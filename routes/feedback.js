@@ -6,19 +6,43 @@ const { categorizeFeedback } = require('../services/openai');
 // Manual feedback entry
 router.post('/manual', async (req, res) => {
   try {
-    const { customer_id, review_text, stars } = req.body;
+    const customer_id = Number(req.body.customer_id);
+    const review_text = String(req.body.review_text || '').trim();
+    const stars = Number(req.body.stars || 0);
+    const fieldErrors = {};
 
-    if (!customer_id || !review_text) {
-      return res.status(400).json({ error: 'Customer ID and review text are required' });
+    if (!customer_id) {
+      fieldErrors.customer_id = 'Please select a customer';
+    }
+
+    if (!review_text) {
+      fieldErrors.review_text = 'Review text is required';
+    } else if (review_text.length < 5) {
+      fieldErrors.review_text = 'Review text should be at least 5 characters';
+    } else if (review_text.length > 1000) {
+      fieldErrors.review_text = 'Review text must be 1000 characters or fewer';
+    }
+
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+      fieldErrors.stars = 'Rating must be between 1 and 5';
+    }
+
+    if (Object.keys(fieldErrors).length > 0) {
+      return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
+    }
+
+    const customer = await dbGet('SELECT id FROM customers WHERE id = ?', [customer_id]);
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found', fieldErrors: { customer_id: 'Selected customer no longer exists' } });
     }
 
     // Categorize using OpenAI
-    const categorization = await categorizeFeedback(review_text, stars || 3);
+    const categorization = await categorizeFeedback(review_text, stars);
 
     // Save to feedback table
     const result = await dbRun(
       'INSERT INTO feedback (customer_id, review_text, category, stars, submitted_at) VALUES (?, ?, ?, ?, ?)',
-      [customer_id, review_text, categorization.category, stars || null, new Date().toISOString()]
+      [customer_id, review_text, categorization.category, stars, new Date().toISOString()]
     );
 
     res.json({

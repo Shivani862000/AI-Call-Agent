@@ -2,12 +2,18 @@ require('dotenv').config();
 
 const express = require('express');
 const http = require('http');
+const path = require('path');
 const WebSocket = require('ws');
 const twilio = require('twilio');
+const { initializeDatabase, dbRun, dbGet, dbAll } = require('./db');
+const customersRouter = require('./routes/customers');
+const feedbackRouter = require('./routes/feedback');
+const reportsRouter = require('./routes/reports');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = Number(process.env.PORT || 3000);
 const CALL_MODE = process.env.CALL_MODE || (process.env.OPENAI_API_KEY ? 'openai' : 'scripted');
@@ -22,8 +28,9 @@ const GEMINI_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.gene
 
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-const AGENT_SYSTEM_PROMPT = `
-You are Priya, a warm and professional customer feedback agent calling on behalf of ${CLIENT_NAME},
+function buildAgentSystemPrompt(clientName, customerName) {
+  return `
+You are Priya, a warm and professional customer feedback agent calling on behalf of ${clientName},
 a diagnostic and medical collection center.
 
 Your job is to have a friendly, natural phone conversation to collect honest feedback
@@ -35,7 +42,7 @@ If they ask for English, switch to simple English.
 CONVERSATION FLOW — follow this order, but keep it conversational, not robotic:
 
 1. GREETING & INTRODUCTION
-Introduce yourself, mention you are calling from ${CLIENT_NAME},
+Introduce yourself, mention you are calling from ${clientName},
 confirm you are speaking with the right person by name.
 First ask whether they would like to continue in Hindi or English.
 Then ask if they have 2-3 minutes to share feedback about their recent visit.
@@ -79,18 +86,19 @@ RULES:
 - After the customer finishes each answer, briefly acknowledge before asking the next question.
 - The full call should feel like 3-5 minutes, not a long survey.
 - If the customer says they are busy or does not want to continue, politely thank them and end the conversation.
-- Start the call with this structure: greet the customer in Hindi, say your name is Priya, say you are calling from ${CLIENT_NAME}, confirm you are speaking with ${process.env.CUSTOMER_NAME}, ask whether they want to continue in Hindi or English, then ask if they have 2-3 minutes for feedback.
+- Start the call with this structure: greet the customer in Hindi, say your name is Priya, say you are calling from ${clientName}, confirm you are speaking with ${customerName}, ask whether they want to continue in Hindi or English, then ask if they have 2-3 minutes for feedback.
 - Do not skip the introduction.
 - Do not sound like a bot, assistant, or AI system.
 - Do not jump to random topics or generic small talk.
 - Ask only one main question at a time.
 `.trim();
+}
 
-function buildOpeningPrompt() {
+function buildOpeningPrompt(clientName, customerName) {
   return [
-    `Start the phone call now as Priya from ${CLIENT_NAME}.`,
-    `The customer name is ${process.env.CUSTOMER_NAME}.`,
-    `Your first spoken turn should closely follow this wording: "Hello, am I speaking with ${process.env.CUSTOMER_NAME}? This is Priya calling from ${CLIENT_NAME}. I am calling to quickly collect feedback about your recent visit. Do you have 2 to 3 minutes?"`,
+    `Start the phone call now as Priya from ${clientName}.`,
+    `The customer name is ${customerName}.`,
+    `Your first spoken turn should closely follow this wording: "Hello, am I speaking with ${customerName}? This is Priya calling from ${clientName}. I am calling to quickly collect feedback about your recent visit. Do you have 2 to 3 minutes?"`,
     'After that, continue the conversation naturally using the feedback flow in the system instructions.',
     'Keep every reply short, warm, and phone-friendly.'
   ].join(' ');
@@ -164,10 +172,10 @@ function detectLanguageChoice(speech, digit) {
   return 'hi';
 }
 
-function getScriptedCopy(language) {
+function getScriptedCopy(language, customerName = process.env.CUSTOMER_NAME, clientName = CLIENT_NAME) {
   if (language === 'en') {
     return {
-      intro: `Hello, am I speaking with ${process.env.CUSTOMER_NAME}? This is Priya calling from ${CLIENT_NAME}. To continue in English, say English or press 2. Hindi mein baat karne ke liye Hindi boliye ya 1 dabaiye.`,
+      intro: `Hello, am I speaking with ${customerName}? This is Priya calling from ${clientName}. To continue in English, say English or press 2. Hindi mein baat karne ke liye Hindi boliye ya 1 dabaiye.`,
       noLanguageResponse: 'We did not receive your language preference. Thank you for your time. Goodbye.',
       consent: `Thank you. I will continue in English. Do you have 2 to 3 minutes to share feedback about your recent visit? Please say yes or press 1 to continue.`,
       decline: 'No problem. Thank you for your time. Goodbye.',
@@ -179,7 +187,7 @@ function getScriptedCopy(language) {
   }
 
   return {
-    intro: `Namaste. Kya main ${process.env.CUSTOMER_NAME} se baat kar rahi hoon? Main Priya bol rahi hoon, ${CLIENT_NAME} se. Hindi mein baat karne ke liye Hindi boliye ya 1 dabaiye. To continue in English, say English or press 2.`,
+    intro: `Namaste. Kya main ${customerName} se baat kar rahi hoon? Main Priya bol rahi hoon, ${clientName} se. Hindi mein baat karne ke liye Hindi boliye ya 1 dabaiye. To continue in English, say English or press 2.`,
     noLanguageResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
     consent: `Dhanyavaad. Main Hindi mein baat karti hoon. Kya aapke paas aapki recent visit ke feedback ke liye 2 se 3 minute hain? Haan boliye ya 1 dabaiye.`,
     decline: 'Koi baat nahin. Aapke samay ke liye dhanyavaad. Namaste.',
@@ -190,8 +198,10 @@ function getScriptedCopy(language) {
   };
 }
 
-function buildScriptedTwiml() {
+function buildScriptedTwiml(customerName, clientName) {
   const twiml = new twilio.twiml.VoiceResponse();
+  const encodedCustomerName = encodeURIComponent(customerName || process.env.CUSTOMER_NAME || 'Customer');
+  const encodedClientName = encodeURIComponent(clientName || CLIENT_NAME);
   const gather = twiml.gather({
     input: 'dtmf speech',
     numDigits: 1,
@@ -199,13 +209,13 @@ function buildScriptedTwiml() {
     speechTimeout: 'auto',
     language: 'hi-IN',
     actionOnEmptyResult: true,
-    action: '/call/scripted/language',
+    action: `/call/scripted/language?customerName=${encodedCustomerName}&clientName=${encodedClientName}`,
     method: 'POST'
   });
 
-  gather.say({ language: 'hi-IN' }, getScriptedCopy('hi').intro);
+  gather.say({ language: 'hi-IN' }, getScriptedCopy('hi', customerName, clientName).intro);
 
-  twiml.say({ language: 'hi-IN' }, getScriptedCopy('hi').noLanguageResponse);
+  twiml.say({ language: 'hi-IN' }, getScriptedCopy('hi', customerName, clientName).noLanguageResponse);
   twiml.hangup();
   return twiml.toString();
 }
@@ -214,8 +224,10 @@ function buildScriptedLanguageResponse(req) {
   const speech = String(req.body.SpeechResult || '').trim().toLowerCase();
   const digit = String(req.body.Digits || '').trim();
   const language = detectLanguageChoice(speech, digit);
-  const copy = getScriptedCopy(language);
+  const copy = getScriptedCopy(language, req.query.customerName, req.query.clientName);
   const twiml = new twilio.twiml.VoiceResponse();
+  const encodedCustomerName = encodeURIComponent(req.query.customerName || process.env.CUSTOMER_NAME || 'Customer');
+  const encodedClientName = encodeURIComponent(req.query.clientName || CLIENT_NAME);
 
   const gather = twiml.gather({
     input: 'speech dtmf',
@@ -224,7 +236,7 @@ function buildScriptedLanguageResponse(req) {
     speechTimeout: 'auto',
     language: language === 'en' ? 'en-IN' : 'hi-IN',
     actionOnEmptyResult: true,
-    action: `/call/scripted/consent?lang=${language}`,
+    action: `/call/scripted/consent?lang=${language}&customerName=${encodedCustomerName}&clientName=${encodedClientName}`,
     method: 'POST'
   });
 
@@ -239,8 +251,10 @@ function buildScriptedConsentResponse(req) {
   const speech = String(req.body.SpeechResult || '').trim();
   const digit = String(req.body.Digits || '').trim();
   const language = req.query.lang === 'en' ? 'en' : 'hi';
-  const copy = getScriptedCopy(language);
+  const copy = getScriptedCopy(language, req.query.customerName, req.query.clientName);
   const twiml = new twilio.twiml.VoiceResponse();
+  const encodedCustomerName = encodeURIComponent(req.query.customerName || process.env.CUSTOMER_NAME || 'Customer');
+  const encodedClientName = encodeURIComponent(req.query.clientName || CLIENT_NAME);
 
   if (!isAffirmativeResponse(speech, digit)) {
     twiml.say({ language: language === 'en' ? 'en-IN' : 'hi-IN' }, copy.decline);
@@ -255,7 +269,7 @@ function buildScriptedConsentResponse(req) {
     speechTimeout: 'auto',
     language: language === 'en' ? 'en-IN' : 'hi-IN',
     actionOnEmptyResult: true,
-    action: `/call/scripted/rating?lang=${language}`,
+    action: `/call/scripted/rating?lang=${language}&customerName=${encodedCustomerName}&clientName=${encodedClientName}`,
     method: 'POST'
   });
 
@@ -270,7 +284,7 @@ function buildScriptedRatingResponse(req) {
   const speech = String(req.body.SpeechResult || '').trim();
   const digit = String(req.body.Digits || '').trim();
   const language = req.query.lang === 'en' ? 'en' : 'hi';
-  const copy = getScriptedCopy(language);
+  const copy = getScriptedCopy(language, req.query.customerName, req.query.clientName);
   const rating = digit || speech;
   const twiml = new twilio.twiml.VoiceResponse();
 
@@ -368,6 +382,89 @@ function usesGeminiRealtimeTextInput(modelName) {
   return String(modelName || '').includes('gemini-3.1');
 }
 
+async function placeRealtimeCall({ customerPhone, customerName, customerId, clientName }) {
+  const safeCustomerName = encodeURIComponent(customerName || process.env.CUSTOMER_NAME || 'Customer');
+  const safeClientName = encodeURIComponent(clientName || CLIENT_NAME);
+  const safeCustomerId = customerId ? `&customerId=${encodeURIComponent(String(customerId))}` : '';
+
+  const twimlUrl = `${PUBLIC_BASE_URL}/call/twiml?customerName=${safeCustomerName}&clientName=${safeClientName}${safeCustomerId}`;
+  const statusUrl = `${PUBLIC_BASE_URL}/call/status${customerId ? `?customerId=${encodeURIComponent(String(customerId))}` : ''}`;
+
+  return twilioClient.calls.create({
+    to: customerPhone,
+    from: process.env.TWILIO_PHONE_NUMBER,
+    url: twimlUrl,
+    method: 'GET',
+    statusCallback: statusUrl,
+    statusCallbackMethod: 'POST'
+  });
+}
+
+async function triggerScheduledCalls() {
+  const now = new Date();
+  const currentSlot = now.toTimeString().slice(0, 5);
+
+  const dueCustomers = await dbAll(
+    `SELECT c.*
+     FROM customers c
+     LEFT JOIN calls call_today
+       ON call_today.customer_id = c.id
+      AND DATE(call_today.called_at) = DATE('now', 'localtime')
+     WHERE c.status = 'pending'
+       AND c.preferred_slot = ?
+       AND call_today.id IS NULL`,
+    [currentSlot]
+  );
+
+  if (!dueCustomers.length) {
+    return;
+  }
+
+  console.log(`[SCHEDULER] Found ${dueCustomers.length} customer(s) due at ${currentSlot}`);
+
+  for (const customer of dueCustomers) {
+    try {
+      const call = await placeRealtimeCall({
+        customerPhone: customer.phone,
+        customerName: customer.name,
+        customerId: customer.id,
+        clientName: CLIENT_NAME
+      });
+
+      await dbRun(
+        'INSERT INTO calls (customer_id, outcome, twilio_sid, called_at) VALUES (?, ?, ?, ?)',
+        [customer.id, 'scheduled_initiated', call.sid, new Date().toISOString()]
+      );
+      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      console.log(`[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`);
+    } catch (error) {
+      console.error(`[SCHEDULER] Failed to call ${customer.name}:`, error.message);
+      if (error.code === 21219) {
+        await dbRun(
+          'INSERT INTO calls (customer_id, outcome, called_at) VALUES (?, ?, ?)',
+          [customer.id, 'twilio_unverified', new Date().toISOString()]
+        );
+        await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['twilio_trial_blocked', customer.id]);
+      }
+    }
+  }
+}
+
+let schedulerRunning = false;
+
+async function runSchedulerTick() {
+  if (schedulerRunning) {
+    return;
+  }
+
+  schedulerRunning = true;
+  try {
+    await triggerScheduledCalls();
+  } finally {
+    schedulerRunning = false;
+  }
+}
+
 function toWssUrl(baseUrl, pathName) {
   const url = new URL(baseUrl);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -421,17 +518,23 @@ app.get('/health', (req, res) => {
   });
 });
 
+app.get('/', (req, res) => {
+  res.redirect('/admin.html');
+});
+
+app.use('/api/customers', customersRouter);
+app.use('/api/feedback', feedbackRouter);
+app.use('/api/reports', reportsRouter);
+
 app.post('/call/start', async (req, res) => {
   try {
-    console.log(`[CALL REQUEST] to=${process.env.CUSTOMER_PHONE} from=${process.env.TWILIO_PHONE_NUMBER} twiml=${PUBLIC_BASE_URL}/call/twiml`);
-    const call = await twilioClient.calls.create({
-      to: process.env.CUSTOMER_PHONE,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      url: `${PUBLIC_BASE_URL}/call/twiml`,
-      method: 'GET',
-      statusCallback: `${PUBLIC_BASE_URL}/call/status`,
-      statusCallbackMethod: 'POST'
-    });
+    const customerPhone = req.body.customerPhone || process.env.CUSTOMER_PHONE;
+    const customerName = req.body.customerName || process.env.CUSTOMER_NAME;
+    const customerId = req.body.customerId;
+    const clientName = req.body.clientName || CLIENT_NAME;
+
+    console.log(`[CALL REQUEST] to=${customerPhone} from=${process.env.TWILIO_PHONE_NUMBER} twiml=${PUBLIC_BASE_URL}/call/twiml`);
+    const call = await placeRealtimeCall({ customerPhone, customerName, customerId, clientName });
 
     console.log(`[CALL STARTED] SID: ${call.sid}`);
     res.json({ success: true, sid: call.sid });
@@ -442,9 +545,12 @@ app.post('/call/start', async (req, res) => {
 });
 
 app.get('/call/twiml', (req, res) => {
+  const customerName = req.query.customerName || process.env.CUSTOMER_NAME;
+  const clientName = req.query.clientName || CLIENT_NAME;
+
   if (CALL_MODE === 'scripted') {
     console.log('[TWIML] Serving scripted TwiML flow');
-    res.type('text/xml').send(buildScriptedTwiml());
+    res.type('text/xml').send(buildScriptedTwiml(customerName, clientName));
     return;
   }
 
@@ -454,8 +560,9 @@ app.get('/call/twiml', (req, res) => {
 <Response>
   <Connect>
     <Stream url="${xmlEscape(streamUrl)}">
-      <Parameter name="customerName" value="${xmlEscape(process.env.CUSTOMER_NAME)}" />
-      <Parameter name="clientName" value="${xmlEscape(CLIENT_NAME)}" />
+      <Parameter name="customerName" value="${xmlEscape(customerName)}" />
+      <Parameter name="clientName" value="${xmlEscape(clientName)}" />
+      <Parameter name="customerId" value="${xmlEscape(req.query.customerId || '')}" />
     </Stream>
   </Connect>
 </Response>`;
@@ -477,9 +584,61 @@ app.post('/call/scripted/rating', (req, res) => {
   res.type('text/xml').send(buildScriptedRatingResponse(req));
 });
 
-app.post('/call/status', (req, res) => {
-  console.log(`[CALL STATUS] ${req.body.CallStatus} | SID: ${req.body.CallSid}`);
-  res.sendStatus(200);
+app.post('/call/status', async (req, res) => {
+  try {
+    console.log(`[CALL STATUS] ${req.body.CallStatus} | SID: ${req.body.CallSid}`);
+
+    const callRecord = await dbGet('SELECT * FROM calls WHERE twilio_sid = ?', [req.body.CallSid]);
+    const customerId = req.query.customerId || callRecord?.customer_id;
+
+    if (callRecord && req.body.CallStatus === 'completed' && !callRecord.outcome) {
+      await dbRun('UPDATE calls SET outcome = ? WHERE id = ?', ['completed', callRecord.id]);
+    }
+
+    if (callRecord && (req.body.CallStatus === 'no-answer' || req.body.CallStatus === 'failed' || req.body.CallStatus === 'busy')) {
+      await dbRun('UPDATE calls SET outcome = ? WHERE id = ?', ['no_answer', callRecord.id]);
+    }
+
+    if (customerId && req.body.CallStatus === 'no-answer') {
+      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['no_answer', customerId]);
+    } else if (customerId && req.body.CallStatus === 'completed') {
+      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['completed', customerId]);
+    } else if (customerId && req.body.CallStatus === 'busy') {
+      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['busy', customerId]);
+    }
+
+    res.sendStatus(200);
+  } catch (error) {
+    console.error('[CALL STATUS ERROR]', error.message);
+    res.sendStatus(500);
+  }
+});
+
+app.post('/api/calls/initiate/:customerId', async (req, res) => {
+  try {
+    const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.customerId]);
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    const call = await placeRealtimeCall({
+      customerPhone: customer.phone,
+      customerName: customer.name,
+      customerId: customer.id,
+      clientName: CLIENT_NAME
+    });
+
+    const result = await dbRun(
+      'INSERT INTO calls (customer_id, outcome, twilio_sid, called_at) VALUES (?, ?, ?, ?)',
+      [customer.id, 'initiated', call.sid, new Date().toISOString()]
+    );
+
+    await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+    res.json({ message: 'Call initiated', callId: result.lastID, sid: call.sid });
+  } catch (error) {
+    console.error('[API CALL INITIATE ERROR]', error.message);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 const server = http.createServer(app);
@@ -494,6 +653,12 @@ wss.on('connection', (twilioWs, req) => {
   let transcriptPrinted = false;
   const transcript = [];
   let geminiSetupComplete = false;
+  let aiSessionStarting = false;
+  let activeCustomerName = process.env.CUSTOMER_NAME || 'Customer';
+  let activeClientName = CLIENT_NAME;
+
+  const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName);
+  const getActiveOpeningPrompt = () => buildOpeningPrompt(activeClientName, activeCustomerName);
 
   const printTranscriptOnce = () => {
     if (!transcriptPrinted) {
@@ -515,6 +680,7 @@ wss.on('connection', (twilioWs, req) => {
   }
 
   function createOpenAiSession() {
+    aiSessionStarting = true;
     aiWs = new WebSocket(`wss://api.openai.com/v1/realtime?model=${encodeURIComponent(REALTIME_MODEL)}`, {
       headers: {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -529,7 +695,7 @@ wss.on('connection', (twilioWs, req) => {
         type: 'session.update',
         session: {
           type: 'realtime',
-          instructions: AGENT_SYSTEM_PROMPT,
+          instructions: getActiveSystemPrompt(),
           output_modalities: ['audio'],
           audio: {
             input: {
@@ -562,7 +728,7 @@ wss.on('connection', (twilioWs, req) => {
           content: [
             {
               type: 'input_text',
-              text: buildOpeningPrompt()
+              text: getActiveOpeningPrompt()
             }
           ]
         }
@@ -572,13 +738,14 @@ wss.on('connection', (twilioWs, req) => {
         type: 'response.create',
         response: {
           output_modalities: ['audio'],
-          instructions: `${AGENT_SYSTEM_PROMPT}\n\n${buildOpeningPrompt()}`
+          instructions: `${getActiveSystemPrompt()}\n\n${getActiveOpeningPrompt()}`
         }
       }));
     });
   }
 
   function createGeminiSession() {
+    aiSessionStarting = true;
     aiWs = new WebSocket(GEMINI_WS_URL, {
       headers: {
         'x-goog-api-key': process.env.GEMINI_API_KEY
@@ -603,7 +770,7 @@ wss.on('connection', (twilioWs, req) => {
           systemInstruction: {
             parts: [
               {
-                text: `${AGENT_SYSTEM_PROMPT}\n\n${buildOpeningPrompt()}`
+                text: `${getActiveSystemPrompt()}\n\n${getActiveOpeningPrompt()}`
               }
             ]
           },
@@ -615,125 +782,137 @@ wss.on('connection', (twilioWs, req) => {
     });
   }
 
-  if (AI_PROVIDER === 'gemini') {
-    createGeminiSession();
-  } else {
-    createOpenAiSession();
-  }
+  function attachAiEventHandlers() {
+    aiWs.on('message', (raw) => {
+      let message;
 
-  aiWs.on('message', (raw) => {
-    let message;
+      try {
+        message = JSON.parse(raw.toString());
+      } catch (error) {
+        console.error(`[${AI_PROVIDER.toUpperCase()}] Failed to parse message:`, error.message);
+        return;
+      }
 
-    try {
-      message = JSON.parse(raw.toString());
-    } catch (error) {
-      console.error(`[${AI_PROVIDER.toUpperCase()}] Failed to parse message:`, error.message);
-      return;
-    }
+      if (AI_PROVIDER === 'gemini') {
+        if (message.setupComplete) {
+          geminiSetupComplete = true;
+          console.log('[GEMINI] Session configured');
 
-    if (AI_PROVIDER === 'gemini') {
-      if (message.setupComplete) {
-        geminiSetupComplete = true;
-        console.log('[GEMINI] Session configured');
+          if (usesGeminiRealtimeTextInput(REALTIME_MODEL)) {
+            aiWs.send(JSON.stringify({
+              realtimeInput: {
+                text: getActiveOpeningPrompt()
+              }
+            }));
+          } else {
+            aiWs.send(JSON.stringify({
+              clientContent: {
+                turns: [
+                  {
+                    role: 'user',
+                    parts: [
+                      {
+                        text: getActiveOpeningPrompt()
+                      }
+                    ]
+                  }
+                ],
+                turnComplete: true
+              }
+            }));
+          }
+          return;
+        }
 
-        if (usesGeminiRealtimeTextInput(REALTIME_MODEL)) {
-          aiWs.send(JSON.stringify({
-            realtimeInput: {
-              text: buildOpeningPrompt()
-            }
-          }));
-        } else {
-          aiWs.send(JSON.stringify({
-            clientContent: {
-              turns: [
-                {
-                  role: 'user',
-                  parts: [
-                    {
-                      text: buildOpeningPrompt()
-                    }
-                  ]
-                }
-              ],
-              turnComplete: true
-            }
-          }));
+        if (message.serverContent?.inputTranscription?.text) {
+          pushTranscriptTurn(transcript, 'CUSTOMER', message.serverContent.inputTranscription.text);
+          console.log(`[CUSTOMER]: ${message.serverContent.inputTranscription.text}`);
+        }
+
+        if (message.serverContent?.outputTranscription?.text) {
+          pushTranscriptTurn(transcript, 'AGENT', message.serverContent.outputTranscription.text);
+          console.log(`[AGENT]: ${message.serverContent.outputTranscription.text}`);
+        }
+
+        const parts = message.serverContent?.modelTurn?.parts || [];
+        for (const part of parts) {
+          if (!part.inlineData?.data || !String(part.inlineData.mimeType || '').startsWith('audio/pcm')) {
+            continue;
+          }
+
+          const pcm16 = Buffer.from(part.inlineData.data, 'base64');
+          const sourceRate = parsePcmRate(part.inlineData.mimeType, 24000);
+          const resampled = resamplePcm16(pcm16, sourceRate, 8000);
+          const mulaw = encodeMuLawFromPcm16(resampled).toString('base64');
+          sendAudioToTwilio(mulaw);
+        }
+
+        if (message.serverContent?.interrupted) {
+          console.log('[GEMINI] Response interrupted');
+        }
+
+        if (message.error) {
+          console.error('[GEMINI ERROR]', JSON.stringify(message, null, 2));
         }
         return;
       }
 
-      if (message.serverContent?.inputTranscription?.text) {
-        pushTranscriptTurn(transcript, 'CUSTOMER', message.serverContent.inputTranscription.text);
-        console.log(`[CUSTOMER]: ${message.serverContent.inputTranscription.text}`);
+      if (message.type === 'session.updated') {
+        console.log('[OPENAI] Session configured');
+        return;
       }
 
-      if (message.serverContent?.outputTranscription?.text) {
-        pushTranscriptTurn(transcript, 'AGENT', message.serverContent.outputTranscription.text);
-        console.log(`[AGENT]: ${message.serverContent.outputTranscription.text}`);
+      if (message.type === 'response.created') {
+        console.log('[OPENAI] Response created');
+        return;
       }
 
-      const parts = message.serverContent?.modelTurn?.parts || [];
-      for (const part of parts) {
-        if (!part.inlineData?.data || !String(part.inlineData.mimeType || '').startsWith('audio/pcm')) {
-          continue;
-        }
-
-        const pcm16 = Buffer.from(part.inlineData.data, 'base64');
-        const sourceRate = parsePcmRate(part.inlineData.mimeType, 24000);
-        const resampled = resamplePcm16(pcm16, sourceRate, 8000);
-        const mulaw = encodeMuLawFromPcm16(resampled).toString('base64');
-        sendAudioToTwilio(mulaw);
+      if (message.type === 'response.output_audio.delta' && message.delta) {
+        sendAudioToTwilio(message.delta);
+        return;
       }
 
-      if (message.serverContent?.interrupted) {
-        console.log('[GEMINI] Response interrupted');
+      if (message.type === 'response.output_audio_transcript.done') {
+        pushTranscriptTurn(transcript, 'AGENT', message.transcript);
+        console.log(`[AGENT]: ${message.transcript}`);
+        return;
       }
 
-      if (message.error) {
-        console.error('[GEMINI ERROR]', JSON.stringify(message, null, 2));
+      if (message.type === 'conversation.item.input_audio_transcription.completed') {
+        pushTranscriptTurn(transcript, 'CUSTOMER', message.transcript);
+        console.log(`[CUSTOMER]: ${message.transcript}`);
+        return;
       }
+
+      if (message.type === 'error') {
+        console.error('[OPENAI ERROR]', JSON.stringify(message, null, 2));
+      }
+    });
+
+    aiWs.on('close', () => {
+      aiSessionStarting = false;
+      console.log(`[${AI_PROVIDER.toUpperCase()}] Realtime session closed`);
+    });
+
+    aiWs.on('error', (error) => {
+      aiSessionStarting = false;
+      console.error(`[${AI_PROVIDER.toUpperCase()} WS ERROR]`, error.message);
+    });
+  }
+
+  function ensureAiSession() {
+    if (aiWs || aiSessionStarting) {
       return;
     }
 
-    if (message.type === 'session.updated') {
-      console.log('[OPENAI] Session configured');
-      return;
+    if (AI_PROVIDER === 'gemini') {
+      createGeminiSession();
+    } else {
+      createOpenAiSession();
     }
 
-    if (message.type === 'response.created') {
-      console.log('[OPENAI] Response created');
-      return;
-    }
-
-    if (message.type === 'response.output_audio.delta' && message.delta) {
-      sendAudioToTwilio(message.delta);
-      return;
-    }
-
-    if (message.type === 'response.output_audio_transcript.done') {
-      pushTranscriptTurn(transcript, 'AGENT', message.transcript);
-      console.log(`[AGENT]: ${message.transcript}`);
-      return;
-    }
-
-    if (message.type === 'conversation.item.input_audio_transcription.completed') {
-      pushTranscriptTurn(transcript, 'CUSTOMER', message.transcript);
-      console.log(`[CUSTOMER]: ${message.transcript}`);
-      return;
-    }
-
-    if (message.type === 'error') {
-      console.error('[OPENAI ERROR]', JSON.stringify(message, null, 2));
-    }
-  });
-
-  aiWs.on('close', () => {
-    console.log(`[${AI_PROVIDER.toUpperCase()}] Realtime session closed`);
-  });
-
-  aiWs.on('error', (error) => {
-    console.error(`[${AI_PROVIDER.toUpperCase()} WS ERROR]`, error.message);
-  });
+    attachAiEventHandlers();
+  }
 
   twilioWs.on('message', (raw) => {
     let message;
@@ -747,12 +926,17 @@ wss.on('connection', (twilioWs, req) => {
 
     if (message.event === 'start') {
       streamSid = message.start.streamSid;
+      const customParameters = message.start.customParameters || {};
+      activeCustomerName = customParameters.customerName || activeCustomerName;
+      activeClientName = customParameters.clientName || activeClientName;
       console.log(`[STREAM] streamSid: ${streamSid}`);
       console.log(`[STREAM] Start payload: ${JSON.stringify(message.start)}`);
+      console.log(`[STREAM] Active customer=${activeCustomerName} client=${activeClientName}`);
+      ensureAiSession();
       return;
     }
 
-    if (message.event === 'media' && aiWs.readyState === WebSocket.OPEN) {
+    if (message.event === 'media' && aiWs?.readyState === WebSocket.OPEN) {
       if (AI_PROVIDER === 'gemini') {
         if (!geminiSetupComplete) {
           return;
@@ -781,7 +965,7 @@ wss.on('connection', (twilioWs, req) => {
       console.log('[STREAM] Call ended');
       printTranscriptOnce();
 
-      if (aiWs.readyState === WebSocket.OPEN) {
+      if (aiWs?.readyState === WebSocket.OPEN) {
         aiWs.close();
       }
     }
@@ -791,7 +975,7 @@ wss.on('connection', (twilioWs, req) => {
     console.log('[STREAM] Twilio WS closed');
     printTranscriptOnce();
 
-    if (aiWs.readyState === WebSocket.OPEN) {
+    if (aiWs?.readyState === WebSocket.OPEN) {
       aiWs.close();
     }
   });
@@ -801,16 +985,32 @@ wss.on('connection', (twilioWs, req) => {
   });
 });
 
-try {
-  validateConfig();
-  server.listen(PORT, () => {
-    console.log(`[SERVER] Running on http://localhost:${PORT}`);
-    console.log(`[SERVER] Public base URL: ${PUBLIC_BASE_URL}`);
-    console.log(`[SERVER] Call mode: ${CALL_MODE}`);
-    console.log(`[SERVER] Realtime model: ${REALTIME_MODEL}`);
-    console.log('[SERVER] Ready. Trigger a call with: curl -X POST http://localhost:3000/call/start');
-  });
-} catch (error) {
-  console.error('[CONFIG ERROR]', error.message);
-  process.exit(1);
-}
+(async () => {
+  try {
+    validateConfig();
+    await initializeDatabase();
+
+    setInterval(() => {
+      runSchedulerTick().catch((error) => {
+        console.error('[SCHEDULER ERROR]', error.message);
+      });
+    }, 15000);
+
+    runSchedulerTick().catch((error) => {
+      console.error('[SCHEDULER ERROR]', error.message);
+    });
+
+    server.listen(PORT, () => {
+      console.log(`[SERVER] Running on http://localhost:${PORT}`);
+      console.log(`[SERVER] Public base URL: ${PUBLIC_BASE_URL}`);
+      console.log(`[SERVER] Call mode: ${CALL_MODE}`);
+      console.log(`[SERVER] Realtime model: ${REALTIME_MODEL}`);
+      console.log('[SERVER] Scheduler active: checks pending customers every 15 seconds');
+      console.log('[SERVER] Admin UI: http://localhost:3000/admin.html');
+      console.log('[SERVER] Ready. Trigger a call with: curl -X POST http://localhost:3000/call/start');
+    });
+  } catch (error) {
+    console.error('[CONFIG ERROR]', error.message);
+    process.exit(1);
+  }
+})();

@@ -5,520 +5,1243 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Feedback Automation Admin</title>
   <style>
+    :root {
+      --bg: #f3f7ff;
+      --bg-soft: #f8fbff;
+      --panel: rgba(255, 255, 255, 0.88);
+      --panel-strong: #ffffff;
+      --line: rgba(112, 144, 176, 0.18);
+      --line-strong: rgba(88, 119, 161, 0.26);
+      --text: #18233f;
+      --muted: #6f7e99;
+      --blue: #2d6df6;
+      --blue-deep: #1747ba;
+      --green: #2ea043;
+      --orange: #ff9b17;
+      --red: #ea5455;
+      --purple: #8d4fff;
+      --shadow: 0 22px 60px rgba(49, 78, 118, 0.12);
+      --shadow-soft: 0 12px 32px rgba(68, 90, 129, 0.10);
+      --radius-xl: 28px;
+      --radius-lg: 22px;
+      --radius-md: 16px;
+      --radius-sm: 12px;
+    }
+
     * {
+      box-sizing: border-box;
       margin: 0;
       padding: 0;
-      box-sizing: border-box;
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background: #f5f5f5;
-      color: #333;
+      min-height: 100vh;
+      font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(45, 109, 246, 0.18), transparent 24%),
+        radial-gradient(circle at top right, rgba(255, 155, 23, 0.10), transparent 18%),
+        linear-gradient(180deg, #f9fbff 0%, #f1f6ff 44%, #eef4ff 100%);
     }
 
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 20px;
+    .app-shell {
+      display: grid;
+      grid-template-columns: 250px minmax(0, 1fr);
+      min-height: 100vh;
     }
 
-    header {
-      background: #2c3e50;
-      color: white;
-      padding: 20px;
-      border-radius: 8px;
-      margin-bottom: 30px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 22px 18px;
+      border-right: 1px solid rgba(121, 151, 189, 0.16);
+      background: rgba(255, 255, 255, 0.72);
+      backdrop-filter: blur(18px);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
     }
 
-    header h1 {
-      font-size: 28px;
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .brand-mark {
+      width: 48px;
+      height: 48px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #2d6df6 0%, #5b8cff 100%);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-size: 22px;
+      box-shadow: 0 18px 36px rgba(45, 109, 246, 0.24);
+    }
+
+    .brand-copy h1 {
+      font-size: 18px;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-copy p {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 5px;
+    }
+
+    .nav-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .nav-link {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      color: #43516a;
+      border-radius: 16px;
+      text-decoration: none;
+      font-weight: 600;
+      transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .nav-link:hover {
+      transform: translateX(2px);
+      background: rgba(45, 109, 246, 0.08);
+      color: var(--blue-deep);
+    }
+
+    .nav-link.active {
+      color: #fff;
+      background: linear-gradient(135deg, #2d6df6 0%, #1d57d7 100%);
+      box-shadow: 0 16px 34px rgba(45, 109, 246, 0.24);
+    }
+
+    .nav-icon {
+      width: 22px;
+      text-align: center;
+      font-size: 16px;
+    }
+
+    .sidebar-footer {
+      padding: 14px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.82);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .admin-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .admin-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      color: var(--blue-deep);
+      background: linear-gradient(135deg, rgba(45, 109, 246, 0.12), rgba(45, 109, 246, 0.22));
+    }
+
+    .admin-meta strong {
+      display: block;
+      font-size: 14px;
+    }
+
+    .admin-meta span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .main-panel {
+      padding: 28px;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 24px;
+    }
+
+    .page-title-wrap h2 {
+      font-size: clamp(28px, 4vw, 40px);
+      line-height: 1.05;
+      letter-spacing: -0.04em;
       margin-bottom: 10px;
     }
 
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 15px;
-      margin-top: 15px;
+    .page-subtitle {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 14px;
     }
 
-    .stat-box {
-      background: rgba(255,255,255,0.1);
-      padding: 15px;
-      border-radius: 6px;
-      text-align: center;
-    }
-
-    .stat-box .number {
-      font-size: 24px;
-      font-weight: bold;
-      margin-bottom: 5px;
-    }
-
-    .stat-box .label {
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: rgba(45, 109, 246, 0.10);
+      color: var(--blue-deep);
       font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .icon-button {
+      width: 46px;
+      height: 46px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      box-shadow: var(--shadow-soft);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card,
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(16px);
+    }
+
+    .stat-card {
+      padding: 20px;
+      min-height: 168px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card::after {
+      content: "";
+      position: absolute;
+      right: -18px;
+      top: -18px;
+      width: 90px;
+      height: 90px;
+      border-radius: 28px;
+      background: radial-gradient(circle, rgba(255,255,255,0.85), rgba(255,255,255,0));
+      opacity: 0.8;
+    }
+
+    .stat-icon {
+      width: 54px;
+      height: 54px;
+      border-radius: 18px;
+      display: grid;
+      place-items: center;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .accent-blue .stat-icon,
+    .mini-card.accent-blue .mini-icon {
+      background: rgba(45, 109, 246, 0.11);
+      color: var(--blue);
+    }
+
+    .accent-green .stat-icon,
+    .mini-card.accent-green .mini-icon {
+      background: rgba(46, 160, 67, 0.11);
+      color: var(--green);
+    }
+
+    .accent-purple .stat-icon {
+      background: rgba(141, 79, 255, 0.12);
+      color: var(--purple);
+    }
+
+    .accent-orange .stat-icon,
+    .mini-card.accent-orange .mini-icon {
+      background: rgba(255, 155, 23, 0.14);
+      color: var(--orange);
+    }
+
+    .stat-number {
+      font-size: 42px;
+      line-height: 1;
+      letter-spacing: -0.05em;
+      font-weight: 800;
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 4px;
+    }
+
+    .stat-line {
+      width: 72px;
+      height: 4px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, currentColor, rgba(255,255,255,0));
       opacity: 0.9;
+      margin-top: auto;
     }
 
-    section {
-      background: white;
-      padding: 25px;
-      margin-bottom: 25px;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1.08fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
     }
 
-    h2 {
-      font-size: 20px;
-      margin-bottom: 15px;
-      color: #2c3e50;
-      border-bottom: 2px solid #3498db;
-      padding-bottom: 10px;
+    .card {
+      padding: 22px;
     }
 
-    .form-group {
-      margin-bottom: 15px;
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 18px;
     }
 
-    label {
-      display: block;
-      margin-bottom: 5px;
-      font-weight: 500;
-      color: #555;
+    .card-title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .card-subtitle {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .card-note {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .field-label {
+      font-size: 13px;
+      font-weight: 700;
+      color: #35445d;
+    }
+
+    .helper-text,
+    .supporting-text {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .error-text {
+      min-height: 16px;
+      color: var(--red);
+      font-size: 12px;
+      font-weight: 600;
     }
 
     input,
     textarea,
     select {
       width: 100%;
-      padding: 10px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      font-size: 14px;
+      border: 1px solid rgba(118, 146, 182, 0.24);
+      background: rgba(255, 255, 255, 0.92);
+      border-radius: 16px;
+      padding: 14px 16px;
+      font-size: 15px;
+      color: var(--text);
       font-family: inherit;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    }
+
+    textarea {
+      min-height: 126px;
+      resize: vertical;
     }
 
     input:focus,
     textarea:focus,
     select:focus {
       outline: none;
-      border-color: #3498db;
-      box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+      border-color: rgba(45, 109, 246, 0.45);
+      box-shadow: 0 0 0 4px rgba(45, 109, 246, 0.12);
+      transform: translateY(-1px);
     }
 
-    button {
-      background: #3498db;
-      color: white;
-      padding: 10px 20px;
+    .input-invalid {
+      border-color: rgba(234, 84, 85, 0.55);
+      box-shadow: 0 0 0 4px rgba(234, 84, 85, 0.10);
+      background: rgba(255, 246, 246, 0.96);
+    }
+
+    button,
+    .button-link {
       border: none;
-      border-radius: 4px;
-      cursor: pointer;
+      border-radius: 16px;
+      padding: 13px 18px;
       font-size: 14px;
-      font-weight: 500;
-      transition: background 0.2s;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, color 0.18s ease;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
     }
 
-    button:hover {
-      background: #2980b9;
+    button:hover,
+    .button-link:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 28px rgba(73, 96, 136, 0.18);
     }
 
-    button.danger {
-      background: #e74c3c;
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.75;
+      transform: none;
+      box-shadow: none;
     }
 
-    button.danger:hover {
-      background: #c0392b;
+    .primary {
+      background: linear-gradient(135deg, #2d6df6 0%, #1d57d7 100%);
+      color: #fff;
     }
 
-    button.success {
-      background: #27ae60;
+    .secondary {
+      background: rgba(45, 109, 246, 0.08);
+      color: var(--blue-deep);
+      border: 1px solid rgba(45, 109, 246, 0.14);
     }
 
-    button.success:hover {
-      background: #229954;
+    .success {
+      background: linear-gradient(135deg, #2ea043 0%, #208235 100%);
+      color: #fff;
     }
 
-    .form-row {
+    .warning {
+      background: linear-gradient(135deg, #ffb020 0%, #ff8e10 100%);
+      color: #fff;
+    }
+
+    .danger {
+      background: rgba(234, 84, 85, 0.10);
+      color: #c93a3b;
+      border: 1px solid rgba(234, 84, 85, 0.15);
+    }
+
+    .ghost {
+      background: rgba(255, 255, 255, 0.88);
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .edit-chip {
+      display: none;
+      padding: 12px 14px;
+      border-radius: 16px;
+      margin-bottom: 16px;
+      background: rgba(45, 109, 246, 0.08);
+      border: 1px solid rgba(45, 109, 246, 0.16);
+      color: var(--blue-deep);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .dropzone {
+      position: relative;
+      border: 1px dashed rgba(98, 129, 167, 0.34);
+      border-radius: 20px;
+      background: rgba(248, 251, 255, 0.88);
+      min-height: 112px;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-      gap: 15px;
+      place-items: center;
+      text-align: center;
+      padding: 18px;
+      overflow: hidden;
+    }
+
+    .dropzone input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .dropzone strong {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .toolbar-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .toolbar input,
+    .toolbar select {
+      min-width: 220px;
+    }
+
+    .meta-text {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.70);
     }
 
     table {
       width: 100%;
       border-collapse: collapse;
-      margin-top: 15px;
+    }
+
+    th,
+    td {
+      padding: 16px 18px;
+      text-align: left;
+      border-bottom: 1px solid rgba(112, 144, 176, 0.14);
+      vertical-align: middle;
     }
 
     th {
-      background: #ecf0f1;
-      padding: 12px;
-      text-align: left;
-      font-weight: 600;
-      border-bottom: 2px solid #bdc3c7;
-      color: #2c3e50;
+      color: #55637d;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 800;
+      background: rgba(246, 249, 255, 0.92);
     }
 
-    td {
-      padding: 12px;
-      border-bottom: 1px solid #ecf0f1;
+    tr:last-child td {
+      border-bottom: none;
     }
 
-    tr:hover {
-      background: #f9f9f9;
+    tr:hover td {
+      background: rgba(248, 251, 255, 0.82);
+    }
+
+    .name-cell strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .name-cell span,
+    .subcell {
+      color: var(--muted);
+      font-size: 12px;
     }
 
     .badge {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 20px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 12px;
+      border-radius: 999px;
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 700;
+      border: 1px solid transparent;
+      text-transform: capitalize;
     }
 
-    .badge.good {
-      background: #d5f4e6;
-      color: #27ae60;
-    }
-
-    .badge.average {
-      background: #ffeaa7;
-      color: #f39c12;
-    }
-
-    .badge.bad {
-      background: #fadbd8;
-      color: #e74c3c;
+    .badge::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.9;
     }
 
     .badge.pending {
-      background: #e8f8f5;
-      color: #16a085;
+      background: rgba(45, 109, 246, 0.09);
+      color: var(--blue);
+      border-color: rgba(45, 109, 246, 0.12);
     }
 
     .badge.called {
-      background: #eaf2f8;
-      color: #3498db;
+      background: rgba(255, 155, 23, 0.12);
+      color: #d48208;
+      border-color: rgba(255, 155, 23, 0.15);
     }
 
-    .badge.no_answer {
-      background: #fadbd8;
-      color: #e74c3c;
+    .badge.completed,
+    .badge.good {
+      background: rgba(46, 160, 67, 0.12);
+      color: var(--green);
+      border-color: rgba(46, 160, 67, 0.16);
     }
 
-    .badge.declined {
-      background: #fadbd8;
-      color: #e74c3c;
+    .badge.average,
+    .badge.busy {
+      background: rgba(255, 155, 23, 0.14);
+      color: var(--orange);
+      border-color: rgba(255, 155, 23, 0.16);
+    }
+
+    .badge.bad,
+    .badge.no_answer,
+    .badge.declined,
+    .badge.twilio_trial_blocked {
+      background: rgba(234, 84, 85, 0.10);
+      color: var(--red);
+      border-color: rgba(234, 84, 85, 0.16);
     }
 
     .action-buttons {
       display: flex;
-      gap: 8px;
       flex-wrap: wrap;
+      gap: 10px;
     }
 
     .action-buttons button {
-      padding: 6px 12px;
-      font-size: 12px;
+      padding: 10px 14px;
+      border-radius: 14px;
+      font-size: 13px;
+      box-shadow: none;
     }
 
     .feedback-excerpt {
-      color: #666;
-      font-style: italic;
+      display: inline-block;
       max-width: 300px;
+      color: #4f5f79;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
+    .empty-state {
+      padding: 34px 24px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .empty-state .empty-icon {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 16px;
+      border-radius: 24px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, rgba(45, 109, 246, 0.10), rgba(45, 109, 246, 0.20));
+      color: var(--blue);
+      font-size: 28px;
+    }
+
+    .lower-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .report-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    .mini-report-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .mini-card {
+      background: rgba(255, 255, 255, 0.90);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+      min-height: 122px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .mini-card::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 14px;
+      bottom: 14px;
+      width: 4px;
+      border-radius: 999px;
+      background: currentColor;
+      opacity: 0.85;
+    }
+
+    .mini-icon {
+      position: absolute;
+      right: 14px;
+      bottom: 14px;
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+    }
+
+    .mini-card strong {
+      display: block;
+      font-size: 34px;
+      line-height: 1;
+      letter-spacing: -0.04em;
+      margin-bottom: 8px;
+    }
+
+    .mini-card span {
+      color: var(--muted);
+      font-size: 13px;
+      display: block;
+      max-width: 90px;
+    }
+
+    .notice-bar {
+      margin-top: 20px;
+      padding: 18px 20px;
+      border-radius: 22px;
+      background: linear-gradient(90deg, rgba(45, 109, 246, 0.10), rgba(45, 109, 246, 0.03));
+      border: 1px solid rgba(45, 109, 246, 0.12);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .notice-text {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--blue-deep);
+      font-weight: 700;
+    }
+
+    .notice-text small {
+      display: block;
+      color: var(--muted);
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
+    .alert-stack {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
     .alert {
-      padding: 12px 15px;
-      border-radius: 4px;
-      margin-bottom: 15px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      font-size: 14px;
+      font-weight: 700;
+      box-shadow: var(--shadow-soft);
     }
 
     .alert.success {
-      background: #d5f4e6;
-      color: #27ae60;
-      border-left: 4px solid #27ae60;
+      background: rgba(46, 160, 67, 0.11);
+      color: #1f7d32;
+      border: 1px solid rgba(46, 160, 67, 0.16);
     }
 
     .alert.error {
-      background: #fadbd8;
-      color: #e74c3c;
-      border-left: 4px solid #e74c3c;
+      background: rgba(234, 84, 85, 0.10);
+      color: #c93a3b;
+      border: 1px solid rgba(234, 84, 85, 0.16);
     }
 
     .alert.info {
-      background: #eaf2f8;
-      color: #3498db;
-      border-left: 4px solid #3498db;
-    }
-
-    .modal {
-      display: none;
-      position: fixed;
-      z-index: 1000;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(0, 0, 0, 0.5);
-    }
-
-    .modal.show {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .modal-content {
-      background-color: white;
-      padding: 25px;
-      border-radius: 8px;
-      width: 90%;
-      max-width: 500px;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-
-    .modal-header {
-      font-size: 18px;
-      font-weight: 600;
-      margin-bottom: 15px;
-      color: #2c3e50;
-    }
-
-    .modal-close {
-      float: right;
-      font-size: 28px;
-      font-weight: bold;
-      color: #999;
-      cursor: pointer;
-    }
-
-    .modal-close:hover {
-      color: #333;
+      background: rgba(45, 109, 246, 0.10);
+      color: #1f58d0;
+      border: 1px solid rgba(45, 109, 246, 0.16);
     }
 
     .spinner {
       display: inline-block;
       width: 14px;
       height: 14px;
-      border: 2px solid #f3f3f3;
-      border-top: 2px solid #3498db;
+      border: 2px solid rgba(255, 255, 255, 0.35);
+      border-top-color: rgba(255, 255, 255, 1);
       border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin-right: 5px;
+      animation: spin 0.8s linear infinite;
     }
 
     @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+      to {
+        transform: rotate(360deg);
+      }
     }
 
-    .stars {
-      display: flex;
-      gap: 5px;
+    .hidden {
+      display: none !important;
     }
 
-    .stars input {
-      display: none;
-    }
-
-    .stars label {
-      font-size: 24px;
-      cursor: pointer;
-      color: #ddd;
-      margin: 0;
-    }
-
-    .stars input:checked ~ label,
-    .stars label:hover,
-    .stars label:hover ~ label {
-      color: #f39c12;
-    }
-
-    @media (max-width: 768px) {
-      .stats {
-        grid-template-columns: repeat(2, 1fr);
+    @media (max-width: 1180px) {
+      .stats-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
 
-      table {
-        font-size: 12px;
+      .dashboard-grid,
+      .lower-grid {
+        grid-template-columns: 1fr;
       }
 
-      button {
-        padding: 8px 12px;
-        font-size: 12px;
+      .mini-report-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 920px) {
+      .app-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: static;
+        height: auto;
+        border-right: none;
+        border-bottom: 1px solid rgba(121, 151, 189, 0.16);
+      }
+
+      .nav-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 720px) {
+      .main-panel {
+        padding: 18px;
+      }
+
+      .stats-grid,
+      .grid-2,
+      .mini-report-grid,
+      .nav-list {
+        grid-template-columns: 1fr;
+      }
+
+      .page-header,
+      .toolbar,
+      .toolbar-group,
+      .notice-bar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .toolbar input,
+      .toolbar select {
+        min-width: 0;
       }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>📞 Feedback Automation Admin</h1>
-      <div class="stats">
-        <div class="stat-box">
-          <div class="number" id="totalCustomers">0</div>
-          <div class="label">Total Customers</div>
-        </div>
-        <div class="stat-box">
-          <div class="number" id="callsToday">0</div>
-          <div class="label">Calls Today</div>
-        </div>
-        <div class="stat-box">
-          <div class="number" id="consentGiven">0</div>
-          <div class="label">Consent Given</div>
-        </div>
-        <div class="stat-box">
-          <div class="number" id="whatsappSent">0</div>
-          <div class="label">WhatsApp Sent</div>
-        </div>
-        <div class="stat-box">
-          <div class="number" id="feedbackReceived">0</div>
-          <div class="label">Feedback Received</div>
-        </div>
-      </div>
-    </header>
-
-    <!-- Alert Container -->
-    <div id="alertContainer"></div>
-
-    <!-- Customers Section -->
-    <section>
-      <h2>Customer Management</h2>
-      
-      <div style="margin-bottom: 20px;">
-        <h3 style="font-size: 14px; margin-bottom: 10px;">Add Single Customer</h3>
-        <div class="form-row">
-          <input type="text" id="customerName" placeholder="Customer Name" />
-          <input type="tel" id="customerPhone" placeholder="Phone (E.164 format, e.g., +919876543210)" />
-          <input type="time" id="customerSlot" />
-          <button onclick="addSingleCustomer()">Add Customer</button>
-        </div>
-      </div>
-
-      <div style="margin-bottom: 20px; border-top: 1px solid #eee; padding-top: 20px;">
-        <h3 style="font-size: 14px; margin-bottom: 10px;">Bulk Import CSV</h3>
-        <div style="display: flex; gap: 10px;">
-          <input type="file" id="csvFile" accept=".csv" />
-          <button onclick="uploadCSV()" class="success">Upload CSV</button>
-          <a href="#" onclick="downloadCSVTemplate()" style="color: #3498db; text-decoration: none;">Download Template</a>
-        </div>
-        <p style="font-size: 12px; color: #666; margin-top: 8px;">Expected columns: name, phone, preferred_slot (HH:MM)</p>
-      </div>
-
-      <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
-
-      <h3 style="font-size: 16px; color: #2c3e50; margin-bottom: 15px;">Customers List</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Phone</th>
-            <th>Preferred Slot</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="customersTableBody">
-          <tr>
-            <td colspan="5" style="text-align: center; color: #999;">Loading...</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-
-    <!-- Feedback Section -->
-    <section>
-      <h2>Feedback Management</h2>
-      
-      <div style="margin-bottom: 20px;">
-        <h3 style="font-size: 14px; margin-bottom: 10px;">Manual Feedback Entry</h3>
-        <div class="form-group">
-          <label>Customer</label>
-          <select id="feedbackCustomer">
-            <option value="">-- Select Customer --</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Review Text</label>
-          <textarea id="reviewText" placeholder="Enter review text..." rows="3"></textarea>
-        </div>
-        <div class="form-group">
-          <label>Rating (Stars)</label>
-          <select id="reviewStars">
-            <option value="1">⭐ 1 Star</option>
-            <option value="2">⭐⭐ 2 Stars</option>
-            <option value="3" selected>⭐⭐⭐ 3 Stars</option>
-            <option value="4">⭐⭐⭐⭐ 4 Stars</option>
-            <option value="5">⭐⭐⭐⭐⭐ 5 Stars</option>
-          </select>
-        </div>
-        <button onclick="submitManualFeedback()" class="success">Submit Feedback</button>
-      </div>
-
-      <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
-
-      <h3 style="font-size: 16px; color: #2c3e50; margin-bottom: 15px;">Recent Feedback</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Customer</th>
-            <th>Category</th>
-            <th>Stars</th>
-            <th>Review</th>
-            <th>Date</th>
-          </tr>
-        </thead>
-        <tbody id="feedbackTableBody">
-          <tr>
-            <td colspan="5" style="text-align: center; color: #999;">Loading...</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-
-    <!-- Reports Section -->
-    <section>
-      <h2>Reports & Analytics</h2>
-      
-      <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-        <button onclick="generateReport()" class="success">📊 Generate & Email Report</button>
-        <button onclick="downloadReport()">📥 Download Last Report</button>
-      </div>
-
-      <div id="reportPreview" style="display: none; background: #f9f9f9; padding: 15px; border-radius: 4px; margin-top: 15px;">
-        <h3 style="margin-bottom: 10px;">Today's Report Preview</h3>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
-          <div style="background: white; padding: 10px; border-radius: 4px; border-left: 4px solid #3498db;">
-            <div style="font-size: 18px; font-weight: bold;" id="previewTotalCalls">0</div>
-            <div style="font-size: 12px; color: #666;">Total Calls</div>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+      <div class="brand">
+          <div class="brand-mark">FA</div>
+          <div class="brand-copy">
+            <h1>Feedback Automation</h1>
+            <p>Calls, surveys, and reports in one place</p>
           </div>
-          <div style="background: white; padding: 10px; border-radius: 4px; border-left: 4px solid #27ae60;">
-            <div style="font-size: 18px; font-weight: bold;" id="previewGoodCount">0</div>
-            <div style="font-size: 12px; color: #666;">Good Reviews</div>
-          </div>
-          <div style="background: white; padding: 10px; border-radius: 4px; border-left: 4px solid #f39c12;">
-            <div style="font-size: 18px; font-weight: bold;" id="previewAvgCount">0</div>
-            <div style="font-size: 12px; color: #666;">Average Reviews</div>
-          </div>
-          <div style="background: white; padding: 10px; border-radius: 4px; border-left: 4px solid #e74c3c;">
-            <div style="font-size: 18px; font-weight: bold;" id="previewBadCount">0</div>
-            <div style="font-size: 12px; color: #666;">Bad Reviews</div>
+        </div>
+
+        <nav class="nav-list" aria-label="Sidebar navigation">
+          <a href="#dashboard" class="nav-link active"><span class="nav-icon">DB</span><span>Dashboard</span></a>
+          <a href="#customers" class="nav-link"><span class="nav-icon">CU</span><span>Customers</span></a>
+          <a href="#feedback" class="nav-link"><span class="nav-icon">FB</span><span>Feedback</span></a>
+          <a href="#reports" class="nav-link"><span class="nav-icon">RP</span><span>Reports</span></a>
+          <a href="#settings" class="nav-link"><span class="nav-icon">ST</span><span>Settings</span></a>
+        </nav>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="admin-row">
+          <div class="admin-avatar">A</div>
+          <div class="admin-meta">
+            <strong>Admin User</strong>
+            <span>admin@example.com</span>
           </div>
         </div>
       </div>
-    </section>
+    </aside>
+
+    <main class="main-panel">
+      <header class="page-header" id="dashboard">
+        <div class="page-title-wrap">
+          <h2>Feedback Automation</h2>
+          <div class="page-subtitle">
+            <span class="pill">Admin</span>
+            <span id="dashboardSubtitle">Track customer calls, feedback, and reporting from one dashboard.</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button class="icon-button" type="button" aria-label="More options">...</button>
+        </div>
+      </header>
+
+      <div id="alertContainer" class="alert-stack"></div>
+
+      <section class="stats-grid" aria-label="Overview stats">
+        <article class="stat-card accent-blue" style="color: var(--blue);">
+          <div class="stat-icon">CU</div>
+          <div>
+            <div class="stat-number" id="totalCustomers">0</div>
+            <div class="stat-label">Total customers</div>
+          </div>
+          <div class="stat-line"></div>
+        </article>
+        <article class="stat-card accent-green" style="color: var(--green);">
+          <div class="stat-icon">CL</div>
+          <div>
+            <div class="stat-number" id="callsToday">0</div>
+            <div class="stat-label">Calls today</div>
+          </div>
+          <div class="stat-line"></div>
+        </article>
+        <article class="stat-card accent-purple" style="color: var(--purple);">
+          <div class="stat-icon">CN</div>
+          <div>
+            <div class="stat-number" id="consentGiven">0</div>
+            <div class="stat-label">Consent given</div>
+          </div>
+          <div class="stat-line"></div>
+        </article>
+        <article class="stat-card accent-green" style="color: var(--green);">
+          <div class="stat-icon">WA</div>
+          <div>
+            <div class="stat-number" id="whatsappSent">0</div>
+            <div class="stat-label">WhatsApp sent</div>
+          </div>
+          <div class="stat-line"></div>
+        </article>
+        <article class="stat-card accent-orange" style="color: var(--orange);">
+          <div class="stat-icon">RV</div>
+          <div>
+            <div class="stat-number" id="feedbackReceived">0</div>
+            <div class="stat-label">Feedback received</div>
+          </div>
+          <div class="stat-line"></div>
+        </article>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="card" id="customers">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Customer management</div>
+              <div class="card-subtitle">Add or update customer records</div>
+            </div>
+          </div>
+
+          <div id="customerEditChip" class="edit-chip"></div>
+          <input type="hidden" id="editingCustomerId">
+
+          <div class="grid-2">
+            <div class="field">
+              <label class="field-label" for="customerName">Customer name</label>
+              <input type="text" id="customerName" placeholder="e.g. Rahul Sharma" maxlength="100">
+              <div class="error-text" id="customerNameError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="customerPhone">Phone number</label>
+              <input type="tel" id="customerPhone" placeholder="+91 98765 43210">
+              <div class="helper-text">Use full E.164 format with country code.</div>
+              <div class="error-text" id="customerPhoneError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="customerSlot">Scheduled call time</label>
+              <input type="time" id="customerSlot" title="Daily call time">
+              <div class="helper-text">Daily scheduler will use this time.</div>
+              <div class="error-text" id="customerSlotError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label">Quick actions</label>
+              <div class="button-row">
+                <button id="customerSubmitButton" class="primary" onclick="saveCustomer()">Add customer</button>
+                <button id="customerCancelButton" class="secondary hidden" onclick="resetCustomerForm()">Cancel</button>
+              </div>
+              <div class="supporting-text">You can create, edit, delete, and instantly call customers from this panel.</div>
+            </div>
+          </div>
+
+          <div style="height: 18px;"></div>
+
+          <div class="card-header" style="margin-bottom: 12px;">
+            <div>
+              <div class="card-subtitle" style="font-size: 15px; color: var(--text);">Bulk CSV import</div>
+              <div class="card-note">Expected columns: <strong>name</strong>, <strong>phone</strong>, <strong>preferred_slot</strong> (HH:MM)</div>
+            </div>
+            <a href="#" class="button-link ghost" onclick="downloadCSVTemplate(); return false;">Template</a>
+          </div>
+
+          <div class="grid-2">
+            <label class="dropzone" for="csvFile">
+              <input type="file" id="csvFile" accept=".csv">
+              <div>
+                <strong>Drop CSV file here</strong>
+                <div class="helper-text">or click to upload</div>
+              </div>
+            </label>
+            <div class="field" style="justify-content: center;">
+              <div class="button-row">
+                <button class="ghost" onclick="uploadCSV()">Bulk CSV import</button>
+              </div>
+              <div class="card-note">Great for daily uploads from your front-desk or CRM export.</div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card" id="feedback">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Manual feedback entry</div>
+              <div class="card-subtitle">Log feedback when the customer shares it offline</div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="feedbackCustomer">Customer</label>
+            <select id="feedbackCustomer">
+              <option value="">-- Select customer --</option>
+            </select>
+            <div class="error-text" id="feedbackCustomerError"></div>
+          </div>
+
+          <div class="field" style="margin-top: 14px;">
+            <label class="field-label" for="reviewText">Review</label>
+            <textarea id="reviewText" placeholder="Write customer's feedback here..."></textarea>
+            <div class="error-text" id="reviewTextError"></div>
+          </div>
+
+          <div class="field" style="margin-top: 14px;">
+            <label class="field-label" for="reviewStars">Rating</label>
+            <select id="reviewStars">
+              <option value="1">1 star</option>
+              <option value="2">2 stars</option>
+              <option value="3" selected>3 stars</option>
+              <option value="4">4 stars</option>
+              <option value="5">5 stars</option>
+            </select>
+            <div class="error-text" id="reviewStarsError"></div>
+          </div>
+
+          <div class="button-row" style="margin-top: 18px;">
+            <button class="primary" onclick="submitManualFeedback()">Submit feedback</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Customers list</div>
+            <div class="card-subtitle" id="customerListMeta">0 records</div>
+          </div>
+          <div class="toolbar-group">
+            <input type="search" id="customerSearch" placeholder="Search name or phone" oninput="renderCustomers()">
+            <select id="customerStatusFilter" onchange="renderCustomers()">
+              <option value="">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="called">Called</option>
+              <option value="completed">Completed</option>
+              <option value="no_answer">No answer</option>
+              <option value="busy">Busy</option>
+              <option value="twilio_trial_blocked">Trial blocked</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Scheduled</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="customersTableBody">
+              <tr>
+                <td colspan="5">
+                  <div class="empty-state">
+                    <div class="empty-icon">..</div>
+                    <strong>Loading customers...</strong>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="lower-grid">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Recent feedback</div>
+              <div class="card-subtitle">Latest manually added or captured responses</div>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Category</th>
+                  <th>Stars</th>
+                  <th>Review</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody id="feedbackTableBody">
+                <tr>
+                  <td colspan="5">
+                    <div class="empty-state">
+                    <div class="empty-icon">FB</div>
+                      <strong>Loading feedback...</strong>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="card" id="reports">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Reports & analytics</div>
+              <div class="card-subtitle">Preview today's calling and review activity</div>
+            </div>
+          </div>
+
+          <div class="report-actions">
+            <button class="primary" onclick="generateReport(this)">Generate & email report</button>
+            <button class="ghost" onclick="downloadReport()">Download last report</button>
+          </div>
+
+          <div id="reportPreview">
+            <div class="mini-report-grid">
+              <div class="mini-card accent-blue" style="color: var(--blue);">
+                <strong id="previewTotalCalls">0</strong>
+                <span>Total calls</span>
+                <div class="mini-icon">CL</div>
+              </div>
+              <div class="mini-card accent-green" style="color: var(--green);">
+                <strong id="previewGoodCount">0</strong>
+                <span>Good reviews</span>
+                <div class="mini-icon">GD</div>
+              </div>
+              <div class="mini-card accent-orange" style="color: var(--orange);">
+                <strong id="previewAvgCount">0</strong>
+                <span>Average reviews</span>
+                <div class="mini-icon">AV</div>
+              </div>
+              <div class="mini-card" style="color: var(--red);">
+                <strong id="previewBadCount">0</strong>
+                <span>Bad reviews</span>
+                <div class="mini-icon" style="background: rgba(234, 84, 85, 0.12); color: var(--red);">BD</div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="notice-bar" id="settings">
+        <div class="notice-text">
+          <span style="font-size: 18px;">i</span>
+          <div>
+            Keep collecting feedback and improve customer satisfaction.
+            <small>Customer records, scheduler, manual entries, and reports stay connected here.</small>
+          </div>
+        </div>
+        <div style="font-size: 34px;">[]</div>
+      </section>
+    </main>
   </div>
 
   <script>
-    const API_BASE = 'http://localhost:3000/api';
+    const API_BASE = `${window.location.origin}/api`;
+    let customerCache = [];
 
-    // Alert helper
     function showAlert(message, type = 'success') {
       const alertContainer = document.getElementById('alertContainer');
       const alertEl = document.createElement('div');
@@ -528,106 +1251,254 @@
       setTimeout(() => alertEl.remove(), 5000);
     }
 
-    // Load stats
+    function clearFieldErrors(fieldIds) {
+      fieldIds.forEach((id) => {
+        const input = document.getElementById(id);
+        const errorEl = document.getElementById(`${id}Error`);
+        if (input) input.classList.remove('input-invalid');
+        if (errorEl) errorEl.textContent = '';
+      });
+    }
+
+    function applyFieldErrors(fieldErrors = {}) {
+      Object.entries(fieldErrors).forEach(([field, message]) => {
+        const fieldIdMap = {
+          name: 'customerName',
+          phone: 'customerPhone',
+          preferred_slot: 'customerSlot',
+          customer_id: 'feedbackCustomer',
+          review_text: 'reviewText',
+          stars: 'reviewStars'
+        };
+
+        const fieldId = fieldIdMap[field] || field;
+        const input = document.getElementById(fieldId);
+        const errorEl = document.getElementById(`${fieldId}Error`);
+
+        if (input) input.classList.add('input-invalid');
+        if (errorEl) errorEl.textContent = message;
+      });
+    }
+
+    function getCustomerFormPayload() {
+      return {
+        name: document.getElementById('customerName').value.trim(),
+        phone: document.getElementById('customerPhone').value.trim(),
+        preferred_slot: document.getElementById('customerSlot').value || '10:00'
+      };
+    }
+
+    function validateCustomerPayload(payload) {
+      const fieldErrors = {};
+
+      if (!payload.name) {
+        fieldErrors.name = 'Customer name is required';
+      } else if (payload.name.length < 2) {
+        fieldErrors.name = 'Customer name must be at least 2 characters';
+      }
+
+      if (!payload.phone) {
+        fieldErrors.phone = 'Phone number is required';
+      } else if (!/^\+\d{10,15}$/.test(payload.phone)) {
+        fieldErrors.phone = 'Use E.164 format, e.g. +919876543210';
+      }
+
+      if (!payload.preferred_slot) {
+        fieldErrors.preferred_slot = 'Scheduled time is required';
+      } else if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(payload.preferred_slot)) {
+        fieldErrors.preferred_slot = 'Scheduled time must be valid HH:MM';
+      }
+
+      return fieldErrors;
+    }
+
+    function formatStatusLabel(value) {
+      return String(value || 'pending').replace(/_/g, ' ');
+    }
+
+    function resetCustomerForm() {
+      document.getElementById('editingCustomerId').value = '';
+      document.getElementById('customerName').value = '';
+      document.getElementById('customerPhone').value = '';
+      document.getElementById('customerSlot').value = '';
+      document.getElementById('customerSubmitButton').textContent = 'Add customer';
+      document.getElementById('customerCancelButton').classList.add('hidden');
+      const chip = document.getElementById('customerEditChip');
+      chip.style.display = 'none';
+      chip.textContent = '';
+      clearFieldErrors(['customerName', 'customerPhone', 'customerSlot']);
+    }
+
+    function startEditCustomer(customerId) {
+      const customer = customerCache.find((item) => item.id === customerId);
+      if (!customer) return;
+
+      document.getElementById('editingCustomerId').value = customer.id;
+      document.getElementById('customerName').value = customer.name || '';
+      document.getElementById('customerPhone').value = customer.phone || '';
+      document.getElementById('customerSlot').value = customer.preferred_slot || '10:00';
+      document.getElementById('customerSubmitButton').textContent = 'Update customer';
+      document.getElementById('customerCancelButton').classList.remove('hidden');
+      const chip = document.getElementById('customerEditChip');
+      chip.textContent = `Editing ${customer.name} (${customer.phone})`;
+      chip.style.display = 'block';
+      clearFieldErrors(['customerName', 'customerPhone', 'customerSlot']);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
     async function loadStats() {
       try {
-        const [customersRes, feedbackRes, reportRes] = await Promise.all([
+        const [customersRes, reportRes] = await Promise.all([
           fetch(`${API_BASE}/customers`),
-          fetch(`${API_BASE}/feedback`),
           fetch(`${API_BASE}/reports/preview`)
         ]);
 
         const customers = await customersRes.json();
-        const feedback = await feedbackRes.json();
         const report = await reportRes.json();
 
-        document.getElementById('totalCustomers').textContent = customers.length;
-        document.getElementById('callsToday').textContent = report.total_calls;
-        document.getElementById('consentGiven').textContent = report.consent_given;
-        document.getElementById('whatsappSent').textContent = report.whatsapp_sent;
-        document.getElementById('feedbackReceived').textContent = report.feedback_count;
+        document.getElementById('totalCustomers').textContent = customers.length || 0;
+        document.getElementById('callsToday').textContent = report.total_calls || 0;
+        document.getElementById('consentGiven').textContent = report.consent_given || 0;
+        document.getElementById('whatsappSent').textContent = report.whatsapp_sent || 0;
+        document.getElementById('feedbackReceived').textContent = report.feedback_count || 0;
+        document.getElementById('previewTotalCalls').textContent = report.total_calls || 0;
+        document.getElementById('previewGoodCount').textContent = report.good_count || 0;
+        document.getElementById('previewAvgCount').textContent = report.average_count || 0;
+        document.getElementById('previewBadCount').textContent = report.bad_count || 0;
 
-        // Update preview
-        document.getElementById('previewTotalCalls').textContent = report.total_calls;
-        document.getElementById('previewGoodCount').textContent = report.good_count;
-        document.getElementById('previewAvgCount').textContent = report.average_count;
-        document.getElementById('previewBadCount').textContent = report.bad_count;
-        document.getElementById('reportPreview').style.display = 'block';
+        const subtitle = document.getElementById('dashboardSubtitle');
+        if (subtitle) {
+          subtitle.textContent = `${customers.length || 0} customers tracked, ${report.total_calls || 0} calls logged today.`;
+        }
       } catch (error) {
         console.error('Error loading stats:', error);
       }
     }
 
-    // Load customers
+    function renderCustomers() {
+      const tbody = document.getElementById('customersTableBody');
+      const searchTerm = document.getElementById('customerSearch').value.trim().toLowerCase();
+      const statusFilter = document.getElementById('customerStatusFilter').value;
+
+      const filteredCustomers = customerCache.filter((customer) => {
+        const name = String(customer.name || '').toLowerCase();
+        const phone = String(customer.phone || '').toLowerCase();
+        const matchesSearch = !searchTerm || name.includes(searchTerm) || phone.includes(searchTerm);
+        const matchesStatus = !statusFilter || customer.status === statusFilter;
+        return matchesSearch && matchesStatus;
+      });
+
+      const meta = document.getElementById('customerListMeta');
+      if (meta) {
+        meta.textContent = `${filteredCustomers.length} record${filteredCustomers.length === 1 ? '' : 's'}`;
+      }
+
+      tbody.innerHTML = '';
+
+      if (filteredCustomers.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5">
+              <div class="empty-state">
+                <div class="empty-icon">CU</div>
+                <strong>No matching customers found</strong>
+                <div class="supporting-text">Try changing the search or status filter.</div>
+              </div>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      filteredCustomers.forEach((customer) => {
+        const row = document.createElement('tr');
+        const slot = customer.preferred_slot || '--:--';
+        const status = customer.status || 'pending';
+        row.innerHTML = `
+          <td>
+            <div class="name-cell">
+              <strong>${customer.name}</strong>
+              <span>ID #${customer.id}</span>
+            </div>
+          </td>
+          <td>
+            <strong>${customer.phone}</strong>
+            <div class="subcell">Primary contact</div>
+          </td>
+          <td>
+            <strong>${slot}</strong>
+            <div class="subcell">Daily scheduler slot</div>
+          </td>
+          <td><span class="badge ${status}">${formatStatusLabel(status)}</span></td>
+          <td>
+            <div class="action-buttons">
+              <button onclick="triggerCallNow(${customer.id})" class="warning">Call now</button>
+              <button onclick="startEditCustomer(${customer.id})" class="secondary">Edit</button>
+              <button onclick="deleteCustomer(${customer.id})" class="danger">Delete</button>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    function populateFeedbackCustomerDropdown() {
+      const feedbackCustomerSelect = document.getElementById('feedbackCustomer');
+      const selectedValue = feedbackCustomerSelect.value;
+      feedbackCustomerSelect.innerHTML = '<option value="">-- Select customer --</option>';
+
+      customerCache.forEach((customer) => {
+        const option = document.createElement('option');
+        option.value = customer.id;
+        option.textContent = `${customer.name} (${customer.phone})`;
+        feedbackCustomerSelect.appendChild(option);
+      });
+
+      if (selectedValue) feedbackCustomerSelect.value = selectedValue;
+    }
+
     async function loadCustomers() {
       try {
         const res = await fetch(`${API_BASE}/customers`);
         const customers = await res.json();
-
-        const tbody = document.getElementById('customersTableBody');
-        tbody.innerHTML = '';
-
-        if (customers.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No customers yet</td></tr>';
-          return;
-        }
-
-        // Populate feedback customer dropdown
-        const feedbackCustomerSelect = document.getElementById('feedbackCustomer');
-        const selectedValue = feedbackCustomerSelect.value;
-        feedbackCustomerSelect.innerHTML = '<option value="">-- Select Customer --</option>';
-        customers.forEach(c => {
-          const option = document.createElement('option');
-          option.value = c.id;
-          option.textContent = `${c.name} (${c.phone})`;
-          feedbackCustomerSelect.appendChild(option);
-        });
-        if (selectedValue) feedbackCustomerSelect.value = selectedValue;
-
-        customers.forEach(customer => {
-          const row = document.createElement('tr');
-          const slot = customer.preferred_slot || '--';
-          row.innerHTML = `
-            <td>${customer.name}</td>
-            <td>${customer.phone}</td>
-            <td>${slot}</td>
-            <td><span class="badge ${customer.status}">${customer.status}</span></td>
-            <td>
-              <div class="action-buttons">
-                <button onclick="triggerCallNow(${customer.id})" style="background: #f39c12;">☎️ Call Now</button>
-                <button onclick="deleteCustomer(${customer.id})" class="danger">Delete</button>
-              </div>
-            </td>
-          `;
-          tbody.appendChild(row);
-        });
+        customerCache = Array.isArray(customers) ? customers : [];
+        populateFeedbackCustomerDropdown();
+        renderCustomers();
       } catch (error) {
         console.error('Error loading customers:', error);
       }
     }
 
-    // Load feedback
     async function loadFeedback() {
       try {
         const res = await fetch(`${API_BASE}/feedback`);
         const feedback = await res.json();
-
         const tbody = document.getElementById('feedbackTableBody');
         tbody.innerHTML = '';
 
-        if (feedback.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No feedback yet</td></tr>';
+        if (!Array.isArray(feedback) || feedback.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="5">
+                <div class="empty-state">
+                  <div class="empty-icon">FB</div>
+                  <strong>No feedback recorded yet</strong>
+                  <div class="supporting-text">Feedback submitted by customers will appear here.</div>
+                </div>
+              </td>
+            </tr>
+          `;
           return;
         }
 
-        feedback.forEach(fb => {
+        feedback.forEach((fb) => {
           const row = document.createElement('tr');
-          const date = new Date(fb.submitted_at).toLocaleDateString();
+          const date = fb.submitted_at ? new Date(fb.submitted_at).toLocaleDateString() : '--';
           row.innerHTML = `
-            <td>${fb.customer_name}</td>
-            <td><span class="badge ${fb.category}">${fb.category}</span></td>
-            <td>${fb.stars ? '⭐'.repeat(fb.stars) : 'N/A'}</td>
-            <td><span class="feedback-excerpt">${fb.review_text}</span></td>
+            <td><strong>${fb.customer_name || '--'}</strong></td>
+            <td><span class="badge ${fb.category || 'average'}">${formatStatusLabel(fb.category || 'average')}</span></td>
+            <td>${fb.stars ? `${fb.stars}/5` : 'N/A'}</td>
+            <td><span class="feedback-excerpt">${fb.review_text || '--'}</span></td>
             <td>${date}</td>
           `;
           tbody.appendChild(row);
@@ -637,42 +1508,45 @@
       }
     }
 
-    // Add single customer
-    async function addSingleCustomer() {
-      const name = document.getElementById('customerName').value;
-      const phone = document.getElementById('customerPhone').value;
-      const slot = document.getElementById('customerSlot').value;
+    async function saveCustomer() {
+      clearFieldErrors(['customerName', 'customerPhone', 'customerSlot']);
+      const payload = getCustomerFormPayload();
+      const fieldErrors = validateCustomerPayload(payload);
 
-      if (!name || !phone) {
-        showAlert('Please fill in all required fields', 'error');
+      if (Object.keys(fieldErrors).length > 0) {
+        applyFieldErrors(fieldErrors);
+        showAlert('Please fix the customer form errors', 'error');
         return;
       }
 
+      const editingCustomerId = document.getElementById('editingCustomerId').value;
+      const method = editingCustomerId ? 'PUT' : 'POST';
+      const endpoint = editingCustomerId ? `${API_BASE}/customers/${editingCustomerId}` : `${API_BASE}/customers`;
+
       try {
-        const res = await fetch(`${API_BASE}/customers`, {
-          method: 'POST',
+        const res = await fetch(endpoint, {
+          method,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, phone, preferred_slot: slot })
+          body: JSON.stringify(payload)
         });
 
         const result = await res.json();
 
         if (res.ok) {
-          showAlert('Customer added successfully!', 'success');
-          document.getElementById('customerName').value = '';
-          document.getElementById('customerPhone').value = '';
-          document.getElementById('customerSlot').value = '';
+          showAlert(editingCustomerId ? 'Customer updated successfully!' : 'Customer added successfully!', 'success');
+          resetCustomerForm();
           loadCustomers();
           loadStats();
         } else {
-          showAlert(result.error || 'Error adding customer', 'error');
+          clearFieldErrors(['customerName', 'customerPhone', 'customerSlot']);
+          if (result.fieldErrors) applyFieldErrors(result.fieldErrors);
+          showAlert(result.error || 'Error saving customer', 'error');
         }
       } catch (error) {
-        showAlert('Error: ' + error.message, 'error');
+        showAlert(`Error: ${error.message}`, 'error');
       }
     }
 
-    // Upload CSV
     async function uploadCSV() {
       const fileInput = document.getElementById('csvFile');
       if (!fileInput.files.length) {
@@ -692,7 +1566,10 @@
         const result = await res.json();
 
         if (res.ok) {
-          showAlert(`Imported ${result.successCount} customers (${result.errorCount} errors)`, 'success');
+          const importSummary = result.errorCount
+            ? `Imported ${result.successCount} customers (${result.errorCount} rows failed)`
+            : `Imported ${result.successCount} customers`;
+          showAlert(importSummary, result.errorCount ? 'info' : 'success');
           fileInput.value = '';
           loadCustomers();
           loadStats();
@@ -700,11 +1577,10 @@
           showAlert(result.error || 'Error uploading CSV', 'error');
         }
       } catch (error) {
-        showAlert('Error: ' + error.message, 'error');
+        showAlert(`Error: ${error.message}`, 'error');
       }
     }
 
-    // Download CSV template
     function downloadCSVTemplate() {
       const csv = 'name,phone,preferred_slot\nJohn Doe,+919876543210,10:00\nJane Smith,+919876543211,14:30';
       const blob = new Blob([csv], { type: 'text/csv' });
@@ -716,7 +1592,6 @@
       window.URL.revokeObjectURL(url);
     }
 
-    // Trigger call now
     async function triggerCallNow(customerId) {
       if (!confirm('Are you sure? This will immediately place a call to this customer.')) return;
 
@@ -728,18 +1603,17 @@
         const result = await res.json();
 
         if (res.ok) {
-          showAlert('Call initiated! SID: ' + result.sid, 'success');
+          showAlert(`Call initiated. SID: ${result.sid}`, 'success');
           loadCustomers();
           loadStats();
         } else {
           showAlert(result.error || 'Error initiating call', 'error');
         }
       } catch (error) {
-        showAlert('Error: ' + error.message, 'error');
+        showAlert(`Error: ${error.message}`, 'error');
       }
     }
 
-    // Delete customer
     async function deleteCustomer(customerId) {
       if (!confirm('Are you sure? This will delete the customer and all related data.')) return;
 
@@ -749,6 +1623,9 @@
         });
 
         if (res.ok) {
+          if (String(customerId) === document.getElementById('editingCustomerId').value) {
+            resetCustomerForm();
+          }
           showAlert('Customer deleted', 'success');
           loadCustomers();
           loadStats();
@@ -756,18 +1633,25 @@
           showAlert('Error deleting customer', 'error');
         }
       } catch (error) {
-        showAlert('Error: ' + error.message, 'error');
+        showAlert(`Error: ${error.message}`, 'error');
       }
     }
 
-    // Submit manual feedback
     async function submitManualFeedback() {
+      clearFieldErrors(['feedbackCustomer', 'reviewText', 'reviewStars']);
       const customerId = document.getElementById('feedbackCustomer').value;
-      const reviewText = document.getElementById('reviewText').value;
+      const reviewText = document.getElementById('reviewText').value.trim();
       const stars = document.getElementById('reviewStars').value;
+      const fieldErrors = {};
 
-      if (!customerId || !reviewText) {
-        showAlert('Please select a customer and enter review text', 'error');
+      if (!customerId) fieldErrors.customer_id = 'Please select a customer';
+      if (!reviewText) fieldErrors.review_text = 'Review text is required';
+      else if (reviewText.length < 5) fieldErrors.review_text = 'Review text should be at least 5 characters';
+      if (!stars) fieldErrors.stars = 'Please select a rating';
+
+      if (Object.keys(fieldErrors).length > 0) {
+        applyFieldErrors(fieldErrors);
+        showAlert('Please fix the feedback form errors', 'error');
         return;
       }
 
@@ -775,7 +1659,11 @@
         const res = await fetch(`${API_BASE}/feedback/manual`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ customer_id: customerId, review_text: reviewText, stars: parseInt(stars) })
+          body: JSON.stringify({
+            customer_id: customerId,
+            review_text: reviewText,
+            stars: parseInt(stars, 10)
+          })
         });
 
         const result = await res.json();
@@ -784,21 +1672,23 @@
           showAlert(`Feedback submitted and categorized as: ${result.category}`, 'success');
           document.getElementById('reviewText').value = '';
           document.getElementById('feedbackCustomer').value = '';
+          document.getElementById('reviewStars').value = '3';
           loadFeedback();
           loadStats();
         } else {
+          if (result.fieldErrors) applyFieldErrors(result.fieldErrors);
           showAlert(result.error || 'Error submitting feedback', 'error');
         }
       } catch (error) {
-        showAlert('Error: ' + error.message, 'error');
+        showAlert(`Error: ${error.message}`, 'error');
       }
     }
 
-    // Generate report
-    async function generateReport() {
+    async function generateReport(buttonEl) {
+      const btn = buttonEl || document.querySelector('.report-actions .primary');
+      const originalText = btn.textContent;
+
       try {
-        const btn = event.target;
-        const originalText = btn.textContent;
         btn.innerHTML = '<span class="spinner"></span>Generating...';
         btn.disabled = true;
 
@@ -814,27 +1704,24 @@
         } else {
           showAlert(result.error || 'Error generating report', 'error');
         }
-
+      } catch (error) {
+        showAlert(`Error: ${error.message}`, 'error');
+      } finally {
         btn.textContent = originalText;
         btn.disabled = false;
-      } catch (error) {
-        showAlert('Error: ' + error.message, 'error');
-        event.target.disabled = false;
       }
     }
 
-    // Download report
     function downloadReport() {
       window.location.href = `${API_BASE}/reports/download`;
     }
 
-    // Initialize
     document.addEventListener('DOMContentLoaded', () => {
+      resetCustomerForm();
       loadCustomers();
       loadFeedback();
       loadStats();
 
-      // Refresh every 30 seconds
       setInterval(() => {
         loadCustomers();
         loadFeedback();
