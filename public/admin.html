@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Feedback Automation Admin</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    header {
+      background: #2c3e50;
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 30px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    header h1 {
+      font-size: 28px;
+      margin-bottom: 10px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-top: 15px;
+    }
+
+    .stat-box {
+      background: rgba(255,255,255,0.1);
+      padding: 15px;
+      border-radius: 6px;
+      text-align: center;
+    }
+
+    .stat-box .number {
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .stat-box .label {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+
+    section {
+      background: white;
+      padding: 25px;
+      margin-bottom: 25px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    h2 {
+      font-size: 20px;
+      margin-bottom: 15px;
+      color: #2c3e50;
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 10px;
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+      color: #555;
+    }
+
+    input,
+    textarea,
+    select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    input:focus,
+    textarea:focus,
+    select:focus {
+      outline: none;
+      border-color: #3498db;
+      box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+    }
+
+    button {
+      background: #3498db;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: #2980b9;
+    }
+
+    button.danger {
+      background: #e74c3c;
+    }
+
+    button.danger:hover {
+      background: #c0392b;
+    }
+
+    button.success {
+      background: #27ae60;
+    }
+
+    button.success:hover {
+      background: #229954;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 15px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+
+    th {
+      background: #ecf0f1;
+      padding: 12px;
+      text-align: left;
+      font-weight: 600;
+      border-bottom: 2px solid #bdc3c7;
+      color: #2c3e50;
+    }
+
+    td {
+      padding: 12px;
+      border-bottom: 1px solid #ecf0f1;
+    }
+
+    tr:hover {
+      background: #f9f9f9;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .badge.good {
+      background: #d5f4e6;
+      color: #27ae60;
+    }
+
+    .badge.average {
+      background: #ffeaa7;
+      color: #f39c12;
+    }
+
+    .badge.bad {
+      background: #fadbd8;
+      color: #e74c3c;
+    }
+
+    .badge.pending {
+      background: #e8f8f5;
+      color: #16a085;
+    }
+
+    .badge.called {
+      background: #eaf2f8;
+      color: #3498db;
+    }
+
+    .badge.no_answer {
+      background: #fadbd8;
+      color: #e74c3c;
+    }
+
+    .badge.declined {
+      background: #fadbd8;
+      color: #e74c3c;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .action-buttons button {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
+    .feedback-excerpt {
+      color: #666;
+      font-style: italic;
+      max-width: 300px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .alert {
+      padding: 12px 15px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+
+    .alert.success {
+      background: #d5f4e6;
+      color: #27ae60;
+      border-left: 4px solid #27ae60;
+    }
+
+    .alert.error {
+      background: #fadbd8;
+      color: #e74c3c;
+      border-left: 4px solid #e74c3c;
+    }
+
+    .alert.info {
+      background: #eaf2f8;
+      color: #3498db;
+      border-left: 4px solid #3498db;
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+    }
+
+    .modal.show {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-content {
+      background-color: white;
+      padding: 25px;
+      border-radius: 8px;
+      width: 90%;
+      max-width: 500px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .modal-header {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 15px;
+      color: #2c3e50;
+    }
+
+    .modal-close {
+      float: right;
+      font-size: 28px;
+      font-weight: bold;
+      color: #999;
+      cursor: pointer;
+    }
+
+    .modal-close:hover {
+      color: #333;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid #3498db;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 5px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .stars {
+      display: flex;
+      gap: 5px;
+    }
+
+    .stars input {
+      display: none;
+    }
+
+    .stars label {
+      font-size: 24px;
+      cursor: pointer;
+      color: #ddd;
+      margin: 0;
+    }
+
+    .stars input:checked ~ label,
+    .stars label:hover,
+    .stars label:hover ~ label {
+      color: #f39c12;
+    }
+
+    @media (max-width: 768px) {
+      .stats {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      table {
+        font-size: 12px;
+      }
+
+      button {
+        padding: 8px 12px;
+        font-size: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📞 Feedback Automation Admin</h1>
+      <div class="stats">
+        <div class="stat-box">
+          <div class="number" id="totalCustomers">0</div>
+          <div class="label">Total Customers</div>
+        </div>
+        <div class="stat-box">
+          <div class="number" id="callsToday">0</div>
+          <div class="label">Calls Today</div>
+        </div>
+        <div class="stat-box">
+          <div class="number" id="consentGiven">0</div>
+          <div class="label">Consent Given</div>
+        </div>
+        <div class="stat-box">
+          <div class="number" id="whatsappSent">0</div>
+          <div class="label">WhatsApp Sent</div>
+        </div>
+        <div class="stat-box">
+          <div class="number" id="feedbackReceived">0</div>
+          <div class="label">Feedback Received</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Alert Container -->
+    <div id="alertContainer"></div>
+
+    <!-- Customers Section -->
+    <section>
+      <h2>Customer Management</h2>
+      
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin-bottom: 10px;">Add Single Customer</h3>
+        <div class="form-row">
+          <input type="text" id="customerName" placeholder="Customer Name" />
+          <input type="tel" id="customerPhone" placeholder="Phone (E.164 format, e.g., +919876543210)" />
+          <input type="time" id="customerSlot" />
+          <button onclick="addSingleCustomer()">Add Customer</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 20px; border-top: 1px solid #eee; padding-top: 20px;">
+        <h3 style="font-size: 14px; margin-bottom: 10px;">Bulk Import CSV</h3>
+        <div style="display: flex; gap: 10px;">
+          <input type="file" id="csvFile" accept=".csv" />
+          <button onclick="uploadCSV()" class="success">Upload CSV</button>
+          <a href="#" onclick="downloadCSVTemplate()" style="color: #3498db; text-decoration: none;">Download Template</a>
+        </div>
+        <p style="font-size: 12px; color: #666; margin-top: 8px;">Expected columns: name, phone, preferred_slot (HH:MM)</p>
+      </div>
+
+      <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+
+      <h3 style="font-size: 16px; color: #2c3e50; margin-bottom: 15px;">Customers List</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Preferred Slot</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="customersTableBody">
+          <tr>
+            <td colspan="5" style="text-align: center; color: #999;">Loading...</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Feedback Section -->
+    <section>
+      <h2>Feedback Management</h2>
+      
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin-bottom: 10px;">Manual Feedback Entry</h3>
+        <div class="form-group">
+          <label>Customer</label>
+          <select id="feedbackCustomer">
+            <option value="">-- Select Customer --</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Review Text</label>
+          <textarea id="reviewText" placeholder="Enter review text..." rows="3"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Rating (Stars)</label>
+          <select id="reviewStars">
+            <option value="1">⭐ 1 Star</option>
+            <option value="2">⭐⭐ 2 Stars</option>
+            <option value="3" selected>⭐⭐⭐ 3 Stars</option>
+            <option value="4">⭐⭐⭐⭐ 4 Stars</option>
+            <option value="5">⭐⭐⭐⭐⭐ 5 Stars</option>
+          </select>
+        </div>
+        <button onclick="submitManualFeedback()" class="success">Submit Feedback</button>
+      </div>
+
+      <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+
+      <h3 style="font-size: 16px; color: #2c3e50; margin-bottom: 15px;">Recent Feedback</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Category</th>
+            <th>Stars</th>
+            <th>Review</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody id="feedbackTableBody">
+          <tr>
+            <td colspan="5" style="text-align: center; color: #999;">Loading...</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Reports Section -->
+    <section>
+      <h2>Reports & Analytics</h2>
+      
+      <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <button onclick="generateReport()" class="success">📊 Generate & Email Report</button>
+        <button onclick="downloadReport()">📥 Download Last Report</button>
+      </div>
+
+      <div id="reportPreview" style="display: none; background: #f9f9f9; padding: 15px; border-radius: 4px; margin-top: 15px;">
+        <h3 style="margin-bottom: 10px;">Today's Report Preview</h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
+          <div style="background: white; padding: 10px; border-radius: 4px; border-left: 4px solid #3498db;">
+            <div style="font-size: 18px; font-weight: bold;" id="previewTotalCalls">0</div>
+            <div style="font-size: 12px; color: #666;">Total Calls</div>
+          </div>
+          <div style="background: white; padding: 10px; border-radius: 4px; border-left: 4px solid #27ae60;">
+            <div style="font-size: 18px; font-weight: bold;" id="previewGoodCount">0</div>
+            <div style="font-size: 12px; color: #666;">Good Reviews</div>
+          </div>
+          <div style="background: white; padding: 10px; border-radius: 4px; border-left: 4px solid #f39c12;">
+            <div style="font-size: 18px; font-weight: bold;" id="previewAvgCount">0</div>
+            <div style="font-size: 12px; color: #666;">Average Reviews</div>
+          </div>
+          <div style="background: white; padding: 10px; border-radius: 4px; border-left: 4px solid #e74c3c;">
+            <div style="font-size: 18px; font-weight: bold;" id="previewBadCount">0</div>
+            <div style="font-size: 12px; color: #666;">Bad Reviews</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:3000/api';
+
+    // Alert helper
+    function showAlert(message, type = 'success') {
+      const alertContainer = document.getElementById('alertContainer');
+      const alertEl = document.createElement('div');
+      alertEl.className = `alert ${type}`;
+      alertEl.textContent = message;
+      alertContainer.appendChild(alertEl);
+      setTimeout(() => alertEl.remove(), 5000);
+    }
+
+    // Load stats
+    async function loadStats() {
+      try {
+        const [customersRes, feedbackRes, reportRes] = await Promise.all([
+          fetch(`${API_BASE}/customers`),
+          fetch(`${API_BASE}/feedback`),
+          fetch(`${API_BASE}/reports/preview`)
+        ]);
+
+        const customers = await customersRes.json();
+        const feedback = await feedbackRes.json();
+        const report = await reportRes.json();
+
+        document.getElementById('totalCustomers').textContent = customers.length;
+        document.getElementById('callsToday').textContent = report.total_calls;
+        document.getElementById('consentGiven').textContent = report.consent_given;
+        document.getElementById('whatsappSent').textContent = report.whatsapp_sent;
+        document.getElementById('feedbackReceived').textContent = report.feedback_count;
+
+        // Update preview
+        document.getElementById('previewTotalCalls').textContent = report.total_calls;
+        document.getElementById('previewGoodCount').textContent = report.good_count;
+        document.getElementById('previewAvgCount').textContent = report.average_count;
+        document.getElementById('previewBadCount').textContent = report.bad_count;
+        document.getElementById('reportPreview').style.display = 'block';
+      } catch (error) {
+        console.error('Error loading stats:', error);
+      }
+    }
+
+    // Load customers
+    async function loadCustomers() {
+      try {
+        const res = await fetch(`${API_BASE}/customers`);
+        const customers = await res.json();
+
+        const tbody = document.getElementById('customersTableBody');
+        tbody.innerHTML = '';
+
+        if (customers.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No customers yet</td></tr>';
+          return;
+        }
+
+        // Populate feedback customer dropdown
+        const feedbackCustomerSelect = document.getElementById('feedbackCustomer');
+        const selectedValue = feedbackCustomerSelect.value;
+        feedbackCustomerSelect.innerHTML = '<option value="">-- Select Customer --</option>';
+        customers.forEach(c => {
+          const option = document.createElement('option');
+          option.value = c.id;
+          option.textContent = `${c.name} (${c.phone})`;
+          feedbackCustomerSelect.appendChild(option);
+        });
+        if (selectedValue) feedbackCustomerSelect.value = selectedValue;
+
+        customers.forEach(customer => {
+          const row = document.createElement('tr');
+          const slot = customer.preferred_slot || '--';
+          row.innerHTML = `
+            <td>${customer.name}</td>
+            <td>${customer.phone}</td>
+            <td>${slot}</td>
+            <td><span class="badge ${customer.status}">${customer.status}</span></td>
+            <td>
+              <div class="action-buttons">
+                <button onclick="triggerCallNow(${customer.id})" style="background: #f39c12;">☎️ Call Now</button>
+                <button onclick="deleteCustomer(${customer.id})" class="danger">Delete</button>
+              </div>
+            </td>
+          `;
+          tbody.appendChild(row);
+        });
+      } catch (error) {
+        console.error('Error loading customers:', error);
+      }
+    }
+
+    // Load feedback
+    async function loadFeedback() {
+      try {
+        const res = await fetch(`${API_BASE}/feedback`);
+        const feedback = await res.json();
+
+        const tbody = document.getElementById('feedbackTableBody');
+        tbody.innerHTML = '';
+
+        if (feedback.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No feedback yet</td></tr>';
+          return;
+        }
+
+        feedback.forEach(fb => {
+          const row = document.createElement('tr');
+          const date = new Date(fb.submitted_at).toLocaleDateString();
+          row.innerHTML = `
+            <td>${fb.customer_name}</td>
+            <td><span class="badge ${fb.category}">${fb.category}</span></td>
+            <td>${fb.stars ? '⭐'.repeat(fb.stars) : 'N/A'}</td>
+            <td><span class="feedback-excerpt">${fb.review_text}</span></td>
+            <td>${date}</td>
+          `;
+          tbody.appendChild(row);
+        });
+      } catch (error) {
+        console.error('Error loading feedback:', error);
+      }
+    }
+
+    // Add single customer
+    async function addSingleCustomer() {
+      const name = document.getElementById('customerName').value;
+      const phone = document.getElementById('customerPhone').value;
+      const slot = document.getElementById('customerSlot').value;
+
+      if (!name || !phone) {
+        showAlert('Please fill in all required fields', 'error');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/customers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, phone, preferred_slot: slot })
+        });
+
+        const result = await res.json();
+
+        if (res.ok) {
+          showAlert('Customer added successfully!', 'success');
+          document.getElementById('customerName').value = '';
+          document.getElementById('customerPhone').value = '';
+          document.getElementById('customerSlot').value = '';
+          loadCustomers();
+          loadStats();
+        } else {
+          showAlert(result.error || 'Error adding customer', 'error');
+        }
+      } catch (error) {
+        showAlert('Error: ' + error.message, 'error');
+      }
+    }
+
+    // Upload CSV
+    async function uploadCSV() {
+      const fileInput = document.getElementById('csvFile');
+      if (!fileInput.files.length) {
+        showAlert('Please select a CSV file', 'error');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+
+      try {
+        const res = await fetch(`${API_BASE}/customers/csv`, {
+          method: 'POST',
+          body: formData
+        });
+
+        const result = await res.json();
+
+        if (res.ok) {
+          showAlert(`Imported ${result.successCount} customers (${result.errorCount} errors)`, 'success');
+          fileInput.value = '';
+          loadCustomers();
+          loadStats();
+        } else {
+          showAlert(result.error || 'Error uploading CSV', 'error');
+        }
+      } catch (error) {
+        showAlert('Error: ' + error.message, 'error');
+      }
+    }
+
+    // Download CSV template
+    function downloadCSVTemplate() {
+      const csv = 'name,phone,preferred_slot\nJohn Doe,+919876543210,10:00\nJane Smith,+919876543211,14:30';
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'customers_template.csv';
+      a.click();
+      window.URL.revokeObjectURL(url);
+    }
+
+    // Trigger call now
+    async function triggerCallNow(customerId) {
+      if (!confirm('Are you sure? This will immediately place a call to this customer.')) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/calls/initiate/${customerId}`, {
+          method: 'POST'
+        });
+
+        const result = await res.json();
+
+        if (res.ok) {
+          showAlert('Call initiated! SID: ' + result.sid, 'success');
+          loadCustomers();
+          loadStats();
+        } else {
+          showAlert(result.error || 'Error initiating call', 'error');
+        }
+      } catch (error) {
+        showAlert('Error: ' + error.message, 'error');
+      }
+    }
+
+    // Delete customer
+    async function deleteCustomer(customerId) {
+      if (!confirm('Are you sure? This will delete the customer and all related data.')) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/customers/${customerId}`, {
+          method: 'DELETE'
+        });
+
+        if (res.ok) {
+          showAlert('Customer deleted', 'success');
+          loadCustomers();
+          loadStats();
+        } else {
+          showAlert('Error deleting customer', 'error');
+        }
+      } catch (error) {
+        showAlert('Error: ' + error.message, 'error');
+      }
+    }
+
+    // Submit manual feedback
+    async function submitManualFeedback() {
+      const customerId = document.getElementById('feedbackCustomer').value;
+      const reviewText = document.getElementById('reviewText').value;
+      const stars = document.getElementById('reviewStars').value;
+
+      if (!customerId || !reviewText) {
+        showAlert('Please select a customer and enter review text', 'error');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/feedback/manual`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customer_id: customerId, review_text: reviewText, stars: parseInt(stars) })
+        });
+
+        const result = await res.json();
+
+        if (res.ok) {
+          showAlert(`Feedback submitted and categorized as: ${result.category}`, 'success');
+          document.getElementById('reviewText').value = '';
+          document.getElementById('feedbackCustomer').value = '';
+          loadFeedback();
+          loadStats();
+        } else {
+          showAlert(result.error || 'Error submitting feedback', 'error');
+        }
+      } catch (error) {
+        showAlert('Error: ' + error.message, 'error');
+      }
+    }
+
+    // Generate report
+    async function generateReport() {
+      try {
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.innerHTML = '<span class="spinner"></span>Generating...';
+        btn.disabled = true;
+
+        const res = await fetch(`${API_BASE}/reports/generate`, {
+          method: 'POST'
+        });
+
+        const result = await res.json();
+
+        if (res.ok) {
+          showAlert('Report generated and emailed successfully!', 'success');
+          loadStats();
+        } else {
+          showAlert(result.error || 'Error generating report', 'error');
+        }
+
+        btn.textContent = originalText;
+        btn.disabled = false;
+      } catch (error) {
+        showAlert('Error: ' + error.message, 'error');
+        event.target.disabled = false;
+      }
+    }
+
+    // Download report
+    function downloadReport() {
+      window.location.href = `${API_BASE}/reports/download`;
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      loadCustomers();
+      loadFeedback();
+      loadStats();
+
+      // Refresh every 30 seconds
+      setInterval(() => {
+        loadCustomers();
+        loadFeedback();
+        loadStats();
+      }, 30000);
+    });
+  </script>
+</body>
+</html>

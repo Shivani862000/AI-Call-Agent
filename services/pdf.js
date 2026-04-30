@@ -1,0 +1,156 @@
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
+
+function drawSimpleTable(doc, rows, options = {}) {
+  const startX = options.x || doc.x;
+  let currentY = options.y || doc.y;
+  const columnWidths = options.columnWidths || [350, 150];
+  const rowHeight = options.rowHeight || 24;
+  const tableWidth = columnWidths.reduce((sum, width) => sum + width, 0);
+
+  rows.forEach((row, index) => {
+    const isHeader = index === 0;
+
+    if (currentY + rowHeight > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+      currentY = doc.page.margins.top;
+    }
+
+    doc.save();
+    doc.rect(startX, currentY, tableWidth, rowHeight);
+    doc.fillAndStroke(isHeader ? '#f0f0f0' : '#ffffff', '#d0d0d0');
+    doc.restore();
+
+    let cellX = startX;
+
+    row.forEach((cell, cellIndex) => {
+      if (cellIndex > 0) {
+        doc.moveTo(cellX, currentY)
+          .lineTo(cellX, currentY + rowHeight)
+          .stroke('#d0d0d0');
+      }
+
+      doc.font(isHeader ? 'Helvetica-Bold' : 'Helvetica')
+        .fontSize(11)
+        .fillColor('#111111')
+        .text(String(cell), cellX + 8, currentY + 7, {
+          width: columnWidths[cellIndex] - 16,
+          ellipsis: true
+        });
+
+      cellX += columnWidths[cellIndex];
+    });
+
+    currentY += rowHeight;
+  });
+
+  doc.y = currentY;
+}
+
+function generateReportPDF(reportData) {
+  return new Promise((resolve, reject) => {
+    try {
+      const reportPath = `/tmp/report_${new Date().toISOString().split('T')[0]}.pdf`;
+      const doc = new PDFDocument({ margin: 50 });
+      const stream = fs.createWriteStream(reportPath);
+
+      doc.pipe(stream);
+
+      // Header
+      doc.fontSize(20).font('Helvetica-Bold');
+      doc.text(`${process.env.CLIENT_NAME} — Daily Feedback Report`, { align: 'center' });
+      doc.fontSize(12).font('Helvetica');
+      doc.text(new Date().toLocaleDateString(), { align: 'center' });
+      doc.moveDown();
+
+      // Section 1: Call Summary
+      doc.fontSize(14).font('Helvetica-Bold');
+      doc.text('Call Summary', { underline: true });
+      doc.fontSize(11).font('Helvetica');
+      
+      const summaryStats = [
+        ['Metric', 'Count'],
+        ['Total Calls', String(reportData.total_calls || 0)],
+        ['Answered', String(reportData.answered || 0)],
+        ['No Answer', String(reportData.no_answer || 0)],
+        ['Declined', String(reportData.declined || 0)],
+        ['Consent Given', String(reportData.consent_given || 0)],
+        ['WhatsApp Sent', String(reportData.whatsapp_sent || 0)]
+      ];
+
+      drawSimpleTable(doc, summaryStats, {
+        x: 50,
+        y: doc.y,
+        columnWidths: [350, 150]
+      });
+
+      doc.moveDown(2);
+
+      // Section 2: Feedback Breakdown
+      doc.fontSize(14).font('Helvetica-Bold');
+      doc.text('Feedback Breakdown', { underline: true });
+      doc.fontSize(11).font('Helvetica');
+
+      const totalFeedback = (reportData.good_count || 0) + 
+                           (reportData.average_count || 0) + 
+                           (reportData.bad_count || 0);
+      const goodPct = totalFeedback > 0 ? ((reportData.good_count || 0) / totalFeedback * 100).toFixed(1) : 0;
+      const avgPct = totalFeedback > 0 ? ((reportData.average_count || 0) / totalFeedback * 100).toFixed(1) : 0;
+      const badPct = totalFeedback > 0 ? ((reportData.bad_count || 0) / totalFeedback * 100).toFixed(1) : 0;
+
+      doc.fillColor('#111111').text(`Good: ${reportData.good_count || 0} (${goodPct}%)`);
+      doc.rect(50, doc.y, 300 * (goodPct / 100), 20).fill('#28a745');
+      doc.fillColor('#111111');
+      doc.moveDown(1.5);
+
+      doc.text(`Average: ${reportData.average_count || 0} (${avgPct}%)`);
+      doc.rect(50, doc.y, 300 * (avgPct / 100), 20).fill('#ffc107');
+      doc.fillColor('#111111');
+      doc.moveDown(1.5);
+
+      doc.text(`Bad: ${reportData.bad_count || 0} (${badPct}%)`);
+      doc.rect(50, doc.y, 300 * (badPct / 100), 20).fill('#dc3545');
+      doc.fillColor('#111111');
+      doc.moveDown(2);
+
+      // Section 3: Individual Feedback
+      doc.fontSize(14).font('Helvetica-Bold');
+      doc.text('Individual Feedback', { underline: true });
+      doc.fontSize(10).font('Helvetica');
+
+      if (reportData.feedback && reportData.feedback.length > 0) {
+        reportData.feedback.forEach((fb) => {
+          const categoryColor = fb.category === 'good' ? '[+]' : 
+                               fb.category === 'average' ? '[~]' : '[-]';
+          doc.text(`${categoryColor} ${fb.customer_name} (${fb.stars || 'N/A'} stars) - ${fb.category}`);
+          doc.fillColor('#666666').text(`"${fb.review_excerpt}"`);
+          doc.fillColor('#111111');
+          doc.moveDown();
+        });
+      } else {
+        doc.text('No feedback received today.');
+      }
+
+      doc.moveDown(2);
+
+      // Footer
+      doc.fontSize(9).font('Helvetica').fillColor('#999999');
+      doc.text('Generated by Feedback Automation System', { align: 'center' });
+
+      doc.end();
+
+      stream.on('finish', () => {
+        console.log(`✓ PDF report generated: ${reportPath}`);
+        resolve(reportPath);
+      });
+
+      stream.on('error', reject);
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+module.exports = {
+  generateReportPDF
+};
