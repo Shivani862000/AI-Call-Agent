@@ -88,6 +88,18 @@ function runMigrations() {
     await addColumnIfMissing('calls', 'extracted_rating', 'INTEGER');
     await addColumnIfMissing('calls', 'extracted_review_text', 'TEXT');
     await addColumnIfMissing('calls', 'feedback_saved_at', 'TIMESTAMP');
+    await addColumnIfMissing('calls', 'recording_sid', 'VARCHAR(100)');
+    await addColumnIfMissing('calls', 'recording_url', 'TEXT');
+    await addColumnIfMissing('calls', 'recording_status', 'VARCHAR(30)');
+    await addColumnIfMissing('calls', 'recording_local_path', 'TEXT');
+    await addColumnIfMissing('calls', 'transcript_status', "VARCHAR(30) DEFAULT 'pending'");
+    await addColumnIfMissing('calls', 'transcript_source', 'VARCHAR(20)');
+    await addColumnIfMissing('calls', 'analysis_status', "VARCHAR(30) DEFAULT 'pending'");
+    await addColumnIfMissing('calls', 'analysis_summary', 'TEXT');
+    await addColumnIfMissing('calls', 'analysis_json', 'TEXT');
+    await addColumnIfMissing('calls', 'key_points_json', 'TEXT');
+    await addColumnIfMissing('calls', 'report_excerpt', 'TEXT');
+    await addColumnIfMissing('calls', 'analysis_completed_at', 'TIMESTAMP');
     await addColumnIfMissing('feedback', 'source', "VARCHAR(20) DEFAULT 'manual'");
 
     console.log('✓ All tables created/verified');

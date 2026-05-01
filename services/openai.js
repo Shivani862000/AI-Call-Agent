@@ -1,4 +1,5 @@
 const OpenAI = require('openai');
+const fs = require('fs');
 
 const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
@@ -122,7 +123,114 @@ Rules: 4-5 stars or positive sentiment = good.
   }
 }
 
+function buildTranscriptAnalysisFallback(transcriptText = '') {
+  const normalized = String(transcriptText || '').toLowerCase();
+  const positiveSignals = ['achha', 'accha', 'good', 'great', 'helpful', 'clean', 'theek', 'satisfied'];
+  const negativeSignals = ['bad', 'poor', 'slow', 'issue', 'problem', 'rude', 'dirty', 'wait'];
+  const positiveCount = positiveSignals.filter((word) => normalized.includes(word)).length;
+  const negativeCount = negativeSignals.filter((word) => normalized.includes(word)).length;
+  const sentiment = positiveCount >= negativeCount ? 'positive' : 'negative';
+
+  return {
+    summary: sentiment === 'positive'
+      ? 'Customer shared mostly positive feedback during the call.'
+      : 'Customer shared concerns during the call.',
+    key_points: [],
+    customer_sentiment: sentiment,
+    rating: null,
+    consent: null,
+    language: normalized.includes('hindi') ? 'hi' : null,
+    review_text: '',
+    improvement_suggestions: [],
+    report_excerpt: sentiment === 'positive'
+      ? 'Mostly positive call feedback.'
+      : 'Call included service concerns.'
+  };
+}
+
+async function transcribeAudioFile(filePath, options = {}) {
+  if (!hasOpenAIAccess() || !openai) {
+    return null;
+  }
+
+  try {
+    const response = await openai.audio.transcriptions.create({
+      file: fs.createReadStream(filePath),
+      model: options.model || 'gpt-4o-mini-transcribe',
+      language: options.language || 'hi',
+      prompt: options.prompt || 'This is a Hindi customer feedback call between an agent and a customer. Return accurate Hindi and Hinglish transcript text.'
+    });
+
+    return response.text || null;
+  } catch (error) {
+    console.error('Error transcribing audio file:', error.message);
+    return null;
+  }
+}
+
+async function analyzeCallTranscript(transcriptText, context = {}) {
+  if (!hasOpenAIAccess() || !openai) {
+    return buildTranscriptAnalysisFallback(transcriptText);
+  }
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      response_format: { type: 'json_object' },
+      max_tokens: 600,
+      messages: [
+        {
+          role: 'system',
+          content: `You analyze customer feedback phone calls.
+Return ONLY JSON with this exact shape:
+{
+  "summary": "string",
+  "key_points": ["string"],
+  "customer_sentiment": "positive|neutral|negative",
+  "rating": 1|2|3|4|5|null,
+  "consent": true|false|null,
+  "language": "hi|en|mixed|null",
+  "review_text": "string",
+  "improvement_suggestions": ["string"],
+  "report_excerpt": "string"
+}
+Rules:
+- Use the actual customer meaning, not literal noisy STT mistakes.
+- Prefer Hindi/Hinglish understanding.
+- If rating is unclear, use null.
+- Keep summary under 35 words.
+- Keep report_excerpt under 20 words.
+- review_text should be a short human-readable summary of the customer's actual feedback.`
+        },
+        {
+          role: 'user',
+          content: `Client: ${context.clientName || process.env.CLIENT_NAME || 'Client'}\nCustomer: ${context.customerName || 'Customer'}\nTranscript:\n${transcriptText}`
+        }
+      ]
+    });
+
+    const parsed = JSON.parse(response.choices[0].message.content);
+    return {
+      summary: parsed.summary || '',
+      key_points: Array.isArray(parsed.key_points) ? parsed.key_points : [],
+      customer_sentiment: parsed.customer_sentiment || 'neutral',
+      rating: Number.isInteger(parsed.rating) ? parsed.rating : null,
+      consent: typeof parsed.consent === 'boolean' ? parsed.consent : null,
+      language: parsed.language || null,
+      review_text: parsed.review_text || '',
+      improvement_suggestions: Array.isArray(parsed.improvement_suggestions) ? parsed.improvement_suggestions : [],
+      report_excerpt: parsed.report_excerpt || ''
+    };
+  } catch (error) {
+    console.error('Error analyzing call transcript:', error.message);
+    return buildTranscriptAnalysisFallback(transcriptText);
+  }
+}
+
 module.exports = {
+  hasOpenAIAccess,
   generateCallScript,
-  categorizeFeedback
+  categorizeFeedback,
+  transcribeAudioFile,
+  analyzeCallTranscript
 };

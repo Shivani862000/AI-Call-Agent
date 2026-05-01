@@ -52,6 +52,28 @@
 
 ---
 
+## Post-Call Intelligence Flow
+
+```
+Call
+  -> Twilio Recording
+  -> Recording URL stored in calls table
+  -> Recording downloaded to local storage (/tmp/feedback-call-recordings)
+  -> Speech-to-Text
+  -> Analysis Agent
+      -> summary
+      -> key points
+      -> sentiment
+      -> rating
+      -> review_text
+  -> Feedback upsert
+  -> Reporting
+      -> JSON preview
+      -> PDF
+      -> Email
+      -> UI dashboard
+```
+
 ## Call Flow Diagram
 
 ```

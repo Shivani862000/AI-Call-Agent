@@ -847,6 +847,131 @@
       animation: spin 0.8s linear infinite;
     }
 
+    .call-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .call-actions button,
+    .call-actions a {
+      padding: 8px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 700;
+      box-shadow: none;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(16, 24, 40, 0.48);
+      backdrop-filter: blur(6px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 50;
+    }
+
+    .modal-backdrop.show {
+      display: flex;
+    }
+
+    .modal-panel {
+      width: min(860px, 100%);
+      max-height: 88vh;
+      overflow: auto;
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: 0 28px 80px rgba(15, 23, 42, 0.24);
+      padding: 22px;
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .modal-title {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .modal-close {
+      min-width: 42px;
+      min-height: 42px;
+      border-radius: 14px;
+      padding: 0;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .detail-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px 16px;
+      background: rgba(248, 251, 255, 0.78);
+    }
+
+    .detail-card strong {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+
+    .detail-card span,
+    .detail-card p {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text);
+      word-break: break-word;
+    }
+
+    .key-points-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .json-view {
+      border-radius: 18px;
+      background: #0f172a;
+      color: #dbeafe;
+      padding: 16px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .audio-wrap {
+      margin: 16px 0 6px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(248, 251, 255, 0.78);
+    }
+
+    .audio-wrap audio {
+      width: 100%;
+      margin-top: 10px;
+    }
+
     @keyframes spin {
       to {
         transform: rotate(360deg);
@@ -905,7 +1030,8 @@
       .page-header,
       .toolbar,
       .toolbar-group,
-      .notice-bar {
+      .notice-bar,
+      .modal-header {
         flex-direction: column;
         align-items: stretch;
       }
@@ -913,6 +1039,10 @@
       .toolbar input,
       .toolbar select {
         min-width: 0;
+      }
+
+      .detail-grid {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -1094,11 +1224,11 @@
             <div class="error-text" id="feedbackCustomerError"></div>
           </div>
 
-          <div class="field" style="margin-top: 14px;">
+          <!-- <div class="field" style="margin-top: 14px;">
             <label class="field-label" for="reviewText">Review</label>
             <textarea id="reviewText" placeholder="Write customer's feedback here..."></textarea>
             <div class="error-text" id="reviewTextError"></div>
-          </div>
+          </div> -->
 
           <div class="field" style="margin-top: 14px;">
             <label class="field-label" for="reviewStars">Rating</label>
@@ -1163,7 +1293,7 @@
         </div>
       </section>
 
-      <section class="lower-grid">
+      <!-- <section class="lower-grid">
         <article class="card">
           <div class="card-header">
             <div>
@@ -1199,6 +1329,41 @@
         </article>
 
        
+      </section> -->
+      <section class="lower-grid">
+         <article class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Call pipeline</div>
+              <div class="card-subtitle">Recording, transcript, analysis, and reporting status</div>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Recording</th>
+                  <th>Transcript</th>
+                  <th>Analysis</th>
+                  <th>Rating</th>
+                  <th>Insight</th>
+                </tr>
+              </thead>
+              <tbody id="recentCallsBody">
+                <tr>
+                  <td colspan="6">
+                    <div class="empty-state">
+                      <div class="empty-icon">CL</div>
+                      <strong>Loading call pipeline...</strong>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
       </section>
       <section class="lower-grid">
          <article class="card" id="reports">
@@ -1213,6 +1378,8 @@
             <button class="primary" onclick="generateReport(this)">Generate & email report</button>
             <button class="ghost" onclick="downloadReport()">Download last report</button>
           </div>
+
+          <div class="card-note" id="reportSummaryText" style="margin-bottom: 16px;">Loading daily summary...</div>
 
           <div id="reportPreview">
             <div class="mini-report-grid">
@@ -1254,9 +1421,55 @@
     </main>
   </div>
 
+  <div id="analysisModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" id="analysisModalTitle">Call analysis</div>
+          <div class="card-subtitle" id="analysisModalSubtitle">Loading details...</div>
+        </div>
+        <button class="ghost modal-close" type="button" onclick="closeAnalysisModal()">Close</button>
+      </div>
+
+      <div id="analysisModalAudio" class="audio-wrap hidden"></div>
+
+      <div class="detail-grid">
+        <div class="detail-card">
+          <strong>Summary</strong>
+          <p id="analysisSummaryValue">--</p>
+        </div>
+        <div class="detail-card">
+          <strong>Report Excerpt</strong>
+          <p id="analysisExcerptValue">--</p>
+        </div>
+        <div class="detail-card">
+          <strong>Statuses</strong>
+          <p id="analysisStatusesValue">--</p>
+        </div>
+        <div class="detail-card">
+          <strong>Call Meta</strong>
+          <p id="analysisMetaValue">--</p>
+        </div>
+      </div>
+
+      <div class="detail-card" style="margin-bottom: 18px;">
+        <strong>Key Points</strong>
+        <ul id="analysisKeyPoints" class="key-points-list">
+          <li>No key points available yet.</li>
+        </ul>
+      </div>
+
+      <!-- <div class="detail-card">
+        <strong>Raw Analysis JSON</strong>
+        <pre id="analysisJsonValue" class="json-view">{}</pre>
+      </div> -->
+    </div>
+  </div>
+
   <script>
     const API_BASE = `${window.location.origin}/api`;
     let customerCache = [];
+    let recentCallsCache = [];
 
     function showAlert(message, type = 'success') {
       const alertContainer = document.getElementById('alertContainer');
@@ -1332,6 +1545,74 @@
       return String(value || 'pending').replace(/_/g, ' ');
     }
 
+    function parseMaybeJson(value, fallback) {
+      if (!value) return fallback;
+      if (typeof value === 'object') return value;
+      try {
+        return JSON.parse(value);
+      } catch (error) {
+        return fallback;
+      }
+    }
+
+    function getRecordingProxyUrl(callId) {
+      return `${API_BASE}/calls/${callId}/recording`;
+    }
+
+    function closeAnalysisModal() {
+      const modal = document.getElementById('analysisModal');
+      modal.classList.remove('show');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    function openAnalysisModal(callId) {
+      const call = recentCallsCache.find((item) => item.id === callId);
+      if (!call) {
+        showAlert('Call details not found', 'error');
+        return;
+      }
+
+      const analysis = parseMaybeJson(call.analysis_json, {});
+      const keyPoints = parseMaybeJson(call.key_points_json, []);
+      document.getElementById('analysisModalTitle').textContent = `Call analysis for ${call.customer_name || 'Customer'}`;
+      document.getElementById('analysisModalSubtitle').textContent = `Call SID: ${call.twilio_sid || '--'}`;
+      document.getElementById('analysisSummaryValue').textContent = call.analysis_summary || analysis.summary || 'Analysis summary not available yet.';
+      document.getElementById('analysisExcerptValue').textContent = call.report_excerpt || analysis.report_excerpt || 'No short excerpt available.';
+      document.getElementById('analysisStatusesValue').textContent = `Recording: ${formatStatusLabel(call.recording_status)} | Transcript: ${formatStatusLabel(call.transcript_status)} | Analysis: ${formatStatusLabel(call.analysis_status)}`;
+      document.getElementById('analysisMetaValue').textContent = `Rating: ${call.extracted_rating ? `${call.extracted_rating}/5` : 'N/A'}   | Outcome: ${formatStatusLabel(call.outcome)}`;
+
+      const keyPointsEl = document.getElementById('analysisKeyPoints');
+      keyPointsEl.innerHTML = '';
+      if (Array.isArray(keyPoints) && keyPoints.length) {
+        keyPoints.forEach((point) => {
+          const li = document.createElement('li');
+          li.textContent = point;
+          keyPointsEl.appendChild(li);
+        });
+      } else {
+        keyPointsEl.innerHTML = '<li>No key points available yet.</li>';
+      }
+
+      // document.getElementById('analysisJsonValue').textContent = JSON.stringify(analysis, null, 2);
+
+      const audioWrap = document.getElementById('analysisModalAudio');
+      if (call.recording_url) {
+        audioWrap.classList.remove('hidden');
+        audioWrap.innerHTML = `
+          <strong>Recording</strong>
+          <div class="supporting-text">You can play the latest call recording here.</div>
+          <audio controls preload="none" src="${getRecordingProxyUrl(call.id)}"></audio>
+        `;
+      } else {
+        audioWrap.classList.add('hidden');
+        audioWrap.innerHTML = '';
+      }
+
+      const modal = document.getElementById('analysisModal');
+      modal.classList.add('show');
+      modal.setAttribute('aria-hidden', 'false');
+    }
+
     function resetCustomerForm() {
       document.getElementById('editingCustomerId').value = '';
       document.getElementById('customerName').value = '';
@@ -1381,6 +1662,7 @@
         document.getElementById('previewGoodCount').textContent = report.good_count || 0;
         document.getElementById('previewAvgCount').textContent = report.average_count || 0;
         document.getElementById('previewBadCount').textContent = report.bad_count || 0;
+        document.getElementById('reportSummaryText').textContent = report.summary_text || 'Daily summary unavailable.';
 
         const subtitle = document.getElementById('dashboardSubtitle');
         if (subtitle) {
@@ -1522,6 +1804,55 @@
         });
       } catch (error) {
         console.error('Error loading feedback:', error);
+      }
+    }
+
+    async function loadRecentCalls() {
+      try {
+        const res = await fetch(`${API_BASE}/calls/recent`);
+        const calls = await res.json();
+        recentCallsCache = Array.isArray(calls) ? calls : [];
+        const tbody = document.getElementById('recentCallsBody');
+        tbody.innerHTML = '';
+
+        if (!recentCallsCache.length) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="6">
+                <div class="empty-state">
+                  <div class="empty-icon">CL</div>
+                  <strong>No calls processed yet</strong>
+                  <div class="supporting-text">Recording, transcription, and analysis status will appear here.</div>
+                </div>
+              </td>
+            </tr>
+          `;
+          return;
+        }
+
+        recentCallsCache.slice(0, 8).forEach((call) => {
+          const row = document.createElement('tr');
+          const playAction = call.recording_url
+            ? `<a class="button-link ghost" href="${getRecordingProxyUrl(call.id)}" target="_blank" rel="noopener">Play recording</a>`
+            : `<button class="ghost" type="button" disabled>Recording pending</button>`;
+          row.innerHTML = `
+            <td><strong>${call.customer_name || '--'}</strong></td>
+            <td><span class="badge ${call.recording_status === 'completed' ? 'completed' : 'pending'}">${formatStatusLabel(call.recording_status || 'pending')}</span></td>
+            <td><span class="badge ${call.transcript_status === 'completed' ? 'completed' : 'pending'}">${formatStatusLabel(call.transcript_status || 'pending')}</span></td>
+            <td><span class="badge ${call.analysis_status === 'completed' ? 'good' : 'pending'}">${formatStatusLabel(call.analysis_status || 'pending')}</span></td>
+            <td>${call.extracted_rating ? `${call.extracted_rating}/5` : 'N/A'}</td>
+            <td>
+              <span class="feedback-excerpt">${call.analysis_summary || call.report_excerpt || call.extracted_review_text || 'Waiting for analysis...'}</span>
+              <div class="call-actions">
+               
+                <button class="secondary" type="button" onclick="openAnalysisModal(${call.id})">Analysis details</button>
+              </div>
+            </td>
+          `;
+          tbody.appendChild(row);
+        });
+      } catch (error) {
+        console.error('Error loading recent calls:', error);
       }
     }
 
@@ -1730,18 +2061,26 @@
     }
 
     function downloadReport() {
-      window.location.href = `${API_BASE}/reports/download`;
+      window.location.href = `${API_BASE}/reports/download?t=${Date.now()}`;
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('analysisModal').addEventListener('click', (event) => {
+        if (event.target.id === 'analysisModal') {
+          closeAnalysisModal();
+        }
+      });
+
       resetCustomerForm();
       loadCustomers();
       loadFeedback();
+      loadRecentCalls();
       loadStats();
 
       setInterval(() => {
         loadCustomers();
         loadFeedback();
+        loadRecentCalls();
         loadStats();
       }, 30000);
     });

@@ -10,6 +10,7 @@ const customersRouter = require('./routes/customers');
 const feedbackRouter = require('./routes/feedback');
 const reportsRouter = require('./routes/reports');
 const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
+const { processCompletedCallPipeline } = require('./services/post-call-pipeline');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -35,17 +36,17 @@ You are Priya, a warm and professional customer feedback agent calling on behalf
 a diagnostic and medical collection center.
 
 Your job is to have a friendly, natural phone conversation to collect honest feedback
-about the customer's recent visit. Start in simple Hindi by default.
-At the beginning of the call, ask whether they would prefer to continue in Hindi or English.
-If the customer responds in Hindi or mixes languages, match their style naturally.
-If they ask for English, switch to simple English.
+about the customer's recent visit. Speak only in simple, natural Hindi.
+Do not ask whether they prefer Hindi or English.
+Even if the customer mixes English words, continue in easy conversational Hindi.
+Speak a little slowly and clearly, with natural short pauses.
+Do not stay silent for long after the customer finishes speaking.
 
 CONVERSATION FLOW — follow this order, but keep it conversational, not robotic:
 
 1. GREETING & INTRODUCTION
 Introduce yourself, mention you are calling from ${clientName},
 confirm you are speaking with the right person by name.
-First ask whether they would like to continue in Hindi or English.
 Then ask if they have 2-3 minutes to share feedback about their recent visit.
 If they say no or are busy — thank them politely and end the call.
 
@@ -87,11 +88,13 @@ RULES:
 - After the customer finishes each answer, briefly acknowledge before asking the next question.
 - The full call should feel like 3-5 minutes, not a long survey.
 - If the customer says they are busy or does not want to continue, politely thank them and end the conversation.
-- Start the call with this structure: greet the customer in Hindi, say your name is Priya, say you are calling from ${clientName}, confirm you are speaking with ${customerName}, ask whether they want to continue in Hindi or English, then ask if they have 2-3 minutes for feedback.
+- Start the call with this structure: greet the customer in Hindi, say your name is Priya, say you are calling from ${clientName}, confirm you are speaking with ${customerName}, then ask if they have 2-3 minutes for feedback.
 - Do not skip the introduction.
 - Do not sound like a bot, assistant, or AI system.
 - Do not jump to random topics or generic small talk.
 - Ask only one main question at a time.
+- Default to Hindi for the entire call.
+- Speak slightly slower than normal phone conversation speed.
 `.trim();
 }
 
@@ -99,9 +102,10 @@ function buildOpeningPrompt(clientName, customerName) {
   return [
     `Start the phone call now as Priya from ${clientName}.`,
     `The customer name is ${customerName}.`,
-    `Your first spoken turn should closely follow this wording: "Hello, am I speaking with ${customerName}? This is Priya calling from ${clientName}. I am calling to quickly collect feedback about your recent visit. Do you have 2 to 3 minutes?"`,
+    `Your first spoken turn should closely follow this wording in Hindi: "Namaste, kya main ${customerName} se baat kar rahi hoon? Main Priya bol rahi hoon, ${clientName} se. Main aapki recent visit ka chhota sa feedback lena chahti hoon. Kya aapke paas 2 se 3 minute hain?"`,
     'After that, continue the conversation naturally using the feedback flow in the system instructions.',
-    'Keep every reply short, warm, and phone-friendly.'
+    'Keep every reply short, warm, phone-friendly, and in Hindi only.',
+    'Speak clearly and a little slowly.'
   ].join(' ');
 }
 
@@ -188,9 +192,9 @@ function getScriptedCopy(language, customerName = process.env.CUSTOMER_NAME, cli
   }
 
   return {
-    intro: `Namaste. Kya main ${customerName} se baat kar rahi hoon? Main Priya bol rahi hoon, ${clientName} se. Hindi mein baat karne ke liye Hindi boliye ya 1 dabaiye. To continue in English, say English or press 2.`,
+    intro: `Namaste. Kya main ${customerName} se baat kar rahi hoon? Main Priya bol rahi hoon, ${clientName} se. Main aapki recent visit ka chhota sa feedback lena chahti hoon. Kya aapke paas 2 se 3 minute hain? Haan boliye ya 1 dabaiye.`,
     noLanguageResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
-    consent: `Dhanyavaad. Main Hindi mein baat karti hoon. Kya aapke paas aapki recent visit ke feedback ke liye 2 se 3 minute hain? Haan boliye ya 1 dabaiye.`,
+    consent: `Dhanyavaad. Main  Hindi mein baat karungi. Aapka overall experience hamare collection center mein kaisa raha?`,
     decline: 'Koi baat nahin. Aapke samay ke liye dhanyavaad. Namaste.',
     noConsentResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
     rating: 'Dhanyavaad. Hamare collection center mein aapka overall experience kaisa tha? 1 se 5 tak rating dijiye, jahan 5 excellent hai. Number boliye ya key dabaiye.',
@@ -210,7 +214,7 @@ function buildScriptedTwiml(customerName, clientName) {
     speechTimeout: 'auto',
     language: 'hi-IN',
     actionOnEmptyResult: true,
-    action: `/call/scripted/language?customerName=${encodedCustomerName}&clientName=${encodedClientName}`,
+    action: `/call/scripted/consent?lang=hi&customerName=${encodedCustomerName}&clientName=${encodedClientName}`,
     method: 'POST'
   });
 
@@ -258,7 +262,7 @@ function buildScriptedConsentResponse(req) {
   const encodedClientName = encodeURIComponent(req.query.clientName || CLIENT_NAME);
 
   if (!isAffirmativeResponse(speech, digit)) {
-    twiml.say({ language: language === 'en' ? 'en-IN' : 'hi-IN' }, copy.decline);
+    twiml.say({ language: 'hi-IN' }, copy.decline);
     twiml.hangup();
     return twiml.toString();
   }
@@ -266,17 +270,17 @@ function buildScriptedConsentResponse(req) {
   const gather = twiml.gather({
     input: 'speech dtmf',
     numDigits: 1,
-    timeout: 7,
+    timeout: 10,
     speechTimeout: 'auto',
-    language: language === 'en' ? 'en-IN' : 'hi-IN',
+    language: 'hi-IN',
     actionOnEmptyResult: true,
     action: `/call/scripted/rating?lang=${language}&customerName=${encodedCustomerName}&clientName=${encodedClientName}`,
     method: 'POST'
   });
 
-  gather.say({ language: language === 'en' ? 'en-IN' : 'hi-IN' }, copy.rating);
+  gather.say({ language: 'hi-IN' }, copy.rating);
 
-  twiml.say({ language: language === 'en' ? 'en-IN' : 'hi-IN' }, copy.noRatingResponse);
+  twiml.say({ language: 'hi-IN' }, copy.noRatingResponse);
   twiml.hangup();
   return twiml.toString();
 }
@@ -291,7 +295,7 @@ function buildScriptedRatingResponse(req) {
 
   console.log(`[SCRIPTED] Rating response: ${rating || 'none'}`);
 
-  twiml.say({ language: language === 'en' ? 'en-IN' : 'hi-IN' }, copy.closing);
+  twiml.say({ language: 'hi-IN' }, copy.closing);
   twiml.hangup();
   return twiml.toString();
 }
@@ -390,6 +394,7 @@ async function placeRealtimeCall({ customerPhone, customerName, customerId, clie
 
   const twimlUrl = `${PUBLIC_BASE_URL}/call/twiml?customerName=${safeCustomerName}&clientName=${safeClientName}${safeCustomerId}`;
   const statusUrl = `${PUBLIC_BASE_URL}/call/status${customerId ? `?customerId=${encodeURIComponent(String(customerId))}` : ''}`;
+  const recordingStatusUrl = `${PUBLIC_BASE_URL}/call/recording-status${customerId ? `?customerId=${encodeURIComponent(String(customerId))}` : ''}`;
 
   return twilioClient.calls.create({
     to: customerPhone,
@@ -397,8 +402,39 @@ async function placeRealtimeCall({ customerPhone, customerName, customerId, clie
     url: twimlUrl,
     method: 'GET',
     statusCallback: statusUrl,
-    statusCallbackMethod: 'POST'
+    statusCallbackMethod: 'POST',
+    record: true,
+    recordingChannels: 'dual',
+    recordingStatusCallback: recordingStatusUrl,
+    recordingStatusCallbackMethod: 'POST'
   });
+}
+
+async function ensureCustomerForCall({ customerId, customerName, customerPhone }) {
+  if (customerId) {
+    const existingById = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
+    if (existingById) {
+      return existingById;
+    }
+  }
+
+  const existingByPhone = await dbGet('SELECT * FROM customers WHERE phone = ?', [customerPhone]);
+  if (existingByPhone) {
+    return existingByPhone;
+  }
+
+  const result = await dbRun(
+    'INSERT INTO customers (name, phone, preferred_slot, status, created_at) VALUES (?, ?, ?, ?, ?)',
+    [
+      customerName || 'Customer',
+      customerPhone,
+      '10:00',
+      'pending',
+      new Date().toISOString()
+    ]
+  );
+
+  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
 }
 
 async function triggerScheduledCalls() {
@@ -502,10 +538,20 @@ function pushTranscriptTurn(transcript, role, text) {
     return;
   }
 
+  const nextText = String(text).trim();
+  const nowIso = new Date().toISOString();
+  const lastTurn = transcript[transcript.length - 1];
+
+  if (lastTurn && lastTurn.role === role) {
+    lastTurn.text = `${lastTurn.text} ${nextText}`.replace(/\s+/g, ' ').trim();
+    lastTurn.time = nowIso;
+    return;
+  }
+
   transcript.push({
     role,
-    text: String(text).trim(),
-    time: new Date().toISOString()
+    text: nextText,
+    time: nowIso
   });
 }
 
@@ -531,14 +577,30 @@ app.post('/call/start', async (req, res) => {
   try {
     const customerPhone = req.body.customerPhone || process.env.CUSTOMER_PHONE;
     const customerName = req.body.customerName || process.env.CUSTOMER_NAME;
-    const customerId = req.body.customerId;
+    const requestedCustomerId = req.body.customerId;
     const clientName = req.body.clientName || CLIENT_NAME;
+    const customer = await ensureCustomerForCall({
+      customerId: requestedCustomerId,
+      customerName,
+      customerPhone
+    });
 
     console.log(`[CALL REQUEST] to=${customerPhone} from=${process.env.TWILIO_PHONE_NUMBER} twiml=${PUBLIC_BASE_URL}/call/twiml`);
-    const call = await placeRealtimeCall({ customerPhone, customerName, customerId, clientName });
+    const call = await placeRealtimeCall({
+      customerPhone,
+      customerName: customer.name || customerName,
+      customerId: customer.id,
+      clientName
+    });
+
+    const result = await dbRun(
+      'INSERT INTO calls (customer_id, outcome, twilio_sid, called_at) VALUES (?, ?, ?, ?)',
+      [customer.id, 'initiated', call.sid, new Date().toISOString()]
+    );
+    await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
 
     console.log(`[CALL STARTED] SID: ${call.sid}`);
-    res.json({ success: true, sid: call.sid });
+    res.json({ success: true, sid: call.sid, callId: result.lastID, customerId: customer.id });
   } catch (error) {
     console.error('[ERROR starting call]', error.message);
     res.status(500).json({ success: false, error: error.message });
@@ -615,6 +677,48 @@ app.post('/call/status', async (req, res) => {
   }
 });
 
+app.post('/call/recording-status', async (req, res) => {
+  try {
+    const callSid = req.body.CallSid;
+    const recordingSid = req.body.RecordingSid;
+    const recordingStatus = req.body.RecordingStatus;
+    const recordingUrl = req.body.RecordingUrl ? `${req.body.RecordingUrl}.mp3` : null;
+
+    console.log(`[RECORDING STATUS] ${recordingStatus} | Call SID: ${callSid} | Recording SID: ${recordingSid}`);
+
+    const callRecord = await dbGet('SELECT * FROM calls WHERE twilio_sid = ?', [callSid]);
+    if (callRecord) {
+      await dbRun(
+        `UPDATE calls
+            SET recording_sid = ?,
+                recording_url = ?,
+                recording_status = ?
+          WHERE id = ?`,
+        [recordingSid || null, recordingUrl, recordingStatus || null, callRecord.id]
+      );
+
+      if (recordingStatus === 'completed' && recordingUrl) {
+        setTimeout(() => {
+          processCompletedCallPipeline({ dbGet, dbRun, callSid }).then((result) => {
+            if (result.ok) {
+              console.log(`[POST CALL PIPELINE] Processed call ${callSid} with feedback ${result.feedbackId}`);
+            } else {
+              console.log(`[POST CALL PIPELINE] Skipped call ${callSid}: ${result.reason}`);
+            }
+          }).catch((error) => {
+            console.error('[POST CALL PIPELINE ERROR]', error.message);
+          });
+        }, 1500);
+      }
+    }
+
+    res.sendStatus(200);
+  } catch (error) {
+    console.error('[RECORDING STATUS ERROR]', error.message);
+    res.sendStatus(500);
+  }
+});
+
 app.post('/api/calls/initiate/:customerId', async (req, res) => {
   try {
     const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.customerId]);
@@ -639,6 +743,97 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
   } catch (error) {
     console.error('[API CALL INITIATE ERROR]', error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/calls/recent', async (req, res) => {
+  try {
+    const rows = await dbAll(
+      `SELECT
+         calls.id,
+         calls.customer_id,
+         customers.name AS customer_name,
+         customers.phone AS customer_phone,
+         calls.called_at,
+         calls.outcome,
+         calls.twilio_sid,
+         calls.recording_sid,
+         calls.recording_url,
+         calls.recording_status,
+         calls.recording_local_path,
+         calls.transcript_status,
+         calls.transcript_source,
+         calls.analysis_status,
+         calls.analysis_summary,
+         calls.analysis_json,
+         calls.key_points_json,
+         calls.report_excerpt,
+         calls.language,
+         calls.extracted_rating,
+         calls.extracted_review_text
+       FROM calls
+       JOIN customers ON customers.id = calls.customer_id
+       ORDER BY calls.id DESC
+       LIMIT 25`
+    );
+
+    res.json(rows);
+  } catch (error) {
+    console.error('[RECENT CALLS ERROR]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/calls/:callId/recording', async (req, res) => {
+  try {
+    const call = await dbGet('SELECT recording_url FROM calls WHERE id = ?', [req.params.callId]);
+
+    if (!call?.recording_url) {
+      return res.status(404).json({ error: 'Recording not available yet' });
+    }
+
+    const authHeader = `Basic ${Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')}`;
+    const response = await fetch(call.recording_url, {
+      headers: {
+        Authorization: authHeader
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).json({ error: `Unable to fetch recording (${response.status})` });
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    res.setHeader('Content-Type', response.headers.get('content-type') || 'audio/mpeg');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(Buffer.from(arrayBuffer));
+  } catch (error) {
+    console.error('[RECORDING PROXY ERROR]', error.message);
+    res.status(500).json({ error: 'Failed to stream recording' });
+  }
+});
+
+app.get('/api/calls/:callId/transcript', async (req, res) => {
+  try {
+    const call = await dbGet(
+      'SELECT transcript_text, transcript_status FROM calls WHERE id = ?',
+      [req.params.callId]
+    );
+
+    if (!call) {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+
+    if (!call.transcript_text) {
+      return res.status(404).json({ error: 'Transcript not available yet' });
+    }
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(call.transcript_text);
+  } catch (error) {
+    console.error('[TRANSCRIPT FETCH ERROR]', error.message);
+    res.status(500).json({ error: 'Failed to fetch transcript' });
   }
 });
 
