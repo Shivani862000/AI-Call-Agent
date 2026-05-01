@@ -633,6 +633,18 @@
       border-color: rgba(255, 155, 23, 0.15);
     }
 
+    .badge.call {
+      background: rgba(45, 109, 246, 0.09);
+      color: var(--blue);
+      border-color: rgba(45, 109, 246, 0.12);
+    }
+
+    .badge.manual {
+      background: rgba(46, 160, 67, 0.12);
+      color: var(--green);
+      border-color: rgba(46, 160, 67, 0.16);
+    }
+
     .badge.completed,
     .badge.good {
       background: rgba(46, 160, 67, 0.12);
@@ -910,7 +922,7 @@
     <aside class="sidebar">
       <div>
       <div class="brand">
-          <div class="brand-mark">FA</div>
+          <!-- <div class="brand-mark">FA</div> -->
           <div class="brand-copy">
             <h1>Feedback Automation</h1>
             <p>Calls, surveys, and reports in one place</p>
@@ -918,11 +930,11 @@
         </div>
 
         <nav class="nav-list" aria-label="Sidebar navigation">
-          <a href="#dashboard" class="nav-link active"><span class="nav-icon">DB</span><span>Dashboard</span></a>
-          <a href="#customers" class="nav-link"><span class="nav-icon">CU</span><span>Customers</span></a>
-          <a href="#feedback" class="nav-link"><span class="nav-icon">FB</span><span>Feedback</span></a>
-          <a href="#reports" class="nav-link"><span class="nav-icon">RP</span><span>Reports</span></a>
-          <a href="#settings" class="nav-link"><span class="nav-icon">ST</span><span>Settings</span></a>
+          <a href="#dashboard" class="nav-link active"><span>Dashboard</span></a>
+          <a href="#customers" class="nav-link"><span>Customers</span></a>
+          <a href="#feedback" class="nav-link"><span>Feedback</span></a>
+          <a href="#reports" class="nav-link"><span>Reports</span></a>
+          <a href="#settings" class="nav-link"><span>Settings</span></a>
         </nav>
       </div>
 
@@ -1165,6 +1177,7 @@
               <thead>
                 <tr>
                   <th>Customer</th>
+                  <th>Source</th>
                   <th>Category</th>
                   <th>Stars</th>
                   <th>Review</th>
@@ -1173,9 +1186,9 @@
               </thead>
               <tbody id="feedbackTableBody">
                 <tr>
-                  <td colspan="5">
+                  <td colspan="6">
                     <div class="empty-state">
-                    <div class="empty-icon">FB</div>
+                  <div class="empty-icon">FB</div>
                       <strong>Loading feedback...</strong>
                     </div>
                   </td>
@@ -1185,7 +1198,10 @@
           </div>
         </article>
 
-        <article class="card" id="reports">
+       
+      </section>
+      <section class="lower-grid">
+         <article class="card" id="reports">
           <div class="card-header">
             <div>
               <div class="card-title">Reports & analytics</div>
@@ -1203,27 +1219,27 @@
               <div class="mini-card accent-blue" style="color: var(--blue);">
                 <strong id="previewTotalCalls">0</strong>
                 <span>Total calls</span>
-                <div class="mini-icon">CL</div>
+                <!-- <div class="mini-icon">CL</div> -->
               </div>
               <div class="mini-card accent-green" style="color: var(--green);">
                 <strong id="previewGoodCount">0</strong>
                 <span>Good reviews</span>
-                <div class="mini-icon">GD</div>
+                <!-- <div class="mini-icon">GD</div> -->
               </div>
               <div class="mini-card accent-orange" style="color: var(--orange);">
                 <strong id="previewAvgCount">0</strong>
                 <span>Average reviews</span>
-                <div class="mini-icon">AV</div>
+                <!-- <div class="mini-icon">AV</div> -->
               </div>
               <div class="mini-card" style="color: var(--red);">
                 <strong id="previewBadCount">0</strong>
                 <span>Bad reviews</span>
-                <div class="mini-icon" style="background: rgba(234, 84, 85, 0.12); color: var(--red);">BD</div>
+                <!-- <div class="mini-icon" style="background: rgba(234, 84, 85, 0.12); color: var(--red);">BD</div> -->
               </div>
             </div>
           </div>
         </article>
-      </section>
+        </section>
 
       <section class="notice-bar" id="settings">
         <div class="notice-text">
@@ -1479,7 +1495,7 @@
         if (!Array.isArray(feedback) || feedback.length === 0) {
           tbody.innerHTML = `
             <tr>
-              <td colspan="5">
+              <td colspan="6">
                 <div class="empty-state">
                   <div class="empty-icon">FB</div>
                   <strong>No feedback recorded yet</strong>
@@ -1496,6 +1512,7 @@
           const date = fb.submitted_at ? new Date(fb.submitted_at).toLocaleDateString() : '--';
           row.innerHTML = `
             <td><strong>${fb.customer_name || '--'}</strong></td>
+            <td><span class="badge ${fb.source || 'manual'}">${formatStatusLabel(fb.source || 'manual')}</span></td>
             <td><span class="badge ${fb.category || 'average'}">${formatStatusLabel(fb.category || 'average')}</span></td>
             <td>${fb.stars ? `${fb.stars}/5` : 'N/A'}</td>
             <td><span class="feedback-excerpt">${fb.review_text || '--'}</span></td>

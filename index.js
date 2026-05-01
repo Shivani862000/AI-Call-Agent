@@ -9,6 +9,7 @@ const { initializeDatabase, dbRun, dbGet, dbAll } = require('./db');
 const customersRouter = require('./routes/customers');
 const feedbackRouter = require('./routes/feedback');
 const reportsRouter = require('./routes/reports');
+const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -656,6 +657,9 @@ wss.on('connection', (twilioWs, req) => {
   let aiSessionStarting = false;
   let activeCustomerName = process.env.CUSTOMER_NAME || 'Customer';
   let activeClientName = CLIENT_NAME;
+  let activeCustomerId = null;
+  let activeCallSid = null;
+  let transcriptPersisted = false;
 
   const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName);
   const getActiveOpeningPrompt = () => buildOpeningPrompt(activeClientName, activeCustomerName);
@@ -666,6 +670,32 @@ wss.on('connection', (twilioWs, req) => {
       printTranscript(transcript);
     }
   };
+
+  async function persistTranscriptOnce() {
+    if (transcriptPersisted) {
+      return;
+    }
+
+    transcriptPersisted = true;
+
+    try {
+      const result = await saveCallFeedbackFromTranscript({
+        dbGet,
+        dbRun,
+        callSid: activeCallSid,
+        customerId: activeCustomerId,
+        transcript
+      });
+
+      if (result.saved) {
+        console.log(`[FEEDBACK] Auto-saved call feedback as record ${result.feedbackId} (${result.category})`);
+      } else {
+        console.log(`[FEEDBACK] Skipped auto-save: ${result.reason}`);
+      }
+    } catch (error) {
+      console.error('[FEEDBACK SAVE ERROR]', error.message);
+    }
+  }
 
   function sendAudioToTwilio(base64Payload) {
     if (!streamSid || !base64Payload) {
@@ -929,6 +959,8 @@ wss.on('connection', (twilioWs, req) => {
       const customParameters = message.start.customParameters || {};
       activeCustomerName = customParameters.customerName || activeCustomerName;
       activeClientName = customParameters.clientName || activeClientName;
+      activeCustomerId = customParameters.customerId ? Number(customParameters.customerId) : null;
+      activeCallSid = message.start.callSid || activeCallSid;
       console.log(`[STREAM] streamSid: ${streamSid}`);
       console.log(`[STREAM] Start payload: ${JSON.stringify(message.start)}`);
       console.log(`[STREAM] Active customer=${activeCustomerName} client=${activeClientName}`);
@@ -964,6 +996,9 @@ wss.on('connection', (twilioWs, req) => {
     if (message.event === 'stop') {
       console.log('[STREAM] Call ended');
       printTranscriptOnce();
+      persistTranscriptOnce().catch((error) => {
+        console.error('[FEEDBACK SAVE ERROR]', error.message);
+      });
 
       if (aiWs?.readyState === WebSocket.OPEN) {
         aiWs.close();
@@ -974,6 +1009,9 @@ wss.on('connection', (twilioWs, req) => {
   twilioWs.on('close', () => {
     console.log('[STREAM] Twilio WS closed');
     printTranscriptOnce();
+    persistTranscriptOnce().catch((error) => {
+      console.error('[FEEDBACK SAVE ERROR]', error.message);
+    });
 
     if (aiWs?.readyState === WebSocket.OPEN) {
       aiWs.close();

@@ -1,8 +1,8 @@
 const OpenAI = require('openai');
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
 
 function hasOpenAIAccess() {
   return Boolean(process.env.OPENAI_API_KEY);
@@ -50,6 +50,10 @@ async function generateCallScript(customerName) {
   }
 
   try {
+    if (!openai) {
+      return buildFallbackCallScript(customerName);
+    }
+
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       max_tokens: 200,
@@ -83,6 +87,10 @@ async function categorizeFeedback(reviewText, stars) {
   }
 
   try {
+    if (!openai) {
+      return categorizeFeedbackFallback(reviewText, stars);
+    }
+
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       max_tokens: 100,

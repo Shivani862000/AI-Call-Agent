@@ -41,8 +41,8 @@ router.post('/manual', async (req, res) => {
 
     // Save to feedback table
     const result = await dbRun(
-      'INSERT INTO feedback (customer_id, review_text, category, stars, submitted_at) VALUES (?, ?, ?, ?, ?)',
-      [customer_id, review_text, categorization.category, stars, new Date().toISOString()]
+      'INSERT INTO feedback (customer_id, review_text, category, stars, submitted_at, source) VALUES (?, ?, ?, ?, ?, ?)',
+      [customer_id, review_text, categorization.category, stars, new Date().toISOString(), 'manual']
     );
 
     res.json({
@@ -67,6 +67,7 @@ router.get('/', async (req, res) => {
         f.review_text,
         f.category,
         f.stars,
+        f.source,
         f.submitted_at
       FROM feedback f
       JOIN customers c ON f.customer_id = c.id
