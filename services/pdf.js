@@ -174,48 +174,6 @@ function drawExecutiveSummary(doc, fonts, reportData, watermarkText) {
   doc.y = y + 96;
 }
 
-function drawMetricCard(doc, fonts, x, y, width, title, value, accent, soft) {
-  drawPanel(doc, x, y, width, 78, soft, COLORS.line, 18);
-  doc.save();
-  doc.roundedRect(x, y, 5, 78, 5).fill(accent);
-  doc.restore();
-
-  setFont(doc, fonts, 'regular', 10, COLORS.muted);
-  doc.text(title, x + 16, y + 14, { width: width - 28 });
-  setFont(doc, fonts, 'heading', 23, COLORS.ink);
-  doc.text(String(value), x + 16, y + 34, { width: width - 28 });
-}
-
-function drawKpiCards(doc, fonts, reportData, watermarkText) {
-  drawSectionTitle(doc, fonts, 'KPI Cards', 'Primary call-center metrics for the current report window', watermarkText);
-  ensureSpace(doc, fonts, watermarkText, 264);
-
-  const cards = [
-    ['Total Calls', safeNumber(reportData.total_calls), COLORS.blue, COLORS.blueSoft],
-    ['Answered', safeNumber(reportData.answered), COLORS.green, COLORS.greenSoft],
-    ['No Answer', safeNumber(reportData.no_answer), COLORS.orange, COLORS.orangeSoft],
-    ['Declined', safeNumber(reportData.declined), COLORS.red, COLORS.redSoft],
-    ['Consent Given', safeNumber(reportData.consent_given), COLORS.blue, COLORS.blueSoft],
-    ['WhatsApp Sent', safeNumber(reportData.whatsapp_sent), COLORS.green, COLORS.greenSoft]
-  ];
-
-  const cardWidth = (doc.page.width - 96) / 2;
-  let x = 40;
-  let y = doc.y;
-
-  cards.forEach((card, index) => {
-    drawMetricCard(doc, fonts, x, y, cardWidth, card[0], card[1], card[2], card[3]);
-    if (index % 2 === 0) {
-      x += cardWidth + 16;
-    } else {
-      x = 40;
-      y += 92;
-    }
-  });
-
-  doc.y = y + 12;
-}
-
 function drawSuccessAndRating(doc, fonts, reportData, watermarkText) {
   drawSectionTitle(doc, fonts, 'Success Rate + Average Rating', 'Operational conversion and customer sentiment at a glance', watermarkText);
   ensureSpace(doc, fonts, watermarkText, 130);
@@ -334,47 +292,6 @@ function drawAlerts(doc, fonts, reportData, watermarkText) {
   drawBulletList(doc, fonts, items, watermarkText, 'No pending alerts. Recording, transcript, and analysis pipeline look healthy.');
 }
 
-function drawFeedbackCard(doc, fonts, fb, watermarkText) {
-  const excerpt = fb.review_excerpt || 'No review text available.';
-  const category = fb.category || 'unknown';
-  const categoryColor = category === 'good' ? COLORS.green : category === 'average' ? COLORS.orange : COLORS.red;
-  const softColor = category === 'good' ? COLORS.greenSoft : category === 'average' ? COLORS.orangeSoft : COLORS.redSoft;
-  const textHeight = doc.heightOfString(excerpt, { width: doc.page.width - 240 });
-  const cardHeight = Math.max(96, textHeight + 68);
-
-  ensureSpace(doc, fonts, watermarkText, cardHeight + 12);
-  const y = doc.y;
-
-  drawPanel(doc, 40, y, doc.page.width - 80, cardHeight, COLORS.panel, COLORS.line, 18);
-  drawPanel(doc, 56, y + 18, 90, 30, softColor, categoryColor, 15);
-
-  setFont(doc, fonts, 'heading', 9, categoryColor);
-  doc.text(category.toUpperCase(), 56, y + 28, { width: 90, align: 'center' });
-
-  setFont(doc, fonts, 'heading', 13, COLORS.ink);
-  doc.text(fb.customer_name || 'Customer', 164, y + 18);
-  setFont(doc, fonts, 'regular', 10, COLORS.muted);
-  doc.text(`Rating: ${safeNumber(fb.stars).toFixed(0)}/5`, 164, y + 38);
-  doc.text(formatDate(fb.submitted_at), doc.page.width - 180, y + 18, { width: 120, align: 'right' });
-
-  setFont(doc, fonts, 'regular', 10, COLORS.ink);
-  doc.text(excerpt, 164, y + 58, { width: doc.page.width - 240 });
-
-  doc.y = y + cardHeight + 10;
-}
-
-function drawCustomerFeedback(doc, fonts, reportData, watermarkText) {
-  drawSectionTitle(doc, fonts, 'Customer Feedback', 'Recent manually added and auto-captured feedback excerpts', watermarkText);
-  const feedbackRows = Array.isArray(reportData.feedback) ? reportData.feedback.slice(0, 8) : [];
-
-  if (!feedbackRows.length) {
-    drawBulletList(doc, fonts, [], watermarkText, 'No customer feedback recorded today.');
-    return;
-  }
-
-  feedbackRows.forEach((feedback) => drawFeedbackCard(doc, fonts, feedback, watermarkText));
-}
-
 function drawCallDetailCard(doc, fonts, call, watermarkText) {
   const detailLines = [
     `Customer: ${call.customer_name || 'Customer'} | Called at: ${formatDate(call.called_at)}`,
@@ -469,12 +386,10 @@ function generateReportPDF(reportData) {
 
       drawHeader(doc, fonts, reportData, watermarkText);
       drawExecutiveSummary(doc, fonts, reportData, watermarkText);
-      drawKpiCards(doc, fonts, reportData, watermarkText);
       drawSuccessAndRating(doc, fonts, reportData, watermarkText);
       drawFeedbackBreakdown(doc, fonts, reportData, watermarkText);
       drawKeyInsights(doc, fonts, reportData, watermarkText);
       drawAlerts(doc, fonts, reportData, watermarkText);
-      drawCustomerFeedback(doc, fonts, reportData, watermarkText);
       drawCallDetails(doc, fonts, reportData, watermarkText);
       drawDashboardLink(doc, fonts, reportData, watermarkText);
 
