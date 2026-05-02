@@ -1257,8 +1257,8 @@
           <div class="toolbar-group">
             <input type="search" id="customerSearch" placeholder="Search name or phone" oninput="renderCustomers()">
             <select id="customerStatusFilter" onchange="renderCustomers()">
+              <option value="pending" selected>Pending</option>
               <option value="">All statuses</option>
-              <option value="pending">Pending</option>
               <option value="called">Called</option>
               <option value="completed">Completed</option>
               <option value="no_answer">No answer</option>
@@ -1293,12 +1293,12 @@
         </div>
       </section>
 
-      <!-- <section class="lower-grid">
-        <article class="card">
+      <section class="lower-grid">
+         <article class="card">
           <div class="card-header">
             <div>
-              <div class="card-title">Recent feedback</div>
-              <div class="card-subtitle">Latest manually added or captured responses</div>
+              <div class="card-title">Feedback intelligence</div>
+              <div class="card-subtitle">Manual feedback and call analysis in one unified review surface</div>
             </div>
           </div>
 
@@ -1308,55 +1308,20 @@
                 <tr>
                   <th>Customer</th>
                   <th>Source</th>
-                  <th>Category</th>
-                  <th>Stars</th>
-                  <th>Review</th>
-                  <th>Date</th>
-                </tr>
-              </thead>
-              <tbody id="feedbackTableBody">
-                <tr>
-                  <td colspan="6">
-                    <div class="empty-state">
-                  <div class="empty-icon">FB</div>
-                      <strong>Loading feedback...</strong>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </article>
-
-       
-      </section> -->
-      <section class="lower-grid">
-         <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Call pipeline</div>
-              <div class="card-subtitle">Recording, transcript, analysis, and reporting status</div>
-            </div>
-          </div>
-
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Customer</th>
-                  <th>Recording</th>
-                  <th>Transcript</th>
-                  <th>Analysis</th>
+                  <th>Quality</th>
+                  <th>Pipeline</th>
                   <th>Rating</th>
                   <th>Insight</th>
+                  <th>Actions</th>
+                  <th>Date</th>
                 </tr>
               </thead>
               <tbody id="recentCallsBody">
                 <tr>
-                  <td colspan="6">
+                  <td colspan="8">
                     <div class="empty-state">
                       <div class="empty-icon">CL</div>
-                      <strong>Loading call pipeline...</strong>
+                      <strong>Loading feedback intelligence...</strong>
                     </div>
                   </td>
                 </tr>
@@ -1367,19 +1332,19 @@
       </section>
       <section class="lower-grid">
          <article class="card" id="reports">
-          <div class="card-header">
+         <div class="card-header">
             <div>
-              <div class="card-title">Reports & analytics</div>
-              <div class="card-subtitle">Preview today's calling and review activity</div>
+              <div class="card-title">Weekly report</div>
+              <div class="card-subtitle">Preview this week's calling and review activity</div>
             </div>
           </div>
 
           <div class="report-actions">
-            <button class="primary" onclick="generateReport(this)">Generate & email report</button>
-            <button class="ghost" onclick="downloadReport()">Download last report</button>
+            <button class="primary" onclick="generateReport(this)">Generate</button>
+            <button class="ghost" onclick="downloadReport()">Download</button>
           </div>
 
-          <div class="card-note" id="reportSummaryText" style="margin-bottom: 16px;">Loading daily summary...</div>
+          <div class="card-note" id="reportSummaryText" style="margin-bottom: 16px;">Loading weekly summary...</div>
 
           <div id="reportPreview">
             <div class="mini-report-grid">
@@ -1469,6 +1434,7 @@
   <script>
     const API_BASE = `${window.location.origin}/api`;
     let customerCache = [];
+    let feedbackCache = [];
     let recentCallsCache = [];
 
     function showAlert(message, type = 'success') {
@@ -1559,6 +1525,107 @@
       return `${API_BASE}/calls/${callId}/recording`;
     }
 
+    function getTranscriptViewerUrl(callId) {
+      return `${API_BASE}/calls/${callId}/transcript`;
+    }
+
+    function formatDateValue(value) {
+      return value ? new Date(value).toLocaleDateString() : '--';
+    }
+
+    function getPipelineSummary(call) {
+      if (!call) return 'Manual entry';
+      return `Rec: ${formatStatusLabel(call.recording_status || 'pending')} | Trx: ${formatStatusLabel(call.transcript_status || 'pending')} | AI: ${formatStatusLabel(call.analysis_status || 'pending')}`;
+    }
+
+    function buildFeedbackIntelligenceRows() {
+      const callMap = new Map(recentCallsCache.map((call) => [String(call.id), call]));
+      const usedCallIds = new Set();
+      const rows = [];
+
+      feedbackCache.forEach((feedback) => {
+        const linkedCall = feedback.call_id ? callMap.get(String(feedback.call_id)) : null;
+        if (linkedCall) usedCallIds.add(String(linkedCall.id));
+
+        rows.push({
+          customer_name: feedback.customer_name || linkedCall?.customer_name || '--',
+          source: feedback.source || (linkedCall ? 'call' : 'manual'),
+          category: feedback.category || 'average',
+          stars: feedback.stars || linkedCall?.extracted_rating || null,
+          review_text: feedback.review_text || linkedCall?.analysis_summary || linkedCall?.report_excerpt || linkedCall?.extracted_review_text || '--',
+          submitted_at: feedback.submitted_at || linkedCall?.called_at,
+          call: linkedCall
+        });
+      });
+
+      recentCallsCache.forEach((call) => {
+        if (usedCallIds.has(String(call.id))) return;
+        rows.push({
+          customer_name: call.customer_name || '--',
+          source: 'call',
+          category: call.analysis_status === 'completed' ? 'good' : 'pending',
+          stars: call.extracted_rating || null,
+          review_text: call.analysis_summary || call.report_excerpt || call.extracted_review_text || 'Waiting for analysis...',
+          submitted_at: call.called_at,
+          call
+        });
+      });
+
+      return rows.sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
+    }
+
+    function renderFeedbackIntelligence() {
+      const tbody = document.getElementById('recentCallsBody');
+      if (!tbody) return;
+
+      const rows = buildFeedbackIntelligenceRows();
+      tbody.innerHTML = '';
+
+      if (!rows.length) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8">
+              <div class="empty-state">
+                <div class="empty-icon">CL</div>
+                <strong>No feedback intelligence available yet</strong>
+                <div class="supporting-text">Manual feedback and analyzed calls will appear here.</div>
+              </div>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      rows.slice(0, 8).forEach((item) => {
+        const row = document.createElement('tr');
+        const call = item.call;
+        const actions = [];
+
+        if (call?.recording_url) {
+          actions.push(`<a class="button-link ghost" href="${getRecordingProxyUrl(call.id)}" target="_blank" rel="noopener">Play recording</a>`);
+        }
+
+        if (call) {
+          actions.push(`<button class="secondary" type="button" onclick="openAnalysisModal(${call.id})">Analysis details</button>`);
+          if (call.transcript_status === 'completed') {
+            actions.push(`<a class="button-link ghost" href="${getTranscriptViewerUrl(call.id)}" target="_blank" rel="noopener">Transcript</a>`);
+          }
+        }
+
+        row.innerHTML = `
+          <td><strong>${item.customer_name}</strong></td>
+          <td><span class="badge ${item.source || 'manual'}">${formatStatusLabel(item.source || 'manual')}</span></td>
+          <td><span class="badge ${item.category || 'average'}">${formatStatusLabel(item.category || 'average')}</span></td>
+          <td><span class="feedback-excerpt">${getPipelineSummary(call)}</span></td>
+          <td>${item.stars ? `${item.stars}/5` : 'N/A'}</td>
+          <td><span class="feedback-excerpt">${item.review_text || '--'}</span></td>
+          <td><div class="call-actions">${actions.join(' ') || '<button class="ghost" type="button" disabled>No actions</button>'}</div></td>
+          <td>${formatDateValue(item.submitted_at)}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
     function closeAnalysisModal() {
       const modal = document.getElementById('analysisModal');
       modal.classList.remove('show');
@@ -1645,24 +1712,26 @@
 
     async function loadStats() {
       try {
-        const [customersRes, reportRes] = await Promise.all([
+        const [customersRes, reportRes, weeklyReportRes] = await Promise.all([
           fetch(`${API_BASE}/customers`),
-          fetch(`${API_BASE}/reports/preview`)
+          fetch(`${API_BASE}/reports/preview`),
+          fetch(`${API_BASE}/reports/weekly-preview`)
         ]);
 
         const customers = await customersRes.json();
         const report = await reportRes.json();
+        const weeklyReport = await weeklyReportRes.json();
 
         document.getElementById('totalCustomers').textContent = customers.length || 0;
         document.getElementById('callsToday').textContent = report.total_calls || 0;
         document.getElementById('consentGiven').textContent = report.consent_given || 0;
         document.getElementById('whatsappSent').textContent = report.whatsapp_sent || 0;
         document.getElementById('feedbackReceived').textContent = report.feedback_count || 0;
-        document.getElementById('previewTotalCalls').textContent = report.total_calls || 0;
-        document.getElementById('previewGoodCount').textContent = report.good_count || 0;
-        document.getElementById('previewAvgCount').textContent = report.average_count || 0;
-        document.getElementById('previewBadCount').textContent = report.bad_count || 0;
-        document.getElementById('reportSummaryText').textContent = report.summary_text || 'Daily summary unavailable.';
+        document.getElementById('previewTotalCalls').textContent = weeklyReport.total_calls || 0;
+        document.getElementById('previewGoodCount').textContent = weeklyReport.good_count || 0;
+        document.getElementById('previewAvgCount').textContent = weeklyReport.average_count || 0;
+        document.getElementById('previewBadCount').textContent = weeklyReport.bad_count || 0;
+        document.getElementById('reportSummaryText').textContent = weeklyReport.summary_text || 'Weekly summary unavailable.';
 
         const subtitle = document.getElementById('dashboardSubtitle');
         if (subtitle) {
@@ -1677,14 +1746,29 @@
       const tbody = document.getElementById('customersTableBody');
       const searchTerm = document.getElementById('customerSearch').value.trim().toLowerCase();
       const statusFilter = document.getElementById('customerStatusFilter').value;
+      const statusRank = {
+        pending: 0,
+        called: 1,
+        completed: 2,
+        busy: 3,
+        no_answer: 4,
+        declined: 5,
+        twilio_trial_blocked: 6
+      };
 
-      const filteredCustomers = customerCache.filter((customer) => {
-        const name = String(customer.name || '').toLowerCase();
-        const phone = String(customer.phone || '').toLowerCase();
-        const matchesSearch = !searchTerm || name.includes(searchTerm) || phone.includes(searchTerm);
-        const matchesStatus = !statusFilter || customer.status === statusFilter;
-        return matchesSearch && matchesStatus;
-      });
+      const filteredCustomers = customerCache
+        .filter((customer) => {
+          const name = String(customer.name || '').toLowerCase();
+          const phone = String(customer.phone || '').toLowerCase();
+          const matchesSearch = !searchTerm || name.includes(searchTerm) || phone.includes(searchTerm);
+          const matchesStatus = !statusFilter || customer.status === statusFilter;
+          return matchesSearch && matchesStatus;
+        })
+        .sort((a, b) => {
+          const statusDelta = (statusRank[a.status] ?? 99) - (statusRank[b.status] ?? 99);
+          if (statusDelta !== 0) return statusDelta;
+          return String(a.name || '').localeCompare(String(b.name || ''));
+        });
 
       const meta = document.getElementById('customerListMeta');
       if (meta) {
@@ -1771,37 +1855,8 @@
       try {
         const res = await fetch(`${API_BASE}/feedback`);
         const feedback = await res.json();
-        const tbody = document.getElementById('feedbackTableBody');
-        tbody.innerHTML = '';
-
-        if (!Array.isArray(feedback) || feedback.length === 0) {
-          tbody.innerHTML = `
-            <tr>
-              <td colspan="6">
-                <div class="empty-state">
-                  <div class="empty-icon">FB</div>
-                  <strong>No feedback recorded yet</strong>
-                  <div class="supporting-text">Feedback submitted by customers will appear here.</div>
-                </div>
-              </td>
-            </tr>
-          `;
-          return;
-        }
-
-        feedback.forEach((fb) => {
-          const row = document.createElement('tr');
-          const date = fb.submitted_at ? new Date(fb.submitted_at).toLocaleDateString() : '--';
-          row.innerHTML = `
-            <td><strong>${fb.customer_name || '--'}</strong></td>
-            <td><span class="badge ${fb.source || 'manual'}">${formatStatusLabel(fb.source || 'manual')}</span></td>
-            <td><span class="badge ${fb.category || 'average'}">${formatStatusLabel(fb.category || 'average')}</span></td>
-            <td>${fb.stars ? `${fb.stars}/5` : 'N/A'}</td>
-            <td><span class="feedback-excerpt">${fb.review_text || '--'}</span></td>
-            <td>${date}</td>
-          `;
-          tbody.appendChild(row);
-        });
+        feedbackCache = Array.isArray(feedback) ? feedback : [];
+        renderFeedbackIntelligence();
       } catch (error) {
         console.error('Error loading feedback:', error);
       }
@@ -1812,45 +1867,7 @@
         const res = await fetch(`${API_BASE}/calls/recent`);
         const calls = await res.json();
         recentCallsCache = Array.isArray(calls) ? calls : [];
-        const tbody = document.getElementById('recentCallsBody');
-        tbody.innerHTML = '';
-
-        if (!recentCallsCache.length) {
-          tbody.innerHTML = `
-            <tr>
-              <td colspan="6">
-                <div class="empty-state">
-                  <div class="empty-icon">CL</div>
-                  <strong>No calls processed yet</strong>
-                  <div class="supporting-text">Recording, transcription, and analysis status will appear here.</div>
-                </div>
-              </td>
-            </tr>
-          `;
-          return;
-        }
-
-        recentCallsCache.slice(0, 8).forEach((call) => {
-          const row = document.createElement('tr');
-          const playAction = call.recording_url
-            ? `<a class="button-link ghost" href="${getRecordingProxyUrl(call.id)}" target="_blank" rel="noopener">Play recording</a>`
-            : `<button class="ghost" type="button" disabled>Recording pending</button>`;
-          row.innerHTML = `
-            <td><strong>${call.customer_name || '--'}</strong></td>
-            <td><span class="badge ${call.recording_status === 'completed' ? 'completed' : 'pending'}">${formatStatusLabel(call.recording_status || 'pending')}</span></td>
-            <td><span class="badge ${call.transcript_status === 'completed' ? 'completed' : 'pending'}">${formatStatusLabel(call.transcript_status || 'pending')}</span></td>
-            <td><span class="badge ${call.analysis_status === 'completed' ? 'good' : 'pending'}">${formatStatusLabel(call.analysis_status || 'pending')}</span></td>
-            <td>${call.extracted_rating ? `${call.extracted_rating}/5` : 'N/A'}</td>
-            <td>
-              <span class="feedback-excerpt">${call.analysis_summary || call.report_excerpt || call.extracted_review_text || 'Waiting for analysis...'}</span>
-              <div class="call-actions">
-               
-                <button class="secondary" type="button" onclick="openAnalysisModal(${call.id})">Analysis details</button>
-              </div>
-            </td>
-          `;
-          tbody.appendChild(row);
-        });
+        renderFeedbackIntelligence();
       } catch (error) {
         console.error('Error loading recent calls:', error);
       }
@@ -2040,14 +2057,14 @@
         btn.innerHTML = '<span class="spinner"></span>Generating...';
         btn.disabled = true;
 
-        const res = await fetch(`${API_BASE}/reports/generate`, {
+        const res = await fetch(`${API_BASE}/reports/weekly-generate`, {
           method: 'POST'
         });
 
         const result = await res.json();
 
         if (res.ok) {
-          showAlert('Report generated and emailed successfully!', 'success');
+          showAlert('Weekly report generated successfully!', 'success');
           loadStats();
         } else {
           showAlert(result.error || 'Error generating report', 'error');
@@ -2061,7 +2078,7 @@
     }
 
     function downloadReport() {
-      window.location.href = `${API_BASE}/reports/download?t=${Date.now()}`;
+      window.location.href = `${API_BASE}/reports/weekly-download?t=${Date.now()}`;
     }
 
     document.addEventListener('DOMContentLoaded', () => {

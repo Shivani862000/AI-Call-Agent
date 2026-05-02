@@ -63,6 +63,7 @@ router.get('/', async (req, res) => {
       SELECT 
         f.id,
         f.customer_id,
+        f.call_id,
         c.name as customer_name,
         f.review_text,
         f.category,

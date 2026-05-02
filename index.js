@@ -143,6 +143,34 @@ function normalizeSpeech(value) {
     .replace(/\s+/g, ' ');
 }
 
+function inferDtmfUtterance(digit, transcript = []) {
+  const normalizedDigit = String(digit || '').trim();
+  const lastAgentTurn = [...transcript].reverse().find((turn) => turn.role === 'AGENT');
+  const lastPrompt = String(lastAgentTurn?.text || '').toLowerCase();
+  const ratingContext = /(1 se 5|scale|rating|star|stars|excellent|rate)/.test(lastPrompt);
+
+  if (ratingContext) {
+    const map = {
+      '1': 'meri rating ek hai',
+      '2': 'meri rating do hai',
+      '3': 'meri rating teen hai',
+      '4': 'meri rating chaar hai',
+      '5': 'meri rating paanch hai'
+    };
+    return map[normalizedDigit] || normalizedDigit;
+  }
+
+  const genericMap = {
+    '1': 'haan, continue',
+    '2': 'nahin',
+    '3': 'teen',
+    '4': 'chaar',
+    '5': 'paanch'
+  };
+
+  return genericMap[normalizedDigit] || normalizedDigit;
+}
+
 function isAffirmativeResponse(speech, digit) {
   const normalized = normalizeSpeech(speech);
   const affirmativePhrases = [
@@ -816,7 +844,18 @@ app.get('/api/calls/:callId/recording', async (req, res) => {
 app.get('/api/calls/:callId/transcript', async (req, res) => {
   try {
     const call = await dbGet(
-      'SELECT transcript_text, transcript_status FROM calls WHERE id = ?',
+      `SELECT
+         calls.id,
+         calls.twilio_sid,
+         calls.called_at,
+         calls.outcome,
+         calls.language,
+         calls.transcript_text,
+         calls.transcript_status,
+         customers.name AS customer_name
+       FROM calls
+       LEFT JOIN customers ON customers.id = calls.customer_id
+       WHERE calls.id = ?`,
       [req.params.callId]
     );
 
@@ -828,9 +867,155 @@ app.get('/api/calls/:callId/transcript', async (req, res) => {
       return res.status(404).json({ error: 'Transcript not available yet' });
     }
 
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'private, max-age=300');
-    res.send(call.transcript_text);
+
+    if (String(req.query.raw || '') === '1') {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.send(call.transcript_text);
+      return;
+    }
+
+    const turns = String(call.transcript_text || '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const match = line.match(/^\[([A-Z]+)\]:\s*(.*)$/);
+        return {
+          role: match?.[1] || 'NOTE',
+          text: match?.[2] || line
+        };
+      });
+
+    const escapedTurns = turns.map((turn) => ({
+      role: String(turn.role).replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char])),
+      text: String(turn.text).replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]))
+    }));
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Call Transcript</title>
+  <style>
+    :root {
+      --bg: #f4f8ff;
+      --panel: #ffffff;
+      --line: rgba(118, 146, 182, 0.18);
+      --text: #18233f;
+      --muted: #6f7e99;
+      --blue: #2d6df6;
+      --green: #2ea043;
+      --shadow: 0 18px 40px rgba(65, 92, 136, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Aptos", "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f9fbff 0%, #eef4ff 100%);
+      color: var(--text);
+      padding: 28px;
+    }
+    .shell {
+      max-width: 980px;
+      margin: 0 auto;
+      background: rgba(255,255,255,0.88);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .hero {
+      padding: 28px 30px 20px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(45,109,246,0.10), rgba(45,109,246,0.02));
+    }
+    .hero h1 { margin: 0 0 8px; font-size: 30px; }
+    .muted { color: var(--muted); }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .meta-card {
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+    .meta-card strong { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .body { padding: 26px 30px 30px; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 22px; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 16px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 700;
+    }
+    .btn.primary { background: linear-gradient(135deg, #2d6df6 0%, #1d57d7 100%); color: #fff; border-color: transparent; }
+    .turns { display: grid; gap: 14px; }
+    .turn {
+      border-radius: 20px;
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+    .turn.agent { border-left: 4px solid var(--blue); }
+    .turn.customer { border-left: 4px solid var(--green); }
+    .turn.note { border-left: 4px solid #9aa9c5; }
+    .turn-role {
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .turn-text {
+      white-space: pre-wrap;
+      line-height: 1.7;
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="hero">
+      <h1>Call Transcript</h1>
+      <div class="muted">Readable transcript view for review, QA, and reporting.</div>
+      <div class="meta">
+        <div class="meta-card"><strong>Customer</strong>${call.customer_name || 'Customer'}</div>
+        <div class="meta-card"><strong>Call SID</strong>${call.twilio_sid || '--'}</div>
+        <div class="meta-card"><strong>Outcome</strong>${call.outcome || '--'}</div>
+        <div class="meta-card"><strong>Called At</strong>${call.called_at ? new Date(call.called_at).toLocaleString() : '--'}</div>
+      </div>
+    </div>
+    <div class="body">
+      <div class="actions">
+        <a class="btn primary" href="${process.env.NGROK_URL || ''}/admin.html">Open Dashboard</a>
+        <a class="btn" href="?raw=1" target="_blank" rel="noopener">Open Raw Transcript</a>
+      </div>
+      <div class="turns">
+        ${escapedTurns.map((turn) => `
+          <div class="turn ${turn.role === 'AGENT' ? 'agent' : turn.role === 'CUSTOMER' ? 'customer' : 'note'}">
+            <div class="turn-role">${turn.role}</div>
+            <div class="turn-text">${turn.text}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  </div>
+</body>
+</html>`);
   } catch (error) {
     console.error('[TRANSCRIPT FETCH ERROR]', error.message);
     res.status(500).json({ error: 'Failed to fetch transcript' });
@@ -901,6 +1086,61 @@ wss.on('connection', (twilioWs, req) => {
       event: 'media',
       streamSid,
       media: { payload: base64Payload }
+    }));
+  }
+
+  function sendTextInputToAi(text) {
+    const safeText = String(text || '').trim();
+    if (!safeText || aiWs?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    if (AI_PROVIDER === 'gemini') {
+      if (!geminiSetupComplete) {
+        return;
+      }
+
+      if (usesGeminiRealtimeTextInput(REALTIME_MODEL)) {
+        aiWs.send(JSON.stringify({
+          realtimeInput: {
+            text: safeText
+          }
+        }));
+      } else {
+        aiWs.send(JSON.stringify({
+          clientContent: {
+            turns: [
+              {
+                role: 'user',
+                parts: [{ text: safeText }]
+              }
+            ],
+            turnComplete: true
+          }
+        }));
+      }
+      return;
+    }
+
+    aiWs.send(JSON.stringify({
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: safeText
+          }
+        ]
+      }
+    }));
+
+    aiWs.send(JSON.stringify({
+      type: 'response.create',
+      response: {
+        output_modalities: ['audio']
+      }
     }));
   }
 
@@ -995,7 +1235,7 @@ wss.on('connection', (twilioWs, req) => {
           systemInstruction: {
             parts: [
               {
-                text: `${getActiveSystemPrompt()}\n\n${getActiveOpeningPrompt()}`
+                text: getActiveSystemPrompt()
               }
             ]
           },
@@ -1185,6 +1425,19 @@ wss.on('connection', (twilioWs, req) => {
         type: 'input_audio_buffer.append',
         audio: message.media.payload
       }));
+      return;
+    }
+
+    if (message.event === 'dtmf') {
+      const digit = String(message.dtmf?.digit || '').trim();
+      if (!digit) {
+        return;
+      }
+
+      const utterance = inferDtmfUtterance(digit, transcript);
+      console.log(`[DTMF] Received digit=${digit} mapped="${utterance}"`);
+      pushTranscriptTurn(transcript, 'CUSTOMER', `[DTMF ${digit}] ${utterance}`);
+      sendTextInputToAi(utterance);
       return;
     }
 
