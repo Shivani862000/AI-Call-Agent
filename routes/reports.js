@@ -13,8 +13,7 @@ async function buildDailyPreview() {
 }
 
 async function buildWeeklyPreview() {
-  const range = getCurrentWeekDateRange();
-  return buildReportData({ ...range, label: 'this week' });
+  return buildWeeklySummary();
 }
 
 router.get('/preview', async (req, res) => {

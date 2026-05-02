@@ -11,6 +11,13 @@ const feedbackRouter = require('./routes/feedback');
 const reportsRouter = require('./routes/reports');
 const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
 const { processCompletedCallPipeline } = require('./services/post-call-pipeline');
+const {
+  buildPreCallIntelligence,
+  computePriorityScore,
+  getCurrentSlotLabel,
+  applyCallOutcomeWorkflow,
+  createSupervisorEvent
+} = require('./services/call-orchestration');
 
 const app = express();
 app.use(express.urlencoded({ extended: false }));
@@ -27,6 +34,7 @@ const REALTIME_MODEL = AI_PROVIDER === 'gemini' ? GEMINI_MODEL : OPENAI_REALTIME
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
 const PUBLIC_BASE_URL = (process.env.NGROK_URL || process.env.WEBHOOK_URL || '').replace(/\/$/, '');
 const GEMINI_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+const liveCallState = new Map();
 
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
@@ -465,19 +473,110 @@ async function ensureCustomerForCall({ customerId, customerName, customerPhone }
   return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
 }
 
+async function getCustomerCallHistory(customerId, limit = 20) {
+  if (!customerId) return [];
+  return dbAll(
+    `SELECT called_at, outcome, sentiment_label, transcript_text, analysis_summary, extracted_review_text
+     FROM calls
+     WHERE customer_id = ?
+     ORDER BY called_at DESC
+     LIMIT ?`,
+    [customerId, limit]
+  );
+}
+
+async function hydratePreCallIntelligence(customer) {
+  const history = await getCustomerCallHistory(customer.id);
+  const intelligence = buildPreCallIntelligence(customer, history);
+
+  await dbRun(
+    `UPDATE customers
+        SET priority_score = ?,
+            ai_score = ?,
+            best_call_slot = ?,
+            preferred_dialect = ?,
+            outstanding_issues = ?,
+            last_sentiment_label = ?,
+            pickup_rate_score = ?,
+            dnd_checked_at = ?
+      WHERE id = ?`,
+    [
+      intelligence.priorityScore,
+      intelligence.priorityScore,
+      intelligence.bestCallSlot,
+      intelligence.preferredDialect,
+      intelligence.outstandingIssues.join('\n') || null,
+      intelligence.lastSentimentLabel || null,
+      intelligence.pickupRateScore,
+      new Date().toISOString(),
+      customer.id
+    ]
+  );
+
+  return {
+    ...customer,
+    priority_score: intelligence.priorityScore,
+    ai_score: intelligence.priorityScore,
+    best_call_slot: intelligence.bestCallSlot,
+    preferred_dialect: intelligence.preferredDialect,
+    outstanding_issues: intelligence.outstandingIssues.join('\n'),
+    pickup_rate_score: intelligence.pickupRateScore
+  };
+}
+
+function shouldBlockCustomerCall(customer) {
+  if (customer.do_not_call) {
+    return 'Customer is on DND / do-not-call';
+  }
+
+  if (customer.wrong_number_flag) {
+    return 'Customer is flagged as wrong number';
+  }
+
+  if (String(customer.consent_status || '').toLowerCase() === 'denied') {
+    return 'Consent denied for this customer';
+  }
+
+  return null;
+}
+
+function evaluateLiveSentimentLabel(text) {
+  const normalized = String(text || '').toLowerCase();
+  const negative = ['problem', 'issue', 'bad', 'rude', 'wait', 'dirty', 'complaint', 'angry', 'nahi', 'galat'];
+  const positive = ['good', 'great', 'achha', 'accha', 'sahi', 'helpful', 'clean', 'thank'];
+  const negativeCount = negative.filter((word) => normalized.includes(word)).length;
+  const positiveCount = positive.filter((word) => normalized.includes(word)).length;
+
+  if (negativeCount > positiveCount && negativeCount > 0) {
+    return { label: 'negative', score: -0.75 };
+  }
+
+  if (positiveCount > negativeCount && positiveCount > 0) {
+    return { label: 'positive', score: 0.65 };
+  }
+
+  return { label: 'neutral', score: 0 };
+}
+
 async function triggerScheduledCalls() {
   const now = new Date();
-  const currentSlot = now.toTimeString().slice(0, 5);
+  const currentSlot = getCurrentSlotLabel(now);
 
   const dueCustomers = await dbAll(
     `SELECT c.*
      FROM customers c
-     LEFT JOIN calls call_today
-       ON call_today.customer_id = c.id
-      AND DATE(call_today.called_at) = DATE('now', 'localtime')
-     WHERE c.status = 'pending'
-       AND c.preferred_slot = ?
-       AND call_today.id IS NULL`,
+     LEFT JOIN calls recent_call
+       ON recent_call.customer_id = c.id
+      AND DATETIME(recent_call.called_at) >= DATETIME('now', '-45 minutes')
+     WHERE COALESCE(c.do_not_call, 0) = 0
+       AND COALESCE(c.wrong_number_flag, 0) = 0
+       AND COALESCE(c.admin_review_required, 0) = 0
+       AND COALESCE(c.consent_status, 'unknown') != 'denied'
+       AND (
+         (c.status = 'pending' AND COALESCE(c.best_call_slot, c.preferred_slot) = ?)
+         OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND c.next_retry_at IS NOT NULL AND DATETIME(c.next_retry_at) <= DATETIME('now'))
+       )
+       AND recent_call.id IS NULL`,
     [currentSlot]
   );
 
@@ -485,10 +584,22 @@ async function triggerScheduledCalls() {
     return;
   }
 
-  console.log(`[SCHEDULER] Found ${dueCustomers.length} customer(s) due at ${currentSlot}`);
-
+  const hydratedCustomers = [];
   for (const customer of dueCustomers) {
+    hydratedCustomers.push(await hydratePreCallIntelligence(customer));
+  }
+
+  hydratedCustomers.sort((a, b) => (Number(b.priority_score) || 0) - (Number(a.priority_score) || 0));
+  console.log(`[SCHEDULER] Found ${hydratedCustomers.length} eligible customer(s) due at ${currentSlot}`);
+
+  for (const customer of hydratedCustomers) {
     try {
+      const blockedReason = shouldBlockCustomerCall(customer);
+      if (blockedReason) {
+        console.log(`[SCHEDULER] Skipping ${customer.name}: ${blockedReason}`);
+        continue;
+      }
+
       const call = await placeRealtimeCall({
         customerPhone: customer.phone,
         customerName: customer.name,
@@ -497,8 +608,11 @@ async function triggerScheduledCalls() {
       });
 
       await dbRun(
-        'INSERT INTO calls (customer_id, outcome, twilio_sid, called_at) VALUES (?, ?, ?, ?)',
-        [customer.id, 'scheduled_initiated', call.sid, new Date().toISOString()]
+        `INSERT INTO calls (
+          customer_id, outcome, twilio_sid, called_at, hot_lead_score,
+          consent_message_played, call_script_version, supervisor_alert_level
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [customer.id, 'scheduled_initiated', call.sid, new Date().toISOString(), customer.priority_score || computePriorityScore(customer), 1, 'hindi-feedback-v1', 'normal']
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
       console.log(`[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`);
@@ -607,11 +721,17 @@ app.post('/call/start', async (req, res) => {
     const customerName = req.body.customerName || process.env.CUSTOMER_NAME;
     const requestedCustomerId = req.body.customerId;
     const clientName = req.body.clientName || CLIENT_NAME;
-    const customer = await ensureCustomerForCall({
+    let customer = await ensureCustomerForCall({
       customerId: requestedCustomerId,
       customerName,
       customerPhone
     });
+    customer = await hydratePreCallIntelligence(customer);
+
+    const blockedReason = shouldBlockCustomerCall(customer);
+    if (blockedReason) {
+      return res.status(409).json({ success: false, error: blockedReason });
+    }
 
     console.log(`[CALL REQUEST] to=${customerPhone} from=${process.env.TWILIO_PHONE_NUMBER} twiml=${PUBLIC_BASE_URL}/call/twiml`);
     const call = await placeRealtimeCall({
@@ -622,8 +742,11 @@ app.post('/call/start', async (req, res) => {
     });
 
     const result = await dbRun(
-      'INSERT INTO calls (customer_id, outcome, twilio_sid, called_at) VALUES (?, ?, ?, ?)',
-      [customer.id, 'initiated', call.sid, new Date().toISOString()]
+      `INSERT INTO calls (
+        customer_id, outcome, twilio_sid, called_at, hot_lead_score,
+        consent_message_played, call_script_version, supervisor_alert_level
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [customer.id, 'initiated', call.sid, new Date().toISOString(), customer.priority_score || computePriorityScore(customer), 1, 'hindi-feedback-v1', 'normal']
     );
     await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
 
@@ -682,20 +805,30 @@ app.post('/call/status', async (req, res) => {
     const callRecord = await dbGet('SELECT * FROM calls WHERE twilio_sid = ?', [req.body.CallSid]);
     const customerId = req.query.customerId || callRecord?.customer_id;
 
-    if (callRecord && req.body.CallStatus === 'completed' && !callRecord.outcome) {
-      await dbRun('UPDATE calls SET outcome = ? WHERE id = ?', ['completed', callRecord.id]);
-    }
+    if (callRecord) {
+      let mappedOutcome = null;
+      if (req.body.CallStatus === 'completed') mappedOutcome = 'completed';
+      if (req.body.CallStatus === 'no-answer') mappedOutcome = 'no_answer';
+      if (req.body.CallStatus === 'failed') mappedOutcome = 'failed';
+      if (req.body.CallStatus === 'busy') mappedOutcome = 'busy';
 
-    if (callRecord && (req.body.CallStatus === 'no-answer' || req.body.CallStatus === 'failed' || req.body.CallStatus === 'busy')) {
-      await dbRun('UPDATE calls SET outcome = ? WHERE id = ?', ['no_answer', callRecord.id]);
-    }
+      if (mappedOutcome) {
+        await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ? WHERE id = ?', [mappedOutcome, req.body.CallStatus, callRecord.id]);
+      }
 
-    if (customerId && req.body.CallStatus === 'no-answer') {
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['no_answer', customerId]);
-    } else if (customerId && req.body.CallStatus === 'completed') {
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['completed', customerId]);
-    } else if (customerId && req.body.CallStatus === 'busy') {
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['busy', customerId]);
+      if (customerId) {
+        const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
+        if (customer && mappedOutcome) {
+          await applyCallOutcomeWorkflow({
+            dbGet,
+            dbRun,
+            callRecord: { ...callRecord, outcome: mappedOutcome },
+            customer,
+            providerStatus: mappedOutcome,
+            inferredOutcome: mappedOutcome
+          });
+        }
+      }
     }
 
     res.sendStatus(200);
@@ -749,9 +882,15 @@ app.post('/call/recording-status', async (req, res) => {
 
 app.post('/api/calls/initiate/:customerId', async (req, res) => {
   try {
-    const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.customerId]);
+    let customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.customerId]);
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    customer = await hydratePreCallIntelligence(customer);
+    const blockedReason = shouldBlockCustomerCall(customer);
+    if (blockedReason) {
+      return res.status(409).json({ error: blockedReason });
     }
 
     const call = await placeRealtimeCall({
@@ -762,8 +901,11 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
     });
 
     const result = await dbRun(
-      'INSERT INTO calls (customer_id, outcome, twilio_sid, called_at) VALUES (?, ?, ?, ?)',
-      [customer.id, 'initiated', call.sid, new Date().toISOString()]
+      `INSERT INTO calls (
+        customer_id, outcome, twilio_sid, called_at, hot_lead_score,
+        consent_message_played, call_script_version, supervisor_alert_level
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [customer.id, 'initiated', call.sid, new Date().toISOString(), customer.priority_score || computePriorityScore(customer), 1, 'hindi-feedback-v1', 'normal']
     );
 
     await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
@@ -798,7 +940,21 @@ app.get('/api/calls/recent', async (req, res) => {
          calls.report_excerpt,
          calls.language,
          calls.extracted_rating,
-         calls.extracted_review_text
+         calls.extracted_review_text,
+         calls.sentiment_label,
+         calls.sentiment_score,
+         calls.hot_lead_score,
+         calls.next_action_at,
+         calls.follow_up_task,
+         calls.crm_sync_status,
+         calls.whatsapp_summary_sent,
+         calls.live_sentiment_score,
+         calls.live_sentiment_label,
+         calls.live_red_flag,
+         calls.supervisor_alert_level,
+         calls.human_escalation_requested,
+         calls.objections_json,
+         calls.competitor_mentions_json
        FROM calls
        JOIN customers ON customers.id = calls.customer_id
        ORDER BY calls.id DESC
@@ -808,6 +964,49 @@ app.get('/api/calls/recent', async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error('[RECENT CALLS ERROR]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/calls/live', async (req, res) => {
+  try {
+    const rows = [...liveCallState.values()].sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
+    res.json(rows);
+  } catch (error) {
+    console.error('[LIVE CALLS ERROR]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/calls/:callId/supervisor-events', async (req, res) => {
+  try {
+    const rows = await dbAll(
+      'SELECT * FROM call_supervisor_events WHERE call_id = ? ORDER BY created_at DESC LIMIT 50',
+      [req.params.callId]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('[SUPERVISOR EVENTS ERROR]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/calls/:callId/escalate', async (req, res) => {
+  try {
+    await dbRun(
+      'UPDATE calls SET human_escalation_requested = ?, supervisor_alert_level = ?, supervisor_notes = ? WHERE id = ?',
+      [1, 'critical', String(req.body.note || 'Manual escalation requested').trim(), req.params.callId]
+    );
+    await createSupervisorEvent({
+      dbRun,
+      callId: Number(req.params.callId),
+      eventType: 'human_escalation_requested',
+      severity: 'critical',
+      payload: { note: String(req.body.note || 'Manual escalation requested').trim() }
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[CALL ESCALATION ERROR]', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1039,6 +1238,7 @@ wss.on('connection', (twilioWs, req) => {
   let activeClientName = CLIENT_NAME;
   let activeCustomerId = null;
   let activeCallSid = null;
+  let activeCallId = null;
   let transcriptPersisted = false;
 
   const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName);
@@ -1074,6 +1274,54 @@ wss.on('connection', (twilioWs, req) => {
       }
     } catch (error) {
       console.error('[FEEDBACK SAVE ERROR]', error.message);
+    }
+  }
+
+  async function refreshLiveCallState(partial = {}) {
+    if (!activeCallSid) return;
+
+    const current = liveCallState.get(activeCallSid) || {
+      call_sid: activeCallSid,
+      customer_name: activeCustomerName,
+      customer_id: activeCustomerId,
+      call_id: activeCallId,
+      started_at: new Date().toISOString(),
+      transcript_preview: '',
+      live_sentiment_label: 'neutral',
+      live_sentiment_score: 0,
+      red_flag: false,
+      escalation_requested: false,
+      status: 'active'
+    };
+
+    liveCallState.set(activeCallSid, {
+      ...current,
+      ...partial,
+      customer_name: activeCustomerName,
+      customer_id: activeCustomerId,
+      call_id: activeCallId,
+      transcript_preview: transcript.slice(-4).map((turn) => `[${turn.role}] ${turn.text}`).join('\n')
+    });
+
+    if (activeCallId) {
+      const nextState = liveCallState.get(activeCallSid);
+      await dbRun(
+        `UPDATE calls
+            SET live_sentiment_score = ?,
+                live_sentiment_label = ?,
+                live_red_flag = ?,
+                supervisor_alert_level = ?,
+                human_escalation_requested = ?
+          WHERE id = ?`,
+        [
+          nextState.live_sentiment_score || 0,
+          nextState.live_sentiment_label || 'neutral',
+          nextState.red_flag ? 1 : 0,
+          nextState.red_flag ? 'high' : 'normal',
+          nextState.escalation_requested ? 1 : 0,
+          activeCallId
+        ]
+      );
     }
   }
 
@@ -1292,11 +1540,28 @@ wss.on('connection', (twilioWs, req) => {
         if (message.serverContent?.inputTranscription?.text) {
           pushTranscriptTurn(transcript, 'CUSTOMER', message.serverContent.inputTranscription.text);
           console.log(`[CUSTOMER]: ${message.serverContent.inputTranscription.text}`);
+          const sentiment = evaluateLiveSentimentLabel(message.serverContent.inputTranscription.text);
+          const redFlag = sentiment.label === 'negative';
+          refreshLiveCallState({
+            live_sentiment_label: sentiment.label,
+            live_sentiment_score: sentiment.score,
+            red_flag: redFlag
+          }).catch(() => {});
+          if (redFlag && activeCallId) {
+            createSupervisorEvent({
+              dbRun,
+              callId: activeCallId,
+              eventType: 'live_negative_signal',
+              severity: 'high',
+              payload: { transcript: message.serverContent.inputTranscription.text }
+            }).catch(() => {});
+          }
         }
 
         if (message.serverContent?.outputTranscription?.text) {
           pushTranscriptTurn(transcript, 'AGENT', message.serverContent.outputTranscription.text);
           console.log(`[AGENT]: ${message.serverContent.outputTranscription.text}`);
+          refreshLiveCallState({}).catch(() => {});
         }
 
         const parts = message.serverContent?.modelTurn?.parts || [];
@@ -1340,12 +1605,20 @@ wss.on('connection', (twilioWs, req) => {
       if (message.type === 'response.output_audio_transcript.done') {
         pushTranscriptTurn(transcript, 'AGENT', message.transcript);
         console.log(`[AGENT]: ${message.transcript}`);
+        refreshLiveCallState({}).catch(() => {});
         return;
       }
 
       if (message.type === 'conversation.item.input_audio_transcription.completed') {
         pushTranscriptTurn(transcript, 'CUSTOMER', message.transcript);
         console.log(`[CUSTOMER]: ${message.transcript}`);
+        const sentiment = evaluateLiveSentimentLabel(message.transcript);
+        const redFlag = sentiment.label === 'negative';
+        refreshLiveCallState({
+          live_sentiment_label: sentiment.label,
+          live_sentiment_score: sentiment.score,
+          red_flag: redFlag
+        }).catch(() => {});
         return;
       }
 
@@ -1379,7 +1652,7 @@ wss.on('connection', (twilioWs, req) => {
     attachAiEventHandlers();
   }
 
-  twilioWs.on('message', (raw) => {
+  twilioWs.on('message', async (raw) => {
     let message;
 
     try {
@@ -1396,9 +1669,14 @@ wss.on('connection', (twilioWs, req) => {
       activeClientName = customParameters.clientName || activeClientName;
       activeCustomerId = customParameters.customerId ? Number(customParameters.customerId) : null;
       activeCallSid = message.start.callSid || activeCallSid;
+      if (activeCallSid) {
+        const callRow = await dbGet('SELECT id FROM calls WHERE twilio_sid = ?', [activeCallSid]);
+        activeCallId = callRow?.id || null;
+      }
       console.log(`[STREAM] streamSid: ${streamSid}`);
       console.log(`[STREAM] Start payload: ${JSON.stringify(message.start)}`);
       console.log(`[STREAM] Active customer=${activeCustomerName} client=${activeClientName}`);
+      await refreshLiveCallState({ status: 'active', started_at: new Date().toISOString() });
       ensureAiSession();
       return;
     }
@@ -1443,6 +1721,7 @@ wss.on('connection', (twilioWs, req) => {
 
     if (message.event === 'stop') {
       console.log('[STREAM] Call ended');
+      refreshLiveCallState({ status: 'completed' }).catch(() => {});
       printTranscriptOnce();
       persistTranscriptOnce().catch((error) => {
         console.error('[FEEDBACK SAVE ERROR]', error.message);
@@ -1456,6 +1735,7 @@ wss.on('connection', (twilioWs, req) => {
 
   twilioWs.on('close', () => {
     console.log('[STREAM] Twilio WS closed');
+    refreshLiveCallState({ status: 'closed' }).catch(() => {});
     printTranscriptOnce();
     persistTranscriptOnce().catch((error) => {
       console.error('[FEEDBACK SAVE ERROR]', error.message);

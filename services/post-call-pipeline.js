@@ -2,6 +2,15 @@ const fs = require('fs');
 const path = require('path');
 const { analyzeCallTranscript, transcribeAudioFile, categorizeFeedback } = require('./openai');
 const { extractCallFeedback } = require('./call-feedback');
+const {
+  detectConversationOutcome,
+  detectObjectionsAndCompetitors,
+  deriveSentimentScore,
+  applyCallOutcomeWorkflow,
+  sendCustomerWhatsAppSummary,
+  createSupervisorEvent
+} = require('./call-orchestration');
+const { syncCallToCrm, sendHotLeadAlert } = require('./crm-sync');
 
 const RECORDINGS_DIR = path.join('/tmp', 'feedback-call-recordings');
 
@@ -109,7 +118,7 @@ async function upsertFeedbackFromAnalysis({ dbGet, dbRun, callRecord, reviewText
 
 async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
   const callRecord = await dbGet(
-    `SELECT calls.*, customers.name AS customer_name
+    `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone
      FROM calls
      LEFT JOIN customers ON customers.id = calls.customer_id
      WHERE calls.twilio_sid = ?`,
@@ -163,6 +172,18 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     customerName: callRecord.customer_name,
     clientName: process.env.CLIENT_NAME
   });
+  const outcome = detectConversationOutcome({
+    analysisSummary: analysis.summary,
+    reportExcerpt: analysis.report_excerpt,
+    reviewText: analysis.review_text,
+    transcriptText
+  });
+  const { objections, competitors } = detectObjectionsAndCompetitors({
+    transcriptText,
+    analysisSummary: analysis.summary
+  });
+  const sentimentLabel = analysis.customer_sentiment || 'neutral';
+  const sentimentScore = deriveSentimentScore(sentimentLabel);
 
   const mergedRating = Number.isInteger(analysis.rating) ? analysis.rating : heuristicExtraction.stars;
   const mergedReviewText = analysis.review_text || heuristicExtraction.reviewText || '';
@@ -179,6 +200,14 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
             report_excerpt = ?,
             extracted_rating = ?,
             extracted_review_text = ?,
+            outcome_detail = ?,
+            sentiment_label = ?,
+            sentiment_score = ?,
+            competitor_mentions_json = ?,
+            objections_json = ?,
+            callback_requested = ?,
+            interest_detected = ?,
+            recording_consent_captured = ?,
             language = COALESCE(?, language),
             consent_detected = ?,
             analysis_completed_at = ?
@@ -194,6 +223,14 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
       analysis.report_excerpt || null,
       mergedRating,
       mergedReviewText || null,
+      outcome,
+      sentimentLabel,
+      sentimentScore,
+      JSON.stringify(competitors),
+      JSON.stringify(objections),
+      outcome === 'callback' ? 1 : 0,
+      outcome === 'interested' ? 1 : 0,
+      analysis.consent === false ? 0 : 1,
       analysis.language || heuristicExtraction.language,
       analysis.consent === null ? (heuristicExtraction.consentDetected ? 1 : 0) : (analysis.consent ? 1 : 0),
       new Date().toISOString(),
@@ -215,12 +252,99 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     callRecord.id
   ]);
 
+  const refreshedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [callRecord.id]);
+  const refreshedCustomer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+
+  const workflowResult = await applyCallOutcomeWorkflow({
+    dbGet,
+    dbRun,
+    callRecord: refreshedCall,
+    customer: refreshedCustomer,
+    providerStatus: refreshedCall.outcome,
+    inferredOutcome: outcome
+  });
+
+  if (sentimentLabel === 'negative' || objections.length > 0) {
+    await createSupervisorEvent({
+      dbRun,
+      callId: refreshedCall.id,
+      eventType: 'negative_signal_detected',
+      severity: sentimentLabel === 'negative' ? 'high' : 'medium',
+      payload: {
+        objections,
+        competitors,
+        summary: analysis.summary || null
+      }
+    });
+  }
+
+  const updatedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [callRecord.id]);
+  const updatedCustomer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+
+  await dbRun(
+    `UPDATE customers
+        SET last_sentiment_label = ?,
+            last_sentiment_score = ?,
+            pending_follow_ups = COALESCE(?, pending_follow_ups),
+            last_competitor_mention = ?,
+            revenue_stage = ?,
+            revenue_estimate = CASE
+              WHEN ? > COALESCE(revenue_estimate, 0) THEN ?
+              ELSE revenue_estimate
+            END
+      WHERE id = ?`,
+    [
+      sentimentLabel,
+      sentimentScore,
+      workflowResult.followUpTask || null,
+      competitors[0] || null,
+      outcome === 'interested' ? 'qualified' : outcome === 'callback' ? 'follow_up' : updatedCustomer.revenue_stage || 'unassigned',
+      outcome === 'interested' ? Math.max(Number(updatedCall.hot_lead_score) || 0, Number(updatedCustomer.revenue_estimate) || 0) : Number(updatedCustomer.revenue_estimate) || 0,
+      outcome === 'interested' ? Math.max(Number(updatedCall.hot_lead_score) || 0, Number(updatedCustomer.revenue_estimate) || 0) : Number(updatedCustomer.revenue_estimate) || 0,
+      callRecord.customer_id
+    ]
+  );
+
+  try {
+    await syncCallToCrm({ dbGet, dbRun, callId: updatedCall.id });
+  } catch (error) {
+    console.error('[CRM SYNC ERROR]', error.message);
+  }
+
+  if (String(updatedCall.outcome || '').toLowerCase() === 'interested') {
+    try {
+      await sendHotLeadAlert({ customer: updatedCustomer, call: updatedCall });
+    } catch (error) {
+      console.error('[HOT LEAD ALERT ERROR]', error.message);
+    }
+  }
+
+  try {
+    const sent = await sendCustomerWhatsAppSummary({
+      customer: updatedCustomer,
+      callSummary: analysis.report_excerpt || analysis.summary
+    });
+    if (sent) {
+      await dbRun('UPDATE calls SET whatsapp_summary_sent = ?, whatsapp_sent = ? WHERE id = ?', [1, 1, updatedCall.id]);
+    }
+  } catch (error) {
+    console.error('[WHATSAPP SUMMARY ERROR]', error.message);
+  }
+
+  if (String(updatedCall.outcome || '').toLowerCase() === 'interested') {
+    await dbRun(
+      'UPDATE calls SET proposal_triggered = ?, invoice_triggered = ?, revenue_attribution_status = ? WHERE id = ?',
+      [1, 1, 'qualified_pipeline', updatedCall.id]
+    );
+  }
+
   return {
     ok: true,
     callId: callRecord.id,
     transcriptSource,
     summary: analysis.summary || null,
-    feedbackId: feedbackResult.feedbackId
+    feedbackId: feedbackResult.feedbackId,
+    workflowResult
   };
 }
 

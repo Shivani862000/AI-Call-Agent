@@ -1,6 +1,8 @@
 const sgMail = require('@sendgrid/mail');
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+}
 
 async function sendEmailWithAttachment(to, subject, text, attachmentPath) {
   try {
@@ -32,6 +34,27 @@ async function sendEmailWithAttachment(to, subject, text, attachmentPath) {
   }
 }
 
+async function sendSimpleEmail(to, subject, text) {
+  if (!process.env.SENDGRID_API_KEY || !to || !process.env.OWNER_EMAIL) {
+    return false;
+  }
+
+  try {
+    await sgMail.send({
+      to,
+      from: process.env.OWNER_EMAIL,
+      subject,
+      text
+    });
+    console.log(`✓ Email sent to ${to}`);
+    return true;
+  } catch (error) {
+    console.error('Error sending simple email:', error.message);
+    throw error;
+  }
+}
+
 module.exports = {
-  sendEmailWithAttachment
+  sendEmailWithAttachment,
+  sendSimpleEmail
 };

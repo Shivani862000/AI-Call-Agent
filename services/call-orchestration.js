@@ -14,9 +14,80 @@ const URGENCY_SCORES = {
   low: 35
 };
 
+const DIALECT_HINTS = {
+  hi: 'standard hindi',
+  hinglish: 'hinglish',
+  en: 'english'
+};
+
 function normalizeEnum(value, allowed, fallback) {
   const normalized = String(value || '').trim().toLowerCase();
   return allowed.includes(normalized) ? normalized : fallback;
+}
+
+function deriveSentimentScore(sentimentLabel) {
+  const normalized = String(sentimentLabel || '').toLowerCase();
+  if (normalized === 'positive') return 0.8;
+  if (normalized === 'negative') return -0.8;
+  return 0;
+}
+
+function getCurrentSlotLabel(date = new Date()) {
+  return new Date(date).toTimeString().slice(0, 5);
+}
+
+function pickBestCallSlotFromHistory(history = []) {
+  const slotScores = new Map();
+  history.forEach((entry) => {
+    if (!entry?.called_at) return;
+    const slot = new Date(entry.called_at).toTimeString().slice(0, 5);
+    const current = slotScores.get(slot) || { answered: 0, total: 0 };
+    current.total += 1;
+    if (['answered', 'completed', 'consent_given', 'interested', 'callback'].includes(String(entry.outcome || '').toLowerCase())) {
+      current.answered += 1;
+    }
+    slotScores.set(slot, current);
+  });
+
+  let bestSlot = null;
+  let bestRatio = -1;
+  for (const [slot, data] of slotScores.entries()) {
+    const ratio = data.total > 0 ? data.answered / data.total : 0;
+    if (ratio > bestRatio) {
+      bestRatio = ratio;
+      bestSlot = slot;
+    }
+  }
+
+  return bestSlot;
+}
+
+function extractOutstandingIssuesFromHistory(history = []) {
+  const issues = [];
+  history.forEach((entry) => {
+    const summary = `${entry.analysis_summary || ''} ${entry.extracted_review_text || ''}`.toLowerCase();
+    if (/\bwait|delay|late|slow|line\b/.test(summary)) issues.push('waiting time concern');
+    if (/\bclean|dirty|hygiene|safai\b/.test(summary)) issues.push('cleanliness concern');
+    if (/\bstaff|rude|behavior|behaviour\b/.test(summary)) issues.push('staff behavior concern');
+  });
+  return [...new Set(issues)].slice(0, 5);
+}
+
+function inferPreferredDialect(customer = {}, history = []) {
+  if (customer.preferred_dialect) {
+    return customer.preferred_dialect;
+  }
+
+  const lang = String(customer.preferred_language || customer.language || '').toLowerCase();
+  if (lang === 'mixed' || lang === 'hinglish') return 'hinglish';
+  if (lang === 'en') return 'english';
+
+  const transcriptBlob = history.map((item) => item.transcript_text || '').join(' ').toLowerCase();
+  if (/\bthanks|overall|staff|process\b/.test(transcriptBlob) && /\bhaan|achha|theek\b/.test(transcriptBlob)) {
+    return 'hinglish';
+  }
+
+  return DIALECT_HINTS[lang] || 'standard hindi';
 }
 
 function computePriorityScore(customer = {}) {
@@ -38,6 +109,37 @@ function computePriorityScore(customer = {}) {
   );
 
   return Math.max(0, Math.min(100, score));
+}
+
+function buildPreCallIntelligence(customer = {}, history = []) {
+  const bestCallSlot = customer.best_call_slot || pickBestCallSlotFromHistory(history) || customer.preferred_slot || '10:00';
+  const outstandingIssues = customer.outstanding_issues
+    ? String(customer.outstanding_issues).split('\n').filter(Boolean)
+    : extractOutstandingIssuesFromHistory(history);
+  const preferredDialect = inferPreferredDialect(customer, history);
+  const lastSentimentLabel = customer.last_sentiment_label || (history[0]?.sentiment_label || null);
+  const pickupRateScore = history.length
+    ? Math.round((history.filter((item) => ['answered', 'completed', 'consent_given', 'interested', 'callback'].includes(String(item.outcome || '').toLowerCase())).length / history.length) * 100)
+    : Number(customer.pickup_rate_score) || 0;
+
+  const enrichedCustomer = {
+    ...customer,
+    best_call_slot: bestCallSlot,
+    preferred_dialect: preferredDialect,
+    outstanding_issues: outstandingIssues.join('\n'),
+    last_sentiment_label: lastSentimentLabel,
+    pickup_rate_score: pickupRateScore
+  };
+
+  return {
+    priorityScore: computePriorityScore(enrichedCustomer),
+    bestCallSlot,
+    preferredDialect,
+    outstandingIssues,
+    pendingFollowUps: customer.pending_follow_ups ? String(customer.pending_follow_ups).split('\n').filter(Boolean) : [],
+    lastSentimentLabel,
+    pickupRateScore
+  };
 }
 
 function getSmartRetryIso(outcome, now = new Date()) {
@@ -87,6 +189,27 @@ function detectConversationOutcome({ analysisSummary = '', reportExcerpt = '', r
   return 'completed';
 }
 
+function detectObjectionsAndCompetitors({ transcriptText = '', analysisSummary = '' } = {}) {
+  const haystack = `${transcriptText} ${analysisSummary}`.toLowerCase();
+  const objections = [];
+  const competitors = [];
+
+  if (/\bexpensive|mehenga|costly|price\b/.test(haystack)) objections.push('pricing objection');
+  if (/\bbusy|later|baad mein|time nahin\b/.test(haystack)) objections.push('timing objection');
+  if (/\bwait|line|late|delay\b/.test(haystack)) objections.push('waiting time objection');
+  if (/\btrust|doubt|unsure|not sure\b/.test(haystack)) objections.push('trust objection');
+
+  const competitorCandidates = ['lal pathlabs', 'dr lal', 'thyrocare', 'metropolis', 'apollo', 'redcliffe'];
+  competitorCandidates.forEach((name) => {
+    if (haystack.includes(name)) competitors.push(name);
+  });
+
+  return {
+    objections: [...new Set(objections)],
+    competitors: [...new Set(competitors)]
+  };
+}
+
 function buildFollowUpTask(outcome, customerName) {
   const safeName = customerName || 'Customer';
 
@@ -117,6 +240,29 @@ async function maybeSendBusyFallback({ customer, callId }) {
   const message = `Namaste ${customer.name || 'Customer'}, humne aapse feedback ke liye call kiya tha. Jab aap free hon, aap apna short feedback yahan de sakte hain: ${process.env.GOOGLE_REVIEW_LINK}`;
   await sendWhatsAppMessage(customer.phone, message);
   return true;
+}
+
+async function sendCustomerWhatsAppSummary({ customer, callSummary }) {
+  if (!customer?.phone || !process.env.GOOGLE_REVIEW_LINK || !process.env.TWILIO_WHATSAPP_FROM) {
+    return false;
+  }
+
+  const message = [
+    `Namaste ${customer.name || 'Customer'},`,
+    callSummary || 'Aaj ke feedback call ke liye dhanyavaad.',
+    `Agar aap chahein to yahan review bhi de sakte hain: ${process.env.GOOGLE_REVIEW_LINK}`
+  ].join(' ');
+
+  await sendWhatsAppMessage(customer.phone, message);
+  return true;
+}
+
+async function createSupervisorEvent({ dbRun, callId, eventType, severity = 'info', payload = {} }) {
+  if (!callId) return;
+  await dbRun(
+    'INSERT INTO call_supervisor_events (call_id, event_type, severity, payload_json, created_at) VALUES (?, ?, ?, ?, ?)',
+    [callId, eventType, severity, JSON.stringify(payload || {}), new Date().toISOString()]
+  );
 }
 
 async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, providerStatus, inferredOutcome }) {
@@ -249,8 +395,14 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
 
 module.exports = {
   computePriorityScore,
+  buildPreCallIntelligence,
   getSmartRetryIso,
   detectConversationOutcome,
+  detectObjectionsAndCompetitors,
+  deriveSentimentScore,
+  getCurrentSlotLabel,
   buildFollowUpTask,
-  applyCallOutcomeWorkflow
+  applyCallOutcomeWorkflow,
+  sendCustomerWhatsAppSummary,
+  createSupervisorEvent
 };

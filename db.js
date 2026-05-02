@@ -82,6 +82,54 @@ function runMigrations() {
       )
     `);
 
+    await run(`
+      CREATE TABLE IF NOT EXISTS app_state (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await run(`
+      CREATE TABLE IF NOT EXISTS call_supervisor_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        call_id INTEGER NOT NULL,
+        event_type VARCHAR(40) NOT NULL,
+        severity VARCHAR(20) DEFAULT 'info',
+        payload_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (call_id) REFERENCES calls(id)
+      )
+    `);
+
+    await addColumnIfMissing('customers', 'customer_value', "VARCHAR(20) DEFAULT 'standard'");
+    await addColumnIfMissing('customers', 'urgency_level', "VARCHAR(20) DEFAULT 'normal'");
+    await addColumnIfMissing('customers', 'priority_score', 'INTEGER DEFAULT 50');
+    await addColumnIfMissing('customers', 'ai_score', 'INTEGER DEFAULT 50');
+    await addColumnIfMissing('customers', 'preferred_language', "VARCHAR(20) DEFAULT 'hi'");
+    await addColumnIfMissing('customers', 'preferred_dialect', 'VARCHAR(40)');
+    await addColumnIfMissing('customers', 'do_not_call', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('customers', 'consent_status', "VARCHAR(20) DEFAULT 'unknown'");
+    await addColumnIfMissing('customers', 'last_contact_outcome', 'VARCHAR(40)');
+    await addColumnIfMissing('customers', 'next_retry_at', 'TIMESTAMP');
+    await addColumnIfMissing('customers', 'retry_count', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('customers', 'wrong_number_flag', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('customers', 'admin_review_required', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('customers', 'callback_requested_at', 'TIMESTAMP');
+    await addColumnIfMissing('customers', 'last_called_at', 'TIMESTAMP');
+    await addColumnIfMissing('customers', 'best_call_slot', 'VARCHAR(10)');
+    await addColumnIfMissing('customers', 'last_pickup_slot', 'VARCHAR(10)');
+    await addColumnIfMissing('customers', 'pickup_rate_score', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('customers', 'outstanding_issues', 'TEXT');
+    await addColumnIfMissing('customers', 'pending_follow_ups', 'TEXT');
+    await addColumnIfMissing('customers', 'last_sentiment_score', 'REAL');
+    await addColumnIfMissing('customers', 'last_sentiment_label', 'VARCHAR(20)');
+    await addColumnIfMissing('customers', 'revenue_stage', "VARCHAR(30) DEFAULT 'unassigned'");
+    await addColumnIfMissing('customers', 'revenue_estimate', 'REAL DEFAULT 0');
+    await addColumnIfMissing('customers', 'last_competitor_mention', 'TEXT');
+    await addColumnIfMissing('customers', 'data_retention_until', 'TIMESTAMP');
+    await addColumnIfMissing('customers', 'dnd_checked_at', 'TIMESTAMP');
+
     await addColumnIfMissing('calls', 'transcript_text', 'TEXT');
     await addColumnIfMissing('calls', 'consent_detected', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('calls', 'language', 'VARCHAR(10)');
@@ -100,6 +148,32 @@ function runMigrations() {
     await addColumnIfMissing('calls', 'key_points_json', 'TEXT');
     await addColumnIfMissing('calls', 'report_excerpt', 'TEXT');
     await addColumnIfMissing('calls', 'analysis_completed_at', 'TIMESTAMP');
+    await addColumnIfMissing('calls', 'outcome_detail', 'VARCHAR(40)');
+    await addColumnIfMissing('calls', 'fallback_triggered', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'sentiment_label', 'VARCHAR(20)');
+    await addColumnIfMissing('calls', 'sentiment_score', 'REAL');
+    await addColumnIfMissing('calls', 'hot_lead_score', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'next_action_at', 'TIMESTAMP');
+    await addColumnIfMissing('calls', 'follow_up_task', 'TEXT');
+    await addColumnIfMissing('calls', 'recording_download_status', "VARCHAR(30) DEFAULT 'pending'");
+    await addColumnIfMissing('calls', 'crm_sync_status', "VARCHAR(30) DEFAULT 'pending'");
+    await addColumnIfMissing('calls', 'whatsapp_summary_sent', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'revenue_attribution_status', "VARCHAR(30) DEFAULT 'pending'");
+    await addColumnIfMissing('calls', 'call_script_version', "VARCHAR(40) DEFAULT 'hindi-feedback-v1'");
+    await addColumnIfMissing('calls', 'competitor_mentions_json', 'TEXT');
+    await addColumnIfMissing('calls', 'objections_json', 'TEXT');
+    await addColumnIfMissing('calls', 'interest_detected', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'callback_requested', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'human_escalation_requested', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'supervisor_alert_level', "VARCHAR(20) DEFAULT 'normal'");
+    await addColumnIfMissing('calls', 'supervisor_notes', 'TEXT');
+    await addColumnIfMissing('calls', 'consent_message_played', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'recording_consent_captured', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'invoice_triggered', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'proposal_triggered', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'live_sentiment_score', 'REAL');
+    await addColumnIfMissing('calls', 'live_sentiment_label', 'VARCHAR(20)');
+    await addColumnIfMissing('calls', 'live_red_flag', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('feedback', 'source', "VARCHAR(20) DEFAULT 'manual'");
 
     console.log('✓ All tables created/verified');

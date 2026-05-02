@@ -1172,6 +1172,68 @@
             </div>
 
             <div class="field">
+              <label class="field-label" for="customerValue">Customer value</label>
+              <select id="customerValue">
+                <option value="standard" selected>Standard</option>
+                <option value="vip">VIP</option>
+                <option value="high">High</option>
+                <option value="low">Low</option>
+              </select>
+              <div class="error-text" id="customerValueError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="urgencyLevel">Urgency level</label>
+              <select id="urgencyLevel">
+                <option value="normal" selected>Normal</option>
+                <option value="urgent">Urgent</option>
+                <option value="high">High</option>
+                <option value="low">Low</option>
+              </select>
+              <div class="error-text" id="urgencyLevelError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="preferredLanguage">Preferred language</label>
+              <select id="preferredLanguage">
+                <option value="hi" selected>Hindi</option>
+                <option value="hinglish">Hinglish</option>
+                <option value="mixed">Mixed</option>
+                <option value="en">English</option>
+              </select>
+              <div class="error-text" id="preferredLanguageError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="consentStatus">Consent status</label>
+              <select id="consentStatus">
+                <option value="unknown" selected>Unknown</option>
+                <option value="granted">Granted</option>
+                <option value="pending">Pending</option>
+                <option value="denied">Denied</option>
+              </select>
+              <div class="error-text" id="consentStatusError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="doNotCall">Do not call</label>
+              <select id="doNotCall">
+                <option value="0" selected>No</option>
+                <option value="1">Yes</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="revenueEstimate">Revenue estimate</label>
+              <input type="number" id="revenueEstimate" min="0" step="0.01" placeholder="e.g. 5000">
+            </div>
+
+            <div class="field" style="grid-column: 1 / -1;">
+              <label class="field-label" for="outstandingIssues">Outstanding issues</label>
+              <textarea id="outstandingIssues" placeholder="Pending issues, objections, or follow-up context"></textarea>
+            </div>
+
+            <div class="field">
               <label class="field-label">Quick actions</label>
               <div class="button-row">
                 <button id="customerSubmitButton" class="primary" onclick="saveCustomer()">Add customer</button>
@@ -1331,6 +1393,40 @@
         </article>
       </section>
       <section class="lower-grid">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Live supervisor</div>
+              <div class="card-subtitle">Live call sentiment, red flags, and escalation view</div>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Status</th>
+                  <th>Sentiment</th>
+                  <th>Red flag</th>
+                  <th>Transcript preview</th>
+                </tr>
+              </thead>
+              <tbody id="liveCallsBody">
+                <tr>
+                  <td colspan="5">
+                    <div class="empty-state">
+                      <div class="empty-icon">LV</div>
+                      <strong>No live calls right now</strong>
+                      <div class="supporting-text">Active Gemini calls and supervisor alerts will appear here.</div>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+      <section class="lower-grid">
          <article class="card" id="reports">
          <div class="card-header">
             <div>
@@ -1461,6 +1557,10 @@
           name: 'customerName',
           phone: 'customerPhone',
           preferred_slot: 'customerSlot',
+          customer_value: 'customerValue',
+          urgency_level: 'urgencyLevel',
+          preferred_language: 'preferredLanguage',
+          consent_status: 'consentStatus',
           customer_id: 'feedbackCustomer',
           review_text: 'reviewText',
           stars: 'reviewStars'
@@ -1479,7 +1579,14 @@
       return {
         name: document.getElementById('customerName').value.trim(),
         phone: document.getElementById('customerPhone').value.trim(),
-        preferred_slot: document.getElementById('customerSlot').value || '10:00'
+        preferred_slot: document.getElementById('customerSlot').value || '10:00',
+        customer_value: document.getElementById('customerValue').value,
+        urgency_level: document.getElementById('urgencyLevel').value,
+        preferred_language: document.getElementById('preferredLanguage').value,
+        consent_status: document.getElementById('consentStatus').value,
+        do_not_call: document.getElementById('doNotCall').value === '1',
+        outstanding_issues: document.getElementById('outstandingIssues').value.trim(),
+        revenue_estimate: Number(document.getElementById('revenueEstimate').value || 0)
       };
     }
 
@@ -1646,7 +1753,9 @@
       document.getElementById('analysisSummaryValue').textContent = call.analysis_summary || analysis.summary || 'Analysis summary not available yet.';
       document.getElementById('analysisExcerptValue').textContent = call.report_excerpt || analysis.report_excerpt || 'No short excerpt available.';
       document.getElementById('analysisStatusesValue').textContent = `Recording: ${formatStatusLabel(call.recording_status)} | Transcript: ${formatStatusLabel(call.transcript_status)} | Analysis: ${formatStatusLabel(call.analysis_status)}`;
-      document.getElementById('analysisMetaValue').textContent = `Rating: ${call.extracted_rating ? `${call.extracted_rating}/5` : 'N/A'}   | Outcome: ${formatStatusLabel(call.outcome)}`;
+      const objections = parseMaybeJson(call.objections_json, []);
+      const competitors = parseMaybeJson(call.competitor_mentions_json, []);
+      document.getElementById('analysisMetaValue').textContent = `Rating: ${call.extracted_rating ? `${call.extracted_rating}/5` : 'N/A'} | Outcome: ${formatStatusLabel(call.outcome)} | Sentiment: ${formatStatusLabel(call.sentiment_label || call.live_sentiment_label || 'neutral')} | Hot lead: ${call.hot_lead_score || 0}`;
 
       const keyPointsEl = document.getElementById('analysisKeyPoints');
       keyPointsEl.innerHTML = '';
@@ -1657,6 +1766,21 @@
           keyPointsEl.appendChild(li);
         });
       } else {
+        keyPointsEl.innerHTML = '';
+      }
+
+      objections.forEach((point) => {
+        const li = document.createElement('li');
+        li.textContent = `Objection: ${point}`;
+        keyPointsEl.appendChild(li);
+      });
+      competitors.forEach((point) => {
+        const li = document.createElement('li');
+        li.textContent = `Competitor mention: ${point}`;
+        keyPointsEl.appendChild(li);
+      });
+
+      if (!keyPointsEl.children.length) {
         keyPointsEl.innerHTML = '<li>No key points available yet.</li>';
       }
 
@@ -1685,6 +1809,13 @@
       document.getElementById('customerName').value = '';
       document.getElementById('customerPhone').value = '';
       document.getElementById('customerSlot').value = '';
+      document.getElementById('customerValue').value = 'standard';
+      document.getElementById('urgencyLevel').value = 'normal';
+      document.getElementById('preferredLanguage').value = 'hi';
+      document.getElementById('consentStatus').value = 'unknown';
+      document.getElementById('doNotCall').value = '0';
+      document.getElementById('outstandingIssues').value = '';
+      document.getElementById('revenueEstimate').value = '';
       document.getElementById('customerSubmitButton').textContent = 'Add customer';
       document.getElementById('customerCancelButton').classList.add('hidden');
       const chip = document.getElementById('customerEditChip');
@@ -1701,6 +1832,13 @@
       document.getElementById('customerName').value = customer.name || '';
       document.getElementById('customerPhone').value = customer.phone || '';
       document.getElementById('customerSlot').value = customer.preferred_slot || '10:00';
+      document.getElementById('customerValue').value = customer.customer_value || 'standard';
+      document.getElementById('urgencyLevel').value = customer.urgency_level || 'normal';
+      document.getElementById('preferredLanguage').value = customer.preferred_language || 'hi';
+      document.getElementById('consentStatus').value = customer.consent_status || 'unknown';
+      document.getElementById('doNotCall').value = String(Number(customer.do_not_call || 0));
+      document.getElementById('outstandingIssues').value = customer.outstanding_issues || '';
+      document.getElementById('revenueEstimate').value = customer.revenue_estimate || '';
       document.getElementById('customerSubmitButton').textContent = 'Update customer';
       document.getElementById('customerCancelButton').classList.remove('hidden');
       const chip = document.getElementById('customerEditChip');
@@ -1800,22 +1938,25 @@
           <td>
             <div class="name-cell">
               <strong>${customer.name}</strong>
-              <span>ID #${customer.id}</span>
+              <span>ID #${customer.id} • Priority ${customer.priority_score || customer.ai_score || 0}</span>
             </div>
           </td>
           <td>
             <strong>${customer.phone}</strong>
-            <div class="subcell">Primary contact</div>
+            <div class="subcell">${customer.preferred_language || 'hi'} • ${customer.customer_value || 'standard'} • ${customer.urgency_level || 'normal'}</div>
           </td>
           <td>
             <strong>${slot}</strong>
-            <div class="subcell">Daily scheduler slot</div>
+            <div class="subcell">Best slot ${customer.best_call_slot || slot}</div>
           </td>
           <td><span class="badge ${status}">${formatStatusLabel(status)}</span></td>
           <td>
             <div class="action-buttons">
               <button onclick="triggerCallNow(${customer.id})" class="warning">Call now</button>
               <button onclick="startEditCustomer(${customer.id})" class="secondary">Edit</button>
+              <button onclick="toggleDnd(${customer.id}, ${Number(customer.do_not_call || 0)})" class="ghost">${Number(customer.do_not_call || 0) ? 'Remove DND' : 'Mark DND'}</button>
+              <button onclick="flagWrongNumber(${customer.id})" class="ghost">Wrong no.</button>
+              <button onclick="scheduleRetryNow(${customer.id})" class="ghost">Retry</button>
               <button onclick="deleteCustomer(${customer.id})" class="danger">Delete</button>
             </div>
           </td>
@@ -1870,6 +2011,87 @@
         renderFeedbackIntelligence();
       } catch (error) {
         console.error('Error loading recent calls:', error);
+      }
+    }
+
+    async function loadLiveCalls() {
+      try {
+        const res = await fetch(`${API_BASE}/calls/live`);
+        const calls = await res.json();
+        const tbody = document.getElementById('liveCallsBody');
+        tbody.innerHTML = '';
+
+        if (!Array.isArray(calls) || calls.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="5">
+                <div class="empty-state">
+                  <div class="empty-icon">LV</div>
+                  <strong>No live calls right now</strong>
+                  <div class="supporting-text">Active Gemini calls and supervisor alerts will appear here.</div>
+                </div>
+              </td>
+            </tr>
+          `;
+          return;
+        }
+
+        calls.forEach((call) => {
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td><strong>${call.customer_name || '--'}</strong></td>
+            <td><span class="badge ${call.status === 'active' ? 'pending' : 'completed'}">${formatStatusLabel(call.status || 'active')}</span></td>
+            <td><span class="badge ${call.live_sentiment_label === 'negative' ? 'bad' : call.live_sentiment_label === 'positive' ? 'good' : 'average'}">${formatStatusLabel(call.live_sentiment_label || 'neutral')}</span></td>
+            <td>${call.red_flag ? '<span class="badge bad">Red flag</span>' : '<span class="badge good">Normal</span>'}</td>
+            <td><span class="feedback-excerpt">${call.transcript_preview || '--'}</span></td>
+          `;
+          tbody.appendChild(row);
+        });
+      } catch (error) {
+        console.error('Error loading live calls:', error);
+      }
+    }
+
+    async function updateCustomerWorkflow(customerId, patch, successMessage) {
+      try {
+        const res = await fetch(`${API_BASE}/customers/${customerId}/workflow`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch)
+        });
+        const result = await res.json();
+        if (res.ok) {
+          showAlert(successMessage, 'success');
+          loadCustomers();
+          loadStats();
+        } else {
+          showAlert(result.error || 'Unable to update workflow', 'error');
+        }
+      } catch (error) {
+        showAlert(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    function toggleDnd(customerId, currentValue) {
+      updateCustomerWorkflow(customerId, { do_not_call: !Number(currentValue) }, Number(currentValue) ? 'DND removed' : 'Customer marked as DND');
+    }
+
+    function flagWrongNumber(customerId) {
+      updateCustomerWorkflow(customerId, { wrong_number_flag: true, admin_review_required: true, do_not_call: true }, 'Wrong number flagged for admin review');
+    }
+
+    async function scheduleRetryNow(customerId) {
+      try {
+        const res = await fetch(`${API_BASE}/customers/${customerId}/retry`, { method: 'POST' });
+        const result = await res.json();
+        if (res.ok) {
+          showAlert(`Retry scheduled for ${new Date(result.retry_at).toLocaleString()}`, 'success');
+          loadCustomers();
+        } else {
+          showAlert(result.error || 'Retry could not be scheduled', 'error');
+        }
+      } catch (error) {
+        showAlert(`Error: ${error.message}`, 'error');
       }
     }
 
@@ -2092,12 +2314,14 @@
       loadCustomers();
       loadFeedback();
       loadRecentCalls();
+      loadLiveCalls();
       loadStats();
 
       setInterval(() => {
         loadCustomers();
         loadFeedback();
         loadRecentCalls();
+        loadLiveCalls();
         loadStats();
       }, 30000);
     });

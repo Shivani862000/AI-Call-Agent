@@ -93,7 +93,11 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
       calls.hot_lead_score,
       calls.sentiment_label,
       calls.crm_sync_status,
-      calls.whatsapp_summary_sent
+      calls.whatsapp_summary_sent,
+      calls.objections_json,
+      calls.competitor_mentions_json,
+      calls.live_red_flag,
+      calls.supervisor_alert_level
     FROM calls
     JOIN customers c ON c.id = calls.customer_id
     WHERE calls.called_at >= ? AND calls.called_at <= ?
@@ -124,6 +128,27 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
     LIMIT 12
   `, [range.start, range.end]);
 
+  const peakSlots = await dbAll(`
+    SELECT SUBSTR(called_at, 12, 5) AS slot, COUNT(*) AS total_calls
+    FROM calls
+    WHERE called_at >= ? AND called_at <= ?
+    GROUP BY SUBSTR(called_at, 12, 5)
+    ORDER BY total_calls DESC, slot ASC
+    LIMIT 5
+  `, [range.start, range.end]);
+
+  const scriptPerformance = await dbAll(`
+    SELECT
+      COALESCE(call_script_version, 'default') AS script_version,
+      COUNT(*) AS total_calls,
+      AVG(CASE WHEN extracted_rating IS NOT NULL THEN extracted_rating END) AS avg_rating
+    FROM calls
+    WHERE called_at >= ? AND called_at <= ?
+    GROUP BY COALESCE(call_script_version, 'default')
+    ORDER BY avg_rating DESC, total_calls DESC
+    LIMIT 5
+  `, [range.start, range.end]);
+
   const safeTotalCalls = Number(callStats?.total_calls) || 0;
   const safeAnswered = Number(callStats?.answered) || 0;
   const safeNoAnswer = Number(callStats?.no_answer) || 0;
@@ -138,6 +163,34 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const safeBadCount = Number(feedbackStats?.bad_count) || 0;
   const averageRating = Number(feedbackStats?.average_rating) || 0;
   const successRate = safeTotalCalls > 0 ? Number(((safeAnswered / safeTotalCalls) * 100).toFixed(1)) : 0;
+
+  const objectionCounts = new Map();
+  const competitorCounts = new Map();
+
+  analyzedCalls.forEach((call) => {
+    const objections = JSON.parse(call.objections_json || '[]');
+    const competitors = JSON.parse(call.competitor_mentions_json || '[]');
+
+    objections.forEach((item) => objectionCounts.set(item, (objectionCounts.get(item) || 0) + 1));
+    competitors.forEach((item) => competitorCounts.set(item, (competitorCounts.get(item) || 0) + 1));
+  });
+
+  const commonObjections = [...objectionCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([label, count]) => ({ label, count }));
+
+  const competitorMentions = [...competitorCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([label, count]) => ({ label, count }));
+
+  const revenuePipeline = analyzedCalls.reduce((sum, call) => {
+    if (['interested', 'hot_lead'].includes(String(call.outcome || '').toLowerCase())) {
+      return sum + (Number(call.hot_lead_score) || 0) * 10;
+    }
+    return sum;
+  }, 0);
 
   const enrichedCalls = analyzedCalls.map((call) => ({
     ...call,
@@ -168,6 +221,11 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
     feedback: feedbackList,
     analyzed_calls: enrichedCalls,
     pending_items: pendingItems,
+    peak_slots: peakSlots,
+    script_performance: scriptPerformance,
+    common_objections: commonObjections,
+    competitor_mentions: competitorMentions,
+    revenue_pipeline_estimate: Number(revenuePipeline.toFixed(2)),
     dashboard_link: publicBaseUrl ? `${publicBaseUrl}/admin.html` : null,
     summary_text: `For ${label}, total ${safeTotalCalls} calls, ${safeFeedbackCount} feedback entries, ${safeGoodCount} good reviews, ${safeHotLeads} hot leads, and ${successRate}% answer success.`
   };
@@ -190,11 +248,21 @@ async function buildWeeklySummary() {
     .map((item) => `${item.customer_name}: ${item.outcome || 'pending'}${item.follow_up_task ? ` - ${item.follow_up_task}` : ''}`)
     .slice(0, 8);
 
+  const bestScripts = (report.script_performance || [])
+    .map((item) => `${item.script_version}: ${Number(item.avg_rating || 0).toFixed(1)}/5 across ${item.total_calls} calls`)
+    .slice(0, 5);
+
+  const bestSlots = (report.peak_slots || [])
+    .map((item) => `${item.slot}: ${item.total_calls} calls`)
+    .slice(0, 5);
+
   return {
     ...report,
     top_insights: topInsights,
     hot_lead_names: hotLeadNames,
-    pending_summary: pending
+    pending_summary: pending,
+    best_scripts: bestScripts,
+    best_slots: bestSlots
   };
 }
 
