@@ -195,6 +195,38 @@ function extractRating(exchanges) {
   return null;
 }
 
+function extractRatingFromTranscriptTurns(transcript = []) {
+  for (let index = 0; index < transcript.length; index += 1) {
+    const turn = transcript[index];
+    if (!turn || turn.role !== 'AGENT') {
+      continue;
+    }
+
+    const promptType = detectPromptType(turn.text);
+    if (promptType !== 'rating') {
+      continue;
+    }
+
+    const customerTurn = transcript[index + 1];
+    if (customerTurn?.role === 'CUSTOMER') {
+      const directScore = extractNumericRatingFromText(customerTurn.text);
+      if (Number.isInteger(directScore)) {
+        return directScore;
+      }
+    }
+
+    const agentAcknowledgement = transcript[index + 2];
+    if (agentAcknowledgement?.role === 'AGENT') {
+      const acknowledgedScore = extractNumericRatingFromText(agentAcknowledgement.text);
+      if (Number.isInteger(acknowledgedScore)) {
+        return acknowledgedScore;
+      }
+    }
+  }
+
+  return null;
+}
+
 function isSubstantiveTurn(text) {
   const normalized = normalizeText(text);
   if (!normalized || normalized.length < 6) {
@@ -208,13 +240,97 @@ function isSubstantiveTurn(text) {
   return true;
 }
 
+function isLikelyNoiseForPrompt(text, promptType) {
+  const raw = String(text || '').trim();
+  const normalized = normalizeText(raw);
+
+  if (!normalized) {
+    return true;
+  }
+
+  if (/\b(goodbye|bye|thank you|thanks|nene|none|no suggestion)\b/.test(normalized)) {
+    return true;
+  }
+
+  if (promptType === 'staff' && !/\b(staff|sumit|behavior|behaviour|communication|attitude|rude|helpful|issue|problem)\b/.test(normalized) && !/[ऀ-ॿ]/.test(raw)) {
+    return true;
+  }
+
+  if (promptType === 'improvement' && normalized.length < 12) {
+    return true;
+  }
+
+  return false;
+}
+
+function cleanTurnForSummary(text) {
+  return String(text || '')
+    .replace(/\b(Beh\.?|Goodbye\.?|Nene)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[.।!?]+$/g, '')
+    .trim();
+}
+
+function buildStructuredReviewSummary(exchanges) {
+  const latestByType = new Map();
+
+  exchanges.forEach((exchange) => {
+    const promptType = detectPromptType(exchange.promptText);
+    const responseText = String(exchange.responseText || '').trim();
+
+    if (!['overall', 'cleanliness', 'staff', 'process', 'improvement'].includes(promptType)) {
+      return;
+    }
+
+    if (!isSubstantiveTurn(responseText) || extractNumericRatingFromText(responseText) !== null || isLikelyNoiseForPrompt(responseText, promptType)) {
+      return;
+    }
+
+    latestByType.set(promptType, cleanTurnForSummary(responseText));
+  });
+
+  const lines = [];
+
+  if (latestByType.has('overall')) {
+    lines.push(`Overall experience: ${latestByType.get('overall')}.`);
+  }
+
+  if (latestByType.has('cleanliness')) {
+    lines.push(`Cleanliness feedback: ${latestByType.get('cleanliness')}.`);
+  }
+
+  if (latestByType.has('staff')) {
+    lines.push(`Staff feedback: ${latestByType.get('staff')}.`);
+  }
+
+  if (latestByType.has('process')) {
+    lines.push(`Process feedback: ${latestByType.get('process')}.`);
+  }
+
+  if (latestByType.has('improvement')) {
+    lines.push(`Suggestion: ${latestByType.get('improvement')}.`);
+  }
+
+  return lines.join(' ').replace(/\s+/g, ' ').trim();
+}
+
 function extractReviewText(exchanges) {
-  const feedbackPromptTypes = new Set(['overall', 'cleanliness', 'staff', 'process', 'improvement', 'unknown']);
+  const structuredSummary = buildStructuredReviewSummary(exchanges);
+  if (structuredSummary) {
+    return structuredSummary.slice(0, 1000);
+  }
+
+  const feedbackPromptTypes = new Set(['overall', 'cleanliness', 'staff', 'process', 'improvement']);
   const substantiveTurns = exchanges
     .filter((exchange) => feedbackPromptTypes.has(detectPromptType(exchange.promptText)))
-    .map((exchange) => String(exchange.responseText || '').trim())
-    .filter(isSubstantiveTurn)
-    .filter((text) => extractNumericRatingFromText(text) === null);
+    .map((exchange) => ({
+      promptType: detectPromptType(exchange.promptText),
+      text: String(exchange.responseText || '').trim()
+    }))
+    .filter((entry) => isSubstantiveTurn(entry.text))
+    .filter((entry) => extractNumericRatingFromText(entry.text) === null)
+    .filter((entry) => !isLikelyNoiseForPrompt(entry.text, entry.promptType))
+    .map((entry) => cleanTurnForSummary(entry.text));
 
   if (!substantiveTurns.length) {
     return '';
@@ -242,7 +358,7 @@ function extractCallFeedback(transcript = []) {
   const customerTurns = getCustomerTurns(transcript);
   const exchanges = splitIntoExchanges(transcript);
   const reviewText = extractReviewText(exchanges);
-  const stars = extractRating(exchanges);
+  const stars = extractRating(exchanges) ?? extractRatingFromTranscriptTurns(transcript);
   const consentDetected = detectConsent(customerTurns);
   const language = detectLanguage(customerTurns);
 
