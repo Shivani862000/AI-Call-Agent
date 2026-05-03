@@ -1009,6 +1009,150 @@
       margin-top: 14px;
     }
 
+    .owner-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 18px;
+    }
+
+    .owner-digest-box {
+      padding: 18px 20px;
+      border-radius: 22px;
+      background: linear-gradient(135deg, rgba(45, 109, 246, 0.08), rgba(139, 92, 246, 0.08));
+      border: 1px solid rgba(45, 109, 246, 0.14);
+      color: var(--text);
+      margin-bottom: 16px;
+    }
+
+    .owner-digest-box strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 15px;
+      color: var(--text-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .owner-alert-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .owner-alert-item {
+      padding: 16px 18px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .owner-alert-item.high {
+      border-color: rgba(234, 84, 85, 0.28);
+      background: rgba(234, 84, 85, 0.05);
+    }
+
+    .owner-alert-item.medium {
+      border-color: rgba(255, 155, 23, 0.28);
+      background: rgba(255, 155, 23, 0.05);
+    }
+
+    .owner-alert-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 6px;
+    }
+
+    .owner-alert-head strong {
+      font-size: 16px;
+    }
+
+    .owner-metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .owner-note-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .owner-note-item {
+      padding: 14px 16px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .notification-wrap {
+      position: relative;
+    }
+
+    .notification-bell {
+      position: relative;
+    }
+
+    .notification-count {
+      position: absolute;
+      top: -6px;
+      right: -6px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: var(--red);
+      color: #fff;
+      font-size: 11px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #fff;
+    }
+
+    .notification-panel {
+      position: absolute;
+      top: calc(100% + 10px);
+      right: 0;
+      width: 360px;
+      max-height: 420px;
+      overflow: auto;
+      padding: 16px;
+      border-radius: 22px;
+      background: #fff;
+      border: 1px solid var(--line);
+      box-shadow: 0 18px 42px rgba(26, 47, 86, 0.14);
+      z-index: 20;
+    }
+
+    .notification-item {
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(121, 151, 189, 0.12);
+    }
+
+    .notification-item:last-child {
+      border-bottom: none;
+    }
+
+    .campaign-grid {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 18px;
+    }
+
+    .sla-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .sla-item {
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+
     @keyframes spin {
       to {
         transform: rotate(360deg);
@@ -1031,6 +1175,12 @@
 
       .mini-report-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .owner-grid,
+      .owner-metrics-grid,
+      .campaign-grid {
+        grid-template-columns: 1fr;
       }
     }
 
@@ -1126,6 +1276,19 @@
           </div>
         </div>
         <div class="header-actions">
+          <div class="notification-wrap">
+            <button class="icon-button notification-bell" type="button" aria-label="Owner alerts" onclick="toggleNotificationPanel()">
+              Bell
+              <span id="ownerNotificationCount" class="notification-count hidden">0</span>
+            </button>
+            <div id="notificationPanel" class="notification-panel hidden">
+              <strong>Owner alerts</strong>
+              <div class="supporting-text" style="margin: 8px 0 12px;">Hot leads, complaints, and stale follow-ups show here live.</div>
+              <div id="notificationItems">
+                <div class="notification-item">Loading alerts...</div>
+              </div>
+            </div>
+          </div>
           <button class="icon-button" type="button" aria-label="More options">...</button>
         </div>
       </header>
@@ -1172,6 +1335,84 @@
             <div class="stat-label">Feedback received</div>
           </div>
           <div class="stat-line"></div>
+        </article>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="card" id="owner-center">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Owner command center</div>
+              <div class="card-subtitle">Morning digest, hot lead alerts, complaints, and ROI visibility on one screen</div>
+            </div>
+            <div class="button-row">
+              <button class="secondary" type="button" onclick="loadOwnerDashboard()">Refresh</button>
+              <button class="primary" type="button" onclick="sendOwnerDigest(this)">Send morning digest</button>
+            </div>
+          </div>
+
+          <div class="owner-grid">
+            <div>
+              <div class="owner-digest-box">
+                <strong>CEO morning digest</strong>
+                <div id="ownerDigestText">Loading owner digest...</div>
+              </div>
+
+              <div class="owner-metrics-grid">
+                <div class="mini-card accent-blue" style="color: var(--blue);">
+                  <strong id="ownerYesterdayCalls">0</strong>
+                  <span>Yesterday calls</span>
+                </div>
+                <div class="mini-card accent-green" style="color: var(--green);">
+                  <strong id="ownerHotLeads">0</strong>
+                  <span>Hot leads</span>
+                </div>
+                <div class="mini-card" style="color: var(--purple);">
+                  <strong id="ownerRevenuePipeline">Rs 0</strong>
+                  <span>Revenue pipeline</span>
+                </div>
+                <div class="mini-card accent-red" style="color: var(--red);">
+                  <strong id="ownerComplaintRisks">0</strong>
+                  <span>Complaint risks</span>
+                </div>
+                <div class="mini-card accent-orange" style="color: var(--orange);">
+                  <strong id="ownerRoiMultiple">0x</strong>
+                  <span>Estimated ROI</span>
+                </div>
+                <div class="mini-card accent-green" style="color: var(--green);">
+                  <strong id="ownerSavings">Rs 0</strong>
+                  <span>AI vs staff saving</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="detail-card">
+                <strong>Priority alerts</strong>
+                <div class="supporting-text" style="margin: 8px 0 14px;">Owner should only intervene when a deal or crisis needs attention.</div>
+                <div id="ownerAlertsList" class="owner-alert-list">
+                  <div class="owner-alert-item">
+                    <div class="supporting-text">Loading alerts...</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="owner-note-list">
+                <div class="owner-note-item">
+                  <strong>Best response slots</strong>
+                  <div class="supporting-text" id="ownerBestSlots">Loading...</div>
+                </div>
+                <div class="owner-note-item">
+                  <strong>Best-performing scripts</strong>
+                  <div class="supporting-text" id="ownerBestScripts">Loading...</div>
+                </div>
+                <div class="owner-note-item">
+                  <strong>Common objections</strong>
+                  <div class="supporting-text" id="ownerObjections">Loading...</div>
+                </div>
+              </div>
+            </div>
+          </div>
         </article>
       </section>
 
@@ -1239,6 +1480,18 @@
                 <option value="en">English</option>
               </select>
               <div class="error-text" id="preferredLanguageError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="campaignName">Campaign name</label>
+              <input type="text" id="campaignName" placeholder="e.g. May Lab Campaign">
+              <div class="helper-text">Use same campaign name to group leads and ROI.</div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="serviceInterest">Service / product</label>
+              <input type="text" id="serviceInterest" placeholder="e.g. Full body checkup">
+              <div class="helper-text">Helps track what service brings most inquiries.</div>
             </div>
 
             
@@ -1490,6 +1743,93 @@
         </article>
         </section>
 
+      <section class="dashboard-grid">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Campaign spend vs ROI</div>
+              <div class="card-subtitle">Track spend, lead quality, and revenue pipeline by campaign</div>
+            </div>
+          </div>
+
+          <div class="campaign-grid">
+            <div>
+              <div class="grid-2">
+                <div class="field">
+                  <label class="field-label" for="campaignConfigName">Campaign name</label>
+                  <input type="text" id="campaignConfigName" placeholder="e.g. Summer Health Drive">
+                </div>
+                <div class="field">
+                  <label class="field-label" for="campaignServiceName">Service focus</label>
+                  <input type="text" id="campaignServiceName" placeholder="e.g. Thyroid profile">
+                </div>
+                <div class="field">
+                  <label class="field-label" for="campaignSpend">Monthly spend (INR)</label>
+                  <input type="number" id="campaignSpend" min="0" step="1" placeholder="50000">
+                </div>
+                <div class="field">
+                  <label class="field-label" for="campaignStatus">Status</label>
+                  <select id="campaignStatus">
+                    <option value="active" selected>Active</option>
+                    <option value="paused">Paused</option>
+                  </select>
+                </div>
+              </div>
+              <div class="button-row" style="margin-top: 14px;">
+                <button class="primary" type="button" onclick="saveCampaign()">Save campaign</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Campaign</th>
+                    <th>Spend</th>
+                    <th>Service</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="campaignConfigBody">
+                  <tr><td colspan="4">Loading campaigns...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="table-wrap" style="margin-top: 18px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Campaign</th>
+                  <th>Spend</th>
+                  <th>Active leads</th>
+                  <th>Qualified</th>
+                  <th>Pipeline</th>
+                  <th>ROI</th>
+                </tr>
+              </thead>
+              <tbody id="campaignRoiBody">
+                <tr><td colspan="6">Loading campaign ROI...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Stale lead SLA board</div>
+              <div class="card-subtitle">Callbacks and follow-ups that need action before they get cold</div>
+            </div>
+          </div>
+          <div id="staleLeadBoard" class="sla-grid">
+            <div class="sla-item">Loading stale leads...</div>
+          </div>
+        </article>
+      </section>
+
       <section class="dashboard-grid" id="settings">
         <div class="notice-text">
           <span style="font-size: 18px;">i</span>
@@ -1553,6 +1893,9 @@
     let customerCache = [];
     let feedbackCache = [];
     let recentCallsCache = [];
+    let ownerDashboardCache = null;
+    let campaignConfigCache = [];
+    let seenOwnerAlertKeys = new Set();
 
     function showAlert(message, type = 'success') {
       const alertContainer = document.getElementById('alertContainer');
@@ -1603,6 +1946,8 @@
         customer_value: document.getElementById('customerValue').value,
         urgency_level: document.getElementById('urgencyLevel').value,
         preferred_language: document.getElementById('preferredLanguage').value,
+        campaign_name: document.getElementById('campaignName').value.trim(),
+        service_interest: document.getElementById('serviceInterest').value.trim(),
       };
     }
 
@@ -1654,6 +1999,10 @@
 
     function formatDateValue(value) {
       return value ? new Date(value).toLocaleDateString() : '--';
+    }
+
+    function formatCurrencyInr(value) {
+      return `Rs ${Number(value || 0).toFixed(0)}`;
     }
 
     function getPipelineSummary(call) {
@@ -1825,6 +2174,9 @@
       document.getElementById('customerSlot').value = '';
       document.getElementById('customerValue').value = 'standard';
       document.getElementById('urgencyLevel').value = 'normal';
+      document.getElementById('preferredLanguage').value = 'hi';
+      document.getElementById('campaignName').value = '';
+      document.getElementById('serviceInterest').value = '';
       document.getElementById('customerSubmitButton').textContent = 'Add customer';
       document.getElementById('customerCancelButton').classList.add('hidden');
       const chip = document.getElementById('customerEditChip');
@@ -1844,6 +2196,8 @@
       document.getElementById('customerValue').value = customer.customer_value || 'standard';
       document.getElementById('urgencyLevel').value = customer.urgency_level || 'normal';
       document.getElementById('preferredLanguage').value = customer.preferred_language || 'hi';
+      document.getElementById('campaignName').value = customer.campaign_name || '';
+      document.getElementById('serviceInterest').value = customer.service_interest || '';
      
       document.getElementById('customerSubmitButton').textContent = 'Update customer';
       document.getElementById('customerCancelButton').classList.remove('hidden');
@@ -1883,6 +2237,230 @@
         }
       } catch (error) {
         console.error('Error loading stats:', error);
+      }
+    }
+
+    function renderOwnerAlerts(alerts = []) {
+      const container = document.getElementById('ownerAlertsList');
+      if (!container) return;
+
+      if (!Array.isArray(alerts) || alerts.length === 0) {
+        container.innerHTML = `
+          <div class="owner-alert-item">
+            <strong>No urgent owner alerts</strong>
+            <div class="supporting-text">Hot leads, complaints, callbacks, and stale follow-ups will appear here.</div>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = alerts.map((alert) => `
+        <div class="owner-alert-item ${alert.severity || 'low'}">
+          <div class="owner-alert-head">
+            <strong>${alert.customer_name || 'Customer'}</strong>
+            <span class="badge ${alert.severity === 'high' ? 'bad' : alert.severity === 'medium' ? 'average' : 'good'}">${formatStatusLabel(alert.type || 'alert')}</span>
+          </div>
+          <div>${alert.headline || 'Attention needed'}</div>
+          <div class="supporting-text" style="margin-top: 8px;">
+            ${alert.summary || 'No summary available.'}
+            ${alert.next_action_at ? `<br>Next action: ${new Date(alert.next_action_at).toLocaleString()}` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderNotificationPanel(alerts = []) {
+      const container = document.getElementById('notificationItems');
+      const countEl = document.getElementById('ownerNotificationCount');
+      if (!container || !countEl) return;
+
+      const criticalAlerts = (alerts || []).filter((item) => item.severity === 'high' || item.type === 'hot_lead');
+      countEl.textContent = String(criticalAlerts.length);
+      countEl.classList.toggle('hidden', criticalAlerts.length === 0);
+
+      if (!criticalAlerts.length) {
+        container.innerHTML = '<div class="notification-item">No urgent owner alerts right now.</div>';
+        return;
+      }
+
+      container.innerHTML = criticalAlerts.map((alert) => `
+        <div class="notification-item">
+          <strong>${alert.customer_name}</strong>
+          <div>${alert.headline}</div>
+          <div class="supporting-text">${alert.summary || ''}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderCampaignConfigs(configs = []) {
+      const tbody = document.getElementById('campaignConfigBody');
+      if (!tbody) return;
+
+      if (!configs.length) {
+        tbody.innerHTML = '<tr><td colspan="4">No campaigns configured yet.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = configs.map((campaign) => `
+        <tr>
+          <td><strong>${campaign.name}</strong></td>
+          <td>${formatCurrencyInr(campaign.monthly_spend_inr || 0)}</td>
+          <td>${campaign.service_name || '--'}</td>
+          <td><span class="badge ${campaign.status === 'active' ? 'good' : 'average'}">${formatStatusLabel(campaign.status)}</span></td>
+        </tr>
+      `).join('');
+    }
+
+    function renderCampaignRoi(rows = []) {
+      const tbody = document.getElementById('campaignRoiBody');
+      if (!tbody) return;
+
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="6">No campaign ROI data yet.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = rows.map((row) => `
+        <tr>
+          <td><strong>${row.campaign_name}</strong><div class="subcell">${row.service_name || '--'}</div></td>
+          <td>${formatCurrencyInr(row.spend_inr || 0)}</td>
+          <td>${row.active_leads || 0}</td>
+          <td>${row.qualified_leads || 0}</td>
+          <td>${formatCurrencyInr(row.revenue_pipeline || 0)}</td>
+          <td>${Number(row.roi_multiple || 0).toFixed(1)}x</td>
+        </tr>
+      `).join('');
+    }
+
+    function renderStaleLeadBoard(rows = []) {
+      const container = document.getElementById('staleLeadBoard');
+      if (!container) return;
+
+      if (!rows.length) {
+        container.innerHTML = '<div class="sla-item">No stale callbacks or overdue leads right now.</div>';
+        return;
+      }
+
+      container.innerHTML = rows.map((item) => `
+        <div class="sla-item">
+          <strong>${item.customer_name}</strong>
+          <div class="supporting-text">${item.follow_up_task || 'Follow-up needed.'}</div>
+          <div class="supporting-text">${item.next_action_at ? `Next action: ${new Date(item.next_action_at).toLocaleString()}` : 'Next action time not set.'}</div>
+        </div>
+      `).join('');
+    }
+
+    function maybeShowComplaintPopups(alerts = []) {
+      alerts
+        .filter((alert) => alert.type === 'reputation' || alert.type === 'hot_lead')
+        .forEach((alert) => {
+          const key = `${alert.type}:${alert.call_id}:${alert.severity}`;
+          if (seenOwnerAlertKeys.has(key)) return;
+          seenOwnerAlertKeys.add(key);
+          showAlert(
+            alert.type === 'reputation'
+              ? `Complaint risk: ${alert.customer_name} needs attention`
+              : `Hot lead: ${alert.customer_name} is ready for follow-up`,
+            alert.type === 'reputation' ? 'error' : 'info'
+          );
+        });
+    }
+
+    async function loadCampaignConfigs() {
+      try {
+        const res = await fetch(`${API_BASE}/campaigns`);
+        const rows = await res.json();
+        campaignConfigCache = Array.isArray(rows) ? rows : [];
+        renderCampaignConfigs(campaignConfigCache);
+      } catch (error) {
+        console.error('Error loading campaigns:', error);
+      }
+    }
+
+    async function loadOwnerDashboard() {
+      try {
+        const res = await fetch(`${API_BASE}/reports/owner-preview`);
+        const ownerData = await res.json();
+        ownerDashboardCache = ownerData;
+
+        document.getElementById('ownerDigestText').textContent = ownerData.digest_text || 'Owner digest unavailable.';
+        document.getElementById('ownerYesterdayCalls').textContent = ownerData.yesterday_snapshot?.calls || 0;
+        document.getElementById('ownerHotLeads').textContent = ownerData.yesterday_snapshot?.hot_leads || 0;
+        document.getElementById('ownerRevenuePipeline').textContent = formatCurrencyInr(ownerData.roi_snapshot?.revenue_pipeline_estimate || 0);
+        document.getElementById('ownerComplaintRisks').textContent = ownerData.yesterday_snapshot?.complaints || 0;
+        document.getElementById('ownerRoiMultiple').textContent = `${Number(ownerData.roi_snapshot?.roi_multiple || 0).toFixed(1)}x`;
+        document.getElementById('ownerSavings').textContent = formatCurrencyInr(ownerData.roi_snapshot?.estimated_saving_vs_staff || 0);
+        document.getElementById('ownerBestSlots').textContent = (ownerData.best_slots || []).join(' • ') || 'Not enough history yet.';
+        document.getElementById('ownerBestScripts').textContent = (ownerData.best_scripts || []).join(' • ') || 'Not enough script data yet.';
+        document.getElementById('ownerObjections').textContent = (ownerData.common_objections || []).map((item) => `${item.label} (${item.count})`).join(' • ') || 'No recurring objections detected.';
+        renderOwnerAlerts(ownerData.alerts || []);
+        renderNotificationPanel(ownerData.alerts || []);
+        renderCampaignRoi(ownerData.campaign_roi || []);
+        renderStaleLeadBoard(ownerData.stale_leads || []);
+        maybeShowComplaintPopups(ownerData.alerts || []);
+      } catch (error) {
+        console.error('Error loading owner dashboard:', error);
+      }
+    }
+
+    async function saveCampaign() {
+      const payload = {
+        name: document.getElementById('campaignConfigName').value.trim(),
+        service_name: document.getElementById('campaignServiceName').value.trim(),
+        monthly_spend_inr: Number(document.getElementById('campaignSpend').value || 0),
+        status: document.getElementById('campaignStatus').value
+      };
+
+      if (!payload.name) {
+        showAlert('Campaign name is required', 'error');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/campaigns`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (res.ok) {
+          showAlert('Campaign saved successfully', 'success');
+          document.getElementById('campaignConfigName').value = '';
+          document.getElementById('campaignServiceName').value = '';
+          document.getElementById('campaignSpend').value = '';
+          document.getElementById('campaignStatus').value = 'active';
+          loadCampaignConfigs();
+          loadOwnerDashboard();
+        } else {
+          showAlert(result.error || 'Campaign could not be saved', 'error');
+        }
+      } catch (error) {
+        showAlert(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    function toggleNotificationPanel() {
+      document.getElementById('notificationPanel').classList.toggle('hidden');
+    }
+
+    async function sendOwnerDigest(buttonEl) {
+      const btn = buttonEl;
+      const original = btn.textContent;
+      try {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>Sending...';
+        const res = await fetch(`${API_BASE}/reports/owner-digest/send`, { method: 'POST' });
+        const result = await res.json();
+        if (res.ok) {
+          showAlert('Owner morning digest sent successfully', 'success');
+        } else {
+          showAlert(result.error || 'Owner digest could not be sent', 'error');
+        }
+      } catch (error) {
+        showAlert(`Error: ${error.message}`, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
       }
     }
 
@@ -1962,7 +2540,7 @@
           </td>
           <td>
             <strong>${customer.phone}</strong>
-            <div class="subcell">${customer.preferred_language || 'hi'} • ${customer.customer_value || 'standard'} • ${customer.urgency_level || 'normal'}</div>
+            <div class="subcell">${customer.preferred_language || 'hi'} • ${customer.customer_value || 'standard'} • ${customer.urgency_level || 'normal'}${customer.campaign_name ? ` • ${customer.campaign_name}` : ''}</div>
           </td>
           <td>
             <strong>${slot}</strong>
@@ -2329,6 +2907,14 @@
         }
       });
 
+      document.addEventListener('click', (event) => {
+        const panel = document.getElementById('notificationPanel');
+        const wrap = event.target.closest('.notification-wrap');
+        if (panel && !wrap) {
+          panel.classList.add('hidden');
+        }
+      });
+
       const statusFilter = document.getElementById('customerStatusFilter');
       const searchInput = document.getElementById('customerSearch');
       if (searchInput) {
@@ -2345,6 +2931,8 @@
       loadRecentCalls();
       loadLiveCalls();
       loadStats();
+      loadOwnerDashboard();
+      loadCampaignConfigs();
 
       setInterval(() => {
         loadCustomers();
@@ -2352,6 +2940,8 @@
         loadRecentCalls();
         loadLiveCalls();
         loadStats();
+        loadOwnerDashboard();
+        loadCampaignConfigs();
       }, 30000);
     });
 

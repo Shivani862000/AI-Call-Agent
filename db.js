@@ -102,6 +102,17 @@ function runMigrations() {
       )
     `);
 
+    await run(`
+      CREATE TABLE IF NOT EXISTS campaign_configs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name VARCHAR(100) NOT NULL UNIQUE,
+        service_name VARCHAR(100),
+        monthly_spend_inr REAL DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     await addColumnIfMissing('customers', 'customer_value', "VARCHAR(20) DEFAULT 'standard'");
     await addColumnIfMissing('customers', 'urgency_level', "VARCHAR(20) DEFAULT 'normal'");
     await addColumnIfMissing('customers', 'priority_score', 'INTEGER DEFAULT 50');
@@ -126,6 +137,8 @@ function runMigrations() {
     await addColumnIfMissing('customers', 'last_sentiment_label', 'VARCHAR(20)');
     await addColumnIfMissing('customers', 'revenue_stage', "VARCHAR(30) DEFAULT 'unassigned'");
     await addColumnIfMissing('customers', 'revenue_estimate', 'REAL DEFAULT 0');
+    await addColumnIfMissing('customers', 'campaign_name', 'VARCHAR(100)');
+    await addColumnIfMissing('customers', 'service_interest', 'VARCHAR(100)');
     await addColumnIfMissing('customers', 'last_competitor_mention', 'TEXT');
     await addColumnIfMissing('customers', 'data_retention_until', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'dnd_checked_at', 'TIMESTAMP');

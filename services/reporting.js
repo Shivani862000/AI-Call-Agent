@@ -13,6 +13,12 @@ function getTodayDateRange() {
   return getDateRangeForDays(1);
 }
 
+function getYesterdayDateRange() {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  return getDateRangeForDays(1, yesterday);
+}
+
 function getCurrentWeekDateRange() {
   const now = new Date();
   const day = now.getDay();
@@ -266,9 +272,215 @@ async function buildWeeklySummary() {
   };
 }
 
+function formatInr(value) {
+  return `Rs ${Number(value || 0).toFixed(0)}`;
+}
+
+async function buildOwnerDashboardData() {
+  const today = await buildReportData({ ...getTodayDateRange(), label: 'today' });
+  const yesterday = await buildReportData({ ...getYesterdayDateRange(), label: 'yesterday' });
+  const weekly = await buildWeeklySummary();
+
+  const estimatedAiCostPerCall = Number(process.env.ESTIMATED_AI_CALL_COST_INR || 8);
+  const estimatedStaffCostPerCall = Number(process.env.ESTIMATED_STAFF_CALL_COST_INR || 25);
+
+  const aiOpsCost = Number((today.total_calls || 0) * estimatedAiCostPerCall);
+  const staffOpsCost = Number((today.total_calls || 0) * estimatedStaffCostPerCall);
+  const roiMultiple = aiOpsCost > 0
+    ? Number(((today.revenue_pipeline_estimate || 0) / aiOpsCost).toFixed(1))
+    : 0;
+  const staffSaving = Math.max(staffOpsCost - aiOpsCost, 0);
+
+  const ownerAlerts = await dbAll(`
+    SELECT
+      calls.id AS call_id,
+      c.id AS customer_id,
+      c.name AS customer_name,
+      c.phone AS customer_phone,
+      calls.called_at,
+      calls.outcome,
+      calls.hot_lead_score,
+      calls.follow_up_task,
+      calls.next_action_at,
+      calls.analysis_summary,
+      calls.report_excerpt,
+      calls.sentiment_label,
+      calls.supervisor_alert_level,
+      calls.live_red_flag,
+      c.admin_review_required,
+      c.wrong_number_flag,
+      c.next_retry_at,
+      c.pending_follow_ups,
+      c.revenue_estimate
+    FROM calls
+    JOIN customers c ON c.id = calls.customer_id
+    WHERE calls.called_at >= DATETIME('now', '-7 days')
+    ORDER BY calls.called_at DESC
+    LIMIT 40
+  `);
+
+  const campaignConfigs = await dbAll(`
+    SELECT name, service_name, monthly_spend_inr, status
+    FROM campaign_configs
+    WHERE COALESCE(status, 'active') = 'active'
+    ORDER BY created_at DESC, name ASC
+  `);
+
+  const campaignPerformance = await dbAll(`
+    SELECT
+      COALESCE(campaign_name, 'Unassigned') AS campaign_name,
+      COUNT(*) AS total_customers,
+      SUM(CASE WHEN status IN ('hot_lead', 'completed', 'called', 'callback_scheduled') THEN 1 ELSE 0 END) AS active_leads,
+      SUM(CASE WHEN revenue_stage IN ('qualified', 'follow_up') THEN 1 ELSE 0 END) AS qualified_leads,
+      SUM(COALESCE(revenue_estimate, 0)) AS revenue_pipeline
+    FROM customers
+    GROUP BY COALESCE(campaign_name, 'Unassigned')
+    ORDER BY revenue_pipeline DESC, total_customers DESC
+  `);
+
+  const normalizedAlerts = ownerAlerts.map((item) => {
+    const outcome = String(item.outcome || '').toLowerCase();
+    const isHotLead = ['interested', 'hot_lead'].includes(outcome) || Number(item.hot_lead_score || 0) >= 85;
+    const isComplaint = String(item.sentiment_label || '').toLowerCase() === 'negative' || Number(item.live_red_flag || 0) === 1;
+    const needsCallback = outcome === 'callback';
+    const wrongNumber = Number(item.admin_review_required || 0) === 1 || Number(item.wrong_number_flag || 0) === 1;
+    const overdue = item.next_action_at && new Date(item.next_action_at).getTime() < Date.now();
+
+    let type = 'info';
+    let severity = 'low';
+    let headline = item.report_excerpt || item.analysis_summary || 'Owner attention recommended.';
+
+    if (isHotLead) {
+      type = 'hot_lead';
+      severity = 'high';
+      headline = `${item.customer_name} is showing strong buying intent.`;
+    } else if (isComplaint) {
+      type = 'reputation';
+      severity = 'high';
+      headline = `${item.customer_name} may be unhappy or complaint-prone.`;
+    } else if (needsCallback) {
+      type = 'callback';
+      severity = 'medium';
+      headline = `${item.customer_name} asked for a callback.`;
+    } else if (wrongNumber) {
+      type = 'admin_review';
+      severity = 'medium';
+      headline = `${item.customer_name} is marked for admin review.`;
+    } else if (overdue) {
+      type = 'stale_followup';
+      severity = 'medium';
+      headline = `${item.customer_name} has an overdue next action.`;
+    }
+
+    return {
+      call_id: item.call_id,
+      customer_id: item.customer_id,
+      customer_name: item.customer_name,
+      customer_phone: item.customer_phone,
+      type,
+      severity,
+      called_at: item.called_at,
+      next_action_at: item.next_action_at,
+      headline,
+      follow_up_task: item.follow_up_task,
+      summary: item.analysis_summary || item.report_excerpt || item.pending_follow_ups || 'No summary available.',
+      revenue_estimate: Number(item.revenue_estimate || 0),
+      hot_lead_score: Number(item.hot_lead_score || 0)
+    };
+  })
+    .filter((item) => item.type !== 'info')
+    .sort((a, b) => {
+      const severityRank = { high: 0, medium: 1, low: 2 };
+      const severityDelta = (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9);
+      if (severityDelta !== 0) return severityDelta;
+      return new Date(b.called_at || 0) - new Date(a.called_at || 0);
+    })
+    .slice(0, 12);
+
+  const complaintCount = normalizedAlerts.filter((item) => item.type === 'reputation').length;
+  const hotLeadCount = normalizedAlerts.filter((item) => item.type === 'hot_lead').length;
+  const callbackCount = normalizedAlerts.filter((item) => item.type === 'callback').length;
+  const staleLeadCount = normalizedAlerts.filter((item) => item.type === 'stale_followup').length;
+
+  const campaignRoi = campaignPerformance.map((campaign) => {
+    const config = campaignConfigs.find((item) => item.name === campaign.campaign_name);
+    const spend = Number(config?.monthly_spend_inr || 0);
+    const pipeline = Number(campaign.revenue_pipeline || 0);
+    return {
+      campaign_name: campaign.campaign_name,
+      service_name: config?.service_name || null,
+      spend_inr: spend,
+      active_leads: Number(campaign.active_leads || 0),
+      qualified_leads: Number(campaign.qualified_leads || 0),
+      revenue_pipeline: pipeline,
+      roi_multiple: spend > 0 ? Number((pipeline / spend).toFixed(1)) : 0
+    };
+  }).slice(0, 8);
+
+  const staleLeads = normalizedAlerts
+    .filter((item) => item.type === 'stale_followup' || item.type === 'callback')
+    .map((item) => ({
+      customer_name: item.customer_name,
+      next_action_at: item.next_action_at,
+      follow_up_task: item.follow_up_task,
+      severity: item.severity,
+      type: item.type,
+      revenue_estimate: item.revenue_estimate
+    }))
+    .slice(0, 8);
+
+  const ownerCards = [
+    { label: 'Yesterday calls', value: yesterday.total_calls || 0, tone: 'blue' },
+    { label: 'Hot leads', value: hotLeadCount || yesterday.hot_leads || 0, tone: 'green' },
+    { label: 'Complaint risks', value: complaintCount, tone: 'red' },
+    { label: 'Revenue pipeline', value: formatInr(today.revenue_pipeline_estimate || weekly.revenue_pipeline_estimate || 0), tone: 'purple' }
+  ];
+
+  const digestText = [
+    `Good morning. Yesterday ${yesterday.total_calls || 0} calls were completed.`,
+    `${hotLeadCount || yesterday.hot_leads || 0} hot leads need attention.`,
+    `Estimated revenue pipeline is ${formatInr(today.revenue_pipeline_estimate || weekly.revenue_pipeline_estimate || 0)}.`,
+    complaintCount ? `${complaintCount} complaint or negative-sentiment risk items were detected.` : 'No major complaint risk was detected.',
+    callbackCount ? `${callbackCount} callbacks are waiting.` : 'No callback backlog right now.'
+  ].join(' ');
+
+  return {
+    generated_at: new Date().toISOString(),
+    digest_text: digestText,
+    yesterday_snapshot: {
+      calls: yesterday.total_calls || 0,
+      hot_leads: yesterday.hot_leads || 0,
+      revenue_pipeline_estimate: yesterday.revenue_pipeline_estimate || 0,
+      complaints: complaintCount
+    },
+    roi_snapshot: {
+      ai_ops_cost_estimate: aiOpsCost,
+      staff_ops_cost_estimate: staffOpsCost,
+      estimated_saving_vs_staff: staffSaving,
+      revenue_pipeline_estimate: today.revenue_pipeline_estimate || 0,
+      roi_multiple: roiMultiple
+    },
+    owner_cards: ownerCards,
+    alerts: normalizedAlerts,
+    critical_alert_count: normalizedAlerts.filter((item) => item.severity === 'high').length,
+    campaign_roi: campaignRoi,
+    stale_leads: staleLeads,
+    weekly_summary: weekly.summary_text,
+    weekly_top_insights: weekly.top_insights || [],
+    best_slots: weekly.best_slots || [],
+    best_scripts: weekly.best_scripts || [],
+    common_objections: weekly.common_objections || [],
+    competitor_mentions: weekly.competitor_mentions || [],
+    callback_count: callbackCount,
+    stale_lead_count: staleLeadCount
+  };
+}
+
 module.exports = {
   getTodayDateRange,
+  getYesterdayDateRange,
   getCurrentWeekDateRange,
   buildReportData,
-  buildWeeklySummary
+  buildWeeklySummary,
+  buildOwnerDashboardData
 };

@@ -7,10 +7,14 @@ const WebSocket = require('ws');
 const twilio = require('twilio');
 const { initializeDatabase, dbRun, dbGet, dbAll } = require('./db');
 const customersRouter = require('./routes/customers');
+const campaignsRouter = require('./routes/campaigns');
 const feedbackRouter = require('./routes/feedback');
 const reportsRouter = require('./routes/reports');
 const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
 const { processCompletedCallPipeline } = require('./services/post-call-pipeline');
+const { buildOwnerDashboardData } = require('./services/reporting');
+const { sendSimpleEmail } = require('./services/email');
+const { sendWhatsAppMessage } = require('./services/twilio');
 const {
   buildPreCallIntelligence,
   computePriorityScore,
@@ -140,6 +144,71 @@ function validateConfig() {
 
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+  }
+}
+
+function getLocalDateKey(now = new Date()) {
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function shouldTriggerOwnerDigest(now = new Date()) {
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  return hour === 8 && minute < 10;
+}
+
+let ownerDigestRunning = false;
+
+async function runOwnerDigestTick() {
+  if (ownerDigestRunning || !shouldTriggerOwnerDigest()) {
+    return;
+  }
+
+  ownerDigestRunning = true;
+
+  try {
+    const todayKey = getLocalDateKey();
+    const state = await dbGet('SELECT value FROM app_state WHERE key = ?', ['owner_morning_digest_last_sent']);
+    if (state?.value === todayKey) {
+      return;
+    }
+
+    const digest = await buildOwnerDashboardData();
+    const lines = [
+      digest.digest_text,
+      '',
+      `Revenue pipeline: Rs ${Number(digest.roi_snapshot?.revenue_pipeline_estimate || 0).toFixed(0)}`,
+      `Estimated AI ops cost: Rs ${Number(digest.roi_snapshot?.ai_ops_cost_estimate || 0).toFixed(0)}`,
+      `Estimated staff saving: Rs ${Number(digest.roi_snapshot?.estimated_saving_vs_staff || 0).toFixed(0)}`,
+      '',
+      digest.alerts?.length
+        ? `Priority alerts:\n- ${digest.alerts.map((item) => `${item.customer_name}: ${item.headline}`).join('\n- ')}`
+        : 'Priority alerts: none'
+    ].join('\n');
+
+    if (process.env.OWNER_EMAIL) {
+      await sendSimpleEmail(process.env.OWNER_EMAIL, `CEO Morning Digest — ${todayKey}`, lines);
+    }
+
+    if (process.env.OWNER_PHONE && process.env.TWILIO_WHATSAPP_FROM) {
+      await sendWhatsAppMessage(process.env.OWNER_PHONE, digest.digest_text);
+    }
+
+    await dbRun(
+      `INSERT INTO app_state (key, value, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      ['owner_morning_digest_last_sent', todayKey, new Date().toISOString()]
+    );
+
+    console.log('[OWNER DIGEST] Morning digest sent successfully');
+  } catch (error) {
+    console.error('[OWNER DIGEST ERROR]', error.message);
+  } finally {
+    ownerDigestRunning = false;
   }
 }
 
@@ -712,6 +781,7 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/customers', customersRouter);
+app.use('/api/campaigns', campaignsRouter);
 app.use('/api/feedback', feedbackRouter);
 app.use('/api/reports', reportsRouter);
 
@@ -1762,8 +1832,18 @@ wss.on('connection', (twilioWs, req) => {
       });
     }, 15000);
 
+    setInterval(() => {
+      runOwnerDigestTick().catch((error) => {
+        console.error('[OWNER DIGEST ERROR]', error.message);
+      });
+    }, 60000);
+
     runSchedulerTick().catch((error) => {
       console.error('[SCHEDULER ERROR]', error.message);
+    });
+
+    runOwnerDigestTick().catch((error) => {
+      console.error('[OWNER DIGEST ERROR]', error.message);
     });
 
     server.listen(PORT, () => {
@@ -1772,6 +1852,7 @@ wss.on('connection', (twilioWs, req) => {
       console.log(`[SERVER] Call mode: ${CALL_MODE}`);
       console.log(`[SERVER] Realtime model: ${REALTIME_MODEL}`);
       console.log('[SERVER] Scheduler active: checks pending customers every 15 seconds');
+      console.log('[SERVER] Owner digest active: checks 8 AM morning delivery every 60 seconds');
       console.log('[SERVER] Admin UI: http://localhost:3000/admin.html');
       console.log('[SERVER] Ready. Trigger a call with: curl -X POST http://localhost:3000/call/start');
     });

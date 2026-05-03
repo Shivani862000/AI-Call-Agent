@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { generateReportPDF } = require('../services/pdf');
 const { sendEmailWithAttachment, sendSimpleEmail } = require('../services/email');
-const { buildReportData, buildWeeklySummary, getCurrentWeekDateRange } = require('../services/reporting');
+const { sendWhatsAppMessage } = require('../services/twilio');
+const { buildReportData, buildWeeklySummary, buildOwnerDashboardData, getCurrentWeekDateRange } = require('../services/reporting');
 
 function weeklyTimestampFilename(prefix = 'Weekly-Report') {
   return `${prefix}-${new Date().toISOString().replace(/[:.]/g, '-')}.pdf`;
@@ -32,6 +33,16 @@ router.get('/weekly-preview', async (req, res) => {
     res.json(report);
   } catch (error) {
     console.error('Error generating weekly preview:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/owner-preview', async (req, res) => {
+  try {
+    const report = await buildOwnerDashboardData();
+    res.json(report);
+  } catch (error) {
+    console.error('Error generating owner preview:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -142,6 +153,49 @@ router.post('/weekly-email', async (req, res) => {
     res.json({ success: true, message: 'Weekly summary emailed successfully', path: pdfPath });
   } catch (error) {
     console.error('Error emailing weekly summary:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/owner-digest/send', async (req, res) => {
+  try {
+    const digest = await buildOwnerDashboardData();
+    const lines = [
+      digest.digest_text,
+      '',
+      `Revenue pipeline: Rs ${Number(digest.roi_snapshot?.revenue_pipeline_estimate || 0).toFixed(0)}`,
+      `Estimated AI ops cost: Rs ${Number(digest.roi_snapshot?.ai_ops_cost_estimate || 0).toFixed(0)}`,
+      `Estimated saving vs staff: Rs ${Number(digest.roi_snapshot?.estimated_saving_vs_staff || 0).toFixed(0)}`,
+      '',
+      digest.alerts?.length
+        ? `Priority alerts:\n- ${digest.alerts.map((item) => `${item.customer_name}: ${item.headline}`).join('\n- ')}`
+        : 'Priority alerts: none'
+    ].join('\n');
+
+    let emailSent = false;
+    let whatsappSent = false;
+
+    if (process.env.OWNER_EMAIL) {
+      emailSent = await sendSimpleEmail(
+        process.env.OWNER_EMAIL,
+        `CEO Morning Digest — ${new Date().toLocaleDateString()}`,
+        lines
+      );
+    }
+
+    if (process.env.OWNER_PHONE && process.env.TWILIO_WHATSAPP_FROM) {
+      await sendWhatsAppMessage(process.env.OWNER_PHONE, digest.digest_text);
+      whatsappSent = true;
+    }
+
+    res.json({
+      success: emailSent || whatsappSent,
+      email_sent: emailSent,
+      whatsapp_sent: whatsappSent,
+      digest: digest.digest_text
+    });
+  } catch (error) {
+    console.error('Error sending owner digest:', error);
     res.status(500).json({ error: error.message });
   }
 });

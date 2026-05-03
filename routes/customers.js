@@ -28,7 +28,9 @@ function normalizeCustomerPayload(payload = {}) {
     outstanding_issues: String(payload.outstanding_issues || '').trim(),
     pending_follow_ups: String(payload.pending_follow_ups || '').trim(),
     revenue_stage: String(payload.revenue_stage || 'unassigned').trim().toLowerCase() || 'unassigned',
-    revenue_estimate: Number(payload.revenue_estimate || 0) || 0
+    revenue_estimate: Number(payload.revenue_estimate || 0) || 0,
+    campaign_name: String(payload.campaign_name || '').trim(),
+    service_interest: String(payload.service_interest || '').trim()
   };
 }
 
@@ -91,8 +93,9 @@ async function saveCustomer(payload) {
     `INSERT INTO customers (
       name, phone, preferred_slot, status, customer_value, urgency_level,
       preferred_language, preferred_dialect, do_not_call, consent_status,
-      outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
+      campaign_name, service_interest
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       payload.name,
       payload.phone,
@@ -107,7 +110,9 @@ async function saveCustomer(payload) {
       payload.outstanding_issues || null,
       payload.pending_follow_ups || null,
       payload.revenue_stage,
-      payload.revenue_estimate
+      payload.revenue_estimate,
+      payload.campaign_name || null,
+      payload.service_interest || null
     ]
   );
 }
@@ -234,7 +239,9 @@ router.put('/:id', async (req, res) => {
               outstanding_issues = ?,
               pending_follow_ups = ?,
               revenue_stage = ?,
-              revenue_estimate = ?
+              revenue_estimate = ?,
+              campaign_name = ?,
+              service_interest = ?
         WHERE id = ?`,
       [
         payload.name,
@@ -250,6 +257,8 @@ router.put('/:id', async (req, res) => {
         payload.pending_follow_ups || null,
         payload.revenue_stage,
         payload.revenue_estimate,
+        payload.campaign_name || null,
+        payload.service_interest || null,
         req.params.id
       ]
     );
