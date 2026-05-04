@@ -1,5 +1,153 @@
 # DigitalOcean Deployment Guide
 
+## Target Production Voice Flow
+
+This guide now reflects the recommended production direction for a low-latency Hindi voice agent:
+
+`Caller -> Twilio -> Deepgram Nova-2 -> orchestration server -> Gemini -> ElevenLabs -> Twilio -> caller`
+
+The current codebase still contains a direct Gemini realtime path, but the target production flow on DigitalOcean should be this layered design because it gives cleaner turn detection, better barge-in control, and a safer post-call pipeline.
+
+### Layer 1. Twilio
+Keep Twilio as the telephony edge:
+
+- outbound calling
+- Media Streams WebSocket
+- call recording
+- status and recording webhooks
+
+Recommended Media Stream assumptions:
+
+- `track: inbound_track`
+- `encoding: audio/x-mulaw`
+- `sample_rate: 8000`
+- `frame size: 20ms`
+
+Twilio should remain the only PSTN-facing component.
+
+### Layer 2. Deepgram Nova-2
+Use Deepgram as the real-time speech-to-text layer and feed it directly from the Twilio stream.
+
+
+
+### Layer 3. Orchestration Server
+This is the real brain of the system. On DigitalOcean, this should run as a stateful Node.js service behind Nginx and own the entire conversation loop.
+
+Primary loop:
+
+```text
+Caller speaks
+-> Twilio streams inbound mu-law audio
+-> Deepgram emits interim and final transcript events
+-> orchestration server builds prompt from system prompt + history + latest final turn
+-> Gemini streams text response
+-> ElevenLabs streams ulaw_8000 audio
+-> Twilio plays audio back to caller
+```
+
+Core states to manage:
+
+- `LISTENING`: Twilio and Deepgram active, waiting for caller speech
+- `PROCESSING`: final transcript locked, Gemini generating response
+- `SPEAKING`: ElevenLabs sending synthesized audio back to Twilio
+- `BARGE_IN`: caller interrupts while bot audio is still playing
+
+
+### Layer 4. Gemini
+Keep Gemini as the conversation engine, but use streaming text generation rather than waiting for a full completion.
+
+Guidance:
+
+- keep temperature low for more stable Hindi responses
+- stream partial text to TTS as soon as it is usable
+- keep prompt assembly inside the orchestration layer, not inside Twilio handlers
+
+### Layer 5. ElevenLabs v3
+Use ElevenLabs as the low-latency Hindi TTS layer and return audio to Twilio in `ulaw_8000` so there is no audio conversion hop in the middle.
+
+
+
+Why this is preferred:
+
+- Twilio already wants telephony-friendly mu-law audio
+- avoiding PCM conversion reduces latency and moving parts
+- the orchestration service can pipe TTS output straight back onto the Twilio stream
+
+### Layer 6. Post-Call Pipeline
+All post-call work should move to an async queue. Do not run it on the WebSocket path.
+
+Recommended sequence:
+
+```text
+Call ends
+-> Twilio recording/status webhook
+-> enqueue post-call job
+-> download recording from Twilio
+-> store durable copy in object storage
+-> run batch transcription
+-> run transcript analysis
+-> upsert structured call + feedback data
+-> trigger alerts if negative sentiment or escalation conditions are met
+```
+
+Suggested jobs:
+
+1. `recording.download`
+2. `transcript.batch`
+3. `analysis.run`
+4. `feedback.upsert`
+5. `alert.evaluate`
+
+## Latency Budget
+
+Target end-to-end experience:
+
+- caller stops speaking: `0ms`
+- Deepgram endpointing: `+300ms`
+- final transcript event: `+100ms`
+- Gemini first token: `+400ms`
+- ElevenLabs first audio: `+200ms`
+- caller hears response: about `1.0s`
+
+This is the right target for a human-feeling interruptible voice bot.
+
+## Production Must-Haves
+
+Non-negotiable controls for this design:
+
+| Concern | Required handling |
+| --- | --- |
+| Deepgram outage | fallback STT provider or safe transfer path |
+| ElevenLabs latency spike | fallback TTS provider or canned voice response |
+| Gemini transient failure | retry up to 2 times, then safe fallback response |
+| WebSocket leak | timeout, heartbeat, and per-call cleanup |
+| Cost runaway | per-call budget cap and alerting |
+| Compliance | consent messaging, retention policy, opt-out persistence |
+
+## DigitalOcean Topology For This Flow
+
+For a first production deployment of this architecture:
+
+- `1` Ubuntu Droplet for the app and live orchestration server
+- `1` Redis instance for queueing
+- `1` PostgreSQL database for structured data
+- object storage for recordings
+- Nginx reverse proxy with WebSocket support
+- PM2 or systemd for process supervision
+
+Recommended service split:
+
+```text
+Nginx
+  -> web/orchestration process
+  -> worker process
+  -> Redis
+  -> PostgreSQL
+  -> object storage
+```
+
+For phase 1 on a single Droplet, the web process and worker can run on the same VM. As call volume grows, split the worker first.
+
 ## Fastest Recommended Path
 If you want the quickest stable deployment for the current codebase, use:
 
@@ -89,6 +237,10 @@ PORT=3000
 NODE_ENV=production
 DATABASE_URL=./feedback.db
 
+REDIS_URL=
+POSTGRES_URL=
+OBJECT_STORAGE_BUCKET=
+
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_PHONE_NUMBER=
@@ -98,6 +250,12 @@ CALL_MODE=gemini
 GEMINI_API_KEY=
 GEMINI_MODEL=models/gemini-3.1-flash-live-preview
 GEMINI_VOICE=Kore
+
+DEEPGRAM_API_KEY=
+
+ELEVENLABS_API_KEY=
+ELEVENLABS_VOICE_ID=
+ELEVENLABS_MODEL_ID=eleven_turbo_v2_5
 
 WEBHOOK_URL=https://calls.yourdomain.com
 NGROK_URL=https://calls.yourdomain.com
@@ -113,6 +271,7 @@ Important:
 
 - do not keep ngrok URL here in production
 - use final live domain only
+- if you adopt the target production flow, treat `POSTGRES_URL`, `REDIS_URL`, and object storage as required rather than optional
 
 ### Step 8. Test app directly
 
@@ -199,7 +358,9 @@ You should verify:
 
 - TwiML request received
 - media stream connected
-- Gemini session connected
+- Deepgram connection established
+- Gemini streaming started
+- ElevenLabs audio returned to caller
 - recording callback received
 - transcript/analysis pipeline completed
 
@@ -238,6 +399,23 @@ The current app has these production characteristics:
 - internal scheduler running in-process every 15 seconds
 - SQLite database via [db.js](/Users/shivaniverma/Desktop/testing/db.js)
 - temporary local recording download path: `/tmp/feedback-call-recordings`
+
+## Current vs Target Architecture
+
+Current runtime in code:
+
+- Twilio -> app -> Gemini realtime
+- SQLite for application data
+- in-process scheduler
+- post-call work triggered from the main app runtime
+
+Target runtime for production hardening:
+
+- Twilio -> Deepgram -> orchestration state machine -> Gemini streaming -> ElevenLabs streaming -> Twilio
+- Redis-backed async queue for post-call jobs
+- PostgreSQL for structured metadata
+- object storage for recordings
+- worker separation from the live call path
 
 Because of this, the safest deployment path right now is:
 
@@ -296,7 +474,9 @@ For phase 2:
 
 ### 4. External APIs
 - Twilio
+- Deepgram
 - Gemini API
+- ElevenLabs
 - SendGrid
 
 ## Ports
@@ -317,6 +497,10 @@ PORT=3000
 NODE_ENV=production
 DATABASE_URL=./feedback.db
 
+REDIS_URL=
+POSTGRES_URL=
+OBJECT_STORAGE_BUCKET=
+
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_PHONE_NUMBER=
@@ -326,6 +510,12 @@ CALL_MODE=gemini
 GEMINI_API_KEY=
 GEMINI_MODEL=models/gemini-3.1-flash-live-preview
 GEMINI_VOICE=Kore
+
+DEEPGRAM_API_KEY=
+
+ELEVENLABS_API_KEY=
+ELEVENLABS_VOICE_ID=
+ELEVENLABS_MODEL_ID=eleven_turbo_v2_5
 
 WEBHOOK_URL=https://calls.yourdomain.com
 NGROK_URL=https://calls.yourdomain.com
@@ -433,11 +623,15 @@ Check:
 - `https://calls.yourdomain.com/admin.html`
 - `https://calls.yourdomain.com/api/customers`
 - place one test call
+- verify Twilio Media Stream connects
+- verify Deepgram transcript events arrive
+- verify Gemini starts streaming before full completion
+- verify ElevenLabs audio returns to the caller
 - verify recording callback works
 - verify `/api/reports/owner-preview`
 
 ## Nginx WebSocket Note
-This app requires WebSocket proxying for Twilio media streams and Gemini bridge stability.
+This app requires WebSocket proxying for Twilio media streams, Deepgram connectivity, and the live orchestration bridge.
 
 Do not omit:
 
@@ -511,11 +705,13 @@ Phase 2:
 ## Recommended DigitalOcean Final Architecture
 
 - App: Droplet or App Platform
+- Live state/orchestration: Node.js process behind Nginx
+- Worker queue: Bull + Redis
 - DB: Managed PostgreSQL
 - Storage: Spaces
 - TLS: Nginx + Let's Encrypt
 - Process management: PM2/systemd
-- Monitoring: PM2 + DO monitoring
+- Monitoring: PM2 + DO monitoring + Sentry/Grafana or Datadog
 
 ## Go/No-Go Recommendation
 

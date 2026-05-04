@@ -10,6 +10,7 @@ const customersRouter = require('./routes/customers');
 const campaignsRouter = require('./routes/campaigns');
 const feedbackRouter = require('./routes/feedback');
 const reportsRouter = require('./routes/reports');
+const agentsRouter = require('./routes/agents');
 const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
 const { processCompletedCallPipeline } = require('./services/post-call-pipeline');
 const { buildOwnerDashboardData } = require('./services/reporting');
@@ -38,11 +39,21 @@ const REALTIME_MODEL = AI_PROVIDER === 'gemini' ? GEMINI_MODEL : OPENAI_REALTIME
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
 const PUBLIC_BASE_URL = (process.env.NGROK_URL || process.env.WEBHOOK_URL || '').replace(/\/$/, '');
 const GEMINI_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+const ELEVENLABS_MODEL_ID = process.env.ELEVENLABS_MODEL_ID || 'eleven_turbo_v2_5';
+const VOICE_PIPELINE = process.env.VOICE_PIPELINE
+  || ((process.env.DEEPGRAM_API_KEY && process.env.ELEVENLABS_API_KEY && process.env.GEMINI_API_KEY) ? 'orchestrated' : 'legacy');
+const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
 const liveCallState = new Map();
 
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-function buildAgentSystemPrompt(clientName, customerName) {
+function applyAgentTemplate(template, replacements = {}) {
+  return String(template || '').replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, key) => {
+    return replacements[key] ?? '';
+  });
+}
+
+function buildDefaultAgentSystemPrompt(clientName, customerName) {
   return `
 You are Priya, a warm and professional customer feedback agent calling on behalf of ${clientName},
 a diagnostic and medical collection center.
@@ -110,7 +121,20 @@ RULES:
 `.trim();
 }
 
-function buildOpeningPrompt(clientName, customerName) {
+function buildAgentSystemPrompt(clientName, customerName, agentConfig = null) {
+  if (agentConfig?.system_prompt) {
+    return applyAgentTemplate(agentConfig.system_prompt, {
+      client_name: clientName,
+      customer_name: customerName,
+      language: agentConfig.language || 'hi',
+      agent_name: agentConfig.name || 'Agent'
+    });
+  }
+
+  return buildDefaultAgentSystemPrompt(clientName, customerName);
+}
+
+function buildDefaultOpeningPrompt(clientName, customerName) {
   return [
     `Start the phone call now as Priya from ${clientName}.`,
     `The customer name is ${customerName}.`,
@@ -119,6 +143,28 @@ function buildOpeningPrompt(clientName, customerName) {
     'Keep every reply short, warm, phone-friendly, and in Hindi only.',
     'Speak clearly and a little slowly.'
   ].join(' ');
+}
+
+function buildOpeningPrompt(clientName, customerName, agentConfig = null) {
+  if (agentConfig?.opening_prompt) {
+    return applyAgentTemplate(agentConfig.opening_prompt, {
+      client_name: clientName,
+      customer_name: customerName,
+      language: agentConfig.language || 'hi',
+      agent_name: agentConfig.name || 'Agent'
+    });
+  }
+
+  return buildDefaultOpeningPrompt(clientName, customerName);
+}
+
+async function getAgentConfigById(agentId) {
+  if (!agentId) return null;
+  return dbGet('SELECT * FROM agents WHERE id = ? AND is_active = 1', [agentId]);
+}
+
+async function getDefaultAgentConfig() {
+  return dbGet('SELECT * FROM agents WHERE is_default = 1 AND is_active = 1 ORDER BY id ASC LIMIT 1');
 }
 
 function validateConfig() {
@@ -136,6 +182,18 @@ function validateConfig() {
 
   if (CALL_MODE === 'gemini' && !process.env.GEMINI_API_KEY) {
     missing.push('GEMINI_API_KEY');
+  }
+
+  if (USE_ORCHESTRATED_PIPELINE && !process.env.DEEPGRAM_API_KEY) {
+    missing.push('DEEPGRAM_API_KEY');
+  }
+
+  if (USE_ORCHESTRATED_PIPELINE && !process.env.ELEVENLABS_API_KEY) {
+    missing.push('ELEVENLABS_API_KEY');
+  }
+
+  if (USE_ORCHESTRATED_PIPELINE && !process.env.ELEVENLABS_VOICE_ID) {
+    missing.push('ELEVENLABS_VOICE_ID');
   }
 
   if (!PUBLIC_BASE_URL) {
@@ -492,12 +550,169 @@ function usesGeminiRealtimeTextInput(modelName) {
   return String(modelName || '').includes('gemini-3.1');
 }
 
-async function placeRealtimeCall({ customerPhone, customerName, customerId, clientName }) {
+function createDeepgramListenUrl() {
+  const url = new URL('wss://api.deepgram.com/v1/listen');
+  url.searchParams.set('model', 'nova-2');
+  url.searchParams.set('language', 'hi');
+  url.searchParams.set('interim_results', 'true');
+  url.searchParams.set('endpointing', '300');
+  url.searchParams.set('smart_format', 'true');
+  url.searchParams.set('encoding', 'mulaw');
+  url.searchParams.set('sample_rate', '8000');
+  url.searchParams.set('channels', '1');
+  return url.toString();
+}
+
+function buildGeminiContentsFromTranscript(transcript = [], nextUserTurn = null) {
+  const contents = transcript.map((turn) => ({
+    role: turn.role === 'AGENT' ? 'model' : 'user',
+    parts: [{ text: turn.text }]
+  }));
+
+  const normalizedNextUserTurn = String(nextUserTurn || '').trim();
+  const lastContent = contents[contents.length - 1];
+  const lastText = String(lastContent?.parts?.[0]?.text || '').trim();
+
+  if (normalizedNextUserTurn && !(lastContent?.role === 'user' && lastText === normalizedNextUserTurn)) {
+    contents.push({
+      role: 'user',
+      parts: [{ text: normalizedNextUserTurn }]
+    });
+  }
+
+  return contents;
+}
+
+function extractGeminiTextFromChunk(payload) {
+  const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
+  const texts = [];
+
+  candidates.forEach((candidate) => {
+    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    parts.forEach((part) => {
+      if (typeof part?.text === 'string' && part.text) {
+        texts.push(part.text);
+      }
+    });
+  });
+
+  return texts.join('');
+}
+
+function shouldFlushSpeechSegment(buffer) {
+  const text = String(buffer || '').trim();
+  if (!text) {
+    return false;
+  }
+
+  return /[.!?।]\s*$/.test(text) || text.length >= 140;
+}
+
+async function streamGeminiResponse({ systemPrompt, contents, onTextChunk, signal, modelName }) {
+  const normalizedModelName = String(modelName || REALTIME_MODEL || '').replace(/^models\//, '');
+  const modelPath = encodeURIComponent(normalizedModelName);
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelPath}:streamGenerateContent?alt=sse&key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: systemPrompt }]
+      },
+      generationConfig: {
+        temperature: 0.3
+      },
+      contents
+    }),
+    signal
+  });
+
+  if (!response.ok || !response.body) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`Gemini streaming failed (${response.status}): ${errorText || response.statusText}`);
+  }
+
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split('\n\n');
+    buffer = events.pop() || '';
+
+    for (const eventBlock of events) {
+      const lines = eventBlock
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const dataLine = lines.find((line) => line.startsWith('data:'));
+      if (!dataLine) {
+        continue;
+      }
+
+      const payloadText = dataLine.slice(5).trim();
+      if (!payloadText || payloadText === '[DONE]') {
+        continue;
+      }
+
+      const payload = JSON.parse(payloadText);
+      const textChunk = extractGeminiTextFromChunk(payload);
+      if (textChunk) {
+        await onTextChunk(textChunk);
+      }
+    }
+  }
+}
+
+async function streamElevenLabsAudio({ text, signal, onAudioChunk }) {
+  const voiceId = encodeURIComponent(process.env.ELEVENLABS_VOICE_ID);
+  console.log(`[ELEVENLABS] Streaming audio for ${text.length} chars`);
+  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?output_format=ulaw_8000&optimize_streaming_latency=4`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'xi-api-key': process.env.ELEVENLABS_API_KEY,
+      Accept: 'application/octet-stream'
+    },
+    body: JSON.stringify({
+      text,
+      model_id: ELEVENLABS_MODEL_ID
+    }),
+    signal
+  });
+
+  if (!response.ok || !response.body) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`ElevenLabs streaming failed (${response.status}): ${errorText || response.statusText}`);
+  }
+
+  const reader = response.body.getReader();
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    if (value?.length) {
+      await onAudioChunk(Buffer.from(value));
+    }
+  }
+}
+
+async function placeRealtimeCall({ customerPhone, customerName, customerId, clientName, agentId }) {
   const safeCustomerName = encodeURIComponent(customerName || process.env.CUSTOMER_NAME || 'Customer');
   const safeClientName = encodeURIComponent(clientName || CLIENT_NAME);
   const safeCustomerId = customerId ? `&customerId=${encodeURIComponent(String(customerId))}` : '';
+  const safeAgentId = agentId ? `&agentId=${encodeURIComponent(String(agentId))}` : '';
 
-  const twimlUrl = `${PUBLIC_BASE_URL}/call/twiml?customerName=${safeCustomerName}&clientName=${safeClientName}${safeCustomerId}`;
+  const twimlUrl = `${PUBLIC_BASE_URL}/call/twiml?customerName=${safeCustomerName}&clientName=${safeClientName}${safeCustomerId}${safeAgentId}`;
   const statusUrl = `${PUBLIC_BASE_URL}/call/status${customerId ? `?customerId=${encodeURIComponent(String(customerId))}` : ''}`;
   const recordingStatusUrl = `${PUBLIC_BASE_URL}/call/recording-status${customerId ? `?customerId=${encodeURIComponent(String(customerId))}` : ''}`;
 
@@ -663,6 +878,7 @@ async function triggerScheduledCalls() {
 
   for (const customer of hydratedCustomers) {
     try {
+      const agentConfig = customer.default_agent_id ? await getAgentConfigById(customer.default_agent_id) : await getDefaultAgentConfig();
       const blockedReason = shouldBlockCustomerCall(customer);
       if (blockedReason) {
         console.log(`[SCHEDULER] Skipping ${customer.name}: ${blockedReason}`);
@@ -673,15 +889,26 @@ async function triggerScheduledCalls() {
         customerPhone: customer.phone,
         customerName: customer.name,
         customerId: customer.id,
-        clientName: CLIENT_NAME
+        clientName: agentConfig?.client_name || CLIENT_NAME,
+        agentId: agentConfig?.id || null
       });
 
       await dbRun(
         `INSERT INTO calls (
-          customer_id, outcome, twilio_sid, called_at, hot_lead_score,
+          customer_id, agent_id, outcome, twilio_sid, called_at, hot_lead_score,
           consent_message_played, call_script_version, supervisor_alert_level
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [customer.id, 'scheduled_initiated', call.sid, new Date().toISOString(), customer.priority_score || computePriorityScore(customer), 1, 'hindi-feedback-v1', 'normal']
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          customer.id,
+          agentConfig?.id || null,
+          'scheduled_initiated',
+          call.sid,
+          new Date().toISOString(),
+          customer.priority_score || computePriorityScore(customer),
+          1,
+          agentConfig?.slug || 'hindi-feedback-v1',
+          'normal'
+        ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
       console.log(`[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`);
@@ -770,6 +997,7 @@ app.get('/health', (req, res) => {
   res.json({
     ok: true,
     mode: CALL_MODE,
+    pipeline: VOICE_PIPELINE,
     model: REALTIME_MODEL,
     publicBaseUrl: PUBLIC_BASE_URL,
     timestamp: new Date().toISOString()
@@ -784,19 +1012,22 @@ app.use('/api/customers', customersRouter);
 app.use('/api/campaigns', campaignsRouter);
 app.use('/api/feedback', feedbackRouter);
 app.use('/api/reports', reportsRouter);
+app.use('/api/agents', agentsRouter);
 
 app.post('/call/start', async (req, res) => {
   try {
     const customerPhone = req.body.customerPhone || process.env.CUSTOMER_PHONE;
     const customerName = req.body.customerName || process.env.CUSTOMER_NAME;
     const requestedCustomerId = req.body.customerId;
-    const clientName = req.body.clientName || CLIENT_NAME;
+    const requestedAgentId = Number(req.body.agentId || req.query.agentId || 0) || null;
     let customer = await ensureCustomerForCall({
       customerId: requestedCustomerId,
       customerName,
       customerPhone
     });
     customer = await hydratePreCallIntelligence(customer);
+    const agentConfig = requestedAgentId ? await getAgentConfigById(requestedAgentId) : await getDefaultAgentConfig();
+    const clientName = req.body.clientName || agentConfig?.client_name || CLIENT_NAME;
 
     const blockedReason = shouldBlockCustomerCall(customer);
     if (blockedReason) {
@@ -808,20 +1039,31 @@ app.post('/call/start', async (req, res) => {
       customerPhone,
       customerName: customer.name || customerName,
       customerId: customer.id,
-      clientName
+      clientName,
+      agentId: agentConfig?.id || null
     });
 
     const result = await dbRun(
       `INSERT INTO calls (
-        customer_id, outcome, twilio_sid, called_at, hot_lead_score,
+        customer_id, agent_id, outcome, twilio_sid, called_at, hot_lead_score,
         consent_message_played, call_script_version, supervisor_alert_level
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [customer.id, 'initiated', call.sid, new Date().toISOString(), customer.priority_score || computePriorityScore(customer), 1, 'hindi-feedback-v1', 'normal']
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        customer.id,
+        agentConfig?.id || null,
+        'initiated',
+        call.sid,
+        new Date().toISOString(),
+        customer.priority_score || computePriorityScore(customer),
+        1,
+        agentConfig?.slug || 'hindi-feedback-v1',
+        'normal'
+      ]
     );
     await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
 
     console.log(`[CALL STARTED] SID: ${call.sid}`);
-    res.json({ success: true, sid: call.sid, callId: result.lastID, customerId: customer.id });
+    res.json({ success: true, sid: call.sid, callId: result.lastID, customerId: customer.id, agentId: agentConfig?.id || null });
   } catch (error) {
     console.error('[ERROR starting call]', error.message);
     res.status(500).json({ success: false, error: error.message });
@@ -831,6 +1073,7 @@ app.post('/call/start', async (req, res) => {
 app.get('/call/twiml', (req, res) => {
   const customerName = req.query.customerName || process.env.CUSTOMER_NAME;
   const clientName = req.query.clientName || CLIENT_NAME;
+  const agentId = req.query.agentId || '';
 
   if (CALL_MODE === 'scripted') {
     console.log('[TWIML] Serving scripted TwiML flow');
@@ -843,10 +1086,11 @@ app.get('/call/twiml', (req, res) => {
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="${xmlEscape(streamUrl)}">
+    <Stream url="${xmlEscape(streamUrl)}" track="inbound_track">
       <Parameter name="customerName" value="${xmlEscape(customerName)}" />
       <Parameter name="clientName" value="${xmlEscape(clientName)}" />
       <Parameter name="customerId" value="${xmlEscape(req.query.customerId || '')}" />
+      <Parameter name="agentId" value="${xmlEscape(agentId)}" />
     </Stream>
   </Connect>
 </Response>`;
@@ -958,6 +1202,8 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
     }
 
     customer = await hydratePreCallIntelligence(customer);
+    const requestedAgentId = Number(req.body?.agentId || req.query.agentId || customer.default_agent_id || 0) || null;
+    const agentConfig = requestedAgentId ? await getAgentConfigById(requestedAgentId) : await getDefaultAgentConfig();
     const blockedReason = shouldBlockCustomerCall(customer);
     if (blockedReason) {
       return res.status(409).json({ error: blockedReason });
@@ -967,19 +1213,30 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
       customerPhone: customer.phone,
       customerName: customer.name,
       customerId: customer.id,
-      clientName: CLIENT_NAME
+      clientName: agentConfig?.client_name || CLIENT_NAME,
+      agentId: agentConfig?.id || null
     });
 
     const result = await dbRun(
       `INSERT INTO calls (
-        customer_id, outcome, twilio_sid, called_at, hot_lead_score,
+        customer_id, agent_id, outcome, twilio_sid, called_at, hot_lead_score,
         consent_message_played, call_script_version, supervisor_alert_level
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [customer.id, 'initiated', call.sid, new Date().toISOString(), customer.priority_score || computePriorityScore(customer), 1, 'hindi-feedback-v1', 'normal']
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        customer.id,
+        agentConfig?.id || null,
+        'initiated',
+        call.sid,
+        new Date().toISOString(),
+        customer.priority_score || computePriorityScore(customer),
+        1,
+        agentConfig?.slug || 'hindi-feedback-v1',
+        'normal'
+      ]
     );
 
     await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
-    res.json({ message: 'Call initiated', callId: result.lastID, sid: call.sid });
+    res.json({ message: 'Call initiated', callId: result.lastID, sid: call.sid, agentId: agentConfig?.id || null, agentName: agentConfig?.name || null });
   } catch (error) {
     console.error('[API CALL INITIATE ERROR]', error.message);
     res.status(500).json({ error: error.message });
@@ -992,8 +1249,11 @@ app.get('/api/calls/recent', async (req, res) => {
       `SELECT
          calls.id,
          calls.customer_id,
+         calls.agent_id,
          customers.name AS customer_name,
          customers.phone AS customer_phone,
+         agents.name AS agent_name,
+         agents.slug AS agent_slug,
          calls.called_at,
          calls.outcome,
          calls.twilio_sid,
@@ -1027,6 +1287,7 @@ app.get('/api/calls/recent', async (req, res) => {
          calls.competitor_mentions_json
        FROM calls
        JOIN customers ON customers.id = calls.customer_id
+       LEFT JOIN agents ON agents.id = calls.agent_id
        ORDER BY calls.id DESC
        LIMIT 25`
     );
@@ -1291,28 +1552,38 @@ app.get('/api/calls/:callId/transcript', async (req, res) => {
   }
 });
 
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server, path: '/call/stream' });
-
-wss.on('connection', (twilioWs, req) => {
+function setupOrchestratedStream(twilioWs, req) {
   console.log('[STREAM] Twilio Media Stream connected');
   console.log(`[STREAM] Upgrade request from ${req.socket.remoteAddress || 'unknown'}`);
+  console.log('[STREAM] Voice pipeline: orchestrated');
 
-  let aiWs;
   let streamSid;
   let transcriptPrinted = false;
   const transcript = [];
-  let geminiSetupComplete = false;
-  let aiSessionStarting = false;
   let activeCustomerName = process.env.CUSTOMER_NAME || 'Customer';
   let activeClientName = CLIENT_NAME;
+  let activeAgentId = null;
+  let activeAgentConfig = null;
   let activeCustomerId = null;
   let activeCallSid = null;
   let activeCallId = null;
   let transcriptPersisted = false;
+  let state = 'LISTENING';
+  let callClosed = false;
+  let greetingStarted = false;
+  let deepgramReady = false;
+  let currentGeminiController = null;
+  let currentElevenLabsController = null;
+  let speechDrainRunning = false;
+  let assistantSequence = Promise.resolve();
+  let pendingSpeechSegments = [];
+  let finalTranscriptBuffer = [];
+  let interruptedGeneration = false;
+  let deepgramWs = null;
 
-  const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName);
-  const getActiveOpeningPrompt = () => buildOpeningPrompt(activeClientName, activeCustomerName);
+  const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName, activeAgentConfig);
+  const getActiveOpeningPrompt = () => buildOpeningPrompt(activeClientName, activeCustomerName, activeAgentConfig);
+  const getActiveModelName = () => activeAgentConfig?.llm_model || REALTIME_MODEL;
 
   const printTranscriptOnce = () => {
     if (!transcriptPrinted) {
@@ -1361,7 +1632,11 @@ wss.on('connection', (twilioWs, req) => {
       live_sentiment_score: 0,
       red_flag: false,
       escalation_requested: false,
-      status: 'active'
+      status: 'active',
+      pipeline: 'orchestrated',
+      voice_state: state,
+      agent_id: activeAgentId,
+      agent_name: activeAgentConfig?.name || null
     };
 
     liveCallState.set(activeCallSid, {
@@ -1369,6 +1644,518 @@ wss.on('connection', (twilioWs, req) => {
       ...partial,
       customer_name: activeCustomerName,
       customer_id: activeCustomerId,
+      agent_id: activeAgentId,
+      agent_name: activeAgentConfig?.name || null,
+      call_id: activeCallId,
+      pipeline: 'orchestrated',
+      voice_state: state,
+      transcript_preview: transcript.slice(-4).map((turn) => `[${turn.role}] ${turn.text}`).join('\n')
+    });
+
+    if (activeCallId) {
+      const nextState = liveCallState.get(activeCallSid);
+      await dbRun(
+        `UPDATE calls
+            SET live_sentiment_score = ?,
+                live_sentiment_label = ?,
+                live_red_flag = ?,
+                supervisor_alert_level = ?,
+                human_escalation_requested = ?
+          WHERE id = ?`,
+        [
+          nextState.live_sentiment_score || 0,
+          nextState.live_sentiment_label || 'neutral',
+          nextState.red_flag ? 1 : 0,
+          nextState.red_flag ? 'high' : 'normal',
+          nextState.escalation_requested ? 1 : 0,
+          activeCallId
+        ]
+      );
+    }
+  }
+
+  function sendAudioToTwilio(base64Payload) {
+    if (!streamSid || !base64Payload || callClosed || twilioWs.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    twilioWs.send(JSON.stringify({
+      event: 'media',
+      streamSid,
+      media: { payload: base64Payload }
+    }));
+  }
+
+  function clearTwilioPlaybackBuffer() {
+    if (!streamSid || callClosed || twilioWs.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    twilioWs.send(JSON.stringify({
+      event: 'clear',
+      streamSid
+    }));
+  }
+
+  async function evaluateAndStoreSentiment(text) {
+    const sentiment = evaluateLiveSentimentLabel(text);
+    const redFlag = sentiment.label === 'negative';
+
+    await refreshLiveCallState({
+      live_sentiment_label: sentiment.label,
+      live_sentiment_score: sentiment.score,
+      red_flag: redFlag
+    });
+
+    if (redFlag && activeCallId) {
+      await createSupervisorEvent({
+        dbRun,
+        callId: activeCallId,
+        eventType: 'live_negative_signal',
+        severity: 'high',
+        payload: { transcript: text }
+      });
+    }
+  }
+
+  function enqueueSpeechSegment(text) {
+    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!normalized || interruptedGeneration || callClosed) {
+      return;
+    }
+
+    pendingSpeechSegments.push(normalized);
+    if (!speechDrainRunning) {
+      drainSpeechQueue().catch((error) => {
+        console.error('[ELEVENLABS DRAIN ERROR]', error.message);
+      });
+    }
+  }
+
+  async function drainSpeechQueue() {
+    if (speechDrainRunning) {
+      return;
+    }
+
+    speechDrainRunning = true;
+
+    try {
+      while (pendingSpeechSegments.length && !callClosed && !interruptedGeneration) {
+        const segment = pendingSpeechSegments.shift();
+        currentElevenLabsController = new AbortController();
+        state = 'SPEAKING';
+        await refreshLiveCallState({ status: 'active' });
+
+        try {
+          await streamElevenLabsAudio({
+            text: segment,
+            signal: currentElevenLabsController.signal,
+            onAudioChunk: async (chunk) => {
+              sendAudioToTwilio(chunk.toString('base64'));
+            }
+          });
+        } catch (error) {
+          if (error.name === 'AbortError') {
+            console.log('[ELEVENLABS] Audio stream interrupted');
+            break;
+          }
+
+          throw error;
+        }
+      }
+    } finally {
+      currentElevenLabsController = null;
+      speechDrainRunning = false;
+      if (!callClosed && state !== 'BARGE_IN') {
+        state = 'LISTENING';
+        refreshLiveCallState({ status: 'active' }).catch(() => {});
+      }
+    }
+  }
+
+  function interruptAssistant(reason) {
+    if (!['SPEAKING', 'PROCESSING'].includes(state)) {
+      return;
+    }
+
+    console.log(`[BARGE-IN] ${reason}`);
+    interruptedGeneration = true;
+    state = 'BARGE_IN';
+    pendingSpeechSegments = [];
+    clearTwilioPlaybackBuffer();
+
+    if (currentGeminiController) {
+      currentGeminiController.abort();
+      currentGeminiController = null;
+    }
+
+    if (currentElevenLabsController) {
+      currentElevenLabsController.abort();
+      currentElevenLabsController = null;
+    }
+
+    refreshLiveCallState({ status: 'active' }).catch(() => {});
+  }
+
+  async function generateAssistantTurn(userTurnText) {
+    if (callClosed) {
+      return;
+    }
+
+    interruptedGeneration = false;
+    pendingSpeechSegments = [];
+    currentGeminiController = new AbortController();
+    state = 'PROCESSING';
+    await refreshLiveCallState({ status: 'active' });
+
+    let fullResponse = '';
+    let speechBuffer = '';
+
+    try {
+      await streamGeminiResponse({
+        systemPrompt: getActiveSystemPrompt(),
+        contents: buildGeminiContentsFromTranscript(transcript, userTurnText),
+        signal: currentGeminiController.signal,
+        modelName: getActiveModelName(),
+        onTextChunk: async (textChunk) => {
+          if (interruptedGeneration || callClosed) {
+            return;
+          }
+
+          fullResponse += textChunk;
+          speechBuffer += textChunk;
+
+          if (shouldFlushSpeechSegment(speechBuffer)) {
+            enqueueSpeechSegment(speechBuffer);
+            speechBuffer = '';
+          }
+        }
+      });
+
+      if (speechBuffer.trim()) {
+        enqueueSpeechSegment(speechBuffer);
+      }
+
+      if (fullResponse.trim()) {
+        pushTranscriptTurn(transcript, 'AGENT', fullResponse.trim());
+        console.log(`[AGENT]: ${fullResponse.trim()}`);
+        await refreshLiveCallState({ status: 'active' });
+      }
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log('[GEMINI] Response interrupted');
+        return;
+      }
+
+      console.error('[GEMINI ERROR]', error.message);
+      const fallbackResponse = 'Maaf kijiye, ek chhoti technical dikkat aa gayi. Kya aap apni baat ek baar phir se bata sakte hain?';
+      pushTranscriptTurn(transcript, 'AGENT', fallbackResponse);
+      enqueueSpeechSegment(fallbackResponse);
+    } finally {
+      currentGeminiController = null;
+    }
+  }
+
+  function queueAssistantTurn(userTurnText) {
+    assistantSequence = assistantSequence
+      .catch(() => {})
+      .then(() => generateAssistantTurn(userTurnText));
+    return assistantSequence;
+  }
+
+  function finalizeUserTurn(text) {
+    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!normalized || callClosed) {
+      return;
+    }
+
+    pushTranscriptTurn(transcript, 'CUSTOMER', normalized);
+    console.log(`[CUSTOMER]: ${normalized}`);
+    evaluateAndStoreSentiment(normalized).catch(() => {});
+    queueAssistantTurn(normalized).catch((error) => {
+      console.error('[ASSISTANT TURN ERROR]', error.message);
+    });
+  }
+
+  function handleDeepgramTranscript(event) {
+    const transcriptText = String(event?.channel?.alternatives?.[0]?.transcript || '').trim();
+    const isFinal = Boolean(event?.is_final);
+    const isSpeechFinal = Boolean(event?.speech_final);
+
+    if (!transcriptText) {
+      if (isSpeechFinal && finalTranscriptBuffer.length) {
+        const merged = finalTranscriptBuffer.join(' ').replace(/\s+/g, ' ').trim();
+        finalTranscriptBuffer = [];
+        finalizeUserTurn(merged);
+      }
+      return;
+    }
+
+    if ((state === 'SPEAKING' || state === 'PROCESSING') && transcriptText.split(/\s+/).filter(Boolean).length >= 2) {
+      interruptAssistant(`caller interruption detected: "${transcriptText}"`);
+    }
+
+    if (isFinal) {
+      finalTranscriptBuffer.push(transcriptText);
+    }
+
+    if (isSpeechFinal) {
+      const merged = finalTranscriptBuffer.length
+        ? finalTranscriptBuffer.join(' ')
+        : transcriptText;
+      finalTranscriptBuffer = [];
+      finalizeUserTurn(merged);
+    }
+  }
+
+  function connectDeepgram() {
+    deepgramWs = new WebSocket(createDeepgramListenUrl(), {
+      headers: {
+        Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`
+      }
+    });
+
+    deepgramWs.on('open', () => {
+      deepgramReady = true;
+      console.log('[DEEPGRAM] Live transcription connected');
+      refreshLiveCallState({ status: 'active' }).catch(() => {});
+
+      if (!greetingStarted) {
+        greetingStarted = true;
+        queueAssistantTurn(getActiveOpeningPrompt()).catch((error) => {
+          console.error('[GREETING ERROR]', error.message);
+        });
+      }
+    });
+
+    deepgramWs.on('message', (raw) => {
+      let event;
+
+      try {
+        event = JSON.parse(raw.toString());
+      } catch (error) {
+        console.error('[DEEPGRAM PARSE ERROR]', error.message);
+        return;
+      }
+
+      if (event.type === 'Results') {
+        handleDeepgramTranscript(event);
+        return;
+      }
+
+      if (event.type === 'Metadata') {
+        console.log('[DEEPGRAM] Metadata received');
+      }
+    });
+
+    deepgramWs.on('close', () => {
+      deepgramReady = false;
+      console.log('[DEEPGRAM] Live transcription closed');
+    });
+
+    deepgramWs.on('error', (error) => {
+      deepgramReady = false;
+      console.error('[DEEPGRAM ERROR]', error.message);
+    });
+  }
+
+  async function closeCallSession(status) {
+    if (callClosed) {
+      return;
+    }
+
+    callClosed = true;
+    pendingSpeechSegments = [];
+    interruptedGeneration = true;
+
+    if (currentGeminiController) {
+      currentGeminiController.abort();
+      currentGeminiController = null;
+    }
+
+    if (currentElevenLabsController) {
+      currentElevenLabsController.abort();
+      currentElevenLabsController = null;
+    }
+
+    if (deepgramWs?.readyState === WebSocket.OPEN) {
+      deepgramWs.close();
+    }
+
+    await refreshLiveCallState({ status }).catch(() => {});
+    printTranscriptOnce();
+    await persistTranscriptOnce().catch((error) => {
+      console.error('[FEEDBACK SAVE ERROR]', error.message);
+    });
+  }
+
+  twilioWs.on('message', async (raw) => {
+    let message;
+
+    try {
+      message = JSON.parse(raw.toString());
+    } catch (error) {
+      console.error('[STREAM] Failed to parse Twilio message:', error.message);
+      return;
+    }
+
+    if (message.event === 'start') {
+      streamSid = message.start.streamSid;
+      const customParameters = message.start.customParameters || {};
+      activeCustomerName = customParameters.customerName || activeCustomerName;
+      activeClientName = customParameters.clientName || activeClientName;
+      activeCustomerId = customParameters.customerId ? Number(customParameters.customerId) : null;
+      activeAgentId = customParameters.agentId ? Number(customParameters.agentId) : null;
+      activeAgentConfig = activeAgentId ? await getAgentConfigById(activeAgentId) : await getDefaultAgentConfig();
+      activeClientName = activeAgentConfig?.client_name || activeClientName;
+      activeCallSid = message.start.callSid || activeCallSid;
+      if (activeCallSid) {
+        const callRow = await dbGet('SELECT id FROM calls WHERE twilio_sid = ?', [activeCallSid]);
+        activeCallId = callRow?.id || null;
+      }
+
+      console.log(`[STREAM] streamSid: ${streamSid}`);
+      console.log(`[STREAM] Start payload: ${JSON.stringify(message.start)}`);
+      console.log(`[STREAM] Active customer=${activeCustomerName} client=${activeClientName}`);
+      await refreshLiveCallState({ status: 'active', started_at: new Date().toISOString() });
+      connectDeepgram();
+      return;
+    }
+
+    if (message.event === 'media') {
+      if (!deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      const audioChunk = Buffer.from(message.media.payload, 'base64');
+      deepgramWs.send(audioChunk);
+      return;
+    }
+
+    if (message.event === 'dtmf') {
+      const digit = String(message.dtmf?.digit || '').trim();
+      if (!digit) {
+        return;
+      }
+
+      interruptAssistant(`dtmf ${digit}`);
+      const utterance = inferDtmfUtterance(digit, transcript);
+      console.log(`[DTMF] Received digit=${digit} mapped="${utterance}"`);
+      pushTranscriptTurn(transcript, 'CUSTOMER', `[DTMF ${digit}] ${utterance}`);
+      queueAssistantTurn(utterance).catch((error) => {
+        console.error('[ASSISTANT TURN ERROR]', error.message);
+      });
+      return;
+    }
+
+    if (message.event === 'stop') {
+      console.log('[STREAM] Call ended');
+      await closeCallSession('completed');
+    }
+  });
+
+  twilioWs.on('close', () => {
+    console.log('[STREAM] Twilio WS closed');
+    closeCallSession('closed').catch((error) => {
+      console.error('[STREAM CLOSE ERROR]', error.message);
+    });
+  });
+
+  twilioWs.on('error', (error) => {
+    console.error('[STREAM WS ERROR]', error.message);
+  });
+}
+
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server, path: '/call/stream' });
+
+wss.on('connection', (twilioWs, req) => {
+  if (USE_ORCHESTRATED_PIPELINE) {
+    setupOrchestratedStream(twilioWs, req);
+    return;
+  }
+
+  console.log('[STREAM] Twilio Media Stream connected');
+  console.log(`[STREAM] Upgrade request from ${req.socket.remoteAddress || 'unknown'}`);
+
+  let aiWs;
+  let streamSid;
+  let transcriptPrinted = false;
+  const transcript = [];
+  let geminiSetupComplete = false;
+  let aiSessionStarting = false;
+  let activeCustomerName = process.env.CUSTOMER_NAME || 'Customer';
+  let activeClientName = CLIENT_NAME;
+  let activeAgentId = null;
+  let activeAgentConfig = null;
+  let activeCustomerId = null;
+  let activeCallSid = null;
+  let activeCallId = null;
+  let transcriptPersisted = false;
+
+  const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName, activeAgentConfig);
+  const getActiveOpeningPrompt = () => buildOpeningPrompt(activeClientName, activeCustomerName, activeAgentConfig);
+  const getActiveModelName = () => activeAgentConfig?.llm_model || REALTIME_MODEL;
+
+  const printTranscriptOnce = () => {
+    if (!transcriptPrinted) {
+      transcriptPrinted = true;
+      printTranscript(transcript);
+    }
+  };
+
+  async function persistTranscriptOnce() {
+    if (transcriptPersisted) {
+      return;
+    }
+
+    transcriptPersisted = true;
+
+    try {
+      const result = await saveCallFeedbackFromTranscript({
+        dbGet,
+        dbRun,
+        callSid: activeCallSid,
+        customerId: activeCustomerId,
+        transcript
+      });
+
+      if (result.saved) {
+        console.log(`[FEEDBACK] Auto-saved call feedback as record ${result.feedbackId} (${result.category})`);
+      } else {
+        console.log(`[FEEDBACK] Skipped auto-save: ${result.reason}`);
+      }
+    } catch (error) {
+      console.error('[FEEDBACK SAVE ERROR]', error.message);
+    }
+  }
+
+  async function refreshLiveCallState(partial = {}) {
+    if (!activeCallSid) return;
+
+    const current = liveCallState.get(activeCallSid) || {
+      call_sid: activeCallSid,
+      customer_name: activeCustomerName,
+      customer_id: activeCustomerId,
+      call_id: activeCallId,
+      started_at: new Date().toISOString(),
+      transcript_preview: '',
+      live_sentiment_label: 'neutral',
+      live_sentiment_score: 0,
+      red_flag: false,
+      escalation_requested: false,
+      status: 'active',
+      agent_id: activeAgentId,
+      agent_name: activeAgentConfig?.name || null
+    };
+
+    liveCallState.set(activeCallSid, {
+      ...current,
+      ...partial,
+      customer_name: activeCustomerName,
+      customer_id: activeCustomerId,
+      agent_id: activeAgentId,
+      agent_name: activeAgentConfig?.name || null,
       call_id: activeCallId,
       transcript_preview: transcript.slice(-4).map((turn) => `[${turn.role}] ${turn.text}`).join('\n')
     });
@@ -1418,7 +2205,7 @@ wss.on('connection', (twilioWs, req) => {
         return;
       }
 
-      if (usesGeminiRealtimeTextInput(REALTIME_MODEL)) {
+      if (usesGeminiRealtimeTextInput(getActiveModelName())) {
         aiWs.send(JSON.stringify({
           realtimeInput: {
             text: safeText
@@ -1464,7 +2251,7 @@ wss.on('connection', (twilioWs, req) => {
 
   function createOpenAiSession() {
     aiSessionStarting = true;
-    aiWs = new WebSocket(`wss://api.openai.com/v1/realtime?model=${encodeURIComponent(REALTIME_MODEL)}`, {
+    aiWs = new WebSocket(`wss://api.openai.com/v1/realtime?model=${encodeURIComponent(getActiveModelName())}`, {
       headers: {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         'OpenAI-Beta': 'realtime=v1'
@@ -1539,7 +2326,7 @@ wss.on('connection', (twilioWs, req) => {
       console.log('[GEMINI] Live session opened');
       aiWs.send(JSON.stringify({
         setup: {
-          model: REALTIME_MODEL,
+          model: getActiveModelName(),
           generationConfig: {
             responseModalities: ['AUDIO'],
             speechConfig: {
@@ -1581,7 +2368,7 @@ wss.on('connection', (twilioWs, req) => {
           geminiSetupComplete = true;
           console.log('[GEMINI] Session configured');
 
-          if (usesGeminiRealtimeTextInput(REALTIME_MODEL)) {
+          if (usesGeminiRealtimeTextInput(getActiveModelName())) {
             aiWs.send(JSON.stringify({
               realtimeInput: {
                 text: getActiveOpeningPrompt()
@@ -1738,6 +2525,9 @@ wss.on('connection', (twilioWs, req) => {
       activeCustomerName = customParameters.customerName || activeCustomerName;
       activeClientName = customParameters.clientName || activeClientName;
       activeCustomerId = customParameters.customerId ? Number(customParameters.customerId) : null;
+      activeAgentId = customParameters.agentId ? Number(customParameters.agentId) : null;
+      activeAgentConfig = activeAgentId ? await getAgentConfigById(activeAgentId) : await getDefaultAgentConfig();
+      activeClientName = activeAgentConfig?.client_name || activeClientName;
       activeCallSid = message.start.callSid || activeCallSid;
       if (activeCallSid) {
         const callRow = await dbGet('SELECT id FROM calls WHERE twilio_sid = ?', [activeCallSid]);
@@ -1850,6 +2640,7 @@ wss.on('connection', (twilioWs, req) => {
       console.log(`[SERVER] Running on http://localhost:${PORT}`);
       console.log(`[SERVER] Public base URL: ${PUBLIC_BASE_URL}`);
       console.log(`[SERVER] Call mode: ${CALL_MODE}`);
+      console.log(`[SERVER] Voice pipeline: ${VOICE_PIPELINE}`);
       console.log(`[SERVER] Realtime model: ${REALTIME_MODEL}`);
       console.log('[SERVER] Scheduler active: checks pending customers every 15 seconds');
       console.log('[SERVER] Owner digest active: checks 8 AM morning delivery every 60 seconds');

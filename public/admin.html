@@ -1248,6 +1248,7 @@
 
         <nav class="nav-list" aria-label="Sidebar navigation">
           <a href="#dashboard" class="nav-link active"><span>Dashboard</span></a>
+          <a href="#agents" class="nav-link"><span>Agents</span></a>
           <a href="#customers" class="nav-link"><span>Customers</span></a>
           <a href="#feedback" class="nav-link"><span>Feedback</span></a>
           <a href="#reports" class="nav-link"><span>Reports</span></a>
@@ -1414,6 +1415,137 @@
             </div>
           </div>
         </article>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="card" id="agents">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Voice agents</div>
+              <div class="card-subtitle">Create reusable prompts, provider settings, and opening lines for different call flows.</div>
+            </div>
+          </div>
+
+          <div id="agentEditChip" class="edit-chip"></div>
+          <input type="hidden" id="editingAgentId">
+
+          <div class="grid-2">
+            <div class="field">
+              <label class="field-label" for="agentName">Agent name</label>
+              <input type="text" id="agentName" placeholder="e.g. Hindi Feedback Agent" maxlength="100">
+              <div class="error-text" id="agentNameError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="agentSlug">Slug</label>
+              <input type="text" id="agentSlug" placeholder="hindi-feedback-agent" maxlength="120">
+              <div class="helper-text">Used as a stable identifier for the prompt version.</div>
+              <div class="error-text" id="agentSlugError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="agentClientName">Client / brand name</label>
+              <input type="text" id="agentClientName" placeholder="e.g. KC Prashant Path Lab">
+              <div class="error-text" id="agentClientNameError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="agentLanguage">Language</label>
+              <select id="agentLanguage">
+                <option value="hi" selected>Hindi</option>
+                <option value="hinglish">Hinglish</option>
+                <option value="mixed">Mixed</option>
+                <option value="en">English</option>
+              </select>
+              <div class="error-text" id="agentLanguageError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="agentModel">LLM model</label>
+              <input type="text" id="agentModel" placeholder="e.g. models/gemini-2.5-flash">
+              <div class="helper-text">Per-agent model override for Gemini or other providers.</div>
+              <div class="error-text" id="agentModelError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="agentVoice">TTS voice</label>
+              <input type="text" id="agentVoice" placeholder="e.g. BTNeCNdXniCSbjEac5vd">
+              <div class="helper-text">Usually your ElevenLabs voice ID.</div>
+              <div class="error-text" id="agentVoiceError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="agentDescription">Description</label>
+              <input type="text" id="agentDescription" placeholder="What this agent is used for">
+              <div class="error-text" id="agentDescriptionError"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label">Defaults</label>
+              <div class="button-row">
+                <label><input type="checkbox" id="agentIsDefault"> Default agent</label>
+                <label><input type="checkbox" id="agentIsActive" checked> Active</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top: 14px;">
+            <label class="field-label" for="agentSystemPrompt">System prompt</label>
+            <textarea id="agentSystemPrompt" placeholder="Use {{client_name}} and {{customer_name}} variables."></textarea>
+            <div class="helper-text">This drives the full conversation style and business logic.</div>
+            <div class="error-text" id="agentSystemPromptError"></div>
+          </div>
+
+          <div class="field" style="margin-top: 14px;">
+            <label class="field-label" for="agentOpeningPrompt">Opening prompt</label>
+            <textarea id="agentOpeningPrompt" placeholder="First turn instruction using {{client_name}} and {{customer_name}}."></textarea>
+            <div class="error-text" id="agentOpeningPromptError"></div>
+          </div>
+
+          <div class="button-row" style="margin-top: 18px;">
+            <button id="agentSubmitButton" class="primary" onclick="saveAgent()">Add agent</button>
+            <button id="agentCancelButton" class="secondary hidden" onclick="resetAgentForm()">Cancel</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Agent library</div>
+            <div class="card-subtitle" id="agentListMeta">0 agents</div>
+          </div>
+          <div class="toolbar-group">
+            <select id="callAgentSelect">
+              <option value="">Loading agents...</option>
+            </select>
+            <button class="secondary" type="button" onclick="loadAgents()">Refresh agents</button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Language</th>
+                <th>Providers</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="agentsTableBody">
+              <tr>
+                <td colspan="5">
+                  <div class="empty-state">
+                    <div class="empty-icon">AG</div>
+                    <strong>Loading agents...</strong>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section class="dashboard-grid">
@@ -1593,6 +1725,9 @@
             <div class="card-subtitle" id="customerListMeta">0 records</div>
           </div>
           <div class="toolbar-group">
+            <select id="customerCallAgentSelect">
+              <option value="">Use default agent</option>
+            </select>
             <input type="search" id="customerSearch" placeholder="Search name or phone" oninput="renderCustomers()">
             <select id="customerStatusFilter" onchange="renderCustomers()">
               <option value="" selected>All statuses</option>
@@ -1890,9 +2025,11 @@
 
   <script>
     const API_BASE = `${window.location.origin}/api`;
+    const DEFAULT_AGENT_MODEL = 'models/gemini-2.5-flash';
     let customerCache = [];
     let feedbackCache = [];
     let recentCallsCache = [];
+    let agentCache = [];
     let ownerDashboardCache = null;
     let campaignConfigCache = [];
     let seenOwnerAlertKeys = new Set();
@@ -1919,6 +2056,14 @@
       Object.entries(fieldErrors).forEach(([field, message]) => {
         const fieldIdMap = {
           name: 'customerName',
+          slug: 'agentSlug',
+          client_name: 'agentClientName',
+          description: 'agentDescription',
+          language: 'agentLanguage',
+          llm_model: 'agentModel',
+          tts_voice: 'agentVoice',
+          system_prompt: 'agentSystemPrompt',
+          opening_prompt: 'agentOpeningPrompt',
           phone: 'customerPhone',
           preferred_slot: 'customerSlot',
           customer_value: 'customerValue',
@@ -1951,6 +2096,26 @@
       };
     }
 
+    function getAgentFormPayload() {
+      return {
+        name: document.getElementById('agentName').value.trim(),
+        slug: document.getElementById('agentSlug').value.trim(),
+        client_name: document.getElementById('agentClientName').value.trim(),
+        description: document.getElementById('agentDescription').value.trim(),
+        language: document.getElementById('agentLanguage').value,
+        voice_pipeline: 'orchestrated',
+        stt_provider: 'deepgram',
+        llm_provider: 'gemini',
+        llm_model: document.getElementById('agentModel').value.trim() || DEFAULT_AGENT_MODEL,
+        tts_provider: 'elevenlabs',
+        tts_voice: document.getElementById('agentVoice').value.trim(),
+        system_prompt: document.getElementById('agentSystemPrompt').value.trim(),
+        opening_prompt: document.getElementById('agentOpeningPrompt').value.trim(),
+        is_default: document.getElementById('agentIsDefault').checked,
+        is_active: document.getElementById('agentIsActive').checked
+      };
+    }
+
     function validateCustomerPayload(payload) {
       const fieldErrors = {};
 
@@ -1971,6 +2136,17 @@
       } else if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(payload.preferred_slot)) {
         fieldErrors.preferred_slot = 'Scheduled time must be valid HH:MM';
       }
+
+      return fieldErrors;
+    }
+
+    function validateAgentPayload(payload) {
+      const fieldErrors = {};
+
+      if (!payload.name) fieldErrors.name = 'Agent name is required';
+      if (!payload.slug) fieldErrors.slug = 'Agent slug is required';
+      if (!payload.opening_prompt) fieldErrors.opening_prompt = 'Opening prompt is required';
+      if (!payload.system_prompt) fieldErrors.system_prompt = 'System prompt is required';
 
       return fieldErrors;
     }
@@ -2165,6 +2341,182 @@
       const modal = document.getElementById('analysisModal');
       modal.classList.add('show');
       modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function resetAgentForm() {
+      document.getElementById('editingAgentId').value = '';
+      document.getElementById('agentName').value = '';
+      document.getElementById('agentSlug').value = '';
+      document.getElementById('agentClientName').value = '';
+      document.getElementById('agentDescription').value = '';
+      document.getElementById('agentLanguage').value = 'hi';
+      document.getElementById('agentModel').value = DEFAULT_AGENT_MODEL;
+      document.getElementById('agentVoice').value = '';
+      document.getElementById('agentSystemPrompt').value = '';
+      document.getElementById('agentOpeningPrompt').value = '';
+      document.getElementById('agentIsDefault').checked = false;
+      document.getElementById('agentIsActive').checked = true;
+      document.getElementById('agentSubmitButton').textContent = 'Add agent';
+      document.getElementById('agentCancelButton').classList.add('hidden');
+      const chip = document.getElementById('agentEditChip');
+      chip.style.display = 'none';
+      chip.textContent = '';
+      clearFieldErrors(['agentName', 'agentSlug', 'agentClientName', 'agentDescription', 'agentLanguage', 'agentModel', 'agentVoice', 'agentSystemPrompt', 'agentOpeningPrompt']);
+    }
+
+    function startEditAgent(agentId) {
+      const agent = agentCache.find((item) => item.id === agentId);
+      if (!agent) return;
+
+      document.getElementById('editingAgentId').value = agent.id;
+      document.getElementById('agentName').value = agent.name || '';
+      document.getElementById('agentSlug').value = agent.slug || '';
+      document.getElementById('agentClientName').value = agent.client_name || '';
+      document.getElementById('agentDescription').value = agent.description || '';
+      document.getElementById('agentLanguage').value = agent.language || 'hi';
+      document.getElementById('agentModel').value = agent.llm_model || DEFAULT_AGENT_MODEL;
+      document.getElementById('agentVoice').value = agent.tts_voice || '';
+      document.getElementById('agentSystemPrompt').value = agent.system_prompt || '';
+      document.getElementById('agentOpeningPrompt').value = agent.opening_prompt || '';
+      document.getElementById('agentIsDefault').checked = Boolean(Number(agent.is_default || 0));
+      document.getElementById('agentIsActive').checked = Boolean(Number(agent.is_active || 0));
+      document.getElementById('agentSubmitButton').textContent = 'Update agent';
+      document.getElementById('agentCancelButton').classList.remove('hidden');
+      const chip = document.getElementById('agentEditChip');
+      chip.textContent = `Editing ${agent.name} (${agent.slug})`;
+      chip.style.display = 'block';
+      clearFieldErrors(['agentName', 'agentSlug', 'agentClientName', 'agentDescription', 'agentLanguage', 'agentModel', 'agentVoice', 'agentSystemPrompt', 'agentOpeningPrompt']);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function populateAgentSelects() {
+      const selects = [document.getElementById('callAgentSelect'), document.getElementById('customerCallAgentSelect')].filter(Boolean);
+      selects.forEach((select, index) => {
+        const selected = select.value;
+        select.innerHTML = `<option value="">${index === 0 ? 'Use default agent for new calls' : 'Use default agent'}</option>`;
+        agentCache.forEach((agent) => {
+          if (!Number(agent.is_active || 0)) return;
+          const option = document.createElement('option');
+          option.value = agent.id;
+          option.textContent = `${agent.name}${Number(agent.is_default || 0) ? ' (Default)' : ''}`;
+          select.appendChild(option);
+        });
+        if (selected) select.value = selected;
+      });
+    }
+
+    function renderAgents() {
+      const tbody = document.getElementById('agentsTableBody');
+      const meta = document.getElementById('agentListMeta');
+      if (!tbody) return;
+      meta.textContent = `${agentCache.length} agent${agentCache.length === 1 ? '' : 's'}`;
+      tbody.innerHTML = '';
+
+      if (!agentCache.length) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5">
+              <div class="empty-state">
+                <div class="empty-icon">AG</div>
+                <strong>No agents created yet</strong>
+                <div class="supporting-text">Create one reusable agent and use it across outbound calls.</div>
+              </div>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      agentCache.forEach((agent) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>
+            <div class="name-cell">
+              <strong>${agent.name}</strong>
+              <span>${agent.slug}${Number(agent.is_default || 0) ? ' • default' : ''}</span>
+            </div>
+          </td>
+          <td><strong>${agent.language || 'hi'}</strong></td>
+          <td>${agent.stt_provider || 'deepgram'} • ${agent.llm_provider || 'gemini'} • ${agent.tts_provider || 'elevenlabs'}</td>
+          <td><span class="badge ${Number(agent.is_active || 0) ? 'good' : 'pending'}">${Number(agent.is_active || 0) ? 'active' : 'inactive'}</span></td>
+          <td>
+            <div class="action-buttons">
+              <button onclick="startEditAgent(${agent.id})" class="secondary">Edit</button>
+              <button onclick="deleteAgent(${agent.id}, ${Number(agent.is_default || 0)})" class="danger">Delete</button>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    async function loadAgents() {
+      try {
+        const res = await fetch(`${API_BASE}/agents`);
+        const agents = await res.json();
+        agentCache = Array.isArray(agents) ? agents : [];
+        populateAgentSelects();
+        renderAgents();
+      } catch (error) {
+        console.error('Error loading agents:', error);
+      }
+    }
+
+    async function saveAgent() {
+      clearFieldErrors(['agentName', 'agentSlug', 'agentClientName', 'agentDescription', 'agentLanguage', 'agentModel', 'agentVoice', 'agentSystemPrompt', 'agentOpeningPrompt']);
+      const payload = getAgentFormPayload();
+      const fieldErrors = validateAgentPayload(payload);
+
+      if (Object.keys(fieldErrors).length > 0) {
+        applyFieldErrors(fieldErrors);
+        showAlert('Please fix the agent form errors', 'error');
+        return;
+      }
+
+      const editingAgentId = document.getElementById('editingAgentId').value;
+      const endpoint = editingAgentId ? `${API_BASE}/agents/${editingAgentId}` : `${API_BASE}/agents`;
+      const method = editingAgentId ? 'PUT' : 'POST';
+
+      try {
+        const res = await fetch(endpoint, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (res.ok) {
+          showAlert(editingAgentId ? 'Agent updated successfully!' : 'Agent created successfully!', 'success');
+          resetAgentForm();
+          loadAgents();
+        } else {
+          if (result.fieldErrors) applyFieldErrors(result.fieldErrors);
+          showAlert(result.error || 'Error saving agent', 'error');
+        }
+      } catch (error) {
+        showAlert(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function deleteAgent(agentId, isDefault) {
+      if (isDefault) {
+        showAlert('Choose another default agent before deleting this one', 'error');
+        return;
+      }
+
+      if (!confirm('Delete this agent? Calls already using it in history will keep their records.')) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/agents/${agentId}`, { method: 'DELETE' });
+        const result = await res.json();
+        if (res.ok) {
+          showAlert('Agent deleted successfully', 'success');
+          loadAgents();
+        } else {
+          showAlert(result.error || 'Error deleting agent', 'error');
+        }
+      } catch (error) {
+        showAlert(`Error: ${error.message}`, 'error');
+      }
     }
 
     function resetCustomerForm() {
@@ -2636,7 +2988,7 @@
         calls.forEach((call) => {
           const row = document.createElement('tr');
           row.innerHTML = `
-            <td><strong>${call.customer_name || '--'}</strong></td>
+            <td><strong>${call.customer_name || '--'}</strong><div class="subcell">${call.agent_name ? `Agent: ${call.agent_name}` : 'Agent: default'}</div></td>
             <td><span class="badge ${call.status === 'active' ? 'pending' : 'completed'}">${formatStatusLabel(call.status || 'active')}</span></td>
             <td><span class="badge ${call.live_sentiment_label === 'negative' ? 'bad' : call.live_sentiment_label === 'positive' ? 'good' : 'average'}">${formatStatusLabel(call.live_sentiment_label || 'neutral')}</span></td>
             <td>${call.red_flag ? '<span class="badge bad">Red flag</span>' : '<span class="badge good">Normal</span>'}</td>
@@ -2780,16 +3132,22 @@
       if (!confirm('Are you sure? This will immediately place a call to this customer.')) return;
 
       try {
+        const selectedAgentId = document.getElementById('customerCallAgentSelect')?.value || '';
         const res = await fetch(`${API_BASE}/calls/initiate/${customerId}`, {
-          method: 'POST'
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agentId: selectedAgentId ? Number(selectedAgentId) : null
+          })
         });
 
         const result = await res.json();
 
         if (res.ok) {
-          showAlert(`Call initiated. SID: ${result.sid}`, 'success');
+          showAlert(`Call initiated${result.agentName ? ` with ${result.agentName}` : ''}. SID: ${result.sid}`, 'success');
           loadCustomers();
           loadStats();
+          loadRecentCalls();
         } else {
           showAlert(result.error || 'Error initiating call', 'error');
         }
@@ -2925,7 +3283,9 @@
         statusFilter.selectedIndex = 0;
       }
 
+      resetAgentForm();
       resetCustomerForm();
+      loadAgents();
       loadCustomers();
       loadFeedback();
       loadRecentCalls();
@@ -2935,6 +3295,7 @@
       loadCampaignConfigs();
 
       setInterval(() => {
+        loadAgents();
         loadCustomers();
         loadFeedback();
         loadRecentCalls();

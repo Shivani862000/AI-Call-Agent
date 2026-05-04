@@ -113,6 +113,29 @@ function runMigrations() {
       )
     `);
 
+    await run(`
+      CREATE TABLE IF NOT EXISTS agents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name VARCHAR(100) NOT NULL UNIQUE,
+        slug VARCHAR(120) NOT NULL UNIQUE,
+        description TEXT,
+        client_name VARCHAR(100),
+        language VARCHAR(20) DEFAULT 'hi',
+        voice_pipeline VARCHAR(30) DEFAULT 'orchestrated',
+        stt_provider VARCHAR(30) DEFAULT 'deepgram',
+        llm_provider VARCHAR(30) DEFAULT 'gemini',
+        llm_model VARCHAR(120),
+        tts_provider VARCHAR(30) DEFAULT 'elevenlabs',
+        tts_voice VARCHAR(120),
+        system_prompt TEXT,
+        opening_prompt TEXT,
+        is_default INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     await addColumnIfMissing('customers', 'customer_value', "VARCHAR(20) DEFAULT 'standard'");
     await addColumnIfMissing('customers', 'urgency_level', "VARCHAR(20) DEFAULT 'normal'");
     await addColumnIfMissing('customers', 'priority_score', 'INTEGER DEFAULT 50');
@@ -142,6 +165,7 @@ function runMigrations() {
     await addColumnIfMissing('customers', 'last_competitor_mention', 'TEXT');
     await addColumnIfMissing('customers', 'data_retention_until', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'dnd_checked_at', 'TIMESTAMP');
+    await addColumnIfMissing('customers', 'default_agent_id', 'INTEGER');
 
     await addColumnIfMissing('calls', 'transcript_text', 'TEXT');
     await addColumnIfMissing('calls', 'consent_detected', 'INTEGER DEFAULT 0');
@@ -187,7 +211,49 @@ function runMigrations() {
     await addColumnIfMissing('calls', 'live_sentiment_score', 'REAL');
     await addColumnIfMissing('calls', 'live_sentiment_label', 'VARCHAR(20)');
     await addColumnIfMissing('calls', 'live_red_flag', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'agent_id', 'INTEGER');
     await addColumnIfMissing('feedback', 'source', "VARCHAR(20) DEFAULT 'manual'");
+
+    const defaultAgent = await new Promise((resolve, reject) => {
+      db.get('SELECT id FROM agents WHERE slug = ?', ['default-feedback-agent'], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!defaultAgent) {
+      await new Promise((resolve, reject) => {
+        db.run(
+          `INSERT INTO agents (
+            name, slug, description, client_name, language, voice_pipeline,
+            stt_provider, llm_provider, llm_model, tts_provider, tts_voice,
+            system_prompt, opening_prompt, is_default, is_active, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            'Default Feedback Agent',
+            'default-feedback-agent',
+            'Default Hindi-first feedback collection agent',
+            process.env.CLIENT_NAME || 'your diagnostic and medical collection center',
+            'hi',
+            'orchestrated',
+            'deepgram',
+            'gemini',
+            process.env.GEMINI_MODEL || 'models/gemini-3.1-flash-live-preview',
+            'elevenlabs',
+            process.env.ELEVENLABS_VOICE_ID || null,
+            null,
+            null,
+            1,
+            1,
+            new Date().toISOString()
+          ],
+          (err) => {
+            if (err) reject(err);
+            else resolve();
+          }
+        );
+      });
+    }
 
     console.log('✓ All tables created/verified');
   })();
