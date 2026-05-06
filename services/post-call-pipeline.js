@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { analyzeCallTranscript, transcribeAudioFile, categorizeFeedback } = require('./openai');
 const { extractCallFeedback } = require('./call-feedback');
+const { buildExotelAuthHeader } = require('./exotel');
 const {
   detectConversationOutcome,
   detectObjectionsAndCompetitors,
@@ -18,12 +19,6 @@ async function ensureRecordingsDir() {
   await fs.promises.mkdir(RECORDINGS_DIR, { recursive: true });
 }
 
-function buildTwilioAuthHeader() {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  return `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`;
-}
-
 async function downloadRecording(recordingUrl, callSid) {
   if (!recordingUrl) {
     return null;
@@ -32,7 +27,7 @@ async function downloadRecording(recordingUrl, callSid) {
   await ensureRecordingsDir();
   const response = await fetch(recordingUrl, {
     headers: {
-      Authorization: buildTwilioAuthHeader()
+      Authorization: buildExotelAuthHeader()
     }
   });
 

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { dbGet, dbRun } = require('../db');
-const { sendWhatsAppMessage } = require('../services/twilio');
+const { sendWhatsAppMessage } = require('../services/exotel');
 
 // Send WhatsApp message for a call
 router.post('/send/:callId', async (req, res) => {
@@ -25,7 +25,7 @@ We'd love your feedback — it takes less than a minute.
 Please leave us a Google review here: ${process.env.GOOGLE_REVIEW_LINK}
 Thank you!`;
 
-    // Send via Twilio
+    // Send via Exotel
     const result = await sendWhatsAppMessage(customer.phone, message);
 
     // Update call record

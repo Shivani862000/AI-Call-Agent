@@ -1,4 +1,4 @@
-const { sendWhatsAppMessage } = require('./twilio');
+const { sendWhatsAppMessage } = require('./exotel');
 
 const VALUE_SCORES = {
   vip: 95,
@@ -243,7 +243,7 @@ async function maybeSendBusyFallback({ customer, callId }) {
 }
 
 async function sendCustomerWhatsAppSummary({ customer, callSummary }) {
-  if (!customer?.phone || !process.env.GOOGLE_REVIEW_LINK || !process.env.TWILIO_WHATSAPP_FROM) {
+  if (!customer?.phone || !process.env.GOOGLE_REVIEW_LINK || !process.env.EXOTEL_WHATSAPP_FROM) {
     return false;
   }
 

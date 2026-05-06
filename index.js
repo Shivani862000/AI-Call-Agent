@@ -4,7 +4,6 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const WebSocket = require('ws');
-const twilio = require('twilio');
 const { initializeDatabase, dbRun, dbGet, dbAll } = require('./db');
 const customersRouter = require('./routes/customers');
 const campaignsRouter = require('./routes/campaigns');
@@ -15,7 +14,13 @@ const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
 const { processCompletedCallPipeline } = require('./services/post-call-pipeline');
 const { buildOwnerDashboardData } = require('./services/reporting');
 const { sendSimpleEmail } = require('./services/email');
-const { sendWhatsAppMessage } = require('./services/twilio');
+const {
+  buildExotelAuthHeader,
+  fetchCallDetails,
+  getRecordingUrlFromCallDetails,
+  initiateCall,
+  sendWhatsAppMessage
+} = require('./services/exotel');
 const {
   buildPreCallIntelligence,
   computePriorityScore,
@@ -27,6 +32,16 @@ const {
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+
+app.use((req, res, next) => {
+  if (req.path === '/admin.html' || req.path.startsWith('/api/')) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+  next();
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = Number(process.env.PORT || 3000);
@@ -39,13 +54,9 @@ const REALTIME_MODEL = AI_PROVIDER === 'gemini' ? GEMINI_MODEL : OPENAI_REALTIME
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
 const PUBLIC_BASE_URL = (process.env.NGROK_URL || process.env.WEBHOOK_URL || '').replace(/\/$/, '');
 const GEMINI_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
-const ELEVENLABS_MODEL_ID = process.env.ELEVENLABS_MODEL_ID || 'eleven_turbo_v2_5';
-const VOICE_PIPELINE = process.env.VOICE_PIPELINE
-  || ((process.env.DEEPGRAM_API_KEY && process.env.ELEVENLABS_API_KEY && process.env.GEMINI_API_KEY) ? 'orchestrated' : 'legacy');
+const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
 const liveCallState = new Map();
-
-const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
 function applyAgentTemplate(template, replacements = {}) {
   return String(template || '').replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, key) => {
@@ -169,9 +180,11 @@ async function getDefaultAgentConfig() {
 
 function validateConfig() {
   const missing = [
-    'TWILIO_ACCOUNT_SID',
-    'TWILIO_AUTH_TOKEN',
-    'TWILIO_PHONE_NUMBER',
+    'EXOTEL_SID',
+    'EXOTEL_API_KEY',
+    'EXOTEL_API_TOKEN',
+    'EXOTEL_CALLER_ID',
+    'EXOTEL_APPLET_URL',
     'CUSTOMER_PHONE',
     'CUSTOMER_NAME'
   ].filter((key) => !process.env[key]);
@@ -184,16 +197,8 @@ function validateConfig() {
     missing.push('GEMINI_API_KEY');
   }
 
-  if (USE_ORCHESTRATED_PIPELINE && !process.env.DEEPGRAM_API_KEY) {
-    missing.push('DEEPGRAM_API_KEY');
-  }
-
-  if (USE_ORCHESTRATED_PIPELINE && !process.env.ELEVENLABS_API_KEY) {
-    missing.push('ELEVENLABS_API_KEY');
-  }
-
-  if (USE_ORCHESTRATED_PIPELINE && !process.env.ELEVENLABS_VOICE_ID) {
-    missing.push('ELEVENLABS_VOICE_ID');
+  if (USE_ORCHESTRATED_PIPELINE) {
+    throw new Error('VOICE_PIPELINE=orchestrated is no longer supported after removing third-party TTS. Use VOICE_PIPELINE=legacy.');
   }
 
   if (!PUBLIC_BASE_URL) {
@@ -251,7 +256,7 @@ async function runOwnerDigestTick() {
       await sendSimpleEmail(process.env.OWNER_EMAIL, `CEO Morning Digest — ${todayKey}`, lines);
     }
 
-    if (process.env.OWNER_PHONE && process.env.TWILIO_WHATSAPP_FROM) {
+    if (process.env.OWNER_PHONE && process.env.EXOTEL_WHATSAPP_FROM) {
       await sendWhatsAppMessage(process.env.OWNER_PHONE, digest.digest_text);
     }
 
@@ -366,26 +371,20 @@ function getScriptedCopy(language, customerName = process.env.CUSTOMER_NAME, cli
   };
 }
 
+function buildXmlResponse(innerXml) {
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n${innerXml}\n</Response>`;
+}
+
 function buildScriptedTwiml(customerName, clientName) {
-  const twiml = new twilio.twiml.VoiceResponse();
   const encodedCustomerName = encodeURIComponent(customerName || process.env.CUSTOMER_NAME || 'Customer');
   const encodedClientName = encodeURIComponent(clientName || CLIENT_NAME);
-  const gather = twiml.gather({
-    input: 'dtmf speech',
-    numDigits: 1,
-    timeout: 6,
-    speechTimeout: 'auto',
-    language: 'hi-IN',
-    actionOnEmptyResult: true,
-    action: `/call/scripted/consent?lang=hi&customerName=${encodedCustomerName}&clientName=${encodedClientName}`,
-    method: 'POST'
-  });
+  const copy = getScriptedCopy('hi', customerName, clientName);
 
-  gather.say({ language: 'hi-IN' }, getScriptedCopy('hi', customerName, clientName).intro);
-
-  twiml.say({ language: 'hi-IN' }, getScriptedCopy('hi', customerName, clientName).noLanguageResponse);
-  twiml.hangup();
-  return twiml.toString();
+  return buildXmlResponse(`  <Gather input="dtmf speech" numDigits="1" timeout="6" speechTimeout="auto" language="hi-IN" actionOnEmptyResult="true" action="/call/scripted/consent?lang=hi&amp;customerName=${xmlEscape(encodedCustomerName)}&amp;clientName=${xmlEscape(encodedClientName)}" method="POST">
+    <Say language="hi-IN">${xmlEscape(copy.intro)}</Say>
+  </Gather>
+  <Say language="hi-IN">${xmlEscape(copy.noLanguageResponse)}</Say>
+  <Hangup />`);
 }
 
 function buildScriptedLanguageResponse(req) {
@@ -393,26 +392,14 @@ function buildScriptedLanguageResponse(req) {
   const digit = String(req.body.Digits || '').trim();
   const language = detectLanguageChoice(speech, digit);
   const copy = getScriptedCopy(language, req.query.customerName, req.query.clientName);
-  const twiml = new twilio.twiml.VoiceResponse();
   const encodedCustomerName = encodeURIComponent(req.query.customerName || process.env.CUSTOMER_NAME || 'Customer');
   const encodedClientName = encodeURIComponent(req.query.clientName || CLIENT_NAME);
 
-  const gather = twiml.gather({
-    input: 'speech dtmf',
-    numDigits: 1,
-    timeout: 7,
-    speechTimeout: 'auto',
-    language: language === 'en' ? 'en-IN' : 'hi-IN',
-    actionOnEmptyResult: true,
-    action: `/call/scripted/consent?lang=${language}&customerName=${encodedCustomerName}&clientName=${encodedClientName}`,
-    method: 'POST'
-  });
-
-  gather.say({ language: language === 'en' ? 'en-IN' : 'hi-IN' }, copy.consent);
-
-  twiml.say({ language: language === 'en' ? 'en-IN' : 'hi-IN' }, copy.noConsentResponse);
-  twiml.hangup();
-  return twiml.toString();
+  return buildXmlResponse(`  <Gather input="speech dtmf" numDigits="1" timeout="7" speechTimeout="auto" language="${language === 'en' ? 'en-IN' : 'hi-IN'}" actionOnEmptyResult="true" action="/call/scripted/consent?lang=${xmlEscape(language)}&amp;customerName=${xmlEscape(encodedCustomerName)}&amp;clientName=${xmlEscape(encodedClientName)}" method="POST">
+    <Say language="${language === 'en' ? 'en-IN' : 'hi-IN'}">${xmlEscape(copy.consent)}</Say>
+  </Gather>
+  <Say language="${language === 'en' ? 'en-IN' : 'hi-IN'}">${xmlEscape(copy.noConsentResponse)}</Say>
+  <Hangup />`);
 }
 
 function buildScriptedConsentResponse(req) {
@@ -420,32 +407,19 @@ function buildScriptedConsentResponse(req) {
   const digit = String(req.body.Digits || '').trim();
   const language = req.query.lang === 'en' ? 'en' : 'hi';
   const copy = getScriptedCopy(language, req.query.customerName, req.query.clientName);
-  const twiml = new twilio.twiml.VoiceResponse();
   const encodedCustomerName = encodeURIComponent(req.query.customerName || process.env.CUSTOMER_NAME || 'Customer');
   const encodedClientName = encodeURIComponent(req.query.clientName || CLIENT_NAME);
 
   if (!isAffirmativeResponse(speech, digit)) {
-    twiml.say({ language: 'hi-IN' }, copy.decline);
-    twiml.hangup();
-    return twiml.toString();
+    return buildXmlResponse(`  <Say language="hi-IN">${xmlEscape(copy.decline)}</Say>
+  <Hangup />`);
   }
 
-  const gather = twiml.gather({
-    input: 'speech dtmf',
-    numDigits: 1,
-    timeout: 10,
-    speechTimeout: 'auto',
-    language: 'hi-IN',
-    actionOnEmptyResult: true,
-    action: `/call/scripted/rating?lang=${language}&customerName=${encodedCustomerName}&clientName=${encodedClientName}`,
-    method: 'POST'
-  });
-
-  gather.say({ language: 'hi-IN' }, copy.rating);
-
-  twiml.say({ language: 'hi-IN' }, copy.noRatingResponse);
-  twiml.hangup();
-  return twiml.toString();
+  return buildXmlResponse(`  <Gather input="speech dtmf" numDigits="1" timeout="10" speechTimeout="auto" language="hi-IN" actionOnEmptyResult="true" action="/call/scripted/rating?lang=${xmlEscape(language)}&amp;customerName=${xmlEscape(encodedCustomerName)}&amp;clientName=${xmlEscape(encodedClientName)}" method="POST">
+    <Say language="hi-IN">${xmlEscape(copy.rating)}</Say>
+  </Gather>
+  <Say language="hi-IN">${xmlEscape(copy.noRatingResponse)}</Say>
+  <Hangup />`);
 }
 
 function buildScriptedRatingResponse(req) {
@@ -454,13 +428,11 @@ function buildScriptedRatingResponse(req) {
   const language = req.query.lang === 'en' ? 'en' : 'hi';
   const copy = getScriptedCopy(language, req.query.customerName, req.query.clientName);
   const rating = digit || speech;
-  const twiml = new twilio.twiml.VoiceResponse();
 
   console.log(`[SCRIPTED] Rating response: ${rating || 'none'}`);
 
-  twiml.say({ language: 'hi-IN' }, copy.closing);
-  twiml.hangup();
-  return twiml.toString();
+  return buildXmlResponse(`  <Say language="hi-IN">${xmlEscape(copy.closing)}</Say>
+  <Hangup />`);
 }
 
 function mulawToLinearSample(value) {
@@ -544,6 +516,72 @@ function resamplePcm16(buffer, fromRate, toRate) {
 function parsePcmRate(mimeType, fallbackRate) {
   const match = String(mimeType || '').match(/rate=(\d+)/i);
   return match ? Number(match[1]) : fallbackRate;
+}
+
+function normalizePhoneLookupValue(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length === 10) return digits;
+  if (digits.length > 10) return digits.slice(-10);
+  return digits;
+}
+
+function getTransportModeFromStartPayload(start = {}, req = null) {
+  const hintedProvider = req ? new URL(req.url, 'http://localhost').searchParams.get('provider') : '';
+  if (hintedProvider === 'exotel') {
+    return 'exotel';
+  }
+
+  const customParameters = getCustomParametersFromStart(start);
+  const customProvider = String(
+    customParameters.provider
+    || customParameters.Provider
+    || start.provider
+    || start.Provider
+    || ''
+  ).toLowerCase();
+  if (customProvider === 'exotel') {
+    return 'exotel';
+  }
+
+  if (start.account_sid || start.accountSid) {
+    return 'exotel';
+  }
+
+  const mediaFormat = start.mediaFormat || start.media_format || {};
+  const encoding = String(mediaFormat.encoding || '').toLowerCase();
+  if (encoding.includes('raw') || encoding.includes('slin') || encoding.includes('pcm')) {
+    return 'exotel';
+  }
+
+  return 'twilio';
+}
+
+function extractStartPayload(message = {}) {
+  return message.start || {};
+}
+
+function getStreamSidFromMessage(message = {}) {
+  const start = extractStartPayload(message);
+  return (
+    start.streamSid
+    || start.stream_sid
+    || message.streamSid
+    || message.stream_sid
+    || null
+  );
+}
+
+function getCallSidFromStart(start = {}) {
+  return start.callSid || start.call_sid || null;
+}
+
+function getCustomParametersFromStart(start = {}) {
+  return start.customParameters || start.custom_parameters || {};
+}
+
+function getMediaPayload(message = {}) {
+  return message?.media?.payload || null;
 }
 
 function usesGeminiRealtimeTextInput(modelName) {
@@ -671,62 +709,16 @@ async function streamGeminiResponse({ systemPrompt, contents, onTextChunk, signa
   }
 }
 
-async function streamElevenLabsAudio({ text, signal, onAudioChunk }) {
-  const voiceId = encodeURIComponent(process.env.ELEVENLABS_VOICE_ID);
-  console.log(`[ELEVENLABS] Streaming audio for ${text.length} chars`);
-  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?output_format=ulaw_8000&optimize_streaming_latency=4`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'xi-api-key': process.env.ELEVENLABS_API_KEY,
-      Accept: 'application/octet-stream'
-    },
-    body: JSON.stringify({
-      text,
-      model_id: ELEVENLABS_MODEL_ID
-    }),
-    signal
-  });
-
-  if (!response.ok || !response.body) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`ElevenLabs streaming failed (${response.status}): ${errorText || response.statusText}`);
-  }
-
-  const reader = response.body.getReader();
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-
-    if (value?.length) {
-      await onAudioChunk(Buffer.from(value));
-    }
-  }
+async function streamSynthesizedAudio() {
+  throw new Error('Orchestrated third-party TTS has been removed. Use VOICE_PIPELINE=legacy.');
 }
 
 async function placeRealtimeCall({ customerPhone, customerName, customerId, clientName, agentId }) {
-  const safeCustomerName = encodeURIComponent(customerName || process.env.CUSTOMER_NAME || 'Customer');
-  const safeClientName = encodeURIComponent(clientName || CLIENT_NAME);
-  const safeCustomerId = customerId ? `&customerId=${encodeURIComponent(String(customerId))}` : '';
-  const safeAgentId = agentId ? `&agentId=${encodeURIComponent(String(agentId))}` : '';
-
-  const twimlUrl = `${PUBLIC_BASE_URL}/call/twiml?customerName=${safeCustomerName}&clientName=${safeClientName}${safeCustomerId}${safeAgentId}`;
   const statusUrl = `${PUBLIC_BASE_URL}/call/status${customerId ? `?customerId=${encodeURIComponent(String(customerId))}` : ''}`;
-  const recordingStatusUrl = `${PUBLIC_BASE_URL}/call/recording-status${customerId ? `?customerId=${encodeURIComponent(String(customerId))}` : ''}`;
-
-  return twilioClient.calls.create({
-    to: customerPhone,
-    from: process.env.TWILIO_PHONE_NUMBER,
-    url: twimlUrl,
-    method: 'GET',
-    statusCallback: statusUrl,
-    statusCallbackMethod: 'POST',
-    record: true,
-    recordingChannels: 'dual',
-    recordingStatusCallback: recordingStatusUrl,
-    recordingStatusCallbackMethod: 'POST'
+  return initiateCall(customerPhone, customerId, statusUrl, {
+    customerName,
+    clientName,
+    agentId
   });
 }
 
@@ -755,6 +747,14 @@ async function ensureCustomerForCall({ customerId, customerName, customerPhone }
   );
 
   return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+}
+
+async function findCustomerByPhone(phoneValue) {
+  const normalized = normalizePhoneLookupValue(phoneValue);
+  if (!normalized) return null;
+
+  const customers = await dbAll('SELECT * FROM customers ORDER BY id DESC LIMIT 200');
+  return customers.find((customer) => normalizePhoneLookupValue(customer.phone) === normalized) || null;
 }
 
 async function getCustomerCallHistory(customerId, limit = 20) {
@@ -860,7 +860,10 @@ async function triggerScheduledCalls() {
          (c.status = 'pending' AND COALESCE(c.best_call_slot, c.preferred_slot) = ?)
          OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND c.next_retry_at IS NOT NULL AND DATETIME(c.next_retry_at) <= DATETIME('now'))
        )
-       AND recent_call.id IS NULL`,
+       AND (
+         c.status IN ('retry_scheduled', 'callback_scheduled')
+         OR recent_call.id IS NULL
+       )`,
     [currentSlot]
   );
 
@@ -914,13 +917,6 @@ async function triggerScheduledCalls() {
       console.log(`[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`);
     } catch (error) {
       console.error(`[SCHEDULER] Failed to call ${customer.name}:`, error.message);
-      if (error.code === 21219) {
-        await dbRun(
-          'INSERT INTO calls (customer_id, outcome, called_at) VALUES (?, ?, ?)',
-          [customer.id, 'twilio_unverified', new Date().toISOString()]
-        );
-        await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['twilio_trial_blocked', customer.id]);
-      }
     }
   }
 }
@@ -1034,7 +1030,7 @@ app.post('/call/start', async (req, res) => {
       return res.status(409).json({ success: false, error: blockedReason });
     }
 
-    console.log(`[CALL REQUEST] to=${customerPhone} from=${process.env.TWILIO_PHONE_NUMBER} twiml=${PUBLIC_BASE_URL}/call/twiml`);
+    console.log(`[CALL REQUEST] to=${customerPhone} callerId=${process.env.EXOTEL_CALLER_ID} applet=${process.env.EXOTEL_APPLET_URL}`);
     const call = await placeRealtimeCall({
       customerPhone,
       customerName: customer.name || customerName,
@@ -1076,13 +1072,13 @@ app.get('/call/twiml', (req, res) => {
   const agentId = req.query.agentId || '';
 
   if (CALL_MODE === 'scripted') {
-    console.log('[TWIML] Serving scripted TwiML flow');
+    console.log('[CALL FLOW] Serving scripted XML flow');
     res.type('text/xml').send(buildScriptedTwiml(customerName, clientName));
     return;
   }
 
   const streamUrl = toWssUrl(PUBLIC_BASE_URL, '/call/stream');
-  console.log(`[TWIML] Serving TwiML with stream URL: ${streamUrl}`);
+  console.log(`[CALL FLOW] Serving stream XML with URL: ${streamUrl}`);
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
@@ -1112,22 +1108,96 @@ app.post('/call/scripted/rating', (req, res) => {
   res.type('text/xml').send(buildScriptedRatingResponse(req));
 });
 
+app.all('/call/exotel/voicebot-url', async (req, res) => {
+  try {
+    const provider = 'exotel';
+    const query = new URLSearchParams({ provider });
+
+    const hintedPhone =
+      req.body?.From
+      || req.query?.From
+      || req.body?.from
+      || req.query?.from
+      || '';
+
+    const hintedCallSid =
+      req.body?.CallSid
+      || req.query?.CallSid
+      || req.body?.call_sid
+      || req.query?.call_sid
+      || '';
+
+    if (hintedPhone) {
+      query.set('from', hintedPhone);
+    }
+
+    if (hintedCallSid) {
+      query.set('callSid', hintedCallSid);
+    }
+
+    const streamUrl = `${toWssUrl(PUBLIC_BASE_URL, '/call/stream')}?${query.toString()}`;
+    res.json({ url: streamUrl });
+  } catch (error) {
+    console.error('[EXOTEL VOICEBOT URL ERROR]', error.message);
+    res.status(500).json({ error: 'Unable to generate Exotel voicebot URL' });
+  }
+});
+
 app.post('/call/status', async (req, res) => {
   try {
-    console.log(`[CALL STATUS] ${req.body.CallStatus} | SID: ${req.body.CallSid}`);
+    const providerStatus = req.body.CallStatus || req.body.Status || req.body.status || null;
+    const providerCallSid = req.body.CallSid || req.body.call_sid || req.body.Sid || req.body.sid || null;
+    const providerRecordingUrl = req.body.RecordingUrl || req.body.recording_url || null;
+    const providerRecordingSid = req.body.RecordingSid || req.body.recording_sid || null;
+    const eventType = req.body.EventType || req.body.event_type || null;
+    console.log(`[CALL STATUS] ${providerStatus} | SID: ${providerCallSid}`);
 
-    const callRecord = await dbGet('SELECT * FROM calls WHERE twilio_sid = ?', [req.body.CallSid]);
+    const callRecord = await dbGet('SELECT * FROM calls WHERE twilio_sid = ?', [providerCallSid]);
     const customerId = req.query.customerId || callRecord?.customer_id;
 
     if (callRecord) {
       let mappedOutcome = null;
-      if (req.body.CallStatus === 'completed') mappedOutcome = 'completed';
-      if (req.body.CallStatus === 'no-answer') mappedOutcome = 'no_answer';
-      if (req.body.CallStatus === 'failed') mappedOutcome = 'failed';
-      if (req.body.CallStatus === 'busy') mappedOutcome = 'busy';
+      if (providerStatus === 'completed') mappedOutcome = 'completed';
+      if (providerStatus === 'no-answer') mappedOutcome = 'no_answer';
+      if (providerStatus === 'failed') mappedOutcome = 'failed';
+      if (providerStatus === 'busy') mappedOutcome = 'busy';
+
+      const normalizedRecordingUrl = providerRecordingUrl
+        ? String(providerRecordingUrl).endsWith('.mp3') ? providerRecordingUrl : `${providerRecordingUrl}.mp3`
+        : null;
+
+      if (normalizedRecordingUrl || providerRecordingSid) {
+        await dbRun(
+          `UPDATE calls
+              SET recording_sid = COALESCE(?, recording_sid),
+                  recording_url = COALESCE(?, recording_url),
+                  recording_status = ?
+            WHERE id = ?`,
+          [
+            providerRecordingSid || null,
+            normalizedRecordingUrl,
+            normalizedRecordingUrl ? 'completed' : (providerStatus || eventType || 'pending'),
+            callRecord.id
+          ]
+        );
+      }
 
       if (mappedOutcome) {
-        await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ? WHERE id = ?', [mappedOutcome, req.body.CallStatus, callRecord.id]);
+        await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ? WHERE id = ?', [mappedOutcome, providerStatus, callRecord.id]);
+      }
+
+      if (mappedOutcome === 'completed' && normalizedRecordingUrl) {
+        setTimeout(() => {
+          processCompletedCallPipeline({ dbGet, dbRun, callSid: providerCallSid }).then((result) => {
+            if (result.ok) {
+              console.log(`[POST CALL PIPELINE] Processed call ${providerCallSid} with feedback ${result.feedbackId}`);
+            } else {
+              console.log(`[POST CALL PIPELINE] Skipped call ${providerCallSid}: ${result.reason}`);
+            }
+          }).catch((error) => {
+            console.error('[POST CALL PIPELINE ERROR]', error.message);
+          });
+        }, 1500);
       }
 
       if (customerId) {
@@ -1344,21 +1414,45 @@ app.post('/api/calls/:callId/escalate', async (req, res) => {
 
 app.get('/api/calls/:callId/recording', async (req, res) => {
   try {
-    const call = await dbGet('SELECT recording_url FROM calls WHERE id = ?', [req.params.callId]);
+    const call = await dbGet('SELECT id, twilio_sid, recording_url, recording_status FROM calls WHERE id = ?', [req.params.callId]);
 
-    if (!call?.recording_url) {
+    if (!call?.recording_url && !call?.twilio_sid) {
       return res.status(404).json({ error: 'Recording not available yet' });
     }
 
-    const authHeader = `Basic ${Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')}`;
-    const response = await fetch(call.recording_url, {
-      headers: {
-        Authorization: authHeader
-      }
-    });
+    let playbackUrl = call.recording_url || null;
+    let response = playbackUrl
+      ? await fetch(playbackUrl, {
+          headers: {
+            Authorization: buildExotelAuthHeader()
+          }
+        })
+      : null;
 
-    if (!response.ok) {
-      return res.status(response.status).json({ error: `Unable to fetch recording (${response.status})` });
+    if ((!response || !response.ok) && call?.twilio_sid) {
+      try {
+        const details = await fetchCallDetails(call.twilio_sid, { recordingUrlValidity: 15 });
+        const refreshedUrl = getRecordingUrlFromCallDetails(details);
+        if (refreshedUrl) {
+          playbackUrl = refreshedUrl;
+          await dbRun(
+            'UPDATE calls SET recording_url = ?, recording_status = COALESCE(recording_status, ?) WHERE id = ?',
+            [refreshedUrl, 'completed', call.id]
+          );
+          response = await fetch(refreshedUrl, {
+            headers: {
+              Authorization: buildExotelAuthHeader()
+            }
+          });
+        }
+      } catch (error) {
+        console.error('[RECORDING REFRESH ERROR]', error.message);
+      }
+    }
+
+    if (!response || !response.ok) {
+      const statusCode = response?.status || 404;
+      return res.status(statusCode).json({ error: `Unable to fetch recording (${statusCode})` });
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -1553,7 +1647,7 @@ app.get('/api/calls/:callId/transcript', async (req, res) => {
 });
 
 function setupOrchestratedStream(twilioWs, req) {
-  console.log('[STREAM] Twilio Media Stream connected');
+  console.log('[STREAM] Media stream connected');
   console.log(`[STREAM] Upgrade request from ${req.socket.remoteAddress || 'unknown'}`);
   console.log('[STREAM] Voice pipeline: orchestrated');
 
@@ -1573,7 +1667,7 @@ function setupOrchestratedStream(twilioWs, req) {
   let greetingStarted = false;
   let deepgramReady = false;
   let currentGeminiController = null;
-  let currentElevenLabsController = null;
+  let currentTtsController = null;
   let speechDrainRunning = false;
   let assistantSequence = Promise.resolve();
   let pendingSpeechSegments = [];
@@ -1674,7 +1768,7 @@ function setupOrchestratedStream(twilioWs, req) {
     }
   }
 
-  function sendAudioToTwilio(base64Payload) {
+  function sendAudioToCaller(base64Payload) {
     if (!streamSid || !base64Payload || callClosed || twilioWs.readyState !== WebSocket.OPEN) {
       return;
     }
@@ -1686,7 +1780,7 @@ function setupOrchestratedStream(twilioWs, req) {
     }));
   }
 
-  function clearTwilioPlaybackBuffer() {
+  function clearCallerPlaybackBuffer() {
     if (!streamSid || callClosed || twilioWs.readyState !== WebSocket.OPEN) {
       return;
     }
@@ -1727,7 +1821,7 @@ function setupOrchestratedStream(twilioWs, req) {
     pendingSpeechSegments.push(normalized);
     if (!speechDrainRunning) {
       drainSpeechQueue().catch((error) => {
-        console.error('[ELEVENLABS DRAIN ERROR]', error.message);
+        console.error('[TTS DRAIN ERROR]', error.message);
       });
     }
   }
@@ -1742,21 +1836,21 @@ function setupOrchestratedStream(twilioWs, req) {
     try {
       while (pendingSpeechSegments.length && !callClosed && !interruptedGeneration) {
         const segment = pendingSpeechSegments.shift();
-        currentElevenLabsController = new AbortController();
+        currentTtsController = new AbortController();
         state = 'SPEAKING';
         await refreshLiveCallState({ status: 'active' });
 
         try {
-          await streamElevenLabsAudio({
+          await streamSynthesizedAudio({
             text: segment,
-            signal: currentElevenLabsController.signal,
+            signal: currentTtsController.signal,
             onAudioChunk: async (chunk) => {
-              sendAudioToTwilio(chunk.toString('base64'));
+              sendAudioToCaller(chunk.toString('base64'));
             }
           });
         } catch (error) {
           if (error.name === 'AbortError') {
-            console.log('[ELEVENLABS] Audio stream interrupted');
+            console.log('[TTS] Audio stream interrupted');
             break;
           }
 
@@ -1764,7 +1858,7 @@ function setupOrchestratedStream(twilioWs, req) {
         }
       }
     } finally {
-      currentElevenLabsController = null;
+      currentTtsController = null;
       speechDrainRunning = false;
       if (!callClosed && state !== 'BARGE_IN') {
         state = 'LISTENING';
@@ -1782,16 +1876,16 @@ function setupOrchestratedStream(twilioWs, req) {
     interruptedGeneration = true;
     state = 'BARGE_IN';
     pendingSpeechSegments = [];
-    clearTwilioPlaybackBuffer();
+    clearCallerPlaybackBuffer();
 
     if (currentGeminiController) {
       currentGeminiController.abort();
       currentGeminiController = null;
     }
 
-    if (currentElevenLabsController) {
-      currentElevenLabsController.abort();
-      currentElevenLabsController = null;
+    if (currentTtsController) {
+      currentTtsController.abort();
+      currentTtsController = null;
     }
 
     refreshLiveCallState({ status: 'active' }).catch(() => {});
@@ -1973,9 +2067,9 @@ function setupOrchestratedStream(twilioWs, req) {
       currentGeminiController = null;
     }
 
-    if (currentElevenLabsController) {
-      currentElevenLabsController.abort();
-      currentElevenLabsController = null;
+    if (currentTtsController) {
+      currentTtsController.abort();
+      currentTtsController = null;
     }
 
     if (deepgramWs?.readyState === WebSocket.OPEN) {
@@ -1995,7 +2089,7 @@ function setupOrchestratedStream(twilioWs, req) {
     try {
       message = JSON.parse(raw.toString());
     } catch (error) {
-      console.error('[STREAM] Failed to parse Twilio message:', error.message);
+      console.error('[STREAM] Failed to parse media stream message:', error.message);
       return;
     }
 
@@ -2055,7 +2149,7 @@ function setupOrchestratedStream(twilioWs, req) {
   });
 
   twilioWs.on('close', () => {
-    console.log('[STREAM] Twilio WS closed');
+    console.log('[STREAM] Media stream closed');
     closeCallSession('closed').catch((error) => {
       console.error('[STREAM CLOSE ERROR]', error.message);
     });
@@ -2075,7 +2169,7 @@ wss.on('connection', (twilioWs, req) => {
     return;
   }
 
-  console.log('[STREAM] Twilio Media Stream connected');
+  console.log('[STREAM] Media stream connected');
   console.log(`[STREAM] Upgrade request from ${req.socket.remoteAddress || 'unknown'}`);
 
   let aiWs;
@@ -2091,6 +2185,7 @@ wss.on('connection', (twilioWs, req) => {
   let activeCustomerId = null;
   let activeCallSid = null;
   let activeCallId = null;
+  let transportMode = 'twilio';
   let transcriptPersisted = false;
 
   const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName, activeAgentConfig);
@@ -2182,7 +2277,7 @@ wss.on('connection', (twilioWs, req) => {
     }
   }
 
-  function sendAudioToTwilio(base64Payload) {
+  function sendAudioToCaller(base64Payload) {
     if (!streamSid || !base64Payload) {
       return;
     }
@@ -2269,7 +2364,7 @@ wss.on('connection', (twilioWs, req) => {
           output_modalities: ['audio'],
           audio: {
             input: {
-              format: { type: 'audio/pcmu' },
+              format: { type: transportMode === 'exotel' ? 'audio/pcm' : 'audio/pcmu' },
               transcription: {
                 model: 'gpt-4o-mini-transcribe'
               },
@@ -2283,7 +2378,7 @@ wss.on('connection', (twilioWs, req) => {
               }
             },
             output: {
-              format: { type: 'audio/pcmu' },
+              format: { type: transportMode === 'exotel' ? 'audio/pcm' : 'audio/pcmu' },
               voice: 'alloy'
             }
           }
@@ -2430,8 +2525,10 @@ wss.on('connection', (twilioWs, req) => {
           const pcm16 = Buffer.from(part.inlineData.data, 'base64');
           const sourceRate = parsePcmRate(part.inlineData.mimeType, 24000);
           const resampled = resamplePcm16(pcm16, sourceRate, 8000);
-          const mulaw = encodeMuLawFromPcm16(resampled).toString('base64');
-          sendAudioToTwilio(mulaw);
+          const outboundAudio = transportMode === 'exotel'
+            ? resampled.toString('base64')
+            : encodeMuLawFromPcm16(resampled).toString('base64');
+          sendAudioToCaller(outboundAudio);
         }
 
         if (message.serverContent?.interrupted) {
@@ -2455,7 +2552,7 @@ wss.on('connection', (twilioWs, req) => {
       }
 
       if (message.type === 'response.output_audio.delta' && message.delta) {
-        sendAudioToTwilio(message.delta);
+        sendAudioToCaller(message.delta);
         return;
       }
 
@@ -2515,39 +2612,63 @@ wss.on('connection', (twilioWs, req) => {
     try {
       message = JSON.parse(raw.toString());
     } catch (error) {
-      console.error('[STREAM] Failed to parse Twilio message:', error.message);
+      console.error('[STREAM] Failed to parse media stream message:', error.message);
       return;
     }
 
     if (message.event === 'start') {
-      streamSid = message.start.streamSid;
-      const customParameters = message.start.customParameters || {};
+      const start = extractStartPayload(message);
+      streamSid = getStreamSidFromMessage(message);
+      transportMode = getTransportModeFromStartPayload(start, req);
+      const customParameters = getCustomParametersFromStart(start);
       activeCustomerName = customParameters.customerName || activeCustomerName;
       activeClientName = customParameters.clientName || activeClientName;
       activeCustomerId = customParameters.customerId ? Number(customParameters.customerId) : null;
       activeAgentId = customParameters.agentId ? Number(customParameters.agentId) : null;
       activeAgentConfig = activeAgentId ? await getAgentConfigById(activeAgentId) : await getDefaultAgentConfig();
       activeClientName = activeAgentConfig?.client_name || activeClientName;
-      activeCallSid = message.start.callSid || activeCallSid;
+      activeCallSid = getCallSidFromStart(start) || new URL(req.url, 'http://localhost').searchParams.get('callSid') || activeCallSid;
+
+      if (!activeCustomerId) {
+        const hintedPhone = start.from || new URL(req.url, 'http://localhost').searchParams.get('from') || '';
+        const customer = await findCustomerByPhone(hintedPhone);
+        if (customer) {
+          activeCustomerId = customer.id;
+          activeCustomerName = customer.name || activeCustomerName;
+          if (!activeAgentId && customer.default_agent_id) {
+            activeAgentId = Number(customer.default_agent_id) || null;
+            activeAgentConfig = activeAgentId ? await getAgentConfigById(activeAgentId) : activeAgentConfig;
+            activeClientName = activeAgentConfig?.client_name || activeClientName;
+          }
+        }
+      }
+
       if (activeCallSid) {
         const callRow = await dbGet('SELECT id FROM calls WHERE twilio_sid = ?', [activeCallSid]);
         activeCallId = callRow?.id || null;
       }
       console.log(`[STREAM] streamSid: ${streamSid}`);
-      console.log(`[STREAM] Start payload: ${JSON.stringify(message.start)}`);
-      console.log(`[STREAM] Active customer=${activeCustomerName} client=${activeClientName}`);
+      console.log(`[STREAM] Start payload: ${JSON.stringify(start)}`);
+      console.log(`[STREAM] Transport=${transportMode} customer=${activeCustomerName} client=${activeClientName}`);
       await refreshLiveCallState({ status: 'active', started_at: new Date().toISOString() });
       ensureAiSession();
       return;
     }
 
     if (message.event === 'media' && aiWs?.readyState === WebSocket.OPEN) {
+      const payload = getMediaPayload(message);
+      if (!payload) {
+        return;
+      }
+
       if (AI_PROVIDER === 'gemini') {
         if (!geminiSetupComplete) {
           return;
         }
 
-        const pcm16 = decodeMuLaw(message.media.payload);
+        const pcm16 = transportMode === 'exotel'
+          ? Buffer.from(payload, 'base64')
+          : decodeMuLaw(payload);
         aiWs.send(JSON.stringify({
           realtimeInput: {
             audio: {
@@ -2561,7 +2682,9 @@ wss.on('connection', (twilioWs, req) => {
 
       aiWs.send(JSON.stringify({
         type: 'input_audio_buffer.append',
-        audio: message.media.payload
+        audio: transportMode === 'exotel'
+          ? encodeMuLawFromPcm16(Buffer.from(payload, 'base64')).toString('base64')
+          : payload
       }));
       return;
     }
@@ -2594,7 +2717,7 @@ wss.on('connection', (twilioWs, req) => {
   });
 
   twilioWs.on('close', () => {
-    console.log('[STREAM] Twilio WS closed');
+    console.log('[STREAM] Media stream closed');
     refreshLiveCallState({ status: 'closed' }).catch(() => {});
     printTranscriptOnce();
     persistTranscriptOnce().catch((error) => {

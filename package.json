@@ -1,7 +1,7 @@
 {
   "name": "feedback-automation-system",
   "version": "1.0.0",
-  "description": "Customer feedback automation system using Twilio, OpenAI, and Express",
+  "description": "Customer feedback automation system using Exotel, OpenAI, and Express",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -10,7 +10,6 @@
   "dependencies": {
     "express": "^4.18.2",
     "sqlite3": "^5.1.6",
-    "twilio": "^4.19.0",
     "openai": "^4.26.0",
     "@sendgrid/mail": "^7.7.0",
     "pdfkit": "^0.13.0",

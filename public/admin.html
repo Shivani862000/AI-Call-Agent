@@ -635,6 +635,13 @@
       border-color: rgba(255, 155, 23, 0.15);
     }
 
+    .badge.retry_scheduled,
+    .badge.callback_scheduled {
+      background: rgba(120, 89, 246, 0.12);
+      color: #5c43d6;
+      border-color: rgba(120, 89, 246, 0.18);
+    }
+
     .badge.call {
       background: rgba(45, 109, 246, 0.09);
       color: var(--blue);
@@ -1416,7 +1423,7 @@
           </div>
         </article>
       </section>
-
+<!-- 
       <section class="dashboard-grid">
         <article class="card" id="agents">
           <div class="card-header">
@@ -1470,7 +1477,7 @@
             <div class="field">
               <label class="field-label" for="agentVoice">TTS voice</label>
               <input type="text" id="agentVoice" placeholder="e.g. BTNeCNdXniCSbjEac5vd">
-              <div class="helper-text">Usually your ElevenLabs voice ID.</div>
+              <div class="helper-text">Usually your built-in voice or provider voice setting.</div>
               <div class="error-text" id="agentVoiceError"></div>
             </div>
 
@@ -1507,9 +1514,9 @@
             <button id="agentCancelButton" class="secondary hidden" onclick="resetAgentForm()">Cancel</button>
           </div>
         </article>
-      </section>
+      </section> -->
 
-      <section class="card">
+      <!-- <section class="card">
         <div class="card-header">
           <div>
             <div class="card-title">Agent library</div>
@@ -1546,7 +1553,7 @@
             </tbody>
           </table>
         </div>
-      </section>
+      </section> -->
 
       <section class="dashboard-grid">
         <article class="card" id="customers">
@@ -2034,6 +2041,29 @@
     let campaignConfigCache = [];
     let seenOwnerAlertKeys = new Set();
 
+    async function fetchJson(path, options = {}) {
+      const res = await fetch(path, {
+        cache: 'no-store',
+        ...options,
+        headers: {
+          ...(options.headers || {})
+        }
+      });
+
+      let payload = null;
+      try {
+        payload = await res.json();
+      } catch (error) {
+        payload = null;
+      }
+
+      if (!res.ok) {
+        throw new Error(payload?.error || `Request failed (${res.status})`);
+      }
+
+      return payload;
+    }
+
     function showAlert(message, type = 'success') {
       const alertContainer = document.getElementById('alertContainer');
       const alertEl = document.createElement('div');
@@ -2103,11 +2133,11 @@
         client_name: document.getElementById('agentClientName').value.trim(),
         description: document.getElementById('agentDescription').value.trim(),
         language: document.getElementById('agentLanguage').value,
-        voice_pipeline: 'orchestrated',
+        voice_pipeline: 'legacy',
         stt_provider: 'deepgram',
         llm_provider: 'gemini',
         llm_model: document.getElementById('agentModel').value.trim() || DEFAULT_AGENT_MODEL,
-        tts_provider: 'elevenlabs',
+        tts_provider: 'native',
         tts_voice: document.getElementById('agentVoice').value.trim(),
         system_prompt: document.getElementById('agentSystemPrompt').value.trim(),
         opening_prompt: document.getElementById('agentOpeningPrompt').value.trim(),
@@ -2152,7 +2182,17 @@
     }
 
     function formatStatusLabel(value) {
-      return String(value || 'pending').replace(/_/g, ' ');
+      const normalized = String(value || 'pending').trim().toLowerCase();
+      const aliases = {
+        retry_scheduled: 'Rescheduled',
+        callback_scheduled: 'Callback scheduled',
+        no_answer: 'No answer',
+        do_not_call: 'Do not call',
+        wrong_number: 'Wrong number',
+        admin_review: 'Admin review'
+      };
+
+      return aliases[normalized] || normalized.replace(/_/g, ' ');
     }
 
     function parseMaybeJson(value, fallback) {
@@ -2249,7 +2289,9 @@
         const call = item.call;
         const actions = [];
 
-        if (call?.recording_url) {
+        const hasPlayableRecording = Boolean(call?.recording_url) || (call?.recording_status === 'completed' && call?.id);
+
+        if (hasPlayableRecording) {
           actions.push(`<a class="button-link ghost" href="${getRecordingProxyUrl(call.id)}" target="_blank" rel="noopener">Play recording</a>`);
         }
 
@@ -2326,7 +2368,8 @@
       // document.getElementById('analysisJsonValue').textContent = JSON.stringify(analysis, null, 2);
 
       const audioWrap = document.getElementById('analysisModalAudio');
-      if (call.recording_url) {
+      const hasPlayableRecording = Boolean(call.recording_url) || (call.recording_status === 'completed' && call.id);
+      if (hasPlayableRecording) {
         audioWrap.classList.remove('hidden');
         audioWrap.innerHTML = `
           <strong>Recording</strong>
@@ -2437,7 +2480,7 @@
             </div>
           </td>
           <td><strong>${agent.language || 'hi'}</strong></td>
-          <td>${agent.stt_provider || 'deepgram'} • ${agent.llm_provider || 'gemini'} • ${agent.tts_provider || 'elevenlabs'}</td>
+          <td>${agent.stt_provider || 'deepgram'} • ${agent.llm_provider || 'gemini'} • ${agent.tts_provider || 'native'}</td>
           <td><span class="badge ${Number(agent.is_active || 0) ? 'good' : 'pending'}">${Number(agent.is_active || 0) ? 'active' : 'inactive'}</span></td>
           <td>
             <div class="action-buttons">
@@ -2562,15 +2605,11 @@
 
     async function loadStats() {
       try {
-        const [customersRes, reportRes, weeklyReportRes] = await Promise.all([
-          fetch(`${API_BASE}/customers`),
-          fetch(`${API_BASE}/reports/preview`),
-          fetch(`${API_BASE}/reports/weekly-preview`)
+        const [customers, report, weeklyReport] = await Promise.all([
+          fetchJson(`${API_BASE}/customers`),
+          fetchJson(`${API_BASE}/reports/preview`),
+          fetchJson(`${API_BASE}/reports/weekly-preview`)
         ]);
-
-        const customers = await customersRes.json();
-        const report = await reportRes.json();
-        const weeklyReport = await weeklyReportRes.json();
 
         document.getElementById('totalCustomers').textContent = customers.length || 0;
         document.getElementById('callsToday').textContent = report.total_calls || 0;
@@ -2720,8 +2759,7 @@
 
     async function loadCampaignConfigs() {
       try {
-        const res = await fetch(`${API_BASE}/campaigns`);
-        const rows = await res.json();
+        const rows = await fetchJson(`${API_BASE}/campaigns`);
         campaignConfigCache = Array.isArray(rows) ? rows : [];
         renderCampaignConfigs(campaignConfigCache);
       } catch (error) {
@@ -2731,8 +2769,7 @@
 
     async function loadOwnerDashboard() {
       try {
-        const res = await fetch(`${API_BASE}/reports/owner-preview`);
-        const ownerData = await res.json();
+        const ownerData = await fetchJson(`${API_BASE}/reports/owner-preview`);
         ownerDashboardCache = ownerData;
 
         document.getElementById('ownerDigestText').textContent = ownerData.digest_text || 'Owner digest unavailable.';
@@ -2753,6 +2790,17 @@
       } catch (error) {
         console.error('Error loading owner dashboard:', error);
       }
+    }
+
+    function refreshDashboardData() {
+      loadAgents();
+      loadCustomers();
+      loadFeedback();
+      loadRecentCalls();
+      loadLiveCalls();
+      loadStats();
+      loadOwnerDashboard();
+      loadCampaignConfigs();
     }
 
     async function saveCampaign() {
@@ -2931,8 +2979,7 @@
 
     async function loadCustomers() {
       try {
-        const res = await fetch(`${API_BASE}/customers`);
-        const customers = await res.json();
+        const customers = await fetchJson(`${API_BASE}/customers`);
         customerCache = Array.isArray(customers) ? customers : [];
         populateFeedbackCustomerDropdown();
         renderCustomers();
@@ -2943,8 +2990,7 @@
 
     async function loadFeedback() {
       try {
-        const res = await fetch(`${API_BASE}/feedback`);
-        const feedback = await res.json();
+        const feedback = await fetchJson(`${API_BASE}/feedback`);
         feedbackCache = Array.isArray(feedback) ? feedback : [];
         renderFeedbackIntelligence();
       } catch (error) {
@@ -2954,8 +3000,7 @@
 
     async function loadRecentCalls() {
       try {
-        const res = await fetch(`${API_BASE}/calls/recent`);
-        const calls = await res.json();
+        const calls = await fetchJson(`${API_BASE}/calls/recent`);
         recentCallsCache = Array.isArray(calls) ? calls : [];
         renderFeedbackIntelligence();
       } catch (error) {
@@ -2965,8 +3010,7 @@
 
     async function loadLiveCalls() {
       try {
-        const res = await fetch(`${API_BASE}/calls/live`);
-        const calls = await res.json();
+        const calls = await fetchJson(`${API_BASE}/calls/live`);
         const tbody = document.getElementById('liveCallsBody');
         tbody.innerHTML = '';
 
@@ -3285,24 +3329,10 @@
 
       resetAgentForm();
       resetCustomerForm();
-      loadAgents();
-      loadCustomers();
-      loadFeedback();
-      loadRecentCalls();
-      loadLiveCalls();
-      loadStats();
-      loadOwnerDashboard();
-      loadCampaignConfigs();
+      refreshDashboardData();
 
       setInterval(() => {
-        loadAgents();
-        loadCustomers();
-        loadFeedback();
-        loadRecentCalls();
-        loadLiveCalls();
-        loadStats();
-        loadOwnerDashboard();
-        loadCampaignConfigs();
+        refreshDashboardData();
       }, 30000);
     });
 
@@ -3317,6 +3347,7 @@
         statusFilter.selectedIndex = 0;
         renderCustomers();
       }
+      refreshDashboardData();
     });
   </script>
 </body>

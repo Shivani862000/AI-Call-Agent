@@ -7,11 +7,38 @@ const { parse } = require('csv-parse/sync');
 const upload = multer({ storage: multer.memoryStorage() });
 const PHONE_PATTERN = /^\+\d{10,15}$/;
 const SLOT_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const RESCHEDULABLE_STATUSES = new Set([
+  'called',
+  'no_answer',
+  'busy',
+  'failed',
+  'completed',
+  'retry_scheduled',
+  'callback_scheduled'
+]);
 
 function toBooleanFlag(value) {
   if (typeof value === 'boolean') return value ? 1 : 0;
   const normalized = String(value || '').trim().toLowerCase();
   return ['1', 'true', 'yes', 'on'].includes(normalized) ? 1 : 0;
+}
+
+function getNextIsoForPreferredSlot(slot, now = new Date()) {
+  const match = SLOT_PATTERN.exec(String(slot || '').trim());
+  if (!match) {
+    return now.toISOString();
+  }
+
+  const [, hours, minutes] = match;
+  const scheduled = new Date(now);
+  scheduled.setHours(Number(hours), Number(minutes), 0, 0);
+
+  // If the selected time has already passed today, schedule the next day's run.
+  if (scheduled.getTime() <= now.getTime()) {
+    scheduled.setDate(scheduled.getDate() + 1);
+  }
+
+  return scheduled.toISOString();
 }
 
 function normalizeCustomerPayload(payload = {}) {
@@ -225,11 +252,20 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
+    const slotChanged = payload.preferred_slot !== (existing.preferred_slot || '10:00');
+    const existingStatus = String(existing.status || '').toLowerCase();
+    const shouldRescheduleStatus = slotChanged && RESCHEDULABLE_STATUSES.has(existingStatus);
+    const nextRetryAt = shouldRescheduleStatus
+      ? getNextIsoForPreferredSlot(payload.preferred_slot)
+      : existing.next_retry_at;
+    const nextStatus = shouldRescheduleStatus ? 'retry_scheduled' : existing.status;
+
     await dbRun(
       `UPDATE customers
           SET name = ?,
               phone = ?,
               preferred_slot = ?,
+              status = ?,
               customer_value = ?,
               urgency_level = ?,
               preferred_language = ?,
@@ -238,6 +274,7 @@ router.put('/:id', async (req, res) => {
               consent_status = ?,
               outstanding_issues = ?,
               pending_follow_ups = ?,
+              next_retry_at = ?,
               revenue_stage = ?,
               revenue_estimate = ?,
               campaign_name = ?,
@@ -247,6 +284,7 @@ router.put('/:id', async (req, res) => {
         payload.name,
         payload.phone,
         payload.preferred_slot,
+        nextStatus,
         payload.customer_value,
         payload.urgency_level,
         payload.preferred_language,
@@ -255,6 +293,7 @@ router.put('/:id', async (req, res) => {
         payload.consent_status,
         payload.outstanding_issues || null,
         payload.pending_follow_ups || null,
+        nextRetryAt,
         payload.revenue_stage,
         payload.revenue_estimate,
         payload.campaign_name || null,
