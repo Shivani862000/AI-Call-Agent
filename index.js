@@ -842,6 +842,35 @@ function evaluateLiveSentimentLabel(text) {
   return { label: 'neutral', score: 0 };
 }
 
+function shouldAutoHangupAfterAgentTurn(text) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return [
+    /(^|\b)(goodbye|bye|alvida)(\b|$)/i,
+    /apna dhyaan rakh/i,
+    /aapne jo feedback diya uske liye/i,
+    /bahut (bahut )?dhanyawa?d/i,
+    /hum (aapko|apko) (ek )?whatsapp message bhejenge/i,
+    /have a great day/i
+  ].some((pattern) => pattern.test(normalized));
+}
+
+function estimateHangupDelayMs(text) {
+  const length = String(text || '').trim().length;
+  return Math.min(10000, Math.max(4500, 2500 + (length * 35)));
+}
+
+function buildTranscriptPreviewText(text, maxLines = 4) {
+  const lines = String(text || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.slice(-maxLines).join('\n');
+}
+
 async function triggerScheduledCalls() {
   const now = new Date();
   const currentSlot = getCurrentSlotLabel(now);
@@ -1371,8 +1400,55 @@ app.get('/api/calls/recent', async (req, res) => {
 
 app.get('/api/calls/live', async (req, res) => {
   try {
-    const rows = [...liveCallState.values()].sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
-    res.json(rows);
+    const inMemoryRows = [...liveCallState.values()];
+    const seenCallSids = new Set(inMemoryRows.map((row) => row.call_sid).filter(Boolean));
+    const recentDbRows = await dbAll(
+      `SELECT
+         calls.id,
+         calls.customer_id,
+         calls.agent_id,
+         calls.called_at,
+         calls.outcome,
+         calls.twilio_sid,
+         calls.transcript_text,
+         calls.live_sentiment_score,
+         calls.live_sentiment_label,
+         calls.live_red_flag,
+         calls.supervisor_alert_level,
+         calls.human_escalation_requested,
+         customers.name AS customer_name,
+         agents.name AS agent_name
+       FROM calls
+       JOIN customers ON customers.id = calls.customer_id
+       LEFT JOIN agents ON agents.id = calls.agent_id
+       WHERE DATETIME(calls.called_at) >= DATETIME('now', '-60 minutes')
+       ORDER BY calls.called_at DESC
+       LIMIT 12`
+    );
+
+    const mergedRows = [
+      ...inMemoryRows,
+      ...recentDbRows
+        .filter((row) => row.twilio_sid && !seenCallSids.has(row.twilio_sid))
+        .map((row) => ({
+          call_sid: row.twilio_sid,
+          customer_name: row.customer_name,
+          customer_id: row.customer_id,
+          call_id: row.id,
+          started_at: row.called_at,
+          transcript_preview: buildTranscriptPreviewText(row.transcript_text),
+          live_sentiment_label: row.live_sentiment_label || 'neutral',
+          live_sentiment_score: Number(row.live_sentiment_score || 0),
+          red_flag: Boolean(Number(row.live_red_flag || 0)),
+          escalation_requested: Boolean(Number(row.human_escalation_requested || 0)),
+          status: row.outcome === 'initiated' || row.outcome === 'scheduled_initiated' ? 'active' : 'recent',
+          agent_id: row.agent_id,
+          agent_name: row.agent_name || 'Default Feedback Agent',
+          supervisor_alert_level: row.supervisor_alert_level || 'normal'
+        }))
+    ].sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
+
+    res.json(mergedRows);
   } catch (error) {
     console.error('[LIVE CALLS ERROR]', error.message);
     res.status(500).json({ error: error.message });
@@ -1674,6 +1750,7 @@ function setupOrchestratedStream(twilioWs, req) {
   let finalTranscriptBuffer = [];
   let interruptedGeneration = false;
   let deepgramWs = null;
+  let autoHangupTimer = null;
 
   const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName, activeAgentConfig);
   const getActiveOpeningPrompt = () => buildOpeningPrompt(activeClientName, activeCustomerName, activeAgentConfig);
@@ -1766,6 +1843,35 @@ function setupOrchestratedStream(twilioWs, req) {
         ]
       );
     }
+  }
+
+  function clearAutoHangupTimer() {
+    if (autoHangupTimer) {
+      clearTimeout(autoHangupTimer);
+      autoHangupTimer = null;
+    }
+  }
+
+  function scheduleAutoHangupFromAgentText(text) {
+    clearAutoHangupTimer();
+    if (!shouldAutoHangupAfterAgentTurn(text) || callClosed) {
+      return;
+    }
+
+    const delayMs = estimateHangupDelayMs(text);
+    autoHangupTimer = setTimeout(() => {
+      if (callClosed) {
+        return;
+      }
+      console.log(`[AUTO HANGUP] Closing orchestrated call after farewell (${delayMs}ms)`);
+      closeCallSession('completed').catch((error) => {
+        console.error('[AUTO HANGUP ERROR]', error.message);
+      }).finally(() => {
+        if (twilioWs.readyState === WebSocket.OPEN) {
+          twilioWs.close();
+        }
+      });
+    }, delayMs);
   }
 
   function sendAudioToCaller(base64Payload) {
@@ -1934,6 +2040,7 @@ function setupOrchestratedStream(twilioWs, req) {
         pushTranscriptTurn(transcript, 'AGENT', fullResponse.trim());
         console.log(`[AGENT]: ${fullResponse.trim()}`);
         await refreshLiveCallState({ status: 'active' });
+        scheduleAutoHangupFromAgentText(fullResponse.trim());
       }
     } catch (error) {
       if (error.name === 'AbortError') {
@@ -1963,6 +2070,7 @@ function setupOrchestratedStream(twilioWs, req) {
       return;
     }
 
+    clearAutoHangupTimer();
     pushTranscriptTurn(transcript, 'CUSTOMER', normalized);
     console.log(`[CUSTOMER]: ${normalized}`);
     evaluateAndStoreSentiment(normalized).catch(() => {});
@@ -2059,6 +2167,7 @@ function setupOrchestratedStream(twilioWs, req) {
     }
 
     callClosed = true;
+    clearAutoHangupTimer();
     pendingSpeechSegments = [];
     interruptedGeneration = true;
 
@@ -2187,6 +2296,8 @@ wss.on('connection', (twilioWs, req) => {
   let activeCallId = null;
   let transportMode = 'twilio';
   let transcriptPersisted = false;
+  let callClosed = false;
+  let autoHangupTimer = null;
 
   const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName, activeAgentConfig);
   const getActiveOpeningPrompt = () => buildOpeningPrompt(activeClientName, activeCustomerName, activeAgentConfig);
@@ -2275,6 +2386,40 @@ wss.on('connection', (twilioWs, req) => {
         ]
       );
     }
+  }
+
+  function clearAutoHangupTimer() {
+    if (autoHangupTimer) {
+      clearTimeout(autoHangupTimer);
+      autoHangupTimer = null;
+    }
+  }
+
+  function scheduleAutoHangupFromAgentText(text) {
+    clearAutoHangupTimer();
+    if (!shouldAutoHangupAfterAgentTurn(text) || callClosed) {
+      return;
+    }
+
+    const delayMs = estimateHangupDelayMs(text);
+    autoHangupTimer = setTimeout(() => {
+      if (callClosed) {
+        return;
+      }
+      callClosed = true;
+      console.log(`[AUTO HANGUP] Closing legacy call after farewell (${delayMs}ms)`);
+      refreshLiveCallState({ status: 'completed' }).catch(() => {});
+      printTranscriptOnce();
+      persistTranscriptOnce().catch((error) => {
+        console.error('[FEEDBACK SAVE ERROR]', error.message);
+      });
+      if (aiWs?.readyState === WebSocket.OPEN) {
+        aiWs.close();
+      }
+      if (twilioWs.readyState === WebSocket.OPEN) {
+        twilioWs.close();
+      }
+    }, delayMs);
   }
 
   function sendAudioToCaller(base64Payload) {
@@ -2490,6 +2635,7 @@ wss.on('connection', (twilioWs, req) => {
         }
 
         if (message.serverContent?.inputTranscription?.text) {
+          clearAutoHangupTimer();
           pushTranscriptTurn(transcript, 'CUSTOMER', message.serverContent.inputTranscription.text);
           console.log(`[CUSTOMER]: ${message.serverContent.inputTranscription.text}`);
           const sentiment = evaluateLiveSentimentLabel(message.serverContent.inputTranscription.text);
@@ -2514,6 +2660,7 @@ wss.on('connection', (twilioWs, req) => {
           pushTranscriptTurn(transcript, 'AGENT', message.serverContent.outputTranscription.text);
           console.log(`[AGENT]: ${message.serverContent.outputTranscription.text}`);
           refreshLiveCallState({}).catch(() => {});
+          scheduleAutoHangupFromAgentText(message.serverContent.outputTranscription.text);
         }
 
         const parts = message.serverContent?.modelTurn?.parts || [];
@@ -2560,10 +2707,12 @@ wss.on('connection', (twilioWs, req) => {
         pushTranscriptTurn(transcript, 'AGENT', message.transcript);
         console.log(`[AGENT]: ${message.transcript}`);
         refreshLiveCallState({}).catch(() => {});
+        scheduleAutoHangupFromAgentText(message.transcript);
         return;
       }
 
       if (message.type === 'conversation.item.input_audio_transcription.completed') {
+        clearAutoHangupTimer();
         pushTranscriptTurn(transcript, 'CUSTOMER', message.transcript);
         console.log(`[CUSTOMER]: ${message.transcript}`);
         const sentiment = evaluateLiveSentimentLabel(message.transcript);
@@ -2704,6 +2853,8 @@ wss.on('connection', (twilioWs, req) => {
 
     if (message.event === 'stop') {
       console.log('[STREAM] Call ended');
+      callClosed = true;
+      clearAutoHangupTimer();
       refreshLiveCallState({ status: 'completed' }).catch(() => {});
       printTranscriptOnce();
       persistTranscriptOnce().catch((error) => {
@@ -2718,6 +2869,8 @@ wss.on('connection', (twilioWs, req) => {
 
   twilioWs.on('close', () => {
     console.log('[STREAM] Media stream closed');
+    callClosed = true;
+    clearAutoHangupTimer();
     refreshLiveCallState({ status: 'closed' }).catch(() => {});
     printTranscriptOnce();
     persistTranscriptOnce().catch((error) => {

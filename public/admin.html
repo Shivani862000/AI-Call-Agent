@@ -3020,8 +3020,8 @@
               <td colspan="5">
                 <div class="empty-state">
                   <div class="empty-icon">LV</div>
-                  <strong>No live calls right now</strong>
-                  <div class="supporting-text">Active Gemini calls and supervisor alerts will appear here.</div>
+                  <strong>No live supervisor activity right now</strong>
+                  <div class="supporting-text">Active and recently completed supervised calls will appear here.</div>
                 </div>
               </td>
             </tr>
@@ -3031,11 +3031,12 @@
 
         calls.forEach((call) => {
           const row = document.createElement('tr');
+          const statusTone = call.status === 'active' ? 'pending' : call.status === 'recent' ? 'average' : 'completed';
           row.innerHTML = `
             <td><strong>${call.customer_name || '--'}</strong><div class="subcell">${call.agent_name ? `Agent: ${call.agent_name}` : 'Agent: default'}</div></td>
-            <td><span class="badge ${call.status === 'active' ? 'pending' : 'completed'}">${formatStatusLabel(call.status || 'active')}</span></td>
+            <td><span class="badge ${statusTone}">${formatStatusLabel(call.status || 'active')}</span></td>
             <td><span class="badge ${call.live_sentiment_label === 'negative' ? 'bad' : call.live_sentiment_label === 'positive' ? 'good' : 'average'}">${formatStatusLabel(call.live_sentiment_label || 'neutral')}</span></td>
-            <td>${call.red_flag ? '<span class="badge bad">Red flag</span>' : '<span class="badge good">Normal</span>'}</td>
+            <td>${call.escalation_requested ? '<span class="badge bad">Escalated</span>' : call.red_flag ? '<span class="badge bad">Red flag</span>' : '<span class="badge good">Normal</span>'}</td>
             <td><span class="feedback-excerpt">${call.transcript_preview || '--'}</span></td>
           `;
           tbody.appendChild(row);
