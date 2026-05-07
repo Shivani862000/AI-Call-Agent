@@ -106,16 +106,41 @@ function getRecordingUrlFromCallDetails(payload) {
   );
 }
 
+function buildExotelTraceId(customerPhone, customerId) {
+  const phoneFragment = String(customerPhone || '').replace(/\D+/g, '').slice(-6) || 'nop';
+  const customerFragment = customerId ? `c${String(customerId)}` : 'c0';
+  const timeFragment = Date.now().toString(36);
+  const randomFragment = Math.random().toString(36).slice(2, 8);
+  return `exotel-${customerFragment}-${phoneFragment}-${timeFragment}-${randomFragment}`;
+}
+
 async function initiateCall(customerPhone, customerId, statusCallbackUrl) {
   const accountSid = getExotelAccountSid();
   const apiHost = getExotelApiHost();
   const configuredFlowUrl = process.env.EXOTEL_APPLET_URL;
   const appId = process.env.EXOTEL_APP_ID;
+  const traceId = buildExotelTraceId(customerPhone, customerId);
   const voiceFlowUrl = configuredFlowUrl
     || (appId ? `http://my.exotel.com/${accountSid}/exoml/start_voice/${appId}` : '');
 
   if (!voiceFlowUrl) {
     throw new Error('Missing EXOTEL_APPLET_URL or EXOTEL_APP_ID for outbound call flow.');
+  }
+
+  let requestUrl = String(voiceFlowUrl).trim();
+  try {
+    const requestUrlObject = new URL(requestUrl);
+    requestUrlObject.searchParams.set('source', 'exotel');
+    requestUrlObject.searchParams.set('traceId', traceId);
+    if (customerId) {
+      requestUrlObject.searchParams.set('customerId', String(customerId));
+    }
+    if (customerPhone) {
+      requestUrlObject.searchParams.set('customerPhone', String(customerPhone));
+    }
+    requestUrl = requestUrlObject.toString();
+  } catch (error) {
+    console.warn(`[EXOTEL] Unable to add trace params to request URL: ${error.message}`);
   }
 
   console.log(
@@ -125,6 +150,7 @@ async function initiateCall(customerPhone, customerId, statusCallbackUrl) {
     `EXOTEL_APP_ID=${appId || ''} ` +
     `EXOTEL_CALLER_ID=${process.env.EXOTEL_CALLER_ID || ''} ` +
     `EXOTEL_APPLET_URL=${configuredFlowUrl || ''} ` +
+    `TRACE_ID=${traceId} ` +
     `STATUS_CALLBACK=${statusCallbackUrl} ` +
     `CALL_TYPE=${process.env.EXOTEL_CALL_TYPE || 'trans'}`
   );
@@ -132,9 +158,20 @@ async function initiateCall(customerPhone, customerId, statusCallbackUrl) {
     `[EXOTEL] Initiating call to ${customerPhone} via ${apiHost} ` +
     `flow=${voiceFlowUrl} statusCallback=${statusCallbackUrl}`
   );
-
-  const requestUrl = String(voiceFlowUrl).trim();
   console.log(`[EXOTEL] Request Url param=${requestUrl}`);
+  console.log(
+    `[EXOTEL PAYLOAD] ` +
+    JSON.stringify({
+      From: customerPhone,
+      CallerId: process.env.EXOTEL_CALLER_ID || '',
+      Url: requestUrl,
+      CallType: process.env.EXOTEL_CALL_TYPE || 'trans',
+      StatusCallback: statusCallbackUrl,
+      StatusCallbackContentType: 'application/json',
+      CustomField: customerId ? String(customerId) : null,
+      TraceId: traceId
+    })
+  );
 
   const body = new URLSearchParams({
     From: customerPhone,

@@ -1362,14 +1362,29 @@ app.all('/call/exotel/voicebot-url', async (req, res) => {
     }
 
     const streamUrl = `${toWssUrl(PUBLIC_BASE_URL, '/call/stream')}?${query.toString()}`;
+    const traceMarker = {
+      method: req.method,
+      path: req.originalUrl,
+      ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '',
+      userAgent: req.headers['user-agent'] || '',
+      host: req.headers.host || '',
+      from: hintedPhone || '',
+      callSid: hintedCallSid || '',
+      query: req.query || {},
+      bodyKeys: Object.keys(req.body || {}),
+      timestamp: new Date().toISOString()
+    };
     console.log(
-      `[EXOTEL VOICEBOT] provider=${provider} streamUrl=${streamUrl} ` +
+      `[EXOTEL VOICEBOT HIT] provider=${provider} streamUrl=${streamUrl} ` +
+      `marker=${JSON.stringify(traceMarker)} ` +
       `APP_BASE_URL=${describeEnvValue(process.env.APP_BASE_URL || '')} ` +
       `NGROK_URL=${describeEnvValue(process.env.NGROK_URL || '')} ` +
       `WEBHOOK_URL=${describeEnvValue(process.env.WEBHOOK_URL || '')} ` +
       `PUBLIC_BASE_URL=${describeEnvValue(PUBLIC_BASE_URL)} ` +
       `EXOTEL_APPLET_URL=${process.env.EXOTEL_APPLET_URL || ''}`
     );
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('X-Exotel-Voicebot-Hit', 'true');
     res.json({ url: streamUrl });
   } catch (error) {
     console.error('[EXOTEL VOICEBOT URL ERROR]', error.message);
