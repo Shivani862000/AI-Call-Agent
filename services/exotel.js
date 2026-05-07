@@ -110,10 +110,13 @@ async function initiateCall(customerPhone, customerId, statusCallbackUrl) {
     `flow=${voiceFlowUrl} statusCallback=${statusCallbackUrl}`
   );
 
+  const requestUrl = String(voiceFlowUrl).trim();
+  console.log(`[EXOTEL] Request Url param=${requestUrl}`);
+
   const body = new URLSearchParams({
     From: customerPhone,
     CallerId: process.env.EXOTEL_CALLER_ID,
-    Url: String(voiceFlowUrl).replace(/^https:\/\//i, 'http://'),
+    Url: requestUrl,
     CallType: process.env.EXOTEL_CALL_TYPE || 'trans',
     StatusCallback: statusCallbackUrl,
     StatusCallbackContentType: 'application/json'
