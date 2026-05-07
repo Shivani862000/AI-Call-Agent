@@ -57,6 +57,25 @@ const GEMINI_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.gene
 const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
 const liveCallState = new Map();
+const LIVE_CALL_RETENTION_MS = 20 * 60 * 1000;
+const LIVE_CALL_ACTIVE_STALE_MS = 90 * 60 * 1000;
+
+function runInBackground(label, work) {
+  Promise.resolve()
+    .then(() => work())
+    .catch((error) => {
+      console.error(`[${label}]`, error.message);
+    });
+}
+
+process.on('unhandledRejection', (reason) => {
+  const message = reason instanceof Error ? reason.stack || reason.message : String(reason);
+  console.error('[UNHANDLED REJECTION]', message);
+});
+
+process.on('uncaughtExceptionMonitor', (error) => {
+  console.error('[UNCAUGHT EXCEPTION]', error.stack || error.message);
+});
 
 function applyAgentTemplate(template, replacements = {}) {
   return String(template || '').replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, key) => {
@@ -871,6 +890,26 @@ function buildTranscriptPreviewText(text, maxLines = 4) {
   return lines.slice(-maxLines).join('\n');
 }
 
+function pruneLiveCallState(now = Date.now()) {
+  for (const [callSid, row] of liveCallState.entries()) {
+    const startedAt = new Date(row?.started_at || 0).getTime();
+    if (!startedAt || Number.isNaN(startedAt)) {
+      liveCallState.delete(callSid);
+      continue;
+    }
+
+    const ageMs = now - startedAt;
+    if (row?.status === 'active' && ageMs > LIVE_CALL_ACTIVE_STALE_MS) {
+      liveCallState.delete(callSid);
+      continue;
+    }
+
+    if (row?.status !== 'active' && ageMs > LIVE_CALL_RETENTION_MS) {
+      liveCallState.delete(callSid);
+    }
+  }
+}
+
 async function triggerScheduledCalls() {
   const now = new Date();
   const currentSlot = getCurrentSlotLabel(now);
@@ -1217,14 +1256,13 @@ app.post('/call/status', async (req, res) => {
 
       if (mappedOutcome === 'completed' && normalizedRecordingUrl) {
         setTimeout(() => {
-          processCompletedCallPipeline({ dbGet, dbRun, callSid: providerCallSid }).then((result) => {
+          runInBackground('POST CALL PIPELINE ERROR', async () => {
+            const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: providerCallSid });
             if (result.ok) {
               console.log(`[POST CALL PIPELINE] Processed call ${providerCallSid} with feedback ${result.feedbackId}`);
             } else {
               console.log(`[POST CALL PIPELINE] Skipped call ${providerCallSid}: ${result.reason}`);
             }
-          }).catch((error) => {
-            console.error('[POST CALL PIPELINE ERROR]', error.message);
           });
         }, 1500);
       }
@@ -1273,14 +1311,13 @@ app.post('/call/recording-status', async (req, res) => {
 
       if (recordingStatus === 'completed' && recordingUrl) {
         setTimeout(() => {
-          processCompletedCallPipeline({ dbGet, dbRun, callSid }).then((result) => {
+          runInBackground('POST CALL PIPELINE ERROR', async () => {
+            const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid });
             if (result.ok) {
               console.log(`[POST CALL PIPELINE] Processed call ${callSid} with feedback ${result.feedbackId}`);
             } else {
               console.log(`[POST CALL PIPELINE] Skipped call ${callSid}: ${result.reason}`);
             }
-          }).catch((error) => {
-            console.error('[POST CALL PIPELINE ERROR]', error.message);
           });
         }, 1500);
       }
@@ -1400,8 +1437,10 @@ app.get('/api/calls/recent', async (req, res) => {
 
 app.get('/api/calls/live', async (req, res) => {
   try {
+    pruneLiveCallState();
     const inMemoryRows = [...liveCallState.values()];
     const seenCallSids = new Set(inMemoryRows.map((row) => row.call_sid).filter(Boolean));
+    const now = Date.now();
     const recentDbRows = await dbAll(
       `SELECT
          calls.id,
@@ -1430,22 +1469,32 @@ app.get('/api/calls/live', async (req, res) => {
       ...inMemoryRows,
       ...recentDbRows
         .filter((row) => row.twilio_sid && !seenCallSids.has(row.twilio_sid))
-        .map((row) => ({
-          call_sid: row.twilio_sid,
-          customer_name: row.customer_name,
-          customer_id: row.customer_id,
-          call_id: row.id,
-          started_at: row.called_at,
-          transcript_preview: buildTranscriptPreviewText(row.transcript_text),
-          live_sentiment_label: row.live_sentiment_label || 'neutral',
-          live_sentiment_score: Number(row.live_sentiment_score || 0),
-          red_flag: Boolean(Number(row.live_red_flag || 0)),
-          escalation_requested: Boolean(Number(row.human_escalation_requested || 0)),
-          status: row.outcome === 'initiated' || row.outcome === 'scheduled_initiated' ? 'active' : 'recent',
-          agent_id: row.agent_id,
-          agent_name: row.agent_name || 'Default Feedback Agent',
-          supervisor_alert_level: row.supervisor_alert_level || 'normal'
-        }))
+        .map((row) => {
+          const calledAtMs = new Date(row.called_at || 0).getTime();
+          const isFreshPending = (
+            (row.outcome === 'initiated' || row.outcome === 'scheduled_initiated')
+            && calledAtMs
+            && !Number.isNaN(calledAtMs)
+            && (now - calledAtMs) <= (10 * 60 * 1000)
+          );
+
+          return {
+            call_sid: row.twilio_sid,
+            customer_name: row.customer_name,
+            customer_id: row.customer_id,
+            call_id: row.id,
+            started_at: row.called_at,
+            transcript_preview: buildTranscriptPreviewText(row.transcript_text),
+            live_sentiment_label: row.live_sentiment_label || 'neutral',
+            live_sentiment_score: Number(row.live_sentiment_score || 0),
+            red_flag: Boolean(Number(row.live_red_flag || 0)),
+            escalation_requested: Boolean(Number(row.human_escalation_requested || 0)),
+            status: isFreshPending ? 'active' : 'recent',
+            agent_id: row.agent_id,
+            agent_name: row.agent_name || 'Default Feedback Agent',
+            supervisor_alert_level: row.supervisor_alert_level || 'normal'
+          };
+        })
     ].sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
 
     res.json(mergedRows);
@@ -2902,6 +2951,10 @@ wss.on('connection', (twilioWs, req) => {
       runOwnerDigestTick().catch((error) => {
         console.error('[OWNER DIGEST ERROR]', error.message);
       });
+    }, 60000);
+
+    setInterval(() => {
+      pruneLiveCallState();
     }, 60000);
 
     runSchedulerTick().catch((error) => {
