@@ -105,6 +105,11 @@ async function initiateCall(customerPhone, customerId, statusCallbackUrl) {
     throw new Error('Missing EXOTEL_APPLET_URL or EXOTEL_APP_ID for outbound call flow.');
   }
 
+  console.log(
+    `[EXOTEL] Initiating call to ${customerPhone} via ${apiHost} ` +
+    `flow=${voiceFlowUrl} statusCallback=${statusCallbackUrl}`
+  );
+
   const body = new URLSearchParams({
     From: customerPhone,
     CallerId: process.env.EXOTEL_CALLER_ID,
@@ -133,6 +138,7 @@ async function initiateCall(customerPhone, customerId, statusCallbackUrl) {
   }
 
   const sid = payload.parsed?.Call?.Sid || payload.parsed?.call?.sid || null;
+  console.log(`[EXOTEL] Call accepted sid=${sid || 'unknown'} status=${payload.parsed?.Call?.Status || payload.parsed?.call?.status || 'queued'}`);
   return {
     sid,
     status: payload.parsed?.Call?.Status || payload.parsed?.call?.status || 'queued',

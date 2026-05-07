@@ -1164,6 +1164,7 @@ app.get('/call/twiml', (req, res) => {
 
   const streamUrl = toWssUrl(PUBLIC_BASE_URL, '/call/stream');
   console.log(`[CALL FLOW] Serving stream XML with URL: ${streamUrl}`);
+  console.log(`[CALL FLOW] customer=${customerName} client=${clientName} agentId=${agentId || 'none'}`);
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
@@ -1221,6 +1222,7 @@ app.all('/call/exotel/voicebot-url', async (req, res) => {
     }
 
     const streamUrl = `${toWssUrl(PUBLIC_BASE_URL, '/call/stream')}?${query.toString()}`;
+    console.log(`[EXOTEL VOICEBOT] provider=${provider} streamUrl=${streamUrl}`);
     res.json({ url: streamUrl });
   } catch (error) {
     console.error('[EXOTEL VOICEBOT URL ERROR]', error.message);
@@ -2713,6 +2715,7 @@ wss.on('connection', (twilioWs, req) => {
         if (message.setupComplete) {
           geminiSetupComplete = true;
           console.log('[GEMINI] Session configured');
+          console.log(`[GEMINI] Config model=${getActiveModelName()} voice=${GEMINI_VOICE} transport=${transportMode}`);
 
           geminiAudioReceived = false;
           clearGeminiOpeningPromptRetry();
@@ -2773,6 +2776,7 @@ wss.on('connection', (twilioWs, req) => {
           const outboundAudio = transportMode === 'exotel'
             ? resampled.toString('base64')
             : encodeMuLawFromPcm16(resampled).toString('base64');
+          console.log(`[GEMINI] Outbound audio chunk mime=${part.inlineData.mimeType} sourceRate=${sourceRate} bytes=${resampled.length}`);
           sendAudioToCaller(outboundAudio);
         }
 
@@ -2897,6 +2901,7 @@ wss.on('connection', (twilioWs, req) => {
       console.log(`[STREAM] streamSid: ${streamSid}`);
       console.log(`[STREAM] Start payload: ${JSON.stringify(start)}`);
       console.log(`[STREAM] Transport=${transportMode} customer=${activeCustomerName} client=${activeClientName}`);
+      console.log(`[STREAM] AI provider=${AI_PROVIDER} model=${getActiveModelName()}`);
       await refreshLiveCallState({ status: 'active', started_at: new Date().toISOString() });
       ensureAiSession();
       return;
@@ -2910,12 +2915,16 @@ wss.on('connection', (twilioWs, req) => {
 
       if (AI_PROVIDER === 'gemini') {
         if (!geminiSetupComplete) {
+          console.log('[STREAM] Dropping media chunk until Gemini setup completes');
           return;
         }
 
         const pcm16 = transportMode === 'exotel'
           ? Buffer.from(payload, 'base64')
           : decodeMuLaw(payload);
+        if (!geminiAudioReceived) {
+          console.log(`[GEMINI] First inbound audio chunk received (${pcm16.length} bytes)`);
+        }
         aiWs.send(JSON.stringify({
           realtimeInput: {
             audio: {
