@@ -136,6 +136,28 @@ function runMigrations() {
       )
     `);
 
+    await run(`
+      CREATE TABLE IF NOT EXISTS clients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name VARCHAR(100) NOT NULL,
+        phone VARCHAR(20) NOT NULL UNIQUE,
+        date_of_birth DATE,
+        last_visit_date DATE NOT NULL,
+        treatment_type VARCHAR(120) NOT NULL,
+        annual_reminder_enabled INTEGER DEFAULT 1,
+        annual_reminder_slot VARCHAR(10) DEFAULT '10:00',
+        next_annual_reminder_date DATE,
+        last_annual_reminder_at TIMESTAMP,
+        last_annual_reminder_year INTEGER,
+        notes TEXT,
+        linked_customer_id INTEGER,
+        status VARCHAR(20) DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (linked_customer_id) REFERENCES customers(id)
+      )
+    `);
+
     await addColumnIfMissing('customers', 'customer_value', "VARCHAR(20) DEFAULT 'standard'");
     await addColumnIfMissing('customers', 'urgency_level', "VARCHAR(20) DEFAULT 'normal'");
     await addColumnIfMissing('customers', 'priority_score', 'INTEGER DEFAULT 50');
@@ -166,6 +188,16 @@ function runMigrations() {
     await addColumnIfMissing('customers', 'data_retention_until', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'dnd_checked_at', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'default_agent_id', 'INTEGER');
+    await addColumnIfMissing('clients', 'date_of_birth', 'DATE');
+    await addColumnIfMissing('clients', 'annual_reminder_enabled', 'INTEGER DEFAULT 1');
+    await addColumnIfMissing('clients', 'annual_reminder_slot', "VARCHAR(10) DEFAULT '10:00'");
+    await addColumnIfMissing('clients', 'next_annual_reminder_date', 'DATE');
+    await addColumnIfMissing('clients', 'last_annual_reminder_at', 'TIMESTAMP');
+    await addColumnIfMissing('clients', 'last_annual_reminder_year', 'INTEGER');
+    await addColumnIfMissing('clients', 'notes', 'TEXT');
+    await addColumnIfMissing('clients', 'linked_customer_id', 'INTEGER');
+    await addColumnIfMissing('clients', 'status', "VARCHAR(20) DEFAULT 'active'");
+    await addColumnIfMissing('clients', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
 
     await addColumnIfMissing('calls', 'transcript_text', 'TEXT');
     await addColumnIfMissing('calls', 'consent_detected', 'INTEGER DEFAULT 0');

@@ -7,6 +7,7 @@ const path = require('path');
 const WebSocket = require('ws');
 const { initializeDatabase, dbRun, dbGet, dbAll } = require('./db');
 const customersRouter = require('./routes/customers');
+const clientsRouter = require('./routes/clients');
 const campaignsRouter = require('./routes/campaigns');
 const feedbackRouter = require('./routes/feedback');
 const reportsRouter = require('./routes/reports');
@@ -33,6 +34,14 @@ const {
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+
+const PROTECTED_HTML_PATHS = new Set([
+  '/admin.html',
+  '/customers.html',
+  '/clients.html',
+  '/feedback.html',
+  '/reports.html'
+]);
 
 const ADMIN_USERNAME = 'Path Lab';
 const ADMIN_PASSWORD = 'Pathlab123#@!';
@@ -156,7 +165,7 @@ function requireAdminAuth(req, res, next) {
 }
 
 app.use((req, res, next) => {
-  if (req.path === '/admin.html' || req.path.startsWith('/api/')) {
+  if (PROTECTED_HTML_PATHS.has(req.path) || req.path.startsWith('/api/')) {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
@@ -169,7 +178,7 @@ app.use((req, res, next) => {
     return next();
   }
 
-  if (req.path === '/admin.html' || req.path.startsWith('/api/')) {
+  if (PROTECTED_HTML_PATHS.has(req.path) || req.path.startsWith('/api/')) {
     return requireAdminAuth(req, res, next);
   }
 
@@ -964,6 +973,30 @@ async function placeRealtimeCall({ customerPhone, customerName, customerId, clie
   });
 }
 
+function computeNextAnnualReminderDate(lastVisitDate, referenceDate = new Date()) {
+  const parts = String(lastVisitDate || '').split('-').map((value) => Number(value));
+  const [, month, day] = parts;
+  if (!month || !day) {
+    return null;
+  }
+
+  const formatDateOnly = (date) => date.toISOString().slice(0, 10);
+  const buildAnniversaryDate = (year) => {
+    const lastDayOfMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const normalizedDay = Math.min(day, lastDayOfMonth);
+    return new Date(Date.UTC(year, month - 1, normalizedDay));
+  };
+
+  const currentYear = referenceDate.getUTCFullYear();
+  const today = formatDateOnly(referenceDate);
+  let candidate = formatDateOnly(buildAnniversaryDate(currentYear));
+  if (candidate < today) {
+    candidate = formatDateOnly(buildAnniversaryDate(currentYear + 1));
+  }
+
+  return candidate;
+}
+
 async function ensureCustomerForCall({ customerId, customerName, customerPhone }) {
   if (customerId) {
     const existingById = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
@@ -986,6 +1019,63 @@ async function ensureCustomerForCall({ customerId, customerName, customerPhone }
       'pending',
       new Date().toISOString()
     ]
+  );
+
+  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+}
+
+async function ensureCustomerForClientReminder(client) {
+  let customer = null;
+
+  if (client.linked_customer_id) {
+    customer = await dbGet('SELECT * FROM customers WHERE id = ?', [client.linked_customer_id]);
+  }
+
+  if (!customer) {
+    customer = await dbGet('SELECT * FROM customers WHERE phone = ?', [client.phone]);
+  }
+
+  if (customer) {
+    await dbRun(
+      `UPDATE customers
+          SET name = ?,
+              phone = ?,
+              preferred_slot = ?,
+              service_interest = ?,
+              status = CASE WHEN status = 'completed' THEN 'pending' ELSE status END
+        WHERE id = ?`,
+      [
+        client.name,
+        client.phone,
+        client.annual_reminder_slot || '10:00',
+        client.treatment_type || null,
+        customer.id
+      ]
+    );
+    await dbRun(
+      'UPDATE clients SET linked_customer_id = ?, updated_at = ? WHERE id = ?',
+      [customer.id, new Date().toISOString(), client.id]
+    );
+    return dbGet('SELECT * FROM customers WHERE id = ?', [customer.id]);
+  }
+
+  const result = await dbRun(
+    `INSERT INTO customers (
+      name, phone, preferred_slot, status, created_at, service_interest
+    ) VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      client.name,
+      client.phone,
+      client.annual_reminder_slot || '10:00',
+      'pending',
+      new Date().toISOString(),
+      client.treatment_type || null
+    ]
+  );
+
+  await dbRun(
+    'UPDATE clients SET linked_customer_id = ?, updated_at = ? WHERE id = ?',
+    [result.lastID, new Date().toISOString(), client.id]
   );
 
   return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
@@ -1257,6 +1347,112 @@ async function triggerScheduledCalls() {
   }
 }
 
+async function triggerAnnualClientReminderCalls() {
+  const now = new Date();
+  const currentSlot = getCurrentSlotLabel(now);
+  const currentYear = now.getUTCFullYear();
+
+  const dueClients = await dbAll(
+    `SELECT client.*
+     FROM clients client
+     LEFT JOIN calls recent_call
+       ON recent_call.customer_id = client.linked_customer_id
+      AND DATETIME(recent_call.called_at) >= DATETIME('now', '-45 minutes')
+     WHERE COALESCE(client.annual_reminder_enabled, 1) = 1
+       AND COALESCE(client.status, 'active') = 'active'
+       AND client.next_annual_reminder_date IS NOT NULL
+       AND DATE(client.next_annual_reminder_date) <= DATE('now')
+       AND COALESCE(client.annual_reminder_slot, '10:00') <= ?
+       AND COALESCE(client.last_annual_reminder_year, 0) < ?
+       AND recent_call.id IS NULL
+     ORDER BY client.next_annual_reminder_date ASC, client.annual_reminder_slot ASC`,
+    [currentSlot, currentYear]
+  );
+
+  if (!dueClients.length) {
+    return;
+  }
+
+  console.log(`[CLIENT REMINDER] Found ${dueClients.length} annual reminder client(s) due at ${currentSlot}`);
+
+  for (const client of dueClients) {
+    try {
+      const customer = await ensureCustomerForClientReminder(client);
+      const hydratedCustomer = await hydratePreCallIntelligence(customer);
+      const blockedReason = shouldBlockCustomerCall(hydratedCustomer);
+      if (blockedReason) {
+        console.log(`[CLIENT REMINDER] Skipping ${client.name}: ${blockedReason}`);
+        continue;
+      }
+
+      const agentConfig = hydratedCustomer.default_agent_id
+        ? await getAgentConfigById(hydratedCustomer.default_agent_id)
+        : await getDefaultAgentConfig();
+
+      const claimResult = await dbRun(
+        `UPDATE customers
+            SET status = ?,
+                last_called_at = ?
+          WHERE id = ?
+            AND COALESCE(status, 'pending') IN ('pending', 'retry_scheduled', 'callback_scheduled', 'called', 'completed')`,
+        ['calling', new Date().toISOString(), hydratedCustomer.id]
+      );
+
+      if (!claimResult.changes) {
+        console.log(`[CLIENT REMINDER] Skipping ${client.name}: customer row is already in use`);
+        continue;
+      }
+
+      const call = await placeRealtimeCall({
+        customerPhone: hydratedCustomer.phone,
+        customerName: hydratedCustomer.name,
+        customerId: hydratedCustomer.id,
+        clientName: agentConfig?.client_name || CLIENT_NAME,
+        agentId: agentConfig?.id || null
+      });
+
+      await dbRun(
+        `INSERT INTO calls (
+          customer_id, agent_id, outcome, twilio_sid, called_at, hot_lead_score,
+          consent_message_played, call_script_version, supervisor_alert_level
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          hydratedCustomer.id,
+          agentConfig?.id || null,
+          'scheduled_initiated',
+          call.sid,
+          new Date().toISOString(),
+          hydratedCustomer.priority_score || computePriorityScore(hydratedCustomer),
+          1,
+          `annual-reminder:${client.treatment_type || 'client-care'}`,
+          'normal'
+        ]
+      );
+
+      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', hydratedCustomer.id]);
+      await dbRun(
+        `UPDATE clients
+            SET last_annual_reminder_at = ?,
+                last_annual_reminder_year = ?,
+                next_annual_reminder_date = ?,
+                updated_at = ?
+          WHERE id = ?`,
+        [
+          new Date().toISOString(),
+          currentYear,
+          computeNextAnnualReminderDate(client.last_visit_date, new Date(Date.UTC(currentYear + 1, 0, 1))),
+          new Date().toISOString(),
+          client.id
+        ]
+      );
+
+      console.log(`[CLIENT REMINDER] Annual reminder call started for ${client.name} (${call.sid})`);
+    } catch (error) {
+      console.error(`[CLIENT REMINDER ERROR] ${client.name}: ${error.message}`);
+    }
+  }
+}
+
 let schedulerRunning = false;
 
 async function runSchedulerTick() {
@@ -1266,6 +1462,7 @@ async function runSchedulerTick() {
 
   schedulerRunning = true;
   try {
+    await triggerAnnualClientReminderCalls();
     await triggerScheduledCalls();
   } finally {
     schedulerRunning = false;
@@ -1379,6 +1576,7 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 app.use('/api/customers', customersRouter);
+app.use('/api/clients', clientsRouter);
 app.use('/api/campaigns', campaignsRouter);
 app.use('/api/feedback', feedbackRouter);
 app.use('/api/reports', reportsRouter);

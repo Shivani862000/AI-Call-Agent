@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reports</title>
+  <link rel="stylesheet" href="/app-shell.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-mark">PL</div>
+          <div class="brand-copy">
+            <h1>Path Lab Console</h1>
+            <p>Reporting workspace</p>
+          </div>
+        </div>
+        <nav class="nav-list">
+          <a href="/admin.html" class="nav-link">Overview</a>
+          <a href="/customers.html" class="nav-link">Customers</a>
+          <a href="/clients.html" class="nav-link">Clients</a>
+          <a href="/feedback.html" class="nav-link">Feedback</a>
+          <a href="/reports.html" class="nav-link active">Reports</a>
+        </nav>
+      </div>
+      <div class="sidebar-footer">
+        <strong>Reports page</strong>
+        <span>Decision-ready summaries, not just raw counts.</span>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <header class="page-header">
+        <div class="page-title-wrap">
+          <h2>Reports</h2>
+          <div class="page-subtitle">
+            <span class="pill">Improved reporting</span>
+            <span>Operational performance, weekly narrative, ROI, and leadership digest in one place.</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button id="generateDailyButton" class="secondary" type="button">Generate daily</button>
+          <button id="generateWeeklyButton" class="primary" type="button">Generate weekly</button>
+          <button id="sendDigestButton" class="ghost" type="button">Send owner digest</button>
+          <button id="logoutButton" class="ghost" type="button">Logout</button>
+        </div>
+      </header>
+
+      <div id="alertContainer" class="alert-stack"></div>
+
+      <section class="stats-grid">
+        <article class="stat-card">
+          <div class="stat-label">Calls today</div>
+          <div class="stat-number" id="reportCallsToday">0</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label">Feedback count</div>
+          <div class="stat-number" id="reportFeedbackCount">0</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label">Revenue pipeline</div>
+          <div class="stat-number" id="reportRevenuePipeline">Rs 0</div>
+        </article>
+        <article class="stat-card">
+          <div class="stat-label">ROI multiple</div>
+          <div class="stat-number" id="reportRoiMultiple">0x</div>
+        </article>
+      </section>
+
+      <section class="three-column-grid">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Daily operational snapshot</div>
+              <div class="card-subtitle">Same-day activity that the admin team should monitor.</div>
+            </div>
+          </div>
+          <div id="dailyReportList" class="list-block"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Weekly summary</div>
+              <div class="card-subtitle">Narrative summary plus lead and complaint context.</div>
+            </div>
+          </div>
+          <div id="weeklyReportList" class="list-block"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Leadership digest</div>
+              <div class="card-subtitle">Morning-brief style output for owners or managers.</div>
+            </div>
+          </div>
+          <div id="ownerDigestList" class="list-block"></div>
+        </article>
+      </section>
+
+      <section class="two-column-grid">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Priority alerts</div>
+              <div class="card-subtitle">Customers that need human attention or immediate follow-up.</div>
+            </div>
+          </div>
+          <div id="priorityAlertsList" class="list-block"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Business intelligence</div>
+              <div class="card-subtitle">Best slots, objections, and campaign ROI surfaced in plain language.</div>
+            </div>
+          </div>
+          <div id="businessIntelList" class="list-block"></div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <script src="/app-shell.js"></script>
+  <script>
+    async function loadReports() {
+      const [daily, weekly, owner] = await Promise.all([
+        AppShell.fetchJson(`${AppShell.API_BASE}/reports/preview`),
+        AppShell.fetchJson(`${AppShell.API_BASE}/reports/weekly-preview`),
+        AppShell.fetchJson(`${AppShell.API_BASE}/reports/owner-preview`)
+      ]);
+
+      document.getElementById('reportCallsToday').textContent = daily.total_calls || 0;
+      document.getElementById('reportFeedbackCount').textContent = daily.feedback_count || 0;
+      document.getElementById('reportRevenuePipeline').textContent = AppShell.formatCurrencyInr(owner.roi_snapshot?.revenue_pipeline_estimate || 0);
+      document.getElementById('reportRoiMultiple').textContent = `${Number(owner.roi_snapshot?.roi_multiple || 0).toFixed(1)}x`;
+
+      document.getElementById('dailyReportList').innerHTML = `
+        <div class="list-item"><strong>Daily summary</strong><span class="muted">${AppShell.escapeHtml(daily.summary_text || 'Daily summary unavailable.')}</span></div>
+        <div class="list-item"><strong>Consent given</strong><span class="muted">${daily.consent_given || 0} customers moved forward with consent-based flow.</span></div>
+        <div class="list-item"><strong>WhatsApp follow-ups</strong><span class="muted">${daily.whatsapp_sent || 0} WhatsApp follow-ups were sent today.</span></div>
+      `;
+
+      document.getElementById('weeklyReportList').innerHTML = `
+        <div class="list-item"><strong>Weekly summary</strong><span class="muted">${AppShell.escapeHtml(weekly.summary_text || 'Weekly summary unavailable.')}</span></div>
+        <div class="list-item"><strong>Top insights</strong><span class="muted">${AppShell.escapeHtml((weekly.top_insights || []).join(' | ') || 'No top insights yet.')}</span></div>
+        <div class="list-item"><strong>Hot leads and pending items</strong><span class="muted">Hot leads: ${AppShell.escapeHtml((weekly.hot_lead_names || []).join(', ') || 'None')} | Pending: ${AppShell.escapeHtml((weekly.pending_summary || []).join(' | ') || 'None')}</span></div>
+      `;
+
+      document.getElementById('ownerDigestList').innerHTML = `
+        <div class="list-item"><strong>Digest text</strong><span class="muted">${AppShell.escapeHtml(owner.digest_text || 'Owner digest unavailable.')}</span></div>
+        <div class="list-item"><strong>Yesterday snapshot</strong><span class="muted">Calls: ${owner.yesterday_snapshot?.calls || 0} | Hot leads: ${owner.yesterday_snapshot?.hot_leads || 0} | Complaints: ${owner.yesterday_snapshot?.complaints || 0}</span></div>
+        <div class="list-item"><strong>Cost and savings</strong><span class="muted">AI ops: ${AppShell.formatCurrencyInr(owner.roi_snapshot?.ai_ops_cost_estimate || 0)} | Saving vs staff: ${AppShell.formatCurrencyInr(owner.roi_snapshot?.estimated_saving_vs_staff || 0)}</span></div>
+      `;
+
+      const alerts = owner.alerts || [];
+      document.getElementById('priorityAlertsList').innerHTML = alerts.length
+        ? alerts.map((alert) => `
+            <div class="list-item">
+              <strong>${AppShell.escapeHtml(alert.customer_name || 'Customer')}</strong>
+              <span class="muted">${AppShell.escapeHtml(alert.headline || '--')}</span>
+              <div class="supporting-text">${AppShell.escapeHtml(alert.summary || '')}</div>
+            </div>
+          `).join('')
+        : `
+          <div class="empty-state">
+            <div class="empty-icon">AL</div>
+            <strong>No priority alerts right now</strong>
+            <div class="supporting-text">Risk alerts and hot lead escalations will appear here.</div>
+          </div>
+        `;
+
+      document.getElementById('businessIntelList').innerHTML = `
+        <div class="list-item"><strong>Best call slots</strong><span class="muted">${AppShell.escapeHtml((owner.best_slots || []).join(' | ') || 'Not enough history yet.')}</span></div>
+        <div class="list-item"><strong>Best scripts</strong><span class="muted">${AppShell.escapeHtml((owner.best_scripts || []).join(' | ') || 'No script comparison available yet.')}</span></div>
+        <div class="list-item"><strong>Common objections</strong><span class="muted">${AppShell.escapeHtml((owner.common_objections || []).map((item) => `${item.label} (${item.count})`).join(' | ') || 'No recurring objections detected.')}</span></div>
+      `;
+    }
+
+    async function generateDailyReport() {
+      const result = await AppShell.fetchJson(`${AppShell.API_BASE}/reports/generate`, { method: 'POST' });
+      AppShell.showAlert(result.message || 'Daily report generated successfully');
+      window.location.href = `${AppShell.API_BASE}/reports/download?t=${Date.now()}`;
+    }
+
+    async function generateWeeklyReport() {
+      const result = await AppShell.fetchJson(`${AppShell.API_BASE}/reports/weekly-generate`, { method: 'POST' });
+      AppShell.showAlert(result.message || 'Weekly report generated successfully');
+      window.location.href = `${AppShell.API_BASE}/reports/weekly-download?t=${Date.now()}`;
+    }
+
+    async function sendOwnerDigest() {
+      const result = await AppShell.fetchJson(`${AppShell.API_BASE}/reports/owner-digest/send`, { method: 'POST' });
+      AppShell.showAlert(result.success ? 'Owner digest sent successfully' : 'Owner digest could not be sent', result.success ? 'success' : 'error');
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await AppShell.ensureAuthenticatedSession();
+      document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
+      document.getElementById('generateDailyButton').addEventListener('click', generateDailyReport);
+      document.getElementById('generateWeeklyButton').addEventListener('click', generateWeeklyReport);
+      document.getElementById('sendDigestButton').addEventListener('click', sendOwnerDigest);
+      try {
+        await loadReports();
+      } catch (error) {
+        AppShell.showAlert(error.message, 'error');
+      }
+    });
+  </script>
+</body>
+</html>

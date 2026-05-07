@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Customers</title>
+  <link rel="stylesheet" href="/app-shell.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-mark">PL</div>
+          <div class="brand-copy">
+            <h1>Path Lab Console</h1>
+            <p>Customer operations</p>
+          </div>
+        </div>
+        <nav class="nav-list">
+          <a href="/admin.html" class="nav-link">Overview</a>
+          <a href="/customers.html" class="nav-link active">Customers</a>
+          <a href="/clients.html" class="nav-link">Clients</a>
+          <a href="/feedback.html" class="nav-link">Feedback</a>
+          <a href="/reports.html" class="nav-link">Reports</a>
+        </nav>
+      </div>
+      <div class="sidebar-footer">
+        <strong>Customers page</strong>
+        <span>Lead entry, scheduling, and outbound call actions live here.</span>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <header class="page-header">
+        <div class="page-title-wrap">
+          <h2>Customers</h2>
+          <div class="page-subtitle">
+            <span class="pill">Dedicated page</span>
+            <span id="customerPageSubtitle">Manage call-ready customers without dashboard clutter.</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <a href="/admin.html" class="button-link ghost">Overview</a>
+          <button id="logoutButton" class="ghost" type="button">Logout</button>
+        </div>
+      </header>
+
+      <div id="alertContainer" class="alert-stack"></div>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Customer management</div>
+            <div class="card-subtitle">Only the fields needed for fast outbound operations</div>
+          </div>
+        </div>
+
+        <div id="customerEditChip" class="edit-chip"></div>
+        <input type="hidden" id="editingCustomerId">
+
+        <div class="grid-2">
+          <div class="field">
+            <label class="field-label" for="customerName">Customer name</label>
+            <input type="text" id="customerName" maxlength="100" placeholder="e.g. Rahul Sharma">
+            <div class="error-text" id="customerNameError"></div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="customerPhone">Phone number</label>
+            <input type="tel" id="customerPhone" placeholder="+91 98765 43210">
+            <div class="helper-text">Use full E.164 format with country code.</div>
+            <div class="error-text" id="customerPhoneError"></div>
+          </div>
+          <div class="field">
+            <label class="field-label" for="customerSlot">Scheduled call time</label>
+            <input type="time" id="customerSlot">
+            <div class="error-text" id="customerSlotError"></div>
+          </div>
+          <div class="field">
+            <label class="field-label">Quick actions</label>
+            <div class="button-row">
+              <button id="customerSubmitButton" class="primary" type="button">Add customer</button>
+              <button id="customerCancelButton" class="secondary" type="button" hidden>Cancel</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Customers list</div>
+            <div class="card-subtitle" id="customerListMeta">0 records</div>
+          </div>
+          <div class="toolbar-group">
+            <input type="search" id="customerSearch" placeholder="Search name or phone">
+            <select id="customerStatusFilter">
+              <option value="" selected>All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="called">Called</option>
+              <option value="completed">Completed</option>
+              <option value="busy">Busy</option>
+              <option value="no_answer">No answer</option>
+              <option value="retry_scheduled">Retry scheduled</option>
+              <option value="callback_scheduled">Callback scheduled</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Scheduled</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="customersTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="analysisModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle">
+      <div class="card-header">
+        <div>
+          <div class="card-title" id="analysisModalTitle">Call analysis</div>
+          <div class="card-subtitle" id="analysisModalSubtitle">Loading details...</div>
+        </div>
+        <button id="analysisModalClose" class="ghost" type="button">Close</button>
+      </div>
+
+      <div class="modal-meta-grid">
+        <div class="modal-stat">
+          <strong>Customer rating</strong>
+          <span id="analysisRatingValue" class="muted">--</span>
+        </div>
+        <div class="modal-stat">
+          <strong>Call outcome</strong>
+          <span id="analysisOutcomeValue" class="muted">--</span>
+        </div>
+        <div class="modal-stat">
+          <strong>Analysis status</strong>
+          <span id="analysisStatusValue" class="muted">--</span>
+        </div>
+        <div class="modal-stat">
+          <strong>Call time</strong>
+          <span id="analysisCalledAtValue" class="muted">--</span>
+        </div>
+      </div>
+
+      <div class="card" style="padding: 16px;">
+        <div class="card-title" style="font-size: 16px; margin-bottom: 8px;">Recording</div>
+        <div id="analysisRecordingWrap" class="muted">Recording not available yet.</div>
+      </div>
+
+      <div class="card" style="padding: 16px;">
+        <div class="card-title" style="font-size: 16px; margin-bottom: 8px;">Summary</div>
+        <div id="analysisSummaryValue" class="muted">Analysis summary not available yet.</div>
+      </div>
+
+      <div class="card" style="padding: 16px;">
+        <div class="card-title" style="font-size: 16px; margin-bottom: 8px;">Customer review</div>
+        <div id="analysisReviewValue" class="review-highlight">No review extracted yet.</div>
+      </div>
+
+      <div class="card" style="padding: 16px;">
+        <div class="card-title" style="font-size: 16px; margin-bottom: 8px;">Transcript</div>
+        <div id="analysisTranscriptValue" class="transcript-box muted">Transcript not available yet.</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app-shell.js"></script>
+  <script>
+    let customerCache = [];
+    let recentCallsCache = [];
+
+    function buildStarMarkup(ratingValue) {
+      const rating = Number(ratingValue || 0);
+      if (!rating) {
+        return `<div class="review-rating"><span class="review-rating-label">Rating not captured</span></div>`;
+      }
+
+      const stars = '★'.repeat(Math.max(0, Math.min(5, rating))) + '☆'.repeat(Math.max(0, 5 - rating));
+      return `
+        <div class="review-rating">
+          <span class="review-stars" aria-hidden="true">${stars}</span>
+          <span class="review-rating-label">${rating}/5 rating</span>
+        </div>
+      `;
+    }
+
+    function renderTranscriptMarkup(transcriptText) {
+      const normalized = String(transcriptText || '').trim();
+      if (!normalized) {
+        return '<span class="muted">Transcript not available yet.</span>';
+      }
+
+      const lines = normalized.split('\n').map((line) => line.trim()).filter(Boolean);
+      return lines.map((line) => {
+        const match = line.match(/^\[([A-Z]+)\]:\s*(.*)$/);
+        const rawRole = String(match?.[1] || 'NOTE').toUpperCase();
+        const text = match?.[2] || line;
+        const roleClass = rawRole === 'AGENT' ? 'agent' : (rawRole === 'CUSTOMER' ? 'customer' : 'note');
+        return `
+          <div class="transcript-turn ${roleClass}">
+            <div class="transcript-role">${AppShell.escapeHtml(rawRole)}</div>
+            <div class="transcript-text">${AppShell.escapeHtml(text)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function getLatestCompletedCallByCustomer(customerId) {
+      return recentCallsCache.find((call) => Number(call.customer_id) === Number(customerId) && String(call.outcome || '').toLowerCase() === 'completed') || null;
+    }
+
+    function getCustomerPayload() {
+      return {
+        name: document.getElementById('customerName').value.trim(),
+        phone: document.getElementById('customerPhone').value.trim(),
+        preferred_slot: document.getElementById('customerSlot').value || '10:00'
+      };
+    }
+
+    function validateCustomerPayload(payload) {
+      const fieldErrors = {};
+      if (!payload.name) fieldErrors.name = 'Customer name is required';
+      else if (payload.name.length < 2) fieldErrors.name = 'Customer name must be at least 2 characters';
+      if (!payload.phone) fieldErrors.phone = 'Phone number is required';
+      else if (!/^\+\d{10,15}$/.test(payload.phone)) fieldErrors.phone = 'Use E.164 format, e.g. +919876543210';
+      if (!payload.preferred_slot) fieldErrors.preferred_slot = 'Scheduled time is required';
+      else if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(payload.preferred_slot)) fieldErrors.preferred_slot = 'Scheduled time must be valid HH:MM';
+      return fieldErrors;
+    }
+
+    function resetCustomerForm() {
+      document.getElementById('editingCustomerId').value = '';
+      document.getElementById('customerName').value = '';
+      document.getElementById('customerPhone').value = '';
+      document.getElementById('customerSlot').value = '';
+      document.getElementById('customerSubmitButton').textContent = 'Add customer';
+      document.getElementById('customerCancelButton').hidden = true;
+      const chip = document.getElementById('customerEditChip');
+      chip.style.display = 'none';
+      chip.textContent = '';
+      AppShell.clearFieldErrors(['customerName', 'customerPhone', 'customerSlot']);
+    }
+
+    function startEditCustomer(customerId) {
+      const customer = customerCache.find((item) => item.id === customerId);
+      if (!customer) return;
+      document.getElementById('editingCustomerId').value = customer.id;
+      document.getElementById('customerName').value = customer.name || '';
+      document.getElementById('customerPhone').value = customer.phone || '';
+      document.getElementById('customerSlot').value = customer.preferred_slot || '10:00';
+      document.getElementById('customerSubmitButton').textContent = 'Update customer';
+      document.getElementById('customerCancelButton').hidden = false;
+      const chip = document.getElementById('customerEditChip');
+      chip.style.display = 'block';
+      chip.textContent = `Editing ${customer.name} (${customer.phone})`;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function renderCustomers(forceReset = false) {
+      const tbody = document.getElementById('customersTableBody');
+      const searchTerm = document.getElementById('customerSearch').value.trim().toLowerCase();
+      const statusFilter = document.getElementById('customerStatusFilter').value;
+      const filtered = customerCache
+        .filter((customer) => {
+          const matchesSearch = !searchTerm || String(customer.name || '').toLowerCase().includes(searchTerm) || String(customer.phone || '').toLowerCase().includes(searchTerm);
+          const matchesStatus = !statusFilter || String(customer.status || 'pending') === statusFilter;
+          return matchesSearch && matchesStatus;
+        })
+        .sort((a, b) => {
+          const aCompleted = getLatestCompletedCallByCustomer(a.id) ? 0 : 1;
+          const bCompleted = getLatestCompletedCallByCustomer(b.id) ? 0 : 1;
+          if (aCompleted !== bCompleted) return aCompleted - bCompleted;
+          const statusOrder = {
+            completed: 0,
+            called: 1,
+            pending: 2,
+            retry_scheduled: 3,
+            callback_scheduled: 4,
+            busy: 5,
+            no_answer: 6
+          };
+          const statusDelta = (statusOrder[String(a.status || 'pending')] ?? 99) - (statusOrder[String(b.status || 'pending')] ?? 99);
+          if (statusDelta !== 0) return statusDelta;
+          return String(a.name || '').localeCompare(String(b.name || ''));
+        });
+
+      if (!filtered.length && customerCache.length > 0 && !forceReset && (searchTerm || statusFilter)) {
+        document.getElementById('customerSearch').value = '';
+        document.getElementById('customerStatusFilter').value = '';
+        return renderCustomers(true);
+      }
+
+      document.getElementById('customerListMeta').textContent = `${filtered.length} record${filtered.length === 1 ? '' : 's'}`;
+
+      if (!filtered.length) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5">
+              <div class="empty-state">
+                <div class="empty-icon">CU</div>
+                <strong>No customers found</strong>
+                <div class="supporting-text">Add a customer to start outbound calling.</div>
+              </div>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map((customer) => {
+        const completedCall = getLatestCompletedCallByCustomer(customer.id);
+        const analysisButton = completedCall
+          ? `<button class="ghost" type="button" onclick="openAnalysisModal(${completedCall.id})">Analysis details</button>`
+          : '';
+
+        return `
+        <tr>
+          <td>
+            <div class="name-cell">
+              <strong>${AppShell.escapeHtml(customer.name)}</strong>
+              <span class="muted">ID #${customer.id}</span>
+            </div>
+          </td>
+          <td>${AppShell.escapeHtml(customer.phone)}</td>
+          <td>${AppShell.escapeHtml(customer.preferred_slot || '--:--')}</td>
+          <td><span class="badge ${AppShell.escapeHtml(customer.status || 'pending')}">${AppShell.formatStatusLabel(customer.status || 'pending')}</span></td>
+          <td>
+            <div class="action-buttons">
+              <button class="warning" type="button" onclick="triggerCallNow(${customer.id})">Call now</button>
+              <button class="secondary" type="button" onclick="startEditCustomer(${customer.id})">Edit</button>
+              ${analysisButton}
+              <button class="ghost" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>
+              <button class="danger" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `;
+      }).join('');
+    }
+
+    async function loadCustomers() {
+      customerCache = await AppShell.fetchJson(`${AppShell.API_BASE}/customers`);
+      renderCustomers();
+    }
+
+    async function loadRecentCalls() {
+      recentCallsCache = await AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`);
+    }
+
+    async function loadTranscriptForCall(callId) {
+      try {
+        const response = await fetch(`${AppShell.API_BASE}/calls/${callId}/transcript?raw=1`, { cache: 'no-store' });
+        if (response.status === 401) {
+          AppShell.redirectToLogin();
+          throw new Error('Authentication required');
+        }
+        if (!response.ok) {
+          throw new Error('Transcript not available yet.');
+        }
+        return response.text();
+      } catch (error) {
+        return `Transcript not available yet.\n${error.message}`;
+      }
+    }
+
+    function closeAnalysisModal() {
+      const modal = document.getElementById('analysisModal');
+      modal.classList.remove('open');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    async function openAnalysisModal(callId) {
+      const call = recentCallsCache.find((item) => Number(item.id) === Number(callId));
+      if (!call) {
+        AppShell.showAlert('Analysis details not found for this call', 'error');
+        return;
+      }
+
+      document.getElementById('analysisModalTitle').textContent = `Analysis for ${call.customer_name || 'Customer'}`;
+      document.getElementById('analysisModalSubtitle').textContent = `Call SID: ${call.twilio_sid || '--'}`;
+      document.getElementById('analysisRatingValue').textContent = call.extracted_rating ? `${call.extracted_rating}/5` : 'Not captured';
+      document.getElementById('analysisOutcomeValue').textContent = AppShell.formatStatusLabel(call.outcome || 'completed');
+      document.getElementById('analysisStatusValue').textContent = `Recording: ${AppShell.formatStatusLabel(call.recording_status || 'pending')} | Transcript: ${AppShell.formatStatusLabel(call.transcript_status || 'pending')} | AI: ${AppShell.formatStatusLabel(call.analysis_status || 'pending')}`;
+      document.getElementById('analysisCalledAtValue').textContent = AppShell.formatDateTime(call.called_at);
+      document.getElementById('analysisSummaryValue').textContent = call.analysis_summary || call.report_excerpt || 'Analysis summary not available yet.';
+      document.getElementById('analysisReviewValue').innerHTML = `${buildStarMarkup(call.extracted_rating)}<div>${AppShell.escapeHtml(call.extracted_review_text || 'No review extracted yet.')}</div>`;
+      document.getElementById('analysisTranscriptValue').innerHTML = '<span class="muted">Loading transcript...</span>';
+
+      const recordingWrap = document.getElementById('analysisRecordingWrap');
+      if (call.recording_url || call.recording_sid || String(call.recording_status || '').toLowerCase() === 'completed') {
+        recordingWrap.innerHTML = `
+          <audio class="audio-player" controls preload="none" src="${AppShell.API_BASE}/calls/${call.id}/recording"></audio>
+          <div class="helper-text">If the recording takes a moment, the system will fetch the latest playable version automatically.</div>
+        `;
+      } else {
+        recordingWrap.textContent = 'Recording not available yet.';
+      }
+
+      const modal = document.getElementById('analysisModal');
+      modal.classList.add('open');
+      modal.setAttribute('aria-hidden', 'false');
+
+      const transcriptText = await loadTranscriptForCall(call.id);
+      document.getElementById('analysisTranscriptValue').innerHTML = renderTranscriptMarkup(transcriptText);
+    }
+
+    async function saveCustomer() {
+      AppShell.clearFieldErrors(['customerName', 'customerPhone', 'customerSlot']);
+      const payload = getCustomerPayload();
+      const fieldErrors = validateCustomerPayload(payload);
+      if (Object.keys(fieldErrors).length) {
+        AppShell.applyFieldErrors(fieldErrors, {
+          name: 'customerName',
+          phone: 'customerPhone',
+          preferred_slot: 'customerSlot'
+        });
+        AppShell.showAlert('Please fix the customer form errors', 'error');
+        return;
+      }
+
+      const editingCustomerId = document.getElementById('editingCustomerId').value;
+      const method = editingCustomerId ? 'PUT' : 'POST';
+      const endpoint = editingCustomerId ? `${AppShell.API_BASE}/customers/${editingCustomerId}` : `${AppShell.API_BASE}/customers`;
+
+      try {
+        await AppShell.fetchJson(endpoint, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        AppShell.showAlert(editingCustomerId ? 'Customer updated successfully' : 'Customer added successfully');
+        resetCustomerForm();
+        await loadCustomers();
+      } catch (error) {
+        AppShell.showAlert(error.message, 'error');
+      }
+    }
+
+    async function triggerCallNow(customerId) {
+      if (!confirm('This will immediately place a call to this customer. Continue?')) return;
+      try {
+        const result = await AppShell.fetchJson(`${AppShell.API_BASE}/calls/initiate/${customerId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        AppShell.showAlert(`Call initiated. SID: ${result.sid}`);
+        await loadRecentCalls();
+        await loadCustomers();
+      } catch (error) {
+        AppShell.showAlert(error.message, 'error');
+      }
+    }
+
+    async function scheduleRetry(customerId) {
+      try {
+        const result = await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}/retry`, { method: 'POST' });
+        AppShell.showAlert(`Retry scheduled for ${AppShell.formatDateTime(result.retry_at)}`);
+        await loadCustomers();
+      } catch (error) {
+        AppShell.showAlert(error.message, 'error');
+      }
+    }
+
+    async function deleteCustomer(customerId) {
+      if (!confirm('Delete this customer and related data?')) return;
+      try {
+        await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}`, { method: 'DELETE' });
+        AppShell.showAlert('Customer deleted successfully');
+        if (String(customerId) === document.getElementById('editingCustomerId').value) {
+          resetCustomerForm();
+        }
+        await loadCustomers();
+      } catch (error) {
+        AppShell.showAlert(error.message, 'error');
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await AppShell.ensureAuthenticatedSession();
+      document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
+      document.getElementById('customerSubmitButton').addEventListener('click', saveCustomer);
+      document.getElementById('customerCancelButton').addEventListener('click', resetCustomerForm);
+      document.getElementById('customerSearch').addEventListener('input', () => renderCustomers());
+      document.getElementById('customerStatusFilter').addEventListener('change', () => renderCustomers());
+      document.getElementById('analysisModalClose').addEventListener('click', closeAnalysisModal);
+      document.getElementById('analysisModal').addEventListener('click', (event) => {
+        if (event.target.id === 'analysisModal') {
+          closeAnalysisModal();
+        }
+      });
+      await loadRecentCalls();
+      await loadCustomers();
+    });
+
+    window.startEditCustomer = startEditCustomer;
+    window.triggerCallNow = triggerCallNow;
+    window.scheduleRetry = scheduleRetry;
+    window.deleteCustomer = deleteCustomer;
+    window.openAnalysisModal = openAnalysisModal;
+  </script>
+</body>
+</html>
