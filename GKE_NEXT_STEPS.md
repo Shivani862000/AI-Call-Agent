@@ -81,6 +81,7 @@ The GKE deploy job applies:
 This app still uses SQLite and local file storage, so the Kubernetes deployment is intentionally configured for:
 
 - `replicas: 1`
+- `strategy: Recreate`
 - one persistent volume claim
 
 That is the safest starting point for this codebase on GKE.
@@ -101,4 +102,5 @@ That will:
 4. apply the Kubernetes manifests
 5. wait for rollout success
 6. wait for the ingress IP
-7. run the smoke test against the ingress IP with the correct `Host` header
+7. verify the service through the ingress IP with the correct `Host` header
+8. wait for the public HTTPS endpoint to be reachable

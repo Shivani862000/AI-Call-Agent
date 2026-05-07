@@ -5,6 +5,8 @@ metadata:
   namespace: __K8S_NAMESPACE__
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: feedback-agent
@@ -13,6 +15,7 @@ spec:
       labels:
         app: feedback-agent
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
         - name: app
           image: __APP_IMAGE__
