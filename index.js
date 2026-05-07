@@ -74,7 +74,14 @@ const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
 const REALTIME_MODEL = AI_PROVIDER === 'gemini' ? GEMINI_MODEL : OPENAI_REALTIME_MODEL;
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
 const HARDCODED_PUBLIC_BASE_URL = 'https://winter-undeclamatory-unstammeringly.ngrok-free.dev';
-const PUBLIC_BASE_URL = (process.env.APP_BASE_URL || process.env.NGROK_URL || process.env.WEBHOOK_URL || HARDCODED_PUBLIC_BASE_URL).replace(/\/$/, '');
+const SERVER_NAME_BASE_URL = process.env.SERVER_NAME ? `https://${String(process.env.SERVER_NAME).replace(/^https?:\/\//i, '').replace(/\/+$/g, '')}` : '';
+const PUBLIC_BASE_URL = (
+  process.env.APP_BASE_URL
+  || process.env.NGROK_URL
+  || process.env.WEBHOOK_URL
+  || SERVER_NAME_BASE_URL
+  || HARDCODED_PUBLIC_BASE_URL
+).replace(/\/$/, '');
 const GEMINI_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
@@ -298,7 +305,7 @@ function validateConfig() {
   }
 
   if (!PUBLIC_BASE_URL) {
-    missing.push('APP_BASE_URL or NGROK_URL or WEBHOOK_URL');
+    missing.push('APP_BASE_URL or NGROK_URL or WEBHOOK_URL or SERVER_NAME');
   }
 
   if (missing.length > 0) {
