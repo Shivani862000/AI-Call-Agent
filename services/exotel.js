@@ -150,20 +150,6 @@ async function initiateCall(customerPhone, customerId, statusCallbackUrl) {
   }
 
   let requestUrl = String(voiceFlowUrl).trim();
-  try {
-    const requestUrlObject = new URL(requestUrl);
-    requestUrlObject.searchParams.set('source', 'exotel');
-    requestUrlObject.searchParams.set('traceId', traceId);
-    if (customerId) {
-      requestUrlObject.searchParams.set('customerId', String(customerId));
-    }
-    if (customerPhone) {
-      requestUrlObject.searchParams.set('customerPhone', String(customerPhone));
-    }
-    requestUrl = requestUrlObject.toString();
-  } catch (error) {
-    console.warn(`[EXOTEL] Unable to add trace params to request URL: ${error.message}`);
-  }
 
   console.log(
     `[EXOTEL CONFIG] ` +

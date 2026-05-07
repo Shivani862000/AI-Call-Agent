@@ -1392,7 +1392,7 @@ app.all('/call/exotel/voicebot-url', async (req, res) => {
     );
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('X-Exotel-Voicebot-Hit', 'true');
-    res.type('text/plain').send(streamUrl);
+    res.json({ url: streamUrl });
   } catch (error) {
     console.error('[EXOTEL VOICEBOT URL ERROR]', error.message);
     res.status(500).json({ error: 'Unable to generate Exotel voicebot URL' });
