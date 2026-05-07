@@ -201,9 +201,55 @@
         grid-template-columns: 1fr;
       }
 
-      .login-copy,
       .login-card {
         padding: 30px 24px;
+      }
+
+      .login-copy {
+        display: none;
+      }
+    }
+
+    @media (max-width: 640px) {
+      body {
+        padding: 0;
+        background: linear-gradient(180deg, #f7fbff 0%, #eef5ff 100%);
+      }
+
+      .login-shell {
+        width: 100%;
+        min-height: 100vh;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        background: transparent;
+        backdrop-filter: none;
+      }
+
+      .login-card {
+        min-height: 100vh;
+        padding: 28px 18px;
+        align-items: flex-start;
+        background: rgba(255, 255, 255, 0.96);
+      }
+
+      .login-card-inner {
+        max-width: 420px;
+        margin: 0 auto;
+        padding-top: 42px;
+      }
+
+      .brand-mark {
+        margin-bottom: 14px;
+      }
+
+      h2 {
+        font-size: 26px;
+      }
+
+      .subtext,
+      .hint {
+        display: none;
       }
     }
   </style>
