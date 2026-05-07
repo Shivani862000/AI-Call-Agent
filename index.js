@@ -1001,6 +1001,7 @@ async function triggerScheduledCalls() {
        AND COALESCE(c.wrong_number_flag, 0) = 0
        AND COALESCE(c.admin_review_required, 0) = 0
        AND COALESCE(c.consent_status, 'unknown') != 'denied'
+       AND COALESCE(c.status, 'pending') != 'calling'
        AND (
          (c.status = 'pending' AND COALESCE(c.best_call_slot, c.preferred_slot) <= ?)
          OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND c.next_retry_at IS NOT NULL AND DATETIME(c.next_retry_at) <= DATETIME('now'))
@@ -1016,8 +1017,27 @@ async function triggerScheduledCalls() {
     return;
   }
 
-  const hydratedCustomers = [];
+  const uniqueByPhone = new Map();
   for (const customer of dueCustomers) {
+    const phoneKey = normalizePhoneLookupValue(customer.phone) || String(customer.phone || '').trim();
+    if (!phoneKey) {
+      continue;
+    }
+
+    if (uniqueByPhone.has(phoneKey)) {
+      const existing = uniqueByPhone.get(phoneKey);
+      console.log(
+        `[SCHEDULER] Skipping duplicate customer row id=${customer.id} phone=${customer.phone} ` +
+        `because row id=${existing.id} already queued`
+      );
+      continue;
+    }
+
+    uniqueByPhone.set(phoneKey, customer);
+  }
+
+  const hydratedCustomers = [];
+  for (const customer of uniqueByPhone.values()) {
     hydratedCustomers.push(await hydratePreCallIntelligence(customer));
   }
 
@@ -1030,6 +1050,20 @@ async function triggerScheduledCalls() {
       const blockedReason = shouldBlockCustomerCall(customer);
       if (blockedReason) {
         console.log(`[SCHEDULER] Skipping ${customer.name}: ${blockedReason}`);
+        continue;
+      }
+
+      const claimResult = await dbRun(
+        `UPDATE customers
+            SET status = ?,
+                last_called_at = ?
+          WHERE id = ?
+            AND COALESCE(status, 'pending') IN ('pending', 'retry_scheduled', 'callback_scheduled')`,
+        ['calling', new Date().toISOString(), customer.id]
+      );
+
+      if (!claimResult.changes) {
+        console.log(`[SCHEDULER] Skipping ${customer.name}: already claimed by another run`);
         continue;
       }
 
@@ -1062,6 +1096,17 @@ async function triggerScheduledCalls() {
       console.log(`[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`);
     } catch (error) {
       console.error(`[SCHEDULER] Failed to call ${customer.name}:`, error.message);
+      try {
+        await dbRun(
+          `UPDATE customers
+              SET status = ?
+            WHERE id = ?
+              AND status = 'calling'`,
+          [customer.status || 'pending', customer.id]
+        );
+      } catch (rollbackError) {
+        console.error(`[SCHEDULER] Failed to roll back customer ${customer.id}:`, rollbackError.message);
+      }
     }
   }
 }
