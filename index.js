@@ -48,7 +48,28 @@ const PORT = Number(process.env.PORT || 3000);
 const CALL_MODE = process.env.CALL_MODE || (process.env.OPENAI_API_KEY ? 'openai' : 'scripted');
 const AI_PROVIDER = CALL_MODE === 'gemini' ? 'gemini' : 'openai';
 const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'models/gemini-3.1-flash-live-preview';
+const DEFAULT_GEMINI_MODEL = 'models/gemini-2.5-flash-native-audio-preview-12-2025';
+const DEPRECATED_GEMINI_LIVE_MODELS = new Set([
+  'models/gemini-3.1-flash-live-preview',
+  'gemini-3.1-flash-live-preview',
+  'models/gemini-live-2.5-flash-preview',
+  'gemini-live-2.5-flash-preview'
+]);
+
+function normalizeGeminiModelName(modelName) {
+  const normalized = String(modelName || '').trim();
+  if (!normalized || DEPRECATED_GEMINI_LIVE_MODELS.has(normalized)) {
+    return DEFAULT_GEMINI_MODEL;
+  }
+
+  return normalized.startsWith('models/') ? normalized : `models/${normalized}`;
+}
+
+const REQUESTED_GEMINI_MODEL = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
+const GEMINI_MODEL = normalizeGeminiModelName(REQUESTED_GEMINI_MODEL);
+if (GEMINI_MODEL !== String(REQUESTED_GEMINI_MODEL || '').trim()) {
+  console.warn(`[CONFIG] Gemini model "${REQUESTED_GEMINI_MODEL}" is deprecated or unsupported here; using "${GEMINI_MODEL}" instead.`);
+}
 const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
 const REALTIME_MODEL = AI_PROVIDER === 'gemini' ? GEMINI_MODEL : OPENAI_REALTIME_MODEL;
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
