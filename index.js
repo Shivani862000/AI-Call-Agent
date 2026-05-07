@@ -73,7 +73,8 @@ if (GEMINI_MODEL !== String(REQUESTED_GEMINI_MODEL || '').trim()) {
 const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
 const REALTIME_MODEL = AI_PROVIDER === 'gemini' ? GEMINI_MODEL : OPENAI_REALTIME_MODEL;
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
-const PUBLIC_BASE_URL = (process.env.APP_BASE_URL || process.env.NGROK_URL || process.env.WEBHOOK_URL || '').replace(/\/$/, '');
+const HARDCODED_PUBLIC_BASE_URL = 'https://winter-undeclamatory-unstammeringly.ngrok-free.dev';
+const PUBLIC_BASE_URL = (process.env.APP_BASE_URL || process.env.NGROK_URL || process.env.WEBHOOK_URL || HARDCODED_PUBLIC_BASE_URL).replace(/\/$/, '');
 const GEMINI_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
@@ -94,6 +95,11 @@ function redactSecret(value, visiblePrefix = 4, visibleSuffix = 4) {
   return `${text.slice(0, visiblePrefix)}…${text.slice(-visibleSuffix)} (len=${text.length})`;
 }
 
+function describeEnvValue(value) {
+  const text = String(value ?? '');
+  return `${JSON.stringify(text)} (len=${text.length})`;
+}
+
 function logConfigSnapshot(scope = 'CONFIG') {
   const snapshot = {
     NODE_ENV: process.env.NODE_ENV || '',
@@ -106,10 +112,10 @@ function logConfigSnapshot(scope = 'CONFIG') {
     REQUESTED_GEMINI_MODEL,
     GEMINI_MODEL,
     GEMINI_VOICE,
-    APP_BASE_URL: process.env.APP_BASE_URL || '',
-    NGROK_URL: process.env.NGROK_URL || '',
-    WEBHOOK_URL: process.env.WEBHOOK_URL || '',
-    SERVER_NAME: process.env.SERVER_NAME || '',
+    APP_BASE_URL: describeEnvValue(process.env.APP_BASE_URL || ''),
+    NGROK_URL: describeEnvValue(process.env.NGROK_URL || ''),
+    WEBHOOK_URL: describeEnvValue(process.env.WEBHOOK_URL || ''),
+    SERVER_NAME: describeEnvValue(process.env.SERVER_NAME || ''),
     EXOTEL_API_HOST: process.env.EXOTEL_API_HOST || '',
     EXOTEL_SID: redactSecret(process.env.EXOTEL_SID),
     EXOTEL_APP_ID: process.env.EXOTEL_APP_ID || '',
@@ -124,6 +130,15 @@ function logConfigSnapshot(scope = 'CONFIG') {
   };
 
   console.log(`[${scope}] ${JSON.stringify(snapshot)}`);
+}
+
+function getSecurePublicBaseUrl() {
+  const baseUrl = String(PUBLIC_BASE_URL || '').trim();
+  if (!baseUrl) {
+    return '';
+  }
+
+  return baseUrl.replace(/^http:\/\//i, 'https://');
 }
 
 function runInBackground(label, work) {
@@ -1166,11 +1181,11 @@ app.post('/call/start', async (req, res) => {
       `mode=${CALL_MODE} pipeline=${VOICE_PIPELINE} model=${REALTIME_MODEL}`
     );
     console.log(
-      `[CALL REQUEST CONFIG] ` +
-      `APP_BASE_URL=${process.env.APP_BASE_URL || ''} ` +
-      `NGROK_URL=${process.env.NGROK_URL || ''} ` +
-      `WEBHOOK_URL=${process.env.WEBHOOK_URL || ''} ` +
-      `SERVER_NAME=${process.env.SERVER_NAME || ''} ` +
+    `[CALL REQUEST CONFIG] ` +
+      `APP_BASE_URL=${describeEnvValue(process.env.APP_BASE_URL || '')} ` +
+      `NGROK_URL=${describeEnvValue(process.env.NGROK_URL || '')} ` +
+      `WEBHOOK_URL=${describeEnvValue(process.env.WEBHOOK_URL || '')} ` +
+      `SERVER_NAME=${describeEnvValue(process.env.SERVER_NAME || '')} ` +
       `EXOTEL_API_HOST=${process.env.EXOTEL_API_HOST || ''} ` +
       `EXOTEL_SID=${redactSecret(process.env.EXOTEL_SID)} ` +
       `EXOTEL_APP_ID=${process.env.EXOTEL_APP_ID || ''} ` +
@@ -1230,10 +1245,10 @@ app.get('/call/twiml', (req, res) => {
   console.log(`[CALL FLOW] customer=${customerName} client=${clientName} agentId=${agentId || 'none'}`);
   console.log(
     `[CALL FLOW CONFIG] ` +
-    `APP_BASE_URL=${process.env.APP_BASE_URL || ''} ` +
-    `NGROK_URL=${process.env.NGROK_URL || ''} ` +
-    `WEBHOOK_URL=${process.env.WEBHOOK_URL || ''} ` +
-    `PUBLIC_BASE_URL=${PUBLIC_BASE_URL} ` +
+    `APP_BASE_URL=${describeEnvValue(process.env.APP_BASE_URL || '')} ` +
+    `NGROK_URL=${describeEnvValue(process.env.NGROK_URL || '')} ` +
+    `WEBHOOK_URL=${describeEnvValue(process.env.WEBHOOK_URL || '')} ` +
+    `PUBLIC_BASE_URL=${describeEnvValue(PUBLIC_BASE_URL)} ` +
     `CALL_MODE=${CALL_MODE} ` +
     `VOICE_PIPELINE=${VOICE_PIPELINE} ` +
     `REALTIME_MODEL=${REALTIME_MODEL}`
@@ -1297,10 +1312,10 @@ app.all('/call/exotel/voicebot-url', async (req, res) => {
     const streamUrl = `${toWssUrl(PUBLIC_BASE_URL, '/call/stream')}?${query.toString()}`;
     console.log(
       `[EXOTEL VOICEBOT] provider=${provider} streamUrl=${streamUrl} ` +
-      `APP_BASE_URL=${process.env.APP_BASE_URL || ''} ` +
-      `NGROK_URL=${process.env.NGROK_URL || ''} ` +
-      `WEBHOOK_URL=${process.env.WEBHOOK_URL || ''} ` +
-      `PUBLIC_BASE_URL=${PUBLIC_BASE_URL} ` +
+      `APP_BASE_URL=${describeEnvValue(process.env.APP_BASE_URL || '')} ` +
+      `NGROK_URL=${describeEnvValue(process.env.NGROK_URL || '')} ` +
+      `WEBHOOK_URL=${describeEnvValue(process.env.WEBHOOK_URL || '')} ` +
+      `PUBLIC_BASE_URL=${describeEnvValue(PUBLIC_BASE_URL)} ` +
       `EXOTEL_APPLET_URL=${process.env.EXOTEL_APPLET_URL || ''}`
     );
     res.json({ url: streamUrl });
@@ -1849,7 +1864,7 @@ app.get('/api/calls/:callId/transcript', async (req, res) => {
     </div>
     <div class="body">
       <div class="actions">
-        <a class="btn primary" href="${PUBLIC_BASE_URL || ''}/admin.html">Open Dashboard</a>
+        <a class="btn primary" href="${getSecurePublicBaseUrl() || ''}/admin.html">Open Dashboard</a>
         <a class="btn" href="?raw=1" target="_blank" rel="noopener">Open Raw Transcript</a>
       </div>
       <div class="turns">
