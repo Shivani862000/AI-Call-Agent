@@ -126,6 +126,8 @@ function logConfigSnapshot(scope = 'CONFIG') {
     EXOTEL_API_HOST: process.env.EXOTEL_API_HOST || '',
     EXOTEL_SID: redactSecret(process.env.EXOTEL_SID),
     EXOTEL_APP_ID: process.env.EXOTEL_APP_ID || '',
+    EXOTEL_FLOW_URL: process.env.EXOTEL_FLOW_URL || process.env.EXOTEL_APPLET_URL || '',
+    EXOTEL_VOICEBOT_URL: process.env.EXOTEL_VOICEBOT_URL || '',
     EXOTEL_APPLET_URL: process.env.EXOTEL_APPLET_URL || '',
     EXOTEL_CALLER_ID: process.env.EXOTEL_CALLER_ID || '',
     EXOTEL_WHATSAPP_FROM: process.env.EXOTEL_WHATSAPP_FROM || '',
@@ -288,9 +290,12 @@ function validateConfig() {
     'EXOTEL_SID',
     'EXOTEL_API_KEY',
     'EXOTEL_API_TOKEN',
-    'EXOTEL_CALLER_ID',
-    'EXOTEL_APPLET_URL'
+    'EXOTEL_CALLER_ID'
   ].filter((key) => !process.env[key]);
+
+  if (!process.env.EXOTEL_FLOW_URL && !process.env.EXOTEL_APPLET_URL) {
+    missing.push('EXOTEL_FLOW_URL or EXOTEL_APPLET_URL');
+  }
 
   if (CALL_MODE === 'openai' && !process.env.OPENAI_API_KEY) {
     missing.push('OPENAI_API_KEY');
@@ -1241,7 +1246,8 @@ app.post('/call/start', async (req, res) => {
       `EXOTEL_API_HOST=${process.env.EXOTEL_API_HOST || ''} ` +
       `EXOTEL_SID=${redactSecret(process.env.EXOTEL_SID)} ` +
       `EXOTEL_APP_ID=${process.env.EXOTEL_APP_ID || ''} ` +
-      `EXOTEL_APPLET_URL=${process.env.EXOTEL_APPLET_URL || ''} ` +
+      `EXOTEL_FLOW_URL=${process.env.EXOTEL_FLOW_URL || process.env.EXOTEL_APPLET_URL || ''} ` +
+      `EXOTEL_VOICEBOT_URL=${process.env.EXOTEL_VOICEBOT_URL || ''} ` +
       `GEMINI_MODEL=${GEMINI_MODEL} ` +
       `GEMINI_VOICE=${GEMINI_VOICE} ` +
       `TZ=${process.env.TZ || ''}`
@@ -1381,11 +1387,12 @@ app.all('/call/exotel/voicebot-url', async (req, res) => {
       `NGROK_URL=${describeEnvValue(process.env.NGROK_URL || '')} ` +
       `WEBHOOK_URL=${describeEnvValue(process.env.WEBHOOK_URL || '')} ` +
       `PUBLIC_BASE_URL=${describeEnvValue(PUBLIC_BASE_URL)} ` +
-      `EXOTEL_APPLET_URL=${process.env.EXOTEL_APPLET_URL || ''}`
+      `EXOTEL_FLOW_URL=${process.env.EXOTEL_FLOW_URL || process.env.EXOTEL_APPLET_URL || ''} ` +
+      `EXOTEL_VOICEBOT_URL=${process.env.EXOTEL_VOICEBOT_URL || ''}`
     );
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('X-Exotel-Voicebot-Hit', 'true');
-    res.json({ url: streamUrl });
+    res.type('text/plain').send(streamUrl);
   } catch (error) {
     console.error('[EXOTEL VOICEBOT URL ERROR]', error.message);
     res.status(500).json({ error: 'Unable to generate Exotel voicebot URL' });

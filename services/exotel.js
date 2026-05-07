@@ -12,6 +12,10 @@ function getExotelAccountSid() {
   return process.env.EXOTEL_SID;
 }
 
+function getExotelVoicebotEndpointUrl() {
+  return process.env.EXOTEL_VOICEBOT_URL || '';
+}
+
 function getExotelApiBaseUrl() {
   const host = String(getExotelApiHost() || 'api.in.exotel.com')
     .replace(/^https?:\/\//i, '')
@@ -114,17 +118,35 @@ function buildExotelTraceId(customerPhone, customerId) {
   return `exotel-${customerFragment}-${phoneFragment}-${timeFragment}-${randomFragment}`;
 }
 
+function isLikelyExotelFlowUrl(url) {
+  const text = String(url || '').trim();
+  if (!text) {
+    return false;
+  }
+
+  return /my\.exotel\.com\/.+\/exoml\/start_voice\/\d+/i.test(text);
+}
+
 async function initiateCall(customerPhone, customerId, statusCallbackUrl) {
   const accountSid = getExotelAccountSid();
   const apiHost = getExotelApiHost();
-  const configuredFlowUrl = process.env.EXOTEL_APPLET_URL;
+  const configuredFlowUrl = process.env.EXOTEL_FLOW_URL || process.env.EXOTEL_APPLET_URL || '';
+  const configuredVoicebotEndpoint = getExotelVoicebotEndpointUrl();
   const appId = process.env.EXOTEL_APP_ID;
   const traceId = buildExotelTraceId(customerPhone, customerId);
-  const voiceFlowUrl = configuredFlowUrl
-    || (appId ? `http://my.exotel.com/${accountSid}/exoml/start_voice/${appId}` : '');
+  const voiceFlowUrl = isLikelyExotelFlowUrl(configuredFlowUrl)
+    ? configuredFlowUrl
+    : (appId ? `http://my.exotel.com/${accountSid}/exoml/start_voice/${appId}` : '');
 
   if (!voiceFlowUrl) {
-    throw new Error('Missing EXOTEL_APPLET_URL or EXOTEL_APP_ID for outbound call flow.');
+    throw new Error('Missing EXOTEL_FLOW_URL/EXOTEL_APPLET_URL or EXOTEL_APP_ID for outbound call flow.');
+  }
+
+  if (configuredFlowUrl && !isLikelyExotelFlowUrl(configuredFlowUrl)) {
+    console.warn(
+      `[EXOTEL] EXOTEL_APPLET_URL looks like a voicebot endpoint, but outbound calls need an Exotel flow URL. ` +
+      `Using the Exotel flow fallback instead. Voicebot endpoint=${configuredFlowUrl}`
+    );
   }
 
   let requestUrl = String(voiceFlowUrl).trim();
@@ -149,7 +171,8 @@ async function initiateCall(customerPhone, customerId, statusCallbackUrl) {
     `EXOTEL_API_HOST=${apiHost} ` +
     `EXOTEL_APP_ID=${appId || ''} ` +
     `EXOTEL_CALLER_ID=${process.env.EXOTEL_CALLER_ID || ''} ` +
-    `EXOTEL_APPLET_URL=${configuredFlowUrl || ''} ` +
+    `EXOTEL_FLOW_URL=${voiceFlowUrl || ''} ` +
+    `EXOTEL_VOICEBOT_URL=${configuredVoicebotEndpoint || ''} ` +
     `TRACE_ID=${traceId} ` +
     `STATUS_CALLBACK=${statusCallbackUrl} ` +
     `CALL_TYPE=${process.env.EXOTEL_CALL_TYPE || 'trans'}`
