@@ -105,4 +105,5 @@ That will:
 5. wait for rollout success
 6. wait for the ingress IP
 7. verify the service through the ingress IP with the correct `Host` header
-8. wait for the public HTTPS endpoint to be reachable
+8. wait for the managed certificate to become `Active`
+9. wait for the public HTTPS endpoint to be reachable
