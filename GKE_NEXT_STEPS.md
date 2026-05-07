@@ -22,6 +22,7 @@ asia-south2-docker.pkg.dev/lively-math-495604-b5/feedback-agent
 
 - `.github/workflows/deploy.yml` now deploys to GKE instead of SSHing into a VM
 - `k8s/` contains the Kubernetes manifests for the app, service, ingress, backend config, and storage
+- `k8s/managed-cert.yaml` adds the GKE managed certificate for HTTPS
 - the pipeline creates or updates a Kubernetes secret from `APP_ENV_FILE`
 - the deployment updates the app image in-cluster and waits for rollout success
 
@@ -74,6 +75,7 @@ The GKE deploy job applies:
 - a `Deployment` with 1 replica
 - a `Service`
 - a `BackendConfig`
+- a `ManagedCertificate`
 - an `Ingress`
 
 ## Important Runtime Note

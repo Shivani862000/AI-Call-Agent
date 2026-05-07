@@ -1,0 +1,8 @@
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: feedback-agent-managed-cert
+  namespace: __K8S_NAMESPACE__
+spec:
+  domains:
+    - __APP_HOSTNAME__

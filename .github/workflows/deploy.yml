@@ -90,7 +90,7 @@ jobs:
           APP_IMAGE_URI: ${{ needs.build.outputs.app_image_uri }}
         run: |
           set -eu
-          for manifest in k8s/backendconfig.yaml k8s/pvc.yaml k8s/deployment.yaml k8s/service.yaml k8s/ingress.yaml; do
+          for manifest in k8s/backendconfig.yaml k8s/pvc.yaml k8s/deployment.yaml k8s/service.yaml k8s/managed-cert.yaml k8s/ingress.yaml; do
             sed \
               -e "s|__K8S_NAMESPACE__|${K8S_NAMESPACE}|g" \
               -e "s|__APP_IMAGE__|${APP_IMAGE_URI}|g" \

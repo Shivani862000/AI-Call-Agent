@@ -5,6 +5,7 @@ metadata:
   namespace: __K8S_NAMESPACE__
   annotations:
     kubernetes.io/ingress.class: "gce"
+    networking.gke.io/managed-certificates: feedback-agent-managed-cert
 spec:
   ingressClassName: gce
   rules:
