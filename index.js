@@ -73,7 +73,7 @@ if (GEMINI_MODEL !== String(REQUESTED_GEMINI_MODEL || '').trim()) {
 const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
 const REALTIME_MODEL = AI_PROVIDER === 'gemini' ? GEMINI_MODEL : OPENAI_REALTIME_MODEL;
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
-const PUBLIC_BASE_URL = (process.env.NGROK_URL || process.env.WEBHOOK_URL || '').replace(/\/$/, '');
+const PUBLIC_BASE_URL = (process.env.APP_BASE_URL || process.env.NGROK_URL || process.env.WEBHOOK_URL || '').replace(/\/$/, '');
 const GEMINI_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
@@ -238,7 +238,7 @@ function validateConfig() {
   }
 
   if (!PUBLIC_BASE_URL) {
-    missing.push('NGROK_URL');
+    missing.push('APP_BASE_URL or NGROK_URL or WEBHOOK_URL');
   }
 
   if (missing.length > 0) {
@@ -1767,7 +1767,7 @@ app.get('/api/calls/:callId/transcript', async (req, res) => {
     </div>
     <div class="body">
       <div class="actions">
-        <a class="btn primary" href="${process.env.NGROK_URL || ''}/admin.html">Open Dashboard</a>
+        <a class="btn primary" href="${PUBLIC_BASE_URL || ''}/admin.html">Open Dashboard</a>
         <a class="btn" href="?raw=1" target="_blank" rel="noopener">Open Raw Transcript</a>
       </div>
       <div class="turns">
