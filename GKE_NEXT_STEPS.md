@@ -50,6 +50,7 @@ The production env secret should still include sensible defaults for:
 
 - `CUSTOMER_PHONE`
 - `CUSTOMER_NAME`
+- `TZ=Asia/Kolkata`
 
 ## Required Service Account Access
 
@@ -86,6 +87,7 @@ This app still uses SQLite and local file storage, so the Kubernetes deployment 
 - `replicas: 1`
 - `strategy: Recreate`
 - one persistent volume claim
+- `TZ=Asia/Kolkata`
 
 That is the safest starting point for this codebase on GKE.
 

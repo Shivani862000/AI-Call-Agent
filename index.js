@@ -923,7 +923,7 @@ async function triggerScheduledCalls() {
        AND COALESCE(c.admin_review_required, 0) = 0
        AND COALESCE(c.consent_status, 'unknown') != 'denied'
        AND (
-         (c.status = 'pending' AND COALESCE(c.best_call_slot, c.preferred_slot) = ?)
+         (c.status = 'pending' AND COALESCE(c.best_call_slot, c.preferred_slot) <= ?)
          OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND c.next_retry_at IS NOT NULL AND DATETIME(c.next_retry_at) <= DATETIME('now'))
        )
        AND (
