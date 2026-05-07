@@ -187,12 +187,10 @@ function buildAgentSystemPrompt(clientName, customerName, agentConfig = null) {
 
 function buildDefaultOpeningPrompt(clientName, customerName) {
   return [
-    `Start the phone call now as Priya from ${clientName}.`,
-    `The customer name is ${customerName}.`,
-    `Your first spoken turn should closely follow this wording in Hindi: "Namaste, kya main ${customerName} se baat kar rahi hoon? Main Priya bol rahi hoon, ${clientName} se. Main aapki recent visit ka chhota sa feedback lena chahti hoon. Kya aapke paas 2 se 3 minute hain?"`,
-    'After that, continue the conversation naturally using the feedback flow in the system instructions.',
-    'Keep every reply short, warm, phone-friendly, and in Hindi only.',
-    'Speak clearly and a little slowly.'
+    `Start the call with a short Hindi greeting as Priya from ${clientName}.`,
+    `Say: "Namaste, kya main ${customerName} se baat kar rahi hoon? Main Priya bol rahi hoon, ${clientName} se. Kya aapke paas 2 se 3 minute hain?"`,
+    'Keep the first turn short, warm, and clearly spoken in Hindi.',
+    'After the greeting, continue the feedback conversation naturally using the system instructions.'
   ].join(' ');
 }
 
@@ -2354,6 +2352,8 @@ wss.on('connection', (twilioWs, req) => {
   let transcriptPrinted = false;
   const transcript = [];
   let geminiSetupComplete = false;
+  let geminiOpeningPromptRetryTimer = null;
+  let geminiAudioReceived = false;
   let aiSessionStarting = false;
   let activeCustomerName = process.env.CUSTOMER_NAME || 'Customer';
   let activeClientName = CLIENT_NAME;
@@ -2463,6 +2463,43 @@ wss.on('connection', (twilioWs, req) => {
     }
   }
 
+  function clearGeminiOpeningPromptRetry() {
+    if (geminiOpeningPromptRetryTimer) {
+      clearTimeout(geminiOpeningPromptRetryTimer);
+      geminiOpeningPromptRetryTimer = null;
+    }
+  }
+
+  function sendGeminiOpeningPrompt(promptText, label = 'opening') {
+    const safePrompt = String(promptText || '').trim();
+    if (!safePrompt || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
+      return;
+    }
+
+    console.log(`[GEMINI] Sending ${label} prompt (${safePrompt.length} chars)`);
+
+    if (usesGeminiRealtimeTextInput(getActiveModelName())) {
+      aiWs.send(JSON.stringify({
+        realtimeInput: {
+          text: safePrompt
+        }
+      }));
+      return;
+    }
+
+    aiWs.send(JSON.stringify({
+      clientContent: {
+        turns: [
+          {
+            role: 'user',
+            parts: [{ text: safePrompt }]
+          }
+        ],
+        turnComplete: true
+      }
+    }));
+  }
+
   function scheduleAutoHangupFromAgentText(text) {
     clearAutoHangupTimer();
     if (!shouldAutoHangupAfterAgentTurn(text) || callClosed) {
@@ -2484,6 +2521,7 @@ wss.on('connection', (twilioWs, req) => {
       if (aiWs?.readyState === WebSocket.OPEN) {
         aiWs.close();
       }
+      clearGeminiOpeningPromptRetry();
       if (twilioWs.readyState === WebSocket.OPEN) {
         twilioWs.close();
       }
@@ -2676,29 +2714,19 @@ wss.on('connection', (twilioWs, req) => {
           geminiSetupComplete = true;
           console.log('[GEMINI] Session configured');
 
-          if (usesGeminiRealtimeTextInput(getActiveModelName())) {
-            aiWs.send(JSON.stringify({
-              realtimeInput: {
-                text: getActiveOpeningPrompt()
-              }
-            }));
-          } else {
-            aiWs.send(JSON.stringify({
-              clientContent: {
-                turns: [
-                  {
-                    role: 'user',
-                    parts: [
-                      {
-                        text: getActiveOpeningPrompt()
-                      }
-                    ]
-                  }
-                ],
-                turnComplete: true
-              }
-            }));
-          }
+          geminiAudioReceived = false;
+          clearGeminiOpeningPromptRetry();
+          sendGeminiOpeningPrompt(getActiveOpeningPrompt(), 'initial');
+          geminiOpeningPromptRetryTimer = setTimeout(() => {
+            if (callClosed || geminiAudioReceived || aiWs?.readyState !== WebSocket.OPEN) {
+              return;
+            }
+            console.warn('[GEMINI] No audible response detected after the opening prompt; retrying with a shorter opener.');
+            sendGeminiOpeningPrompt(
+              `Namaste, kya main ${activeCustomerName} se baat kar rahi hoon? Main Priya bol rahi hoon, ${activeClientName} se. Kya aapke paas 2 se 3 minute hain?`,
+              'retry'
+            );
+          }, 7000);
           return;
         }
 
@@ -2737,6 +2765,8 @@ wss.on('connection', (twilioWs, req) => {
             continue;
           }
 
+          geminiAudioReceived = true;
+          clearGeminiOpeningPromptRetry();
           const pcm16 = Buffer.from(part.inlineData.data, 'base64');
           const sourceRate = parsePcmRate(part.inlineData.mimeType, 24000);
           const resampled = resamplePcm16(pcm16, sourceRate, 8000);
@@ -2923,6 +2953,7 @@ wss.on('connection', (twilioWs, req) => {
       console.log('[STREAM] Call ended');
       callClosed = true;
       clearAutoHangupTimer();
+      clearGeminiOpeningPromptRetry();
       refreshLiveCallState({ status: 'completed' }).catch(() => {});
       printTranscriptOnce();
       persistTranscriptOnce().catch((error) => {
@@ -2939,6 +2970,7 @@ wss.on('connection', (twilioWs, req) => {
     console.log('[STREAM] Media stream closed');
     callClosed = true;
     clearAutoHangupTimer();
+    clearGeminiOpeningPromptRetry();
     refreshLiveCallState({ status: 'closed' }).catch(() => {});
     printTranscriptOnce();
     persistTranscriptOnce().catch((error) => {
