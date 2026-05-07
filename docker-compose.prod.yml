@@ -1,0 +1,33 @@
+services:
+  app:
+    image: ${APP_IMAGE_NAME}
+    restart: unless-stopped
+    env_file:
+      - ${ENV_FILE}
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-/app/data/feedback.db}
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+    volumes:
+      - feedback_data:/app/data
+      - feedback_recordings:/tmp/feedback-call-recordings
+
+  nginx:
+    image: ${NGINX_IMAGE_NAME}
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      SERVER_NAME: ${SERVER_NAME}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - nginx_certs:/etc/letsencrypt:ro
+      - nginx_acme:/var/www/certbot
+
+volumes:
+  feedback_data:
+  feedback_recordings:
+  nginx_certs:
+  nginx_acme:

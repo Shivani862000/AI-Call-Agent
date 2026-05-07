@@ -1,0 +1,12 @@
+.git
+.github
+node_modules
+npm-debug.log
+.env
+.env.*
+feedback.db
+*.db
+tmp
+.DS_Store
+DEPLOYMENT_AZURE.md
+DEPLOYMENT_DIGITALOCEAN.md

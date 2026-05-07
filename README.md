@@ -98,3 +98,32 @@ curl -X POST http://localhost:3000/call/start
 - No audio both ways: confirm the stream URL resolves to `wss://.../call/stream`.
 - OpenAI auth errors: verify the API key has access to Realtime.
 - Twilio trial failure: verify the destination number in Twilio or upgrade the account.
+
+## Docker Development
+
+Build and start locally with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+The app listens on:
+
+```text
+http://localhost:3000
+```
+
+The Compose setup persists SQLite data in a Docker volume and is ready to accept a production image through the `IMAGE_NAME` variable during deployment.
+
+## CI/CD
+
+The repository includes a GitHub Actions deployment workflow:
+
+- workflow file: `.github/workflows/deploy.yml`
+- release branch: `deploy`
+- Artifact Registry: `asia-south2-docker.pkg.dev/lively-math-495604-b5/feedback-agent`
+- runtime target: `GKE + Kubernetes Ingress`
+
+Google Cloud deployment notes live in:
+
+- `GKE_NEXT_STEPS.md`

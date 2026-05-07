@@ -1,0 +1,122 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - deploy
+  workflow_dispatch:
+
+env:
+  GCP_PROJECT_ID: lively-math-495604-b5
+  GCP_REGION: asia-south2
+  GAR_REPOSITORY: feedback-agent
+  APP_IMAGE_NAME: feedback-automation-system
+  APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+  K8S_NAMESPACE: ${{ secrets.K8S_NAMESPACE }}
+  APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      app_image_uri: ${{ steps.build_push.outputs.app_image_uri }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        id: build_push
+        run: |
+          APP_IMAGE_URI="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/${APP_IMAGE_NAME}:${GITHUB_SHA}"
+          docker build -t "${APP_IMAGE_URI}" .
+          docker push "${APP_IMAGE_URI}"
+          echo "app_image_uri=${APP_IMAGE_URI}" >> "${GITHUB_OUTPUT}"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.GKE_CLUSTER_NAME }}
+          location: ${{ secrets.GKE_CLUSTER_LOCATION }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Create namespace and sync app env secret
+        env:
+          APP_ENV_FILE: ${{ secrets.APP_ENV_FILE }}
+        run: |
+          set -eu
+          kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+          printf '%s' "${APP_ENV_FILE}" > .app.env
+          kubectl create secret generic feedback-agent-env \
+            --namespace "${K8S_NAMESPACE}" \
+            --from-env-file=.app.env \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply Kubernetes manifests
+        env:
+          APP_IMAGE_URI: ${{ needs.build.outputs.app_image_uri }}
+        run: |
+          set -eu
+          for manifest in k8s/backendconfig.yaml k8s/pvc.yaml k8s/deployment.yaml k8s/service.yaml k8s/ingress.yaml; do
+            sed \
+              -e "s|__K8S_NAMESPACE__|${K8S_NAMESPACE}|g" \
+              -e "s|__APP_IMAGE__|${APP_IMAGE_URI}|g" \
+              -e "s|__APP_HOSTNAME__|${APP_HOSTNAME}|g" \
+              "${manifest}" | kubectl apply -f -
+          done
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/feedback-agent -n "${K8S_NAMESPACE}" --timeout=300s
+
+  smoke-test:
+    runs-on: ubuntu-latest
+    needs: deploy
+
+    steps:
+      - name: Wait for HTTPS endpoint
+        run: |
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS "${APP_BASE_URL}/health" > health.json; then
+              exit 0
+            fi
+            echo "Waiting for public health endpoint (${attempt}/10)..."
+            sleep 10
+          done
+          echo "Public health endpoint did not become available."
+          exit 1
+
+      - name: Assert health payload
+        run: |
+          grep -q '"ok"[[:space:]]*:[[:space:]]*true' health.json
