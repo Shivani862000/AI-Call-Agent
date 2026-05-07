@@ -4,6 +4,7 @@ metadata:
   name: feedback-agent-service
   namespace: __K8S_NAMESPACE__
   annotations:
+    cloud.google.com/neg: '{"ingress": true}'
     cloud.google.com/backend-config: '{"default":"feedback-agent-backendconfig"}'
 spec:
   type: NodePort

@@ -100,4 +100,5 @@ That will:
 3. get GKE credentials
 4. apply the Kubernetes manifests
 5. wait for rollout success
-6. run the smoke test against `${APP_BASE_URL}/health`
+6. wait for the ingress IP
+7. run the smoke test against the ingress IP with the correct `Host` header

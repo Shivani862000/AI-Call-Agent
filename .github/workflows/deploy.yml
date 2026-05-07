@@ -108,16 +108,49 @@ jobs:
     environment: DEV
 
     steps:
-      - name: Wait for HTTPS endpoint
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.GKE_CLUSTER_NAME }}
+          location: ${{ secrets.GKE_CLUSTER_LOCATION }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Wait for ingress IP
+        env:
+          K8S_NAMESPACE: ${{ secrets.K8S_NAMESPACE }}
         run: |
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -fsS "${APP_BASE_URL}/health" > health.json; then
+          set -eu
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            INGRESS_IP="$(kubectl get ingress feedback-agent-ingress -n "${K8S_NAMESPACE}" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+            if [ -n "${INGRESS_IP}" ]; then
+              echo "INGRESS_IP=${INGRESS_IP}" >> "${GITHUB_ENV}"
               exit 0
             fi
-            echo "Waiting for public health endpoint (${attempt}/10)..."
-            sleep 10
+            echo "Waiting for ingress IP (${attempt}/12)..."
+            sleep 15
           done
-          echo "Public health endpoint did not become available."
+          echo "Ingress IP did not become available."
+          exit 1
+
+      - name: Wait for live API
+        env:
+          K8S_NAMESPACE: ${{ secrets.K8S_NAMESPACE }}
+          APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
+        run: |
+          set -eu
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS -H "Host: ${APP_HOSTNAME}" "http://${INGRESS_IP}/health" > health.json; then
+              exit 0
+            fi
+            echo "Waiting for live API (${attempt}/10)..."
+            sleep 15
+          done
+          echo "Live API did not become available."
           exit 1
 
       - name: Assert health payload
