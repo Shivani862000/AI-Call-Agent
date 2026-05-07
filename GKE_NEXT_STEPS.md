@@ -24,6 +24,7 @@ asia-south2-docker.pkg.dev/lively-math-495604-b5/feedback-agent
 - `k8s/` contains the Kubernetes manifests for the app, service, ingress, backend config, and storage
 - `k8s/managed-cert.yaml` adds the GKE managed certificate for HTTPS
 - the pipeline creates or updates a Kubernetes secret from `APP_ENV_FILE`
+- the pipeline deletes and recreates the managed certificate on deploy
 - the deployment updates the app image in-cluster and waits for rollout success
 
 ## Required GitHub Secrets
@@ -103,7 +104,8 @@ That will:
 3. get GKE credentials
 4. apply the Kubernetes manifests
 5. wait for rollout success
-6. wait for the ingress IP
-7. verify the service through the ingress IP with the correct `Host` header
-8. wait for the managed certificate to become `Active`
-9. wait for the public HTTPS endpoint to be reachable
+6. recreate the managed certificate
+7. wait for the ingress IP
+8. verify the service through the ingress IP with the correct `Host` header
+9. wait for the managed certificate to become `Active`
+10. wait for the public HTTPS endpoint to be reachable

@@ -85,6 +85,13 @@ jobs:
             --from-env-file=.app.env \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Recreate managed certificate
+        env:
+          K8S_NAMESPACE: ${{ secrets.K8S_NAMESPACE }}
+        run: |
+          set -eu
+          kubectl delete managedcertificate feedback-agent-managed-cert -n "${K8S_NAMESPACE}" --ignore-not-found=true
+
       - name: Apply Kubernetes manifests
         env:
           APP_IMAGE_URI: ${{ needs.build.outputs.app_image_uri }}
