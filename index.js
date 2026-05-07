@@ -81,6 +81,51 @@ const liveCallState = new Map();
 const LIVE_CALL_RETENTION_MS = 20 * 60 * 1000;
 const LIVE_CALL_ACTIVE_STALE_MS = 90 * 60 * 1000;
 
+function redactSecret(value, visiblePrefix = 4, visibleSuffix = 4) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  if (text.length <= visiblePrefix + visibleSuffix) {
+    return '[set]';
+  }
+
+  return `${text.slice(0, visiblePrefix)}…${text.slice(-visibleSuffix)} (len=${text.length})`;
+}
+
+function logConfigSnapshot(scope = 'CONFIG') {
+  const snapshot = {
+    NODE_ENV: process.env.NODE_ENV || '',
+    PORT: process.env.PORT || '',
+    TZ: process.env.TZ || '',
+    CALL_MODE,
+    VOICE_PIPELINE,
+    AI_PROVIDER,
+    REALTIME_MODEL,
+    REQUESTED_GEMINI_MODEL,
+    GEMINI_MODEL,
+    GEMINI_VOICE,
+    APP_BASE_URL: process.env.APP_BASE_URL || '',
+    NGROK_URL: process.env.NGROK_URL || '',
+    WEBHOOK_URL: process.env.WEBHOOK_URL || '',
+    SERVER_NAME: process.env.SERVER_NAME || '',
+    EXOTEL_API_HOST: process.env.EXOTEL_API_HOST || '',
+    EXOTEL_SID: redactSecret(process.env.EXOTEL_SID),
+    EXOTEL_APP_ID: process.env.EXOTEL_APP_ID || '',
+    EXOTEL_APPLET_URL: process.env.EXOTEL_APPLET_URL || '',
+    EXOTEL_CALLER_ID: process.env.EXOTEL_CALLER_ID || '',
+    EXOTEL_WHATSAPP_FROM: process.env.EXOTEL_WHATSAPP_FROM || '',
+    EXOTEL_API_KEY_PRESENT: Boolean(process.env.EXOTEL_API_KEY),
+    EXOTEL_API_TOKEN_PRESENT: Boolean(process.env.EXOTEL_API_TOKEN),
+    GEMINI_API_KEY_PRESENT: Boolean(process.env.GEMINI_API_KEY),
+    DEEPGRAM_API_KEY_PRESENT: Boolean(process.env.DEEPGRAM_API_KEY),
+    DATABASE_URL: process.env.DATABASE_URL || ''
+  };
+
+  console.log(`[${scope}] ${JSON.stringify(snapshot)}`);
+}
+
 function runInBackground(label, work) {
   Promise.resolve()
     .then(() => work())
@@ -1115,7 +1160,25 @@ app.post('/call/start', async (req, res) => {
       return res.status(409).json({ success: false, error: blockedReason });
     }
 
-    console.log(`[CALL REQUEST] to=${customerPhone} callerId=${process.env.EXOTEL_CALLER_ID} applet=${process.env.EXOTEL_APPLET_URL}`);
+    console.log(
+      `[CALL REQUEST] to=${customerPhone} callerId=${process.env.EXOTEL_CALLER_ID} ` +
+      `applet=${process.env.EXOTEL_APPLET_URL} baseUrl=${PUBLIC_BASE_URL} ` +
+      `mode=${CALL_MODE} pipeline=${VOICE_PIPELINE} model=${REALTIME_MODEL}`
+    );
+    console.log(
+      `[CALL REQUEST CONFIG] ` +
+      `APP_BASE_URL=${process.env.APP_BASE_URL || ''} ` +
+      `NGROK_URL=${process.env.NGROK_URL || ''} ` +
+      `WEBHOOK_URL=${process.env.WEBHOOK_URL || ''} ` +
+      `SERVER_NAME=${process.env.SERVER_NAME || ''} ` +
+      `EXOTEL_API_HOST=${process.env.EXOTEL_API_HOST || ''} ` +
+      `EXOTEL_SID=${redactSecret(process.env.EXOTEL_SID)} ` +
+      `EXOTEL_APP_ID=${process.env.EXOTEL_APP_ID || ''} ` +
+      `EXOTEL_APPLET_URL=${process.env.EXOTEL_APPLET_URL || ''} ` +
+      `GEMINI_MODEL=${GEMINI_MODEL} ` +
+      `GEMINI_VOICE=${GEMINI_VOICE} ` +
+      `TZ=${process.env.TZ || ''}`
+    );
     const call = await placeRealtimeCall({
       customerPhone,
       customerName: customer.name || customerName,
@@ -1165,6 +1228,16 @@ app.get('/call/twiml', (req, res) => {
   const streamUrl = toWssUrl(PUBLIC_BASE_URL, '/call/stream');
   console.log(`[CALL FLOW] Serving stream XML with URL: ${streamUrl}`);
   console.log(`[CALL FLOW] customer=${customerName} client=${clientName} agentId=${agentId || 'none'}`);
+  console.log(
+    `[CALL FLOW CONFIG] ` +
+    `APP_BASE_URL=${process.env.APP_BASE_URL || ''} ` +
+    `NGROK_URL=${process.env.NGROK_URL || ''} ` +
+    `WEBHOOK_URL=${process.env.WEBHOOK_URL || ''} ` +
+    `PUBLIC_BASE_URL=${PUBLIC_BASE_URL} ` +
+    `CALL_MODE=${CALL_MODE} ` +
+    `VOICE_PIPELINE=${VOICE_PIPELINE} ` +
+    `REALTIME_MODEL=${REALTIME_MODEL}`
+  );
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
@@ -1222,7 +1295,14 @@ app.all('/call/exotel/voicebot-url', async (req, res) => {
     }
 
     const streamUrl = `${toWssUrl(PUBLIC_BASE_URL, '/call/stream')}?${query.toString()}`;
-    console.log(`[EXOTEL VOICEBOT] provider=${provider} streamUrl=${streamUrl}`);
+    console.log(
+      `[EXOTEL VOICEBOT] provider=${provider} streamUrl=${streamUrl} ` +
+      `APP_BASE_URL=${process.env.APP_BASE_URL || ''} ` +
+      `NGROK_URL=${process.env.NGROK_URL || ''} ` +
+      `WEBHOOK_URL=${process.env.WEBHOOK_URL || ''} ` +
+      `PUBLIC_BASE_URL=${PUBLIC_BASE_URL} ` +
+      `EXOTEL_APPLET_URL=${process.env.EXOTEL_APPLET_URL || ''}`
+    );
     res.json({ url: streamUrl });
   } catch (error) {
     console.error('[EXOTEL VOICEBOT URL ERROR]', error.message);
@@ -3000,6 +3080,7 @@ wss.on('connection', (twilioWs, req) => {
   try {
     validateConfig();
     await initializeDatabase();
+    logConfigSnapshot('SERVER');
 
     setInterval(() => {
       runSchedulerTick().catch((error) => {

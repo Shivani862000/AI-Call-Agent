@@ -27,6 +27,19 @@ function parseJsonSafely(text) {
   }
 }
 
+function redactSecret(value, visiblePrefix = 4, visibleSuffix = 4) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  if (text.length <= visiblePrefix + visibleSuffix) {
+    return '[set]';
+  }
+
+  return `${text.slice(0, visiblePrefix)}…${text.slice(-visibleSuffix)} (len=${text.length})`;
+}
+
 function extractXmlTag(text, tagName) {
   const match = String(text || '').match(new RegExp(`<${tagName}>([^<]+)</${tagName}>`, 'i'));
   return match ? match[1] : null;
@@ -105,6 +118,16 @@ async function initiateCall(customerPhone, customerId, statusCallbackUrl) {
     throw new Error('Missing EXOTEL_APPLET_URL or EXOTEL_APP_ID for outbound call flow.');
   }
 
+  console.log(
+    `[EXOTEL CONFIG] ` +
+    `EXOTEL_SID=${redactSecret(accountSid)} ` +
+    `EXOTEL_API_HOST=${apiHost} ` +
+    `EXOTEL_APP_ID=${appId || ''} ` +
+    `EXOTEL_CALLER_ID=${process.env.EXOTEL_CALLER_ID || ''} ` +
+    `EXOTEL_APPLET_URL=${configuredFlowUrl || ''} ` +
+    `STATUS_CALLBACK=${statusCallbackUrl} ` +
+    `CALL_TYPE=${process.env.EXOTEL_CALL_TYPE || 'trans'}`
+  );
   console.log(
     `[EXOTEL] Initiating call to ${customerPhone} via ${apiHost} ` +
     `flow=${voiceFlowUrl} statusCallback=${statusCallbackUrl}`
