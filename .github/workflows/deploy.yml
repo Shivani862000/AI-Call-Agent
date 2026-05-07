@@ -178,22 +178,22 @@ jobs:
           kubectl describe managedcertificate feedback-agent-managed-cert -n "${K8S_NAMESPACE}" || true
           exit 1
 
-      - name: Wait for public HTTPS
+      - name: Wait for direct HTTPS
         env:
-          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
+          APP_HOSTNAME: ${{ secrets.APP_HOSTNAME }}
         run: |
           set -eu
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-            if curl -fsS "${APP_BASE_URL}/health" > public-health.json; then
+            if curl -fsS --resolve "${APP_HOSTNAME}:443:${INGRESS_IP}" "https://${APP_HOSTNAME}/health" > direct-health.json; then
               exit 0
             fi
-            echo "Waiting for public HTTPS endpoint (${attempt}/15)..."
+            echo "Waiting for direct HTTPS endpoint (${attempt}/15)..."
             sleep 20
           done
-          echo "Public HTTPS endpoint did not become available. Check DNS, Cloudflare, and TLS."
+          echo "Direct HTTPS endpoint did not become available."
           exit 1
 
       - name: Assert health payload
         run: |
           grep -q '"ok"[[:space:]]*:[[:space:]]*true' health.json
-          grep -q '"ok"[[:space:]]*:[[:space:]]*true' public-health.json
+          grep -q '"ok"[[:space:]]*:[[:space:]]*true' direct-health.json

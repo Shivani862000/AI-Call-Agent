@@ -108,4 +108,4 @@ That will:
 7. wait for the ingress IP
 8. verify the service through the ingress IP with the correct `Host` header
 9. wait for the managed certificate to become `Active`
-10. wait for the public HTTPS endpoint to be reachable
+10. verify HTTPS directly against the ingress IP using the hostname for SNI
