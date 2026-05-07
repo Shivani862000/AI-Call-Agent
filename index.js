@@ -203,9 +203,7 @@ function validateConfig() {
     'EXOTEL_API_KEY',
     'EXOTEL_API_TOKEN',
     'EXOTEL_CALLER_ID',
-    'EXOTEL_APPLET_URL',
-    'CUSTOMER_PHONE',
-    'CUSTOMER_NAME'
+    'EXOTEL_APPLET_URL'
   ].filter((key) => !process.env[key]);
 
   if (CALL_MODE === 'openai' && !process.env.OPENAI_API_KEY) {

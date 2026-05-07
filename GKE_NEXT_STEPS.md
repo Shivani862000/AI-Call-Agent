@@ -44,6 +44,11 @@ You no longer need VM-specific secrets such as:
 - `VM_SSH_PRIVATE_KEY`
 - `VM_DEPLOY_PATH`
 
+The production env secret should still include sensible defaults for:
+
+- `CUSTOMER_PHONE`
+- `CUSTOMER_NAME`
+
 ## Required Service Account Access
 
 The service account used in `GCP_SA_KEY` should have at least:
