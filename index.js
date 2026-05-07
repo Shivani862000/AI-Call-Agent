@@ -1,5 +1,6 @@
 require('dotenv').config();
 
+const crypto = require('crypto');
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -33,6 +34,127 @@ const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
+const ADMIN_USERNAME = 'Path Lab';
+const ADMIN_PASSWORD = 'Pathlab123#@!';
+const AUTH_COOKIE_NAME = 'feedback_admin_session';
+const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const AUTH_SIGNING_SECRET = process.env.AUTH_SIGNING_SECRET || process.env.SESSION_SECRET || process.env.EXOTEL_API_TOKEN || 'feedback-admin-auth-secret';
+
+function parseCookies(req) {
+  const header = String(req.headers.cookie || '');
+  if (!header) {
+    return {};
+  }
+
+  return header.split(';').reduce((accumulator, item) => {
+    const separatorIndex = item.indexOf('=');
+    if (separatorIndex === -1) {
+      return accumulator;
+    }
+
+    const key = item.slice(0, separatorIndex).trim();
+    const value = item.slice(separatorIndex + 1).trim();
+    if (key) {
+      accumulator[key] = decodeURIComponent(value);
+    }
+    return accumulator;
+  }, {});
+}
+
+function signAuthValue(value) {
+  return crypto.createHmac('sha256', AUTH_SIGNING_SECRET).update(value).digest('base64url');
+}
+
+function createAuthToken(username) {
+  const payload = Buffer.from(JSON.stringify({
+    username,
+    exp: Date.now() + AUTH_SESSION_TTL_MS
+  })).toString('base64url');
+  const signature = signAuthValue(payload);
+  return `${payload}.${signature}`;
+}
+
+function readAuthSession(req) {
+  const cookies = parseCookies(req);
+  const token = cookies[AUTH_COOKIE_NAME];
+  if (!token) {
+    return null;
+  }
+
+  const [payload, signature] = token.split('.');
+  if (!payload || !signature) {
+    return null;
+  }
+
+  const expectedSignature = signAuthValue(payload);
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (
+    signatureBuffer.length !== expectedBuffer.length
+    || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+  ) {
+    return null;
+  }
+
+  try {
+    const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!session?.username || !session?.exp || session.exp < Date.now()) {
+      return null;
+    }
+    return session;
+  } catch (error) {
+    return null;
+  }
+}
+
+function setAuthCookie(res, token) {
+  const isSecure = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+  const cookieParts = [
+    `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${Math.floor(AUTH_SESSION_TTL_MS / 1000)}`
+  ];
+
+  if (isSecure) {
+    cookieParts.push('Secure');
+  }
+
+  res.setHeader('Set-Cookie', cookieParts.join('; '));
+}
+
+function clearAuthCookie(res) {
+  const isSecure = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+  const cookieParts = [
+    `${AUTH_COOKIE_NAME}=`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    'Max-Age=0'
+  ];
+
+  if (isSecure) {
+    cookieParts.push('Secure');
+  }
+
+  res.setHeader('Set-Cookie', cookieParts.join('; '));
+}
+
+function requireAdminAuth(req, res, next) {
+  const session = readAuthSession(req);
+  if (session) {
+    req.adminSession = session;
+    return next();
+  }
+
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  return res.redirect('/login.html');
+}
+
 app.use((req, res, next) => {
   if (req.path === '/admin.html' || req.path.startsWith('/api/')) {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -40,6 +162,18 @@ app.use((req, res, next) => {
     res.setHeader('Expires', '0');
   }
   next();
+});
+
+app.use((req, res, next) => {
+  if (req.path === '/login.html' || req.path.startsWith('/api/auth/')) {
+    return next();
+  }
+
+  if (req.path === '/admin.html' || req.path.startsWith('/api/')) {
+    return requireAdminAuth(req, res, next);
+  }
+
+  return next();
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -1203,7 +1337,45 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.redirect('/admin.html');
+  if (readAuthSession(req)) {
+    return res.redirect('/admin.html');
+  }
+
+  return res.redirect('/login.html');
+});
+
+app.get('/api/auth/session', (req, res) => {
+  const session = readAuthSession(req);
+  if (!session) {
+    return res.status(401).json({ authenticated: false });
+  }
+
+  return res.json({
+    authenticated: true,
+    username: session.username
+  });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const username = String(req.body.username || '').trim();
+  const password = String(req.body.password || '');
+
+  if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
+    clearAuthCookie(res);
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+
+  const token = createAuthToken(username);
+  setAuthCookie(res, token);
+  return res.json({
+    success: true,
+    username
+  });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  clearAuthCookie(res);
+  return res.json({ success: true });
 });
 
 app.use('/api/customers', customersRouter);

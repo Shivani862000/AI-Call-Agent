@@ -221,6 +221,13 @@
       box-shadow: var(--shadow-soft);
     }
 
+    .logout-button {
+      width: auto;
+      min-width: 110px;
+      padding: 0 16px;
+      font-weight: 700;
+    }
+
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1297,6 +1304,7 @@
               </div>
             </div>
           </div>
+          <button id="logoutButton" class="icon-button logout-button" type="button" onclick="logoutAdmin()">Logout</button>
           <button class="icon-button" type="button" aria-label="More options">...</button>
         </div>
       </header>
@@ -1346,215 +1354,7 @@
         </article>
       </section>
 
-      <!-- <section class="dashboard-grid">
-        <article class="card" id="owner-center">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Owner command center</div>
-              <div class="card-subtitle">Morning digest, hot lead alerts, complaints, and ROI visibility on one screen</div>
-            </div>
-            <div class="button-row">
-              <button class="secondary" type="button" onclick="loadOwnerDashboard()">Refresh</button>
-              <button class="primary" type="button" onclick="sendOwnerDigest(this)">Send morning digest</button>
-            </div>
-          </div>
-
-          <div class="owner-grid">
-            <div>
-              <div class="owner-digest-box">
-                <strong>CEO morning digest</strong>
-                <div id="ownerDigestText">Loading owner digest...</div>
-              </div>
-
-              <div class="owner-metrics-grid">
-                <div class="mini-card accent-blue" style="color: var(--blue);">
-                  <strong id="ownerYesterdayCalls">0</strong>
-                  <span>Yesterday calls</span>
-                </div>
-                <div class="mini-card accent-green" style="color: var(--green);">
-                  <strong id="ownerHotLeads">0</strong>
-                  <span>Hot leads</span>
-                </div>
-                <div class="mini-card" style="color: var(--purple);">
-                  <strong id="ownerRevenuePipeline">Rs 0</strong>
-                  <span>Revenue pipeline</span>
-                </div>
-                <div class="mini-card accent-red" style="color: var(--red);">
-                  <strong id="ownerComplaintRisks">0</strong>
-                  <span>Complaint risks</span>
-                </div>
-                <div class="mini-card accent-orange" style="color: var(--orange);">
-                  <strong id="ownerRoiMultiple">0x</strong>
-                  <span>Estimated ROI</span>
-                </div>
-                <div class="mini-card accent-green" style="color: var(--green);">
-                  <strong id="ownerSavings">Rs 0</strong>
-                  <span>AI vs staff saving</span>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div class="detail-card">
-                <strong>Priority alerts</strong>
-                <div class="supporting-text" style="margin: 8px 0 14px;">Owner should only intervene when a deal or crisis needs attention.</div>
-                <div id="ownerAlertsList" class="owner-alert-list">
-                  <div class="owner-alert-item">
-                    <div class="supporting-text">Loading alerts...</div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="owner-note-list">
-                <div class="owner-note-item">
-                  <strong>Best response slots</strong>
-                  <div class="supporting-text" id="ownerBestSlots">Loading...</div>
-                </div>
-                <div class="owner-note-item">
-                  <strong>Best-performing scripts</strong>
-                  <div class="supporting-text" id="ownerBestScripts">Loading...</div>
-                </div>
-                <div class="owner-note-item">
-                  <strong>Common objections</strong>
-                  <div class="supporting-text" id="ownerObjections">Loading...</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </article>
-      </section> -->
-<!-- 
-      <section class="dashboard-grid">
-        <article class="card" id="agents">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Voice agents</div>
-              <div class="card-subtitle">Create reusable prompts, provider settings, and opening lines for different call flows.</div>
-            </div>
-          </div>
-
-          <div id="agentEditChip" class="edit-chip"></div>
-          <input type="hidden" id="editingAgentId">
-
-          <div class="grid-2">
-            <div class="field">
-              <label class="field-label" for="agentName">Agent name</label>
-              <input type="text" id="agentName" placeholder="e.g. Hindi Feedback Agent" maxlength="100">
-              <div class="error-text" id="agentNameError"></div>
-            </div>
-
-            <div class="field">
-              <label class="field-label" for="agentSlug">Slug</label>
-              <input type="text" id="agentSlug" placeholder="hindi-feedback-agent" maxlength="120">
-              <div class="helper-text">Used as a stable identifier for the prompt version.</div>
-              <div class="error-text" id="agentSlugError"></div>
-            </div>
-
-            <div class="field">
-              <label class="field-label" for="agentClientName">Client / brand name</label>
-              <input type="text" id="agentClientName" placeholder="e.g. KC Prashant Path Lab">
-              <div class="error-text" id="agentClientNameError"></div>
-            </div>
-
-            <div class="field">
-              <label class="field-label" for="agentLanguage">Language</label>
-              <select id="agentLanguage">
-                <option value="hi" selected>Hindi</option>
-                <option value="hinglish">Hinglish</option>
-                <option value="mixed">Mixed</option>
-                <option value="en">English</option>
-              </select>
-              <div class="error-text" id="agentLanguageError"></div>
-            </div>
-
-            <div class="field">
-              <label class="field-label" for="agentModel">LLM model</label>
-              <input type="text" id="agentModel" placeholder="e.g. models/gemini-2.5-flash">
-              <div class="helper-text">Per-agent model override for Gemini or other providers.</div>
-              <div class="error-text" id="agentModelError"></div>
-            </div>
-
-            <div class="field">
-              <label class="field-label" for="agentVoice">TTS voice</label>
-              <input type="text" id="agentVoice" placeholder="e.g. BTNeCNdXniCSbjEac5vd">
-              <div class="helper-text">Usually your built-in voice or provider voice setting.</div>
-              <div class="error-text" id="agentVoiceError"></div>
-            </div>
-
-            <div class="field">
-              <label class="field-label" for="agentDescription">Description</label>
-              <input type="text" id="agentDescription" placeholder="What this agent is used for">
-              <div class="error-text" id="agentDescriptionError"></div>
-            </div>
-
-            <div class="field">
-              <label class="field-label">Defaults</label>
-              <div class="button-row">
-                <label><input type="checkbox" id="agentIsDefault"> Default agent</label>
-                <label><input type="checkbox" id="agentIsActive" checked> Active</label>
-              </div>
-            </div>
-          </div>
-
-          <div class="field" style="margin-top: 14px;">
-            <label class="field-label" for="agentSystemPrompt">System prompt</label>
-            <textarea id="agentSystemPrompt" placeholder="Use {{client_name}} and {{customer_name}} variables."></textarea>
-            <div class="helper-text">This drives the full conversation style and business logic.</div>
-            <div class="error-text" id="agentSystemPromptError"></div>
-          </div>
-
-          <div class="field" style="margin-top: 14px;">
-            <label class="field-label" for="agentOpeningPrompt">Opening prompt</label>
-            <textarea id="agentOpeningPrompt" placeholder="First turn instruction using {{client_name}} and {{customer_name}}."></textarea>
-            <div class="error-text" id="agentOpeningPromptError"></div>
-          </div>
-
-          <div class="button-row" style="margin-top: 18px;">
-            <button id="agentSubmitButton" class="primary" onclick="saveAgent()">Add agent</button>
-            <button id="agentCancelButton" class="secondary hidden" onclick="resetAgentForm()">Cancel</button>
-          </div>
-        </article>
-      </section> -->
-
-      <!-- <section class="card">
-        <div class="card-header">
-          <div>
-            <div class="card-title">Agent library</div>
-            <div class="card-subtitle" id="agentListMeta">0 agents</div>
-          </div>
-          <div class="toolbar-group">
-            <select id="callAgentSelect">
-              <option value="">Loading agents...</option>
-            </select>
-            <button class="secondary" type="button" onclick="loadAgents()">Refresh agents</button>
-          </div>
-        </div>
-
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Language</th>
-                <th>Providers</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="agentsTableBody">
-              <tr>
-                <td colspan="5">
-                  <div class="empty-state">
-                    <div class="empty-icon">AG</div>
-                    <strong>Loading agents...</strong>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section> -->
-
+ 
       <section class="dashboard-grid">
         <article class="card" id="customers">
           <div class="card-header">
@@ -1587,62 +1387,6 @@
               <div class="helper-text">Daily scheduler will use this time.</div>
               <div class="error-text" id="customerSlotError"></div>
             </div>
-
-            <div class="field">
-              <label class="field-label" for="customerValue">Customer value</label>
-              <select id="customerValue">
-                <option value="standard" selected>Standard</option>
-                <option value="vip">VIP</option>
-                <option value="high">High</option>
-                <option value="low">Low</option>
-              </select>
-              <div class="error-text" id="customerValueError"></div>
-            </div>
-
-            <div class="field">
-              <label class="field-label" for="urgencyLevel">Urgency level</label>
-              <select id="urgencyLevel">
-                <option value="normal" selected>Normal</option>
-                <option value="urgent">Urgent</option>
-                <option value="high">High</option>
-                <option value="low">Low</option>
-              </select>
-              <div class="error-text" id="urgencyLevelError"></div>
-            </div>
-
-            <div class="field">
-              <label class="field-label" for="preferredLanguage">Preferred language</label>
-              <select id="preferredLanguage">
-                <option value="hi" selected>Hindi</option>
-                <option value="hinglish">Hinglish</option>
-                <option value="mixed">Mixed</option>
-                <option value="en">English</option>
-              </select>
-              <div class="error-text" id="preferredLanguageError"></div>
-            </div>
-
-            <div class="field">
-              <label class="field-label" for="campaignName">Campaign name</label>
-              <input type="text" id="campaignName" placeholder="e.g. May Lab Campaign">
-              <div class="helper-text">Use same campaign name to group leads and ROI.</div>
-            </div>
-
-            <div class="field">
-              <label class="field-label" for="serviceInterest">Service / product</label>
-              <input type="text" id="serviceInterest" placeholder="e.g. Full body checkup">
-              <div class="helper-text">Helps track what service brings most inquiries.</div>
-            </div>
-
-            
-
-            <div class="field">
-              <label class="field-label" for="doNotCall">Do not call</label>
-              <select id="doNotCall">
-                <option value="0" selected>No</option>
-                <option value="1">Yes</option>
-              </select>
-            </div>
-
 
             <div class="field">
               <label class="field-label">Quick actions</label>
@@ -1684,46 +1428,7 @@
         
       </section>
 
-      <section class="dashboard-grid">
-        <article class="card" id="feedback">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Manual feedback entry</div>
-              <div class="card-subtitle">Log feedback when the customer shares it offline</div>
-            </div>
-          </div>
-
-          <div class="field">
-            <label class="field-label" for="feedbackCustomer">Customer</label>
-            <select id="feedbackCustomer">
-              <option value="">-- Select customer --</option>
-            </select>
-            <div class="error-text" id="feedbackCustomerError"></div>
-          </div>
-
-          <!-- <div class="field" style="margin-top: 14px;">
-            <label class="field-label" for="reviewText">Review</label>
-            <textarea id="reviewText" placeholder="Write customer's feedback here..."></textarea>
-            <div class="error-text" id="reviewTextError"></div>
-          </div> -->
-
-          <div class="field" style="margin-top: 14px;">
-            <label class="field-label" for="reviewStars">Rating</label>
-            <select id="reviewStars">
-              <option value="1">1 star</option>
-              <option value="2">2 stars</option>
-              <option value="3" selected>3 stars</option>
-              <option value="4">4 stars</option>
-              <option value="5">5 stars</option>
-            </select>
-            <div class="error-text" id="reviewStarsError"></div>
-          </div>
-
-          <div class="button-row" style="margin-top: 18px;">
-            <button class="primary" onclick="submitManualFeedback()">Submit feedback</button>
-          </div>
-        </article>
-      </section>
+    
 
       <section class="card">
         <div class="card-header">
@@ -1732,9 +1437,6 @@
             <div class="card-subtitle" id="customerListMeta">0 records</div>
           </div>
           <div class="toolbar-group">
-            <select id="customerCallAgentSelect">
-              <option value="">Use default agent</option>
-            </select>
             <input type="search" id="customerSearch" placeholder="Search name or phone" oninput="renderCustomers()">
             <select id="customerStatusFilter" onchange="renderCustomers()">
               <option value="" selected>All statuses</option>
@@ -1808,40 +1510,7 @@
           </div>
         </article>
       </section>
-     <section class="dashboard-grid">
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Live supervisor</div>
-              <div class="card-subtitle">Live call sentiment, red flags, and escalation view</div>
-            </div>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Customer</th>
-                  <th>Status</th>
-                  <th>Sentiment</th>
-                  <th>Red flag</th>
-                  <th>Transcript preview</th>
-                </tr>
-              </thead>
-              <tbody id="liveCallsBody">
-                <tr>
-                  <td colspan="5">
-                    <div class="empty-state">
-                      <div class="empty-icon">LV</div>
-                      <strong>No live calls right now</strong>
-                      <div class="supporting-text">Active Gemini calls and supervisor alerts will appear here.</div>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </section>
+    
       <section class="dashboard-grid">
          <article class="card" id="reports">
          <div class="card-header">
@@ -1885,103 +1554,8 @@
         </article>
         </section>
 
-      <section class="dashboard-grid">
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Campaign spend vs ROI</div>
-              <div class="card-subtitle">Track spend, lead quality, and revenue pipeline by campaign</div>
-            </div>
-          </div>
+   
 
-          <div class="campaign-grid">
-            <div>
-              <div class="grid-2">
-                <div class="field">
-                  <label class="field-label" for="campaignConfigName">Campaign name</label>
-                  <input type="text" id="campaignConfigName" placeholder="e.g. Summer Health Drive">
-                </div>
-                <div class="field">
-                  <label class="field-label" for="campaignServiceName">Service focus</label>
-                  <input type="text" id="campaignServiceName" placeholder="e.g. Thyroid profile">
-                </div>
-                <div class="field">
-                  <label class="field-label" for="campaignSpend">Monthly spend (INR)</label>
-                  <input type="number" id="campaignSpend" min="0" step="1" placeholder="50000">
-                </div>
-                <div class="field">
-                  <label class="field-label" for="campaignStatus">Status</label>
-                  <select id="campaignStatus">
-                    <option value="active" selected>Active</option>
-                    <option value="paused">Paused</option>
-                  </select>
-                </div>
-              </div>
-              <div class="button-row" style="margin-top: 14px;">
-                <button class="primary" type="button" onclick="saveCampaign()">Save campaign</button>
-              </div>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Campaign</th>
-                    <th>Spend</th>
-                    <th>Service</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody id="campaignConfigBody">
-                  <tr><td colspan="4">Loading campaigns...</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="table-wrap" style="margin-top: 18px;">
-            <table>
-              <thead>
-                <tr>
-                  <th>Campaign</th>
-                  <th>Spend</th>
-                  <th>Active leads</th>
-                  <th>Qualified</th>
-                  <th>Pipeline</th>
-                  <th>ROI</th>
-                </tr>
-              </thead>
-              <tbody id="campaignRoiBody">
-                <tr><td colspan="6">Loading campaign ROI...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </section>
-
-      <section class="dashboard-grid">
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Stale lead SLA board</div>
-              <div class="card-subtitle">Callbacks and follow-ups that need action before they get cold</div>
-            </div>
-          </div>
-          <div id="staleLeadBoard" class="sla-grid">
-            <div class="sla-item">Loading stale leads...</div>
-          </div>
-        </article>
-      </section>
-
-      <section class="dashboard-grid" id="settings">
-        <div class="notice-text">
-          <span style="font-size: 18px;">i</span>
-          <div>
-            Keep collecting feedback and improve customer satisfaction.
-            <small>Customer records, scheduler, manual entries, and reports stay connected here.</small>
-          </div>
-        </div>
-        <div style="font-size: 34px;">[]</div>
-      </section>
     </main>
   </div>
 
@@ -2041,6 +1615,10 @@
     let campaignConfigCache = [];
     let seenOwnerAlertKeys = new Set();
 
+    function redirectToLogin() {
+      window.location.replace('/login.html');
+    }
+
     async function fetchJson(path, options = {}) {
       const res = await fetch(path, {
         cache: 'no-store',
@@ -2057,11 +1635,45 @@
         payload = null;
       }
 
+      if (res.status === 401) {
+        redirectToLogin();
+        throw new Error('Authentication required');
+      }
+
       if (!res.ok) {
         throw new Error(payload?.error || `Request failed (${res.status})`);
       }
 
       return payload;
+    }
+
+    async function ensureAuthenticatedSession() {
+      const session = await fetchJson('/api/auth/session');
+      return session;
+    }
+
+    async function logoutAdmin() {
+      const button = document.getElementById('logoutButton');
+      const originalText = button ? button.textContent : 'Logout';
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Signing out...';
+      }
+
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+      } catch (error) {
+        console.error('Logout failed', error);
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = originalText;
+        }
+        redirectToLogin();
+      }
     }
 
     function showAlert(message, type = 'success') {
@@ -2117,12 +1729,7 @@
       return {
         name: document.getElementById('customerName').value.trim(),
         phone: document.getElementById('customerPhone').value.trim(),
-        preferred_slot: document.getElementById('customerSlot').value || '10:00',
-        customer_value: document.getElementById('customerValue').value,
-        urgency_level: document.getElementById('urgencyLevel').value,
-        preferred_language: document.getElementById('preferredLanguage').value,
-        campaign_name: document.getElementById('campaignName').value.trim(),
-        service_interest: document.getElementById('serviceInterest').value.trim(),
+        preferred_slot: document.getElementById('customerSlot').value || '10:00'
       };
     }
 
@@ -2433,7 +2040,7 @@
     }
 
     function populateAgentSelects() {
-      const selects = [document.getElementById('callAgentSelect'), document.getElementById('customerCallAgentSelect')].filter(Boolean);
+      const selects = [document.getElementById('callAgentSelect')].filter(Boolean);
       selects.forEach((select, index) => {
         const selected = select.value;
         select.innerHTML = `<option value="">${index === 0 ? 'Use default agent for new calls' : 'Use default agent'}</option>`;
@@ -2567,11 +2174,6 @@
       document.getElementById('customerName').value = '';
       document.getElementById('customerPhone').value = '';
       document.getElementById('customerSlot').value = '';
-      document.getElementById('customerValue').value = 'standard';
-      document.getElementById('urgencyLevel').value = 'normal';
-      document.getElementById('preferredLanguage').value = 'hi';
-      document.getElementById('campaignName').value = '';
-      document.getElementById('serviceInterest').value = '';
       document.getElementById('customerSubmitButton').textContent = 'Add customer';
       document.getElementById('customerCancelButton').classList.add('hidden');
       const chip = document.getElementById('customerEditChip');
@@ -2588,12 +2190,6 @@
       document.getElementById('customerName').value = customer.name || '';
       document.getElementById('customerPhone').value = customer.phone || '';
       document.getElementById('customerSlot').value = customer.preferred_slot || '10:00';
-      document.getElementById('customerValue').value = customer.customer_value || 'standard';
-      document.getElementById('urgencyLevel').value = customer.urgency_level || 'normal';
-      document.getElementById('preferredLanguage').value = customer.preferred_language || 'hi';
-      document.getElementById('campaignName').value = customer.campaign_name || '';
-      document.getElementById('serviceInterest').value = customer.service_interest || '';
-     
       document.getElementById('customerSubmitButton').textContent = 'Update customer';
       document.getElementById('customerCancelButton').classList.remove('hidden');
       const chip = document.getElementById('customerEditChip');
@@ -3177,13 +2773,10 @@
       if (!confirm('Are you sure? This will immediately place a call to this customer.')) return;
 
       try {
-        const selectedAgentId = document.getElementById('customerCallAgentSelect')?.value || '';
         const res = await fetch(`${API_BASE}/calls/initiate/${customerId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            agentId: selectedAgentId ? Number(selectedAgentId) : null
-          })
+          body: JSON.stringify({})
         });
 
         const result = await res.json();
@@ -3303,7 +2896,7 @@
       window.location.href = `${API_BASE}/reports/weekly-download?t=${Date.now()}`;
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('analysisModal').addEventListener('click', (event) => {
         if (event.target.id === 'analysisModal') {
           closeAnalysisModal();
@@ -3328,6 +2921,7 @@
         statusFilter.selectedIndex = 0;
       }
 
+      await ensureAuthenticatedSession();
       resetAgentForm();
       resetCustomerForm();
       refreshDashboardData();

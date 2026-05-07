@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Path Lab Admin Login</title>
+  <style>
+    :root {
+      --bg: #eef6ff;
+      --panel: rgba(255, 255, 255, 0.92);
+      --line: rgba(45, 109, 246, 0.15);
+      --text: #18233f;
+      --muted: #667692;
+      --blue: #2d6df6;
+      --blue-deep: #1747ba;
+      --red: #d9534f;
+      --shadow: 0 28px 64px rgba(43, 72, 119, 0.16);
+      --radius-xl: 30px;
+      --radius-lg: 20px;
+      --radius-md: 14px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(45, 109, 246, 0.2), transparent 26%),
+        radial-gradient(circle at bottom right, rgba(255, 155, 23, 0.14), transparent 22%),
+        linear-gradient(180deg, #f7fbff 0%, #eef5ff 100%);
+    }
+
+    .login-shell {
+      width: min(100%, 980px);
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(360px, 420px);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(16px);
+    }
+
+    .login-copy {
+      padding: 56px;
+      background:
+        linear-gradient(150deg, rgba(45, 109, 246, 0.94), rgba(23, 71, 186, 0.96)),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent);
+      color: #fff;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.16);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .login-copy h1 {
+      margin: 22px 0 14px;
+      font-size: clamp(34px, 5vw, 48px);
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+    }
+
+    .login-copy p {
+      margin: 0;
+      max-width: 460px;
+      color: rgba(255, 255, 255, 0.82);
+      font-size: 16px;
+      line-height: 1.7;
+    }
+
+    .feature-list {
+      margin: 34px 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 14px;
+    }
+
+    .feature-list li {
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+    }
+
+    .login-card {
+      padding: 40px 34px;
+      display: flex;
+      align-items: center;
+    }
+
+    .login-card-inner {
+      width: 100%;
+    }
+
+    .brand-mark {
+      width: 54px;
+      height: 54px;
+      border-radius: 18px;
+      display: grid;
+      place-items: center;
+      font-size: 22px;
+      color: #fff;
+      background: linear-gradient(135deg, #2d6df6 0%, #5b8cff 100%);
+      box-shadow: 0 18px 34px rgba(45, 109, 246, 0.28);
+      margin-bottom: 18px;
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 28px;
+      letter-spacing: -0.03em;
+    }
+
+    .subtext {
+      margin: 0 0 24px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .field {
+      margin-bottom: 16px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    input {
+      width: 100%;
+      border: 1px solid rgba(104, 129, 165, 0.28);
+      border-radius: var(--radius-md);
+      padding: 14px 15px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+      outline: none;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    input:focus {
+      border-color: rgba(45, 109, 246, 0.58);
+      box-shadow: 0 0 0 4px rgba(45, 109, 246, 0.12);
+    }
+
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 16px;
+      padding: 15px 18px;
+      font: inherit;
+      font-weight: 700;
+      color: #fff;
+      cursor: pointer;
+      background: linear-gradient(135deg, #2d6df6 0%, #1747ba 100%);
+      box-shadow: 0 18px 34px rgba(45, 109, 246, 0.24);
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.72;
+    }
+
+    .error {
+      min-height: 22px;
+      margin: 14px 0 0;
+      color: var(--red);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .hint {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 900px) {
+      .login-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .login-copy,
+      .login-card {
+        padding: 30px 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="login-shell">
+    <section class="login-copy">
+      <span class="eyebrow">Secure Access</span>
+      <h1>Path Lab admin operations, in one focused workspace.</h1>
+      <p>Sign in to manage agents, trigger calls, review transcripts, and keep the feedback pipeline under control without exposing the dashboard publicly.</p>
+      <ul class="feature-list">
+        <li>Track live outreach, feedback, and owner digests from one dashboard.</li>
+        <li>Keep customer workflows and retry actions behind authenticated access.</li>
+        <li>Use the same login flow across local and production environments.</li>
+      </ul>
+    </section>
+
+    <section class="login-card">
+      <div class="login-card-inner">
+        <div class="brand-mark">PL</div>
+        <h2>Admin Login</h2>
+        <p class="subtext">Enter your Path Lab admin credentials to continue.</p>
+
+        <form id="loginForm">
+          <div class="field">
+            <label for="username">Username</label>
+            <input id="username" name="username" type="text" autocomplete="username" required>
+          </div>
+
+          <div class="field">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+          </div>
+
+          <button id="loginButton" type="submit">Sign in</button>
+          <div id="loginError" class="error" aria-live="polite"></div>
+        </form>
+
+        <p class="hint">After sign-in, your session stays active until logout or session expiry.</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    async function checkExistingSession() {
+      try {
+        const res = await fetch('/api/auth/session', { cache: 'no-store' });
+        if (res.ok) {
+          window.location.replace('/admin.html');
+        }
+      } catch (error) {
+        // Let the user continue to login if the session check fails.
+      }
+    }
+
+    async function handleLogin(event) {
+      event.preventDefault();
+      const button = document.getElementById('loginButton');
+      const errorEl = document.getElementById('loginError');
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const originalText = button.textContent;
+
+      button.disabled = true;
+      button.textContent = 'Signing in...';
+      errorEl.textContent = '';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const payload = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          throw new Error(payload.error || 'Unable to sign in');
+        }
+
+        window.location.replace('/admin.html');
+      } catch (error) {
+        errorEl.textContent = error.message;
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      checkExistingSession();
+      document.getElementById('loginForm').addEventListener('submit', handleLogin);
+    });
+  </script>
+</body>
+</html>
