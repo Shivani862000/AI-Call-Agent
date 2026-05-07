@@ -32,6 +32,7 @@ const {
 } = require('./services/call-orchestration');
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
@@ -116,8 +117,25 @@ function readAuthSession(req) {
   }
 }
 
-function setAuthCookie(res, token) {
-  const isSecure = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+function shouldUseSecureCookie(req) {
+  if (!req) {
+    return false;
+  }
+
+  if (req.secure) {
+    return true;
+  }
+
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+
+  return forwardedProto === 'https';
+}
+
+function setAuthCookie(req, res, token) {
+  const isSecure = shouldUseSecureCookie(req);
   const cookieParts = [
     `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}`,
     'Path=/',
@@ -133,8 +151,8 @@ function setAuthCookie(res, token) {
   res.setHeader('Set-Cookie', cookieParts.join('; '));
 }
 
-function clearAuthCookie(res) {
-  const isSecure = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+function clearAuthCookie(req, res) {
+  const isSecure = shouldUseSecureCookie(req);
   const cookieParts = [
     `${AUTH_COOKIE_NAME}=`,
     'Path=/',
@@ -1558,12 +1576,12 @@ app.post('/api/auth/login', (req, res) => {
   const password = String(req.body.password || '');
 
   if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
-    clearAuthCookie(res);
+    clearAuthCookie(req, res);
     return res.status(401).json({ error: 'Invalid username or password' });
   }
 
   const token = createAuthToken(username);
-  setAuthCookie(res, token);
+  setAuthCookie(req, res, token);
   return res.json({
     success: true,
     username
@@ -1571,7 +1589,7 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 app.post('/api/auth/logout', (req, res) => {
-  clearAuthCookie(res);
+  clearAuthCookie(req, res);
   return res.json({ success: true });
 });
 

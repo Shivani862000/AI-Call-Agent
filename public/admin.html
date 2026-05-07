@@ -6,7 +6,7 @@
   <title>Admin Overview</title>
   <link rel="stylesheet" href="/app-shell.css">
 </head>
-<body>
+<body class="admin-overview-page">
   <div class="app-shell">
     <aside class="sidebar">
       <div>
@@ -33,6 +33,7 @@
     <main class="main-panel">
       <header class="page-header">
         <div class="page-title-wrap">
+          <div class="page-kicker">Admin home</div>
           <h2>Operations Overview</h2>
           <div class="page-subtitle">
             <span class="pill">Admin</span>
@@ -40,28 +41,51 @@
           </div>
         </div>
         <div class="header-actions">
-          <button id="logoutButton" class="ghost" type="button">Logout</button>
+          <button id="logoutButton" class="ghost logout-pill" type="button" aria-label="Logout admin">
+            <span class="logout-pill-icon" aria-hidden="true">↗</span>
+            <span>Logout</span>
+          </button>
         </div>
       </header>
 
       <div id="alertContainer" class="alert-stack"></div>
 
-      <section class="section-link-grid">
-        <a class="section-link" href="/customers.html">
+      <section class="section-link-grid admin-nav-grid">
+        <a class="section-link admin-nav-card" href="/customers.html" aria-label="Open customers page">
+          <span class="admin-nav-chip">Customer desk</span>
           <strong>Customers</strong>
           <span class="muted">Add leads, schedule calls, and manage call-ready records.</span>
+          <span class="admin-nav-cta">
+            <span>Open</span>
+            <span class="admin-nav-arrow" aria-hidden="true">→</span>
+          </span>
         </a>
-        <a class="section-link" href="/clients.html">
+        <a class="section-link admin-nav-card" href="/clients.html" aria-label="Open clients page">
+          <span class="admin-nav-chip">Retention desk</span>
           <strong>Clients</strong>
           <span class="muted">Track treatments, visit anniversaries, and annual reminder care calls.</span>
+          <span class="admin-nav-cta">
+            <span>Open</span>
+            <span class="admin-nav-arrow" aria-hidden="true">→</span>
+          </span>
         </a>
-        <a class="section-link" href="/feedback.html">
+        <a class="section-link admin-nav-card" href="/feedback.html" aria-label="Open feedback page">
+          <span class="admin-nav-chip">Review desk</span>
           <strong>Feedback</strong>
           <span class="muted">See recent reviews, call intelligence, and manual submissions.</span>
+          <span class="admin-nav-cta">
+            <span>Open</span>
+            <span class="admin-nav-arrow" aria-hidden="true">→</span>
+          </span>
         </a>
-        <a class="section-link" href="/reports.html">
+        <a class="section-link admin-nav-card" href="/reports.html" aria-label="Open reports page">
+          <span class="admin-nav-chip">Insights desk</span>
           <strong>Reports</strong>
           <span class="muted">Review performance, ROI, alerts, and generate polished report outputs.</span>
+          <span class="admin-nav-cta">
+            <span>Open</span>
+            <span class="admin-nav-arrow" aria-hidden="true">→</span>
+          </span>
         </a>
       </section>
 
