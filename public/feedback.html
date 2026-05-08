@@ -20,7 +20,6 @@
         <nav class="nav-list">
           <a href="/admin.html" class="nav-link">Overview</a>
           <a href="/customers.html" class="nav-link">Customers</a>
-          <a href="/clients.html" class="nav-link">Clients</a>
           <a href="/feedback.html" class="nav-link active">Feedback</a>
           <a href="/reports.html" class="nav-link">Reports</a>
         </nav>
@@ -37,7 +36,7 @@
           <h2>Feedback</h2>
           <div class="page-subtitle">
             <span class="pill">Review</span>
-            <span>Manual input and recent call intelligence in one page.</span>
+            <span>Summary first, insights second, manual capture last.</span>
           </div>
         </div>
         <div class="header-actions">
@@ -48,72 +47,105 @@
 
       <div id="alertContainer" class="alert-stack"></div>
 
-      <section class="two-column-grid">
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Manual feedback</div>
-              <div class="card-subtitle">Capture offline comments, ratings, or verbal reviews from staff.</div>
-            </div>
-          </div>
-          <div class="field">
-            <label class="field-label" for="feedbackCustomer">Customer</label>
-            <select id="feedbackCustomer"></select>
-            <div class="error-text" id="feedbackCustomerError"></div>
-          </div>
-          <div class="field">
-            <label class="field-label" for="reviewStars">Rating</label>
-            <select id="reviewStars">
-              <option value="5">5 stars</option>
-              <option value="4">4 stars</option>
-              <option value="3" selected>3 stars</option>
-              <option value="2">2 stars</option>
-              <option value="1">1 star</option>
-            </select>
-            <div class="error-text" id="reviewStarsError"></div>
-          </div>
-          <div class="field">
-            <label class="field-label" for="reviewText">Review text</label>
-            <textarea id="reviewText" placeholder="Write the customer's feedback here..."></textarea>
-            <div class="error-text" id="reviewTextError"></div>
-          </div>
-          <div class="button-row">
-            <button id="submitFeedbackButton" class="primary" type="button">Submit feedback</button>
-          </div>
+      <section class="summary-strip">
+        <article class="summary-mini">
+          <span class="summary-mini-label">Feedback captured</span>
+          <span id="feedbackSummaryTotal" class="summary-mini-value">0</span>
+          <span class="summary-mini-note">Manual and call-extracted feedback records.</span>
         </article>
-
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Recent call intelligence</div>
-              <div class="card-subtitle">Operational reading of what happened across recent calls.</div>
-            </div>
-          </div>
-          <div id="recentCallInsights" class="list-block"></div>
+        <article class="summary-mini">
+          <span class="summary-mini-label">Positive sentiment</span>
+          <span id="feedbackSummaryPositive" class="summary-mini-value">0</span>
+          <span class="summary-mini-note">High-intent reviews worth amplifying.</span>
+        </article>
+        <article class="summary-mini">
+          <span class="summary-mini-label">Calls needing review</span>
+          <span id="feedbackSummaryReview" class="summary-mini-value">0</span>
+          <span class="summary-mini-note">Recent conversations you should inspect first.</span>
         </article>
       </section>
 
       <section class="card">
         <div class="card-header">
           <div>
-            <div class="card-title">Feedback list</div>
+            <div class="card-title">Feedback summary</div>
+            <div class="card-subtitle">Start here before opening individual reviews or entering anything manually.</div>
+          </div>
+        </div>
+        <div id="feedbackExecutiveSummary" class="list-block"></div>
+      </section>
+
+      <section class="two-column-grid">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Recent call intelligence</div>
+              <div class="card-subtitle">Lead with insights, then capture manual feedback only when needed.</div>
+            </div>
+          </div>
+          <div id="recentCallInsights" class="list-block"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Feedback board</div>
+              <div class="card-subtitle">Latest recorded feedback with direct access to analysis details.</div>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Review</th>
+                  <th>Category</th>
+                  <th>Rating</th>
+                  <th>Actions</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody id="feedbackTableBody"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <div class="section-divider">
+        <h3>Manual capture</h3>
+        <span>Use when staff collect feedback offline or outside the call flow.</span>
+      </div>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Manual feedback</div>
             <div class="card-subtitle" id="feedbackListMeta">0 records</div>
           </div>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Customer</th>
-                <th>Review</th>
-                <th>Category</th>
-                <th>Rating</th>
-                <th>Actions</th>
-                <th>Date</th>
-              </tr>
-            </thead>
-            <tbody id="feedbackTableBody"></tbody>
-          </table>
+        <div class="field">
+          <label class="field-label" for="feedbackCustomer">Customer</label>
+          <select id="feedbackCustomer"></select>
+          <div class="error-text" id="feedbackCustomerError"></div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="reviewStars">Rating</label>
+          <select id="reviewStars">
+            <option value="5">5 stars</option>
+            <option value="4">4 stars</option>
+            <option value="3" selected>3 stars</option>
+            <option value="2">2 stars</option>
+            <option value="1">1 star</option>
+          </select>
+          <div class="error-text" id="reviewStarsError"></div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="reviewText">Review text</label>
+          <textarea id="reviewText" placeholder="Write the customer's feedback here..."></textarea>
+          <div class="error-text" id="reviewTextError"></div>
+        </div>
+        <div class="button-row">
+          <button id="submitFeedbackButton" class="primary" type="button">Submit feedback</button>
         </div>
       </section>
     </main>
@@ -282,6 +314,19 @@
       if (selected) select.value = selected;
     }
 
+    function renderFeedbackSummary() {
+      const positiveCount = feedbackCache.filter((item) => Number(item.stars || 0) >= 4 || String(item.category || '').toLowerCase() === 'positive').length;
+      const reviewCount = recentCallsCache.filter((call) => String(call.outcome || '').toLowerCase() === 'completed').length;
+      document.getElementById('feedbackSummaryTotal').textContent = feedbackCache.length;
+      document.getElementById('feedbackSummaryPositive').textContent = positiveCount;
+      document.getElementById('feedbackSummaryReview').textContent = reviewCount;
+      document.getElementById('feedbackExecutiveSummary').innerHTML = `
+        <div class="list-item"><strong>Signal</strong><span class="muted">${positiveCount} strong reviews out of ${feedbackCache.length || 0} total captured feedback items.</span></div>
+        <div class="list-item"><strong>Review queue</strong><span class="muted">${reviewCount} completed calls are ready for rating, transcript, or recording review.</span></div>
+        <div class="list-item"><strong>Manual capture role</strong><span class="muted">Use the manual form only for staff-collected feedback that did not come through the call flow.</span></div>
+      `;
+    }
+
     function renderFeedback() {
       const tbody = document.getElementById('feedbackTableBody');
       document.getElementById('feedbackListMeta').textContent = `${feedbackCache.length} record${feedbackCache.length === 1 ? '' : 's'}`;
@@ -353,6 +398,7 @@
       feedbackCache = Array.isArray(feedback) ? feedback : [];
       recentCallsCache = Array.isArray(calls) ? calls : [];
       populateCustomerDropdown();
+      renderFeedbackSummary();
       renderFeedback();
       renderRecentCallInsights();
     }

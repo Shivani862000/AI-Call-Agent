@@ -21,7 +21,6 @@
         <nav class="nav-list">
           <a href="/admin.html" class="nav-link active">Overview</a>
           <a href="/customers.html" class="nav-link">Customers</a>
-          <a href="/clients.html" class="nav-link">Clients</a>
           <a href="/feedback.html" class="nav-link">Feedback</a>
           <a href="/reports.html" class="nav-link">Reports</a>
         </nav>
@@ -50,44 +49,43 @@
 
       <div id="alertContainer" class="alert-stack"></div>
 
-      <section class="section-link-grid admin-nav-grid">
-        <a class="section-link admin-nav-card" href="/customers.html" aria-label="Open customers page">
-          <span class="admin-nav-chip">Customer desk</span>
-          <strong>Customers</strong>
-          <span class="muted">Add leads, schedule calls, and manage call-ready records.</span>
-          <span class="admin-nav-cta">
-            <span>Open</span>
-            <span class="admin-nav-arrow" aria-hidden="true">→</span>
-          </span>
-        </a>
-        <a class="section-link admin-nav-card" href="/clients.html" aria-label="Open clients page">
-          <span class="admin-nav-chip">Retention desk</span>
-          <strong>Clients</strong>
-          <span class="muted">Track treatments, visit anniversaries, and annual reminder care calls.</span>
-          <span class="admin-nav-cta">
-            <span>Open</span>
-            <span class="admin-nav-arrow" aria-hidden="true">→</span>
-          </span>
-        </a>
-        <a class="section-link admin-nav-card" href="/feedback.html" aria-label="Open feedback page">
-          <span class="admin-nav-chip">Review desk</span>
-          <strong>Feedback</strong>
-          <span class="muted">See recent reviews, call intelligence, and manual submissions.</span>
-          <span class="admin-nav-cta">
-            <span>Open</span>
-            <span class="admin-nav-arrow" aria-hidden="true">→</span>
-          </span>
-        </a>
-        <a class="section-link admin-nav-card" href="/reports.html" aria-label="Open reports page">
-          <span class="admin-nav-chip">Insights desk</span>
-          <strong>Reports</strong>
-          <span class="muted">Review performance, ROI, alerts, and generate polished report outputs.</span>
-          <span class="admin-nav-cta">
-            <span>Open</span>
-            <span class="admin-nav-arrow" aria-hidden="true">→</span>
-          </span>
-        </a>
+      <section class="summary-strip">
+        <article class="summary-mini">
+          <span class="summary-mini-label">Customers tracked</span>
+          <span id="overviewSummaryCustomers" class="summary-mini-value">0</span>
+          <span class="summary-mini-note">Call queue records currently in circulation.</span>
+        </article>
+        <article class="summary-mini">
+          <span class="summary-mini-label">Active reminders</span>
+          <span id="overviewSummaryClients" class="summary-mini-value">0</span>
+          <span class="summary-mini-note">Clients with anniversary care reminders enabled.</span>
+        </article>
+        <article class="summary-mini">
+          <span class="summary-mini-label">Calls today</span>
+          <span id="overviewSummaryCalls" class="summary-mini-value">0</span>
+          <span class="summary-mini-note">Outbound activity recorded in today’s operations window.</span>
+        </article>
       </section>
+
+      <section class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Overview only</div>
+            <div class="card-subtitle">This page is intentionally limited to summary signals. Use the page navigation to move into customers, clients, feedback, or reports.</div>
+          </div>
+        </div>
+        <div class="list-block">
+          <div class="list-item">
+            <strong>Navigation</strong>
+            <span class="muted">Use the top navigation on desktop or the bottom tabs on mobile to open the operational pages.</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="section-divider">
+        <h3>Snapshot</h3>
+        <span>Quick operational reading before you dive deeper.</span>
+      </div>
 
       <section class="stats-grid">
         <article class="stat-card">
@@ -201,6 +199,9 @@
       document.getElementById('activeClients').textContent = activeClients.length || 0;
       document.getElementById('callsToday').textContent = report.total_calls || 0;
       document.getElementById('feedbackCount').textContent = feedback.length || 0;
+      document.getElementById('overviewSummaryCustomers').textContent = customers.length || 0;
+      document.getElementById('overviewSummaryClients').textContent = activeClients.length || 0;
+      document.getElementById('overviewSummaryCalls').textContent = report.total_calls || 0;
       document.getElementById('dashboardSubtitle').textContent = `${customers.length || 0} customers, ${activeClients.length || 0} active client reminders, ${report.total_calls || 0} calls today.`;
 
       document.getElementById('dailyPerformanceList').innerHTML = `

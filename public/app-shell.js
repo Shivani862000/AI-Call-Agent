@@ -1,5 +1,11 @@
 (function () {
   const API_BASE = `${window.location.origin}/api`;
+  const NAV_ITEMS = [
+    { href: '/admin.html', label: 'Overview', shortLabel: 'Home' },
+    { href: '/customers.html', label: 'Customers', shortLabel: 'Customers' },
+    { href: '/feedback.html', label: 'Feedback', shortLabel: 'Feedback' },
+    { href: '/reports.html', label: 'Reports', shortLabel: 'Reports' }
+  ];
 
   function redirectToLogin() {
     window.location.replace('/login.html');
@@ -124,6 +130,37 @@
       .replace(/'/g, '&#39;');
   }
 
+  function buildMobileTabbar() {
+    const currentPath = window.location.pathname || '/admin.html';
+    const existing = document.querySelector('.mobile-tabbar');
+    if (existing) {
+      existing.remove();
+    }
+
+    const nav = document.createElement('nav');
+    nav.className = 'mobile-tabbar';
+    nav.setAttribute('aria-label', 'Primary');
+    nav.innerHTML = `
+      <div class="mobile-tabbar-inner">
+        ${NAV_ITEMS.map((item) => {
+          const isActive = currentPath === item.href;
+          return `
+            <a href="${item.href}" class="mobile-tab${isActive ? ' active' : ''}" aria-current="${isActive ? 'page' : 'false'}">
+              <span class="mobile-tab-label">${item.shortLabel}</span>
+            </a>
+          `;
+        }).join('')}
+      </div>
+    `;
+    document.body.appendChild(nav);
+  }
+
+  function initializeShellChrome() {
+    buildMobileTabbar();
+  }
+
+  document.addEventListener('DOMContentLoaded', initializeShellChrome);
+
   window.AppShell = {
     API_BASE,
     applyFieldErrors,
@@ -135,6 +172,7 @@
     formatDate,
     formatDateTime,
     formatStatusLabel,
+    initializeShellChrome,
     logoutAdmin,
     redirectToLogin,
     showAlert

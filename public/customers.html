@@ -6,7 +6,7 @@
   <title>Customers</title>
   <link rel="stylesheet" href="/app-shell.css">
 </head>
-<body>
+<body class="customers-workspace-page">
   <div class="app-shell">
     <aside class="sidebar">
       <div>
@@ -14,20 +14,19 @@
           <div class="brand-mark">PL</div>
           <div class="brand-copy">
             <h1>Path Lab Console</h1>
-            <p>Customer operations</p>
+            <p>Customers workspace</p>
           </div>
         </div>
         <nav class="nav-list">
           <a href="/admin.html" class="nav-link">Overview</a>
           <a href="/customers.html" class="nav-link active">Customers</a>
-          <a href="/clients.html" class="nav-link">Clients</a>
           <a href="/feedback.html" class="nav-link">Feedback</a>
           <a href="/reports.html" class="nav-link">Reports</a>
         </nav>
       </div>
       <div class="sidebar-footer">
-        <strong>Customers page</strong>
-        <span>Lead entry, scheduling, and outbound call actions live here.</span>
+        <strong>One workspace</strong>
+        <span>Scheduling, client care context, and queue handling now live on one page.</span>
       </div>
     </aside>
 
@@ -36,91 +35,249 @@
         <div class="page-title-wrap">
           <h2>Customers</h2>
           <div class="page-subtitle">
-            <span class="pill">Dedicated page</span>
-            <span id="customerPageSubtitle">Manage call-ready customers without dashboard clutter.</span>
+            <span class="pill">Unified workspace</span>
+            <span id="customerPageSubtitle">Schedule calls, edit client care context, and manage the queue from one screen.</span>
           </div>
         </div>
         <div class="header-actions">
-          <a href="/admin.html" class="button-link ghost">Overview</a>
-          <button id="logoutButton" class="ghost" type="button">Logout</button>
+          <button id="quickAddButton" class="ghost" type="button">+ Add</button>
+          <button id="logoutButton" class="ghost logout-pill" type="button">Logout</button>
         </div>
       </header>
 
       <div id="alertContainer" class="alert-stack"></div>
 
-      <section class="card">
-        <div class="card-header">
-          <div>
-            <div class="card-title">Customer management</div>
-            <div class="card-subtitle">Only the fields needed for fast outbound operations</div>
-          </div>
-        </div>
-
-        <div id="customerEditChip" class="edit-chip"></div>
-        <input type="hidden" id="editingCustomerId">
-
-        <div class="grid-2">
-          <div class="field">
-            <label class="field-label" for="customerName">Customer name</label>
-            <input type="text" id="customerName" maxlength="100" placeholder="e.g. Rahul Sharma">
-            <div class="error-text" id="customerNameError"></div>
-          </div>
-          <div class="field">
-            <label class="field-label" for="customerPhone">Phone number</label>
-            <input type="tel" id="customerPhone" placeholder="+91 98765 43210">
-            <div class="helper-text">Use full E.164 format with country code.</div>
-            <div class="error-text" id="customerPhoneError"></div>
-          </div>
-          <div class="field">
-            <label class="field-label" for="customerSlot">Scheduled call time</label>
-            <input type="time" id="customerSlot">
-            <div class="error-text" id="customerSlotError"></div>
-          </div>
-          <div class="field">
-            <label class="field-label">Quick actions</label>
-            <div class="button-row">
-              <button id="customerSubmitButton" class="primary" type="button">Add customer</button>
-              <button id="customerCancelButton" class="secondary" type="button" hidden>Cancel</button>
-            </div>
-          </div>
+      <section class="workspace-tabs card">
+        <div class="segmented-control" role="tablist" aria-label="Customer workspace tabs">
+          <button id="tabSchedule" class="segment-button active" data-tab="schedule-call" role="tab" aria-selected="true" type="button">Schedule call</button>
+          <button id="tabClientDetails" class="segment-button" data-tab="client-details" role="tab" aria-selected="false" type="button">Client details</button>
+          <button id="tabQueue" class="segment-button" data-tab="queue" role="tab" aria-selected="false" type="button">Queue</button>
         </div>
       </section>
 
-      <section class="card">
-        <div class="card-header">
-          <div>
-            <div class="card-title">Customers list</div>
-            <div class="card-subtitle" id="customerListMeta">0 records</div>
-          </div>
-          <div class="toolbar-group">
-            <input type="search" id="customerSearch" placeholder="Search name or phone">
-            <select id="customerStatusFilter">
-              <option value="" selected>All statuses</option>
-              <option value="pending">Pending</option>
-              <option value="called">Called</option>
-              <option value="completed">Completed</option>
-              <option value="busy">Busy</option>
-              <option value="no_answer">No answer</option>
-              <option value="retry_scheduled">Retry scheduled</option>
-              <option value="callback_scheduled">Callback scheduled</option>
-            </select>
-          </div>
-        </div>
+      <section class="summary-strip">
+        <article class="summary-mini">
+          <span class="summary-mini-label">Total</span>
+          <span id="customerSummaryTotal" class="summary-mini-value">0</span>
+          <span class="summary-mini-note">Customers tracked in this workspace.</span>
+        </article>
+        <article class="summary-mini">
+          <span class="summary-mini-label">Pending</span>
+          <span id="customerSummaryPending" class="summary-mini-value">0</span>
+          <span class="summary-mini-note">Still waiting for first or retry outreach.</span>
+        </article>
+        <article class="summary-mini">
+          <span class="summary-mini-label">Analysed</span>
+          <span id="customerSummaryCompleted" class="summary-mini-value">0</span>
+          <span class="summary-mini-note">Completed calls ready with insights.</span>
+        </article>
+      </section>
 
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Phone</th>
-                <th>Scheduled</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="customersTableBody"></tbody>
-          </table>
-        </div>
+      <section id="panelSchedule" class="content-stack tab-panel active" role="tabpanel">
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">New outbound call</div>
+              <div class="card-subtitle">Primary workflow: capture call basics first, then optional care context below.</div>
+            </div>
+          </div>
+
+          <div id="customerEditChip" class="edit-chip"></div>
+          <input type="hidden" id="editingCustomerId">
+
+          <div class="grid-2">
+            <div class="field" style="grid-column: 1 / -1;">
+              <label class="field-label" for="customerName">Customer name</label>
+              <input type="text" id="customerName" maxlength="100" placeholder="e.g. Rahul Sharma">
+              <div class="error-text" id="customerNameError"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="customerPhone">Phone number</label>
+              <input type="tel" id="customerPhone" placeholder="+91 98765 43210">
+              <div class="error-text" id="customerPhoneError"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="customerSlot">Call time</label>
+              <input type="time" id="customerSlot">
+              <div class="error-text" id="customerSlotError"></div>
+            </div>
+            <div class="field" style="grid-column: 1 / -1;">
+              <div class="button-row">
+                <button id="customerSubmitButton" class="primary" type="button">Schedule call</button>
+                <button id="customerCancelButton" class="secondary" type="button" hidden>Cancel</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Client care details</div>
+              <div class="card-subtitle">Annual reminder and treatment context. This saves together with the call form but stays visually separate.</div>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="field">
+              <label class="field-label" for="clientDob">Date of birth</label>
+              <input type="date" id="clientDob">
+              <div class="error-text" id="clientDobError"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="clientVisitDate">Last visit date</label>
+              <input type="date" id="clientVisitDate">
+              <div class="error-text" id="clientVisitDateError"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="clientTreatmentType">Treatment type</label>
+              <input type="text" id="clientTreatmentType" placeholder="e.g. Blood test">
+              <div class="error-text" id="clientTreatmentTypeError"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="clientReminderSlot">Reminder time</label>
+              <input type="time" id="clientReminderSlot">
+              <div class="error-text" id="clientReminderSlotError"></div>
+            </div>
+            <div class="field" style="grid-column: 1 / -1;">
+              <label class="field-label" for="clientNotes">Notes</label>
+              <textarea id="clientNotes" placeholder="Treatment notes, follow-up, retention context..."></textarea>
+            </div>
+            <div class="field" style="grid-column: 1 / -1;">
+              <label class="field-label" for="clientReminderEnabled">Annual reminder</label>
+              <label class="toggle-row" for="clientReminderEnabled">
+                <div>
+                  <strong>Annual reminder enabled</strong>
+                  <div class="helper-text">Send yearly follow-up call</div>
+                </div>
+                <span class="toggle-switch">
+                  <input id="clientReminderEnabled" type="checkbox" checked>
+                  <span class="toggle-slider" aria-hidden="true"></span>
+                </span>
+              </label>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section id="panelClientDetails" class="content-stack tab-panel" role="tabpanel" hidden>
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Edit existing client</div>
+              <div class="card-subtitle">Search and select an existing client care record, then update only the care details.</div>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="field" style="grid-column: 1 / -1;">
+              <label class="field-label" for="clientSearchInput">Search client</label>
+              <input id="clientSearchInput" type="search" placeholder="Search client name or phone">
+            </div>
+            <div class="field" style="grid-column: 1 / -1;">
+              <label class="field-label" for="clientSelect">Select client</label>
+              <select id="clientSelect"></select>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Client details</div>
+              <div class="card-subtitle">This tab edits care context only. Queue actions stay in the queue tab.</div>
+            </div>
+          </div>
+
+          <input type="hidden" id="editingClientId">
+
+          <div class="grid-2">
+            <div class="field">
+              <label class="field-label" for="clientDetailName">Client name</label>
+              <input type="text" id="clientDetailName">
+              <div class="error-text" id="clientDetailNameError"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="clientDetailPhone">Phone number</label>
+              <input type="tel" id="clientDetailPhone" placeholder="+91 98765 43210">
+              <div class="error-text" id="clientDetailPhoneError"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="clientDetailDob">Date of birth</label>
+              <input type="date" id="clientDetailDob">
+              <div class="error-text" id="clientDetailDobError"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="clientDetailVisitDate">Last visit date</label>
+              <input type="date" id="clientDetailVisitDate">
+              <div class="error-text" id="clientDetailVisitDateError"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="clientDetailTreatmentType">Treatment type</label>
+              <input type="text" id="clientDetailTreatmentType">
+              <div class="error-text" id="clientDetailTreatmentTypeError"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="clientDetailReminderSlot">Reminder time</label>
+              <input type="time" id="clientDetailReminderSlot">
+              <div class="error-text" id="clientDetailReminderSlotError"></div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="clientDetailStatus">Status</label>
+              <select id="clientDetailStatus">
+                <option value="active">Active</option>
+                <option value="paused">Paused</option>
+              </select>
+            </div>
+            <div class="field" style="grid-column: 1 / -1;">
+              <label class="field-label" for="clientDetailNotes">Notes</label>
+              <textarea id="clientDetailNotes"></textarea>
+            </div>
+            <div class="field" style="grid-column: 1 / -1;">
+              <label class="field-label" for="clientDetailReminderEnabled">Annual reminder</label>
+              <label class="toggle-row" for="clientDetailReminderEnabled">
+                <div>
+                  <strong>Annual reminder enabled</strong>
+                  <div class="helper-text">Keep yearly reminder care call active</div>
+                </div>
+                <span class="toggle-switch">
+                  <input id="clientDetailReminderEnabled" type="checkbox" checked>
+                  <span class="toggle-slider" aria-hidden="true"></span>
+                </span>
+              </label>
+            </div>
+            <div class="field" style="grid-column: 1 / -1;">
+              <div class="button-row">
+                <button id="clientDetailSaveButton" class="primary" type="button">Save client record</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section id="panelQueue" class="content-stack tab-panel" role="tabpanel" hidden>
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Customers queue</div>
+              <div class="card-subtitle" id="customerListMeta">0 records</div>
+            </div>
+            <div class="toolbar-group">
+              <input type="search" id="customerSearch" placeholder="Search name or phone...">
+              <select id="customerStatusFilter">
+                <option value="" selected>All statuses</option>
+                <option value="pending">Pending</option>
+                <option value="called">Called</option>
+                <option value="completed">Completed</option>
+                <option value="busy">Busy</option>
+                <option value="no_answer">No answer</option>
+                <option value="retry_scheduled">Retry scheduled</option>
+                <option value="callback_scheduled">Callback scheduled</option>
+              </select>
+            </div>
+          </div>
+          <div id="queueList" class="queue-list"></div>
+        </section>
       </section>
     </main>
   </div>
@@ -179,7 +336,9 @@
   <script src="/app-shell.js"></script>
   <script>
     let customerCache = [];
+    let clientCache = [];
     let recentCallsCache = [];
+    let activeTab = 'schedule-call';
 
     function buildStarMarkup(ratingValue) {
       const rating = Number(ratingValue || 0);
@@ -221,6 +380,38 @@
       return recentCallsCache.find((call) => Number(call.customer_id) === Number(customerId) && String(call.outcome || '').toLowerCase() === 'completed') || null;
     }
 
+    function getClientByPhone(phone) {
+      return clientCache.find((client) => String(client.phone || '') === String(phone || '')) || null;
+    }
+
+    function getScheduleClientPayload() {
+      return {
+        name: document.getElementById('customerName').value.trim(),
+        phone: document.getElementById('customerPhone').value.trim(),
+        date_of_birth: document.getElementById('clientDob').value || '',
+        last_visit_date: document.getElementById('clientVisitDate').value || '',
+        treatment_type: document.getElementById('clientTreatmentType').value.trim(),
+        annual_reminder_slot: document.getElementById('clientReminderSlot').value || '',
+        annual_reminder_enabled: document.getElementById('clientReminderEnabled').checked ? 1 : 0,
+        status: 'active',
+        notes: document.getElementById('clientNotes').value.trim()
+      };
+    }
+
+    function getClientDetailPayload() {
+      return {
+        name: document.getElementById('clientDetailName').value.trim(),
+        phone: document.getElementById('clientDetailPhone').value.trim(),
+        date_of_birth: document.getElementById('clientDetailDob').value || '',
+        last_visit_date: document.getElementById('clientDetailVisitDate').value || '',
+        treatment_type: document.getElementById('clientDetailTreatmentType').value.trim(),
+        annual_reminder_slot: document.getElementById('clientDetailReminderSlot').value || '',
+        annual_reminder_enabled: document.getElementById('clientDetailReminderEnabled').checked ? 1 : 0,
+        status: document.getElementById('clientDetailStatus').value,
+        notes: document.getElementById('clientDetailNotes').value.trim()
+      };
+    }
+
     function getCustomerPayload() {
       return {
         name: document.getElementById('customerName').value.trim(),
@@ -232,44 +423,119 @@
     function validateCustomerPayload(payload) {
       const fieldErrors = {};
       if (!payload.name) fieldErrors.name = 'Customer name is required';
-      else if (payload.name.length < 2) fieldErrors.name = 'Customer name must be at least 2 characters';
       if (!payload.phone) fieldErrors.phone = 'Phone number is required';
       else if (!/^\+\d{10,15}$/.test(payload.phone)) fieldErrors.phone = 'Use E.164 format, e.g. +919876543210';
       if (!payload.preferred_slot) fieldErrors.preferred_slot = 'Scheduled time is required';
-      else if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(payload.preferred_slot)) fieldErrors.preferred_slot = 'Scheduled time must be valid HH:MM';
       return fieldErrors;
     }
 
-    function resetCustomerForm() {
+    function validateClientPayload(payload, prefix = 'client') {
+      const fieldErrors = {};
+      const hasAnyDetail = payload.date_of_birth || payload.last_visit_date || payload.treatment_type || payload.notes || payload.annual_reminder_slot;
+      if (!hasAnyDetail) {
+        return fieldErrors;
+      }
+      if (prefix === 'clientDetail') {
+        if (!payload.phone) fieldErrors.clientDetailPhone = 'Phone number is required';
+        else if (!/^\+\d{10,15}$/.test(payload.phone)) fieldErrors.clientDetailPhone = 'Use E.164 format, e.g. +919876543210';
+      }
+      if (!payload.last_visit_date) fieldErrors[`${prefix}VisitDate`] = 'Visit date is required when saving care details';
+      if (!payload.treatment_type) fieldErrors[`${prefix}TreatmentType`] = 'Treatment type is required when saving care details';
+      return fieldErrors;
+    }
+
+    function clearCustomerAndClientErrors() {
+      AppShell.clearFieldErrors([
+        'customerName', 'customerPhone', 'customerSlot',
+        'clientDob', 'clientVisitDate', 'clientTreatmentType', 'clientReminderSlot',
+        'clientDetailName', 'clientDetailPhone', 'clientDetailDob', 'clientDetailVisitDate', 'clientDetailTreatmentType', 'clientDetailReminderSlot'
+      ]);
+    }
+
+    function renderCustomerSummary() {
+      const pendingStatuses = new Set(['pending', 'retry_scheduled', 'callback_scheduled', 'busy', 'no_answer']);
+      const pendingCount = customerCache.filter((customer) => pendingStatuses.has(String(customer.status || 'pending'))).length;
+      const completedCount = customerCache.filter((customer) => getLatestCompletedCallByCustomer(customer.id)).length;
+      document.getElementById('customerSummaryTotal').textContent = customerCache.length;
+      document.getElementById('customerSummaryPending').textContent = pendingCount;
+      document.getElementById('customerSummaryCompleted').textContent = completedCount;
+      document.getElementById('customerPageSubtitle').textContent = `${customerCache.length} customers tracked, ${pendingCount} pending outreach, ${completedCount} analysed calls.`;
+    }
+
+    function populateClientSelect(filter = '') {
+      const select = document.getElementById('clientSelect');
+      const normalized = String(filter || '').trim().toLowerCase();
+      const filtered = clientCache.filter((client) => {
+        if (!normalized) return true;
+        return [client.name, client.phone, client.treatment_type].some((value) => String(value || '').toLowerCase().includes(normalized));
+      });
+      select.innerHTML = '<option value="">Select an existing client</option>' + filtered.map((client) => (
+        `<option value="${client.id}">${AppShell.escapeHtml(client.name)} (${AppShell.escapeHtml(client.phone)})</option>`
+      )).join('');
+    }
+
+    function hydrateScheduleFormFromClient(client) {
+      if (!client) return;
+      document.getElementById('clientDob').value = client.date_of_birth || '';
+      document.getElementById('clientVisitDate').value = client.last_visit_date || '';
+      document.getElementById('clientTreatmentType').value = client.treatment_type || '';
+      document.getElementById('clientReminderSlot').value = client.annual_reminder_slot || '';
+      document.getElementById('clientNotes').value = client.notes || '';
+      document.getElementById('clientReminderEnabled').checked = Number(client.annual_reminder_enabled || 0) === 1;
+    }
+
+    function hydrateClientDetailsForm(client) {
+      document.getElementById('editingClientId').value = client?.id || '';
+      document.getElementById('clientDetailName').value = client?.name || '';
+      document.getElementById('clientDetailPhone').value = client?.phone || '';
+      document.getElementById('clientDetailDob').value = client?.date_of_birth || '';
+      document.getElementById('clientDetailVisitDate').value = client?.last_visit_date || '';
+      document.getElementById('clientDetailTreatmentType').value = client?.treatment_type || '';
+      document.getElementById('clientDetailReminderSlot').value = client?.annual_reminder_slot || '';
+      document.getElementById('clientDetailStatus').value = client?.status || 'active';
+      document.getElementById('clientDetailNotes').value = client?.notes || '';
+      document.getElementById('clientDetailReminderEnabled').checked = Number(client?.annual_reminder_enabled || 0) === 1;
+    }
+
+    function resetScheduleForms() {
       document.getElementById('editingCustomerId').value = '';
       document.getElementById('customerName').value = '';
       document.getElementById('customerPhone').value = '';
       document.getElementById('customerSlot').value = '';
-      document.getElementById('customerSubmitButton').textContent = 'Add customer';
+      document.getElementById('clientDob').value = '';
+      document.getElementById('clientVisitDate').value = '';
+      document.getElementById('clientTreatmentType').value = '';
+      document.getElementById('clientReminderSlot').value = '';
+      document.getElementById('clientNotes').value = '';
+      document.getElementById('clientReminderEnabled').checked = true;
+      document.getElementById('customerSubmitButton').textContent = 'Schedule call';
       document.getElementById('customerCancelButton').hidden = true;
       const chip = document.getElementById('customerEditChip');
       chip.style.display = 'none';
       chip.textContent = '';
-      AppShell.clearFieldErrors(['customerName', 'customerPhone', 'customerSlot']);
+      clearCustomerAndClientErrors();
     }
 
     function startEditCustomer(customerId) {
       const customer = customerCache.find((item) => item.id === customerId);
       if (!customer) return;
+      const linkedClient = getClientByPhone(customer.phone);
       document.getElementById('editingCustomerId').value = customer.id;
       document.getElementById('customerName').value = customer.name || '';
       document.getElementById('customerPhone').value = customer.phone || '';
       document.getElementById('customerSlot').value = customer.preferred_slot || '10:00';
+      hydrateScheduleFormFromClient(linkedClient);
       document.getElementById('customerSubmitButton').textContent = 'Update customer';
       document.getElementById('customerCancelButton').hidden = false;
       const chip = document.getElementById('customerEditChip');
       chip.style.display = 'block';
       chip.textContent = `Editing ${customer.name} (${customer.phone})`;
+      switchTab('schedule-call');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    function renderCustomers(forceReset = false) {
-      const tbody = document.getElementById('customersTableBody');
+    function renderQueue(forceReset = false) {
+      const container = document.getElementById('queueList');
       const searchTerm = document.getElementById('customerSearch').value.trim().toLowerCase();
       const statusFilter = document.getElementById('customerStatusFilter').value;
       const filtered = customerCache
@@ -282,81 +548,150 @@
           const aCompleted = getLatestCompletedCallByCustomer(a.id) ? 0 : 1;
           const bCompleted = getLatestCompletedCallByCustomer(b.id) ? 0 : 1;
           if (aCompleted !== bCompleted) return aCompleted - bCompleted;
-          const statusOrder = {
-            completed: 0,
-            called: 1,
-            pending: 2,
-            retry_scheduled: 3,
-            callback_scheduled: 4,
-            busy: 5,
-            no_answer: 6
-          };
-          const statusDelta = (statusOrder[String(a.status || 'pending')] ?? 99) - (statusOrder[String(b.status || 'pending')] ?? 99);
-          if (statusDelta !== 0) return statusDelta;
           return String(a.name || '').localeCompare(String(b.name || ''));
         });
 
       if (!filtered.length && customerCache.length > 0 && !forceReset && (searchTerm || statusFilter)) {
         document.getElementById('customerSearch').value = '';
         document.getElementById('customerStatusFilter').value = '';
-        return renderCustomers(true);
+        return renderQueue(true);
       }
 
-      document.getElementById('customerListMeta').textContent = `${filtered.length} record${filtered.length === 1 ? '' : 's'}`;
+      document.getElementById('customerListMeta').textContent = `Customers queue · ${filtered.length}`;
 
       if (!filtered.length) {
-        tbody.innerHTML = `
-          <tr>
-            <td colspan="5">
-              <div class="empty-state">
-                <div class="empty-icon">CU</div>
-                <strong>No customers found</strong>
-                <div class="supporting-text">Add a customer to start outbound calling.</div>
-              </div>
-            </td>
-          </tr>
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">CU</div>
+            <strong>No customers found</strong>
+            <div class="supporting-text">Schedule a call to populate the queue.</div>
+          </div>
         `;
         return;
       }
 
-      tbody.innerHTML = filtered.map((customer) => {
+      container.innerHTML = filtered.map((customer) => {
         const completedCall = getLatestCompletedCallByCustomer(customer.id);
-        const analysisButton = completedCall
-          ? `<button class="ghost" type="button" onclick="openAnalysisModal(${completedCall.id})">Analysis details</button>`
-          : '';
+        const contextButton = completedCall
+          ? `<button class="ghost" type="button" onclick="openAnalysisModal(${completedCall.id})">Analysis</button>`
+          : `<button class="ghost" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
 
         return `
-        <tr>
-          <td>
-            <div class="name-cell">
-              <strong>${AppShell.escapeHtml(customer.name)}</strong>
-              <span class="muted">ID #${customer.id}</span>
+          <article class="queue-card">
+            <div class="queue-card-top">
+              <div class="queue-avatar">${AppShell.escapeHtml(String(customer.name || '?').slice(0, 2).toUpperCase())}</div>
+              <div class="queue-meta">
+                <strong>${AppShell.escapeHtml(customer.name)}</strong>
+                <span>${AppShell.escapeHtml(customer.phone)} · ${AppShell.escapeHtml(customer.preferred_slot || '--:--')}</span>
+              </div>
+              <span class="badge ${AppShell.escapeHtml(customer.status || 'pending')}">${AppShell.formatStatusLabel(customer.status || 'pending')}</span>
             </div>
-          </td>
-          <td>${AppShell.escapeHtml(customer.phone)}</td>
-          <td>${AppShell.escapeHtml(customer.preferred_slot || '--:--')}</td>
-          <td><span class="badge ${AppShell.escapeHtml(customer.status || 'pending')}">${AppShell.formatStatusLabel(customer.status || 'pending')}</span></td>
-          <td>
-            <div class="action-buttons">
+            <div class="queue-actions">
               <button class="warning" type="button" onclick="triggerCallNow(${customer.id})">Call now</button>
-              <button class="secondary" type="button" onclick="startEditCustomer(${customer.id})">Edit</button>
-              ${analysisButton}
-              <button class="ghost" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>
-              <button class="danger" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
+              ${contextButton}
+              <details class="queue-overflow">
+                <summary aria-label="More actions">⋯</summary>
+                <div class="queue-overflow-menu">
+                  <button class="secondary" type="button" onclick="startEditCustomer(${customer.id})">Edit</button>
+                  <button class="danger" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
+                </div>
+              </details>
             </div>
-          </td>
-        </tr>
-      `;
+          </article>
+        `;
       }).join('');
     }
 
     async function loadCustomers() {
       customerCache = await AppShell.fetchJson(`${AppShell.API_BASE}/customers`);
-      renderCustomers();
+      renderCustomerSummary();
+      renderQueue();
+    }
+
+    async function loadClients() {
+      clientCache = await AppShell.fetchJson(`${AppShell.API_BASE}/clients`);
+      populateClientSelect(document.getElementById('clientSearchInput').value);
     }
 
     async function loadRecentCalls() {
       recentCallsCache = await AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`);
+    }
+
+    async function saveClientRecord(payload, existingClientId = null) {
+      const endpoint = existingClientId ? `${AppShell.API_BASE}/clients/${existingClientId}` : `${AppShell.API_BASE}/clients`;
+      const method = existingClientId ? 'PUT' : 'POST';
+      await AppShell.fetchJson(endpoint, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }
+
+    async function saveScheduleWorkspace() {
+      clearCustomerAndClientErrors();
+      const customerPayload = getCustomerPayload();
+      const clientPayload = getScheduleClientPayload();
+      const fieldErrors = {
+        ...validateCustomerPayload(customerPayload),
+        ...validateClientPayload(clientPayload, 'client')
+      };
+      if (Object.keys(fieldErrors).length) {
+        AppShell.applyFieldErrors(fieldErrors);
+        AppShell.showAlert('Please fix the highlighted fields', 'error');
+        return;
+      }
+
+      const editingCustomerId = document.getElementById('editingCustomerId').value;
+      const customerMethod = editingCustomerId ? 'PUT' : 'POST';
+      const customerEndpoint = editingCustomerId ? `${AppShell.API_BASE}/customers/${editingCustomerId}` : `${AppShell.API_BASE}/customers`;
+      try {
+        await AppShell.fetchJson(customerEndpoint, {
+          method: customerMethod,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(customerPayload)
+        });
+
+        const existingClient = getClientByPhone(clientPayload.phone);
+        const hasClientContext = clientPayload.date_of_birth || clientPayload.last_visit_date || clientPayload.treatment_type || clientPayload.notes || clientPayload.annual_reminder_slot;
+        if (hasClientContext) {
+          if (!clientPayload.annual_reminder_slot) {
+            clientPayload.annual_reminder_slot = '10:00';
+          }
+          await saveClientRecord(clientPayload, existingClient?.id || null);
+        }
+
+        AppShell.showAlert(editingCustomerId ? 'Customer workspace updated successfully' : 'Call scheduled successfully');
+        resetScheduleForms();
+        await Promise.all([loadRecentCalls(), loadCustomers(), loadClients()]);
+      } catch (error) {
+        AppShell.showAlert(error.message, 'error');
+      }
+    }
+
+    async function saveClientDetailsOnly() {
+      clearCustomerAndClientErrors();
+      const clientId = document.getElementById('editingClientId').value;
+      if (!clientId) {
+        AppShell.showAlert('Select a client record first', 'error');
+        return;
+      }
+      const payload = getClientDetailPayload();
+      const fieldErrors = validateClientPayload(payload, 'clientDetail');
+      if (Object.keys(fieldErrors).length) {
+        AppShell.applyFieldErrors(fieldErrors);
+        AppShell.showAlert('Please fix the client detail fields', 'error');
+        return;
+      }
+      try {
+        if (!payload.annual_reminder_slot) {
+          payload.annual_reminder_slot = '10:00';
+        }
+        await saveClientRecord(payload, clientId);
+        AppShell.showAlert('Client record updated successfully');
+        await Promise.all([loadClients(), loadCustomers()]);
+      } catch (error) {
+        AppShell.showAlert(error.message, 'error');
+      }
     }
 
     async function loadTranscriptForCall(callId) {
@@ -387,7 +722,6 @@
         AppShell.showAlert('Analysis details not found for this call', 'error');
         return;
       }
-
       document.getElementById('analysisModalTitle').textContent = `Analysis for ${call.customer_name || 'Customer'}`;
       document.getElementById('analysisModalSubtitle').textContent = `Call SID: ${call.twilio_sid || '--'}`;
       document.getElementById('analysisRatingValue').textContent = call.extracted_rating ? `${call.extracted_rating}/5` : 'Not captured';
@@ -400,52 +734,15 @@
 
       const recordingWrap = document.getElementById('analysisRecordingWrap');
       if (call.recording_url || call.recording_sid || String(call.recording_status || '').toLowerCase() === 'completed') {
-        recordingWrap.innerHTML = `
-          <audio class="audio-player" controls preload="none" src="${AppShell.API_BASE}/calls/${call.id}/recording"></audio>
-          <div class="helper-text">If the recording takes a moment, the system will fetch the latest playable version automatically.</div>
-        `;
+        recordingWrap.innerHTML = `<audio class="audio-player" controls preload="none" src="${AppShell.API_BASE}/calls/${call.id}/recording"></audio>`;
       } else {
         recordingWrap.textContent = 'Recording not available yet.';
       }
 
-      const modal = document.getElementById('analysisModal');
-      modal.classList.add('open');
-      modal.setAttribute('aria-hidden', 'false');
-
+      document.getElementById('analysisModal').classList.add('open');
+      document.getElementById('analysisModal').setAttribute('aria-hidden', 'false');
       const transcriptText = await loadTranscriptForCall(call.id);
       document.getElementById('analysisTranscriptValue').innerHTML = renderTranscriptMarkup(transcriptText);
-    }
-
-    async function saveCustomer() {
-      AppShell.clearFieldErrors(['customerName', 'customerPhone', 'customerSlot']);
-      const payload = getCustomerPayload();
-      const fieldErrors = validateCustomerPayload(payload);
-      if (Object.keys(fieldErrors).length) {
-        AppShell.applyFieldErrors(fieldErrors, {
-          name: 'customerName',
-          phone: 'customerPhone',
-          preferred_slot: 'customerSlot'
-        });
-        AppShell.showAlert('Please fix the customer form errors', 'error');
-        return;
-      }
-
-      const editingCustomerId = document.getElementById('editingCustomerId').value;
-      const method = editingCustomerId ? 'PUT' : 'POST';
-      const endpoint = editingCustomerId ? `${AppShell.API_BASE}/customers/${editingCustomerId}` : `${AppShell.API_BASE}/customers`;
-
-      try {
-        await AppShell.fetchJson(endpoint, {
-          method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        AppShell.showAlert(editingCustomerId ? 'Customer updated successfully' : 'Customer added successfully');
-        resetCustomerForm();
-        await loadCustomers();
-      } catch (error) {
-        AppShell.showAlert(error.message, 'error');
-      }
     }
 
     async function triggerCallNow(customerId) {
@@ -457,8 +754,7 @@
           body: JSON.stringify({})
         });
         AppShell.showAlert(`Call initiated. SID: ${result.sid}`);
-        await loadRecentCalls();
-        await loadCustomers();
+        await Promise.all([loadRecentCalls(), loadCustomers()]);
       } catch (error) {
         AppShell.showAlert(error.message, 'error');
       }
@@ -479,37 +775,72 @@
       try {
         await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}`, { method: 'DELETE' });
         AppShell.showAlert('Customer deleted successfully');
-        if (String(customerId) === document.getElementById('editingCustomerId').value) {
-          resetCustomerForm();
-        }
-        await loadCustomers();
+        await Promise.all([loadCustomers(), loadRecentCalls()]);
       } catch (error) {
         AppShell.showAlert(error.message, 'error');
       }
     }
 
+    function switchTab(tabId) {
+      activeTab = tabId;
+      const panelMap = {
+        'schedule-call': 'panelSchedule',
+        'client-details': 'panelClientDetails',
+        queue: 'panelQueue'
+      };
+      document.querySelectorAll('.segment-button').forEach((button) => {
+        const isActive = button.dataset.tab === tabId;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+      document.querySelectorAll('.tab-panel').forEach((panel) => {
+        const isActive = panel.id === panelMap[tabId];
+        panel.classList.toggle('active', isActive);
+        panel.hidden = !isActive;
+      });
+    }
+
     document.addEventListener('DOMContentLoaded', async () => {
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
-      document.getElementById('customerSubmitButton').addEventListener('click', saveCustomer);
-      document.getElementById('customerCancelButton').addEventListener('click', resetCustomerForm);
-      document.getElementById('customerSearch').addEventListener('input', () => renderCustomers());
-      document.getElementById('customerStatusFilter').addEventListener('change', () => renderCustomers());
+      document.getElementById('quickAddButton').addEventListener('click', () => {
+        resetScheduleForms();
+        switchTab('schedule-call');
+      });
+      document.querySelectorAll('.segment-button').forEach((button) => {
+        button.addEventListener('click', () => switchTab(button.dataset.tab));
+      });
+      document.getElementById('customerSubmitButton').addEventListener('click', saveScheduleWorkspace);
+      document.getElementById('customerCancelButton').addEventListener('click', resetScheduleForms);
+      document.getElementById('clientDetailSaveButton').addEventListener('click', saveClientDetailsOnly);
+      document.getElementById('customerSearch').addEventListener('input', () => renderQueue());
+      document.getElementById('customerStatusFilter').addEventListener('change', () => renderQueue());
+      document.getElementById('clientSearchInput').addEventListener('input', (event) => populateClientSelect(event.target.value));
+      document.getElementById('clientSelect').addEventListener('change', (event) => {
+        const client = clientCache.find((item) => Number(item.id) === Number(event.target.value));
+        hydrateClientDetailsForm(client || null);
+      });
+      document.getElementById('customerPhone').addEventListener('blur', () => {
+        const client = getClientByPhone(document.getElementById('customerPhone').value.trim());
+        hydrateScheduleFormFromClient(client);
+      });
       document.getElementById('analysisModalClose').addEventListener('click', closeAnalysisModal);
       document.getElementById('analysisModal').addEventListener('click', (event) => {
         if (event.target.id === 'analysisModal') {
           closeAnalysisModal();
         }
       });
-      await loadRecentCalls();
-      await loadCustomers();
+
+      const requestedTab = new URLSearchParams(window.location.search).get('tab');
+      switchTab(requestedTab || 'schedule-call');
+      await Promise.all([loadRecentCalls(), loadCustomers(), loadClients()]);
     });
 
-    window.startEditCustomer = startEditCustomer;
     window.triggerCallNow = triggerCallNow;
     window.scheduleRetry = scheduleRetry;
     window.deleteCustomer = deleteCustomer;
     window.openAnalysisModal = openAnalysisModal;
+    window.startEditCustomer = startEditCustomer;
   </script>
 </body>
 </html>
