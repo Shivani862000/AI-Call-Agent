@@ -6,7 +6,7 @@
   <title>Feedback</title>
   <link rel="stylesheet" href="/app-shell.css">
 </head>
-<body>
+<body class="poc-page feedback-page">
   <div class="app-shell">
     <aside class="sidebar">
       <div>
@@ -14,9 +14,10 @@
           <div class="brand-mark">PL</div>
           <div class="brand-copy">
             <h1>Path Lab Console</h1>
-            <p>Feedback intelligence</p>
+            <p>AI follow-up POC</p>
           </div>
         </div>
+
         <nav class="nav-list">
           <a href="/admin.html" class="nav-link">Overview</a>
           <a href="/customers.html" class="nav-link">Customers</a>
@@ -24,181 +25,171 @@
           <a href="/reports.html" class="nav-link">Reports</a>
         </nav>
       </div>
-      <div class="sidebar-footer">
-        <strong>Feedback page</strong>
-        <span>Review customer sentiment and add manual feedback without unrelated distractions.</span>
-      </div>
     </aside>
 
     <main class="main-panel">
       <header class="page-header">
         <div class="page-title-wrap">
           <h2>Feedback</h2>
-          <div class="page-subtitle">
-            <span class="pill">Review</span>
-            <span>Summary first, insights second, manual capture last.</span>
-          </div>
+          <div class="page-subtitle">Review call feedback, transcripts, and customer sentiment.</div>
         </div>
         <div class="header-actions">
-          <a href="/admin.html" class="button-link ghost">Overview</a>
-          <button id="logoutButton" class="ghost" type="button">Logout</button>
+          <button id="openManualFeedbackButton" class="primary" type="button">Add Manual Feedback</button>
+          <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
       </header>
 
       <div id="alertContainer" class="alert-stack"></div>
 
-      <section class="summary-strip">
-        <article class="summary-mini">
-          <span class="summary-mini-label">Feedback captured</span>
-          <span id="feedbackSummaryTotal" class="summary-mini-value">0</span>
-          <span class="summary-mini-note">Manual and call-extracted feedback records.</span>
+      <section class="poc-metrics-grid">
+        <article class="metric-card">
+          <div class="metric-label">Feedback Captured</div>
+          <div class="metric-value" id="metricFeedbackTotal">0</div>
+          <div class="metric-note">Recorded feedback entries across the POC flow.</div>
         </article>
-        <article class="summary-mini">
-          <span class="summary-mini-label">Positive sentiment</span>
-          <span id="feedbackSummaryPositive" class="summary-mini-value">0</span>
-          <span class="summary-mini-note">High-intent reviews worth amplifying.</span>
+        <article class="metric-card">
+          <div class="metric-label">Positive Feedback</div>
+          <div class="metric-value" id="metricPositiveFeedback">0</div>
+          <div class="metric-note">Ratings and reviews worth showcasing.</div>
         </article>
-        <article class="summary-mini">
-          <span class="summary-mini-label">Calls needing review</span>
-          <span id="feedbackSummaryReview" class="summary-mini-value">0</span>
-          <span class="summary-mini-note">Recent conversations you should inspect first.</span>
+        <article class="metric-card">
+          <div class="metric-label">Needs Review</div>
+          <div class="metric-value" id="metricNeedsReview">0</div>
+          <div class="metric-note">Completed calls that still need human review.</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Pending Analysis</div>
+          <div class="metric-value" id="metricPendingAnalysis">0</div>
+          <div class="metric-note">Calls waiting on transcript or analysis completion.</div>
         </article>
       </section>
 
-      <section class="card">
-        <div class="card-header">
-          <div>
-            <div class="card-title">Feedback summary</div>
-            <div class="card-subtitle">Start here before opening individual reviews or entering anything manually.</div>
-          </div>
-        </div>
-        <div id="feedbackExecutiveSummary" class="list-block"></div>
-      </section>
-
-      <section class="two-column-grid">
-        <article class="card">
-          <div class="card-header">
+      <section class="poc-grid-2">
+        <article class="poc-card">
+          <div class="poc-card-header">
             <div>
-              <div class="card-title">Recent call intelligence</div>
-              <div class="card-subtitle">Lead with insights, then capture manual feedback only when needed.</div>
+              <h3 class="poc-card-title">Calls Needing Review</h3>
+              <div class="poc-card-subtitle">Open analysis only for the conversations that need attention.</div>
             </div>
           </div>
-          <div id="recentCallInsights" class="list-block"></div>
+          <div id="needsReviewList" class="compact-list"></div>
         </article>
 
-        <article class="card">
-          <div class="card-header">
+        <article class="poc-card">
+          <div class="poc-card-header">
             <div>
-              <div class="card-title">Feedback board</div>
-              <div class="card-subtitle">Latest recorded feedback with direct access to analysis details.</div>
+              <h3 class="poc-card-title">Feedback Board</h3>
+              <div class="poc-card-subtitle">Latest captured feedback in one clean board.</div>
             </div>
           </div>
-          <div class="table-wrap">
+
+          <div class="table-wrap desktop-only feedback-board-table">
             <table>
               <thead>
                 <tr>
                   <th>Customer</th>
-                  <th>Review</th>
-                  <th>Category</th>
+                  <th>Sentiment</th>
                   <th>Rating</th>
-                  <th>Actions</th>
+                  <th>Summary</th>
                   <th>Date</th>
                 </tr>
               </thead>
               <tbody id="feedbackTableBody"></tbody>
             </table>
           </div>
+
+          <div id="mobileFeedbackList" class="mobile-feedback-stack mobile-only"></div>
         </article>
-      </section>
-
-      <div class="section-divider">
-        <h3>Manual capture</h3>
-        <span>Use when staff collect feedback offline or outside the call flow.</span>
-      </div>
-
-      <section class="card">
-        <div class="card-header">
-          <div>
-            <div class="card-title">Manual feedback</div>
-            <div class="card-subtitle" id="feedbackListMeta">0 records</div>
-          </div>
-        </div>
-        <div class="field">
-          <label class="field-label" for="feedbackCustomer">Customer</label>
-          <select id="feedbackCustomer"></select>
-          <div class="error-text" id="feedbackCustomerError"></div>
-        </div>
-        <div class="field">
-          <label class="field-label" for="reviewStars">Rating</label>
-          <select id="reviewStars">
-            <option value="5">5 stars</option>
-            <option value="4">4 stars</option>
-            <option value="3" selected>3 stars</option>
-            <option value="2">2 stars</option>
-            <option value="1">1 star</option>
-          </select>
-          <div class="error-text" id="reviewStarsError"></div>
-        </div>
-        <div class="field">
-          <label class="field-label" for="reviewText">Review text</label>
-          <textarea id="reviewText" placeholder="Write the customer's feedback here..."></textarea>
-          <div class="error-text" id="reviewTextError"></div>
-        </div>
-        <div class="button-row">
-          <button id="submitFeedbackButton" class="primary" type="button">Submit feedback</button>
-        </div>
       </section>
     </main>
   </div>
 
+  <button id="mobileManualFeedbackFab" class="poc-fab" type="button">Add Feedback</button>
+
+  <div id="manualFeedbackModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-panel modal-panel--narrow" role="dialog" aria-modal="true" aria-labelledby="manualFeedbackTitle">
+      <div class="poc-card-header">
+        <div>
+          <h3 id="manualFeedbackTitle" class="poc-card-title">Add Manual Feedback</h3>
+          <div class="poc-card-subtitle">Use this only when feedback is collected outside the AI call flow.</div>
+        </div>
+        <button id="closeManualFeedbackModal" class="secondary modal-close" type="button">Close</button>
+      </div>
+
+      <div class="poc-form-grid">
+        <label class="span-2">
+          Customer
+          <select id="feedbackCustomer"></select>
+          <span class="error-text" id="feedbackCustomerError"></span>
+        </label>
+        <label>
+          Rating
+          <select id="reviewStars">
+            <option value="5">5 stars</option>
+            <option value="4">4 stars</option>
+            <option value="3">3 stars</option>
+            <option value="2">2 stars</option>
+            <option value="1">1 star</option>
+          </select>
+          <span class="error-text" id="reviewStarsError"></span>
+        </label>
+        <label class="span-2">
+          Review
+          <textarea id="reviewText" placeholder="Write the customer's feedback here..."></textarea>
+          <span class="error-text" id="reviewTextError"></span>
+        </label>
+      </div>
+
+      <div class="button-row" style="margin-top: 18px;">
+        <button id="submitFeedbackButton" class="primary" type="button">Submit Feedback</button>
+      </div>
+    </div>
+  </div>
+
   <div id="analysisModal" class="modal-backdrop" aria-hidden="true">
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle">
-      <div class="card-header">
+      <div class="poc-card-header">
         <div>
-          <div class="card-title" id="analysisModalTitle">Call analysis</div>
-          <div class="card-subtitle" id="analysisModalSubtitle">Loading details...</div>
+          <h3 id="analysisModalTitle" class="poc-card-title">Call Analysis</h3>
+          <div id="analysisModalSubtitle" class="poc-card-subtitle">Loading details...</div>
         </div>
-        <button id="analysisModalClose" class="ghost" type="button">Close</button>
+        <button id="analysisModalClose" class="secondary modal-close" type="button">Close</button>
       </div>
 
-      <div class="modal-meta-grid">
-        <div class="modal-stat">
-          <strong>Customer rating</strong>
-          <span id="analysisRatingValue" class="muted">--</span>
-        </div>
-        <div class="modal-stat">
-          <strong>Call outcome</strong>
-          <span id="analysisOutcomeValue" class="muted">--</span>
-        </div>
-        <div class="modal-stat">
-          <strong>Analysis status</strong>
-          <span id="analysisStatusValue" class="muted">--</span>
-        </div>
-        <div class="modal-stat">
-          <strong>Call time</strong>
-          <span id="analysisCalledAtValue" class="muted">--</span>
-        </div>
-      </div>
+      <section class="poc-mini-grid" style="margin-bottom: 16px;">
+        <article class="mini-stat">
+          <strong id="analysisRatingValue">--</strong>
+          <span>Rating</span>
+        </article>
+        <article class="mini-stat">
+          <strong id="analysisOutcomeValue">--</strong>
+          <span>Outcome</span>
+        </article>
+        <article class="mini-stat">
+          <strong id="analysisStatusValue">--</strong>
+          <span>Processing</span>
+        </article>
+      </section>
 
-      <div class="card" style="padding: 16px;">
-        <div class="card-title" style="font-size: 16px; margin-bottom: 8px;">Recording</div>
-        <div id="analysisRecordingWrap" class="muted">Recording not available yet.</div>
-      </div>
+      <section class="poc-card" style="margin-bottom: 14px;">
+        <h4 class="poc-card-title" style="font-size:16px;">Recording</h4>
+        <div id="analysisRecordingWrap" class="poc-card-subtitle" style="margin-top:10px;">Recording not available yet.</div>
+      </section>
 
-      <div class="card" style="padding: 16px;">
-        <div class="card-title" style="font-size: 16px; margin-bottom: 8px;">Summary</div>
-        <div id="analysisSummaryValue" class="muted">Analysis summary not available yet.</div>
-      </div>
+      <section class="poc-card" style="margin-bottom: 14px;">
+        <h4 class="poc-card-title" style="font-size:16px;">Summary</h4>
+        <div id="analysisSummaryValue" class="poc-card-subtitle" style="margin-top:10px;">Analysis summary not available yet.</div>
+      </section>
 
-      <div class="card" style="padding: 16px;">
-        <div class="card-title" style="font-size: 16px; margin-bottom: 8px;">Customer review</div>
-        <div id="analysisReviewValue" class="review-highlight">No review extracted yet.</div>
-      </div>
+      <section class="poc-card" style="margin-bottom: 14px;">
+        <h4 class="poc-card-title" style="font-size:16px;">Customer Review</h4>
+        <div id="analysisReviewValue" class="poc-card-subtitle" style="margin-top:10px;">No review extracted yet.</div>
+      </section>
 
-      <div class="card" style="padding: 16px;">
-        <div class="card-title" style="font-size: 16px; margin-bottom: 8px;">Transcript</div>
-        <div id="analysisTranscriptValue" class="transcript-box muted">Transcript not available yet.</div>
-      </div>
+      <section class="poc-card">
+        <h4 class="poc-card-title" style="font-size:16px;">Transcript</h4>
+        <div id="analysisTranscriptValue" class="poc-card-subtitle" style="margin-top:10px;">Transcript not available yet.</div>
+      </section>
     </div>
   </div>
 
@@ -208,40 +199,153 @@
     let feedbackCache = [];
     let recentCallsCache = [];
 
-    function buildStarMarkup(ratingValue) {
-      const rating = Number(ratingValue || 0);
-      if (!rating) {
-        return `<div class="review-rating"><span class="review-rating-label">Rating not captured</span></div>`;
-      }
-
-      const stars = '★'.repeat(Math.max(0, Math.min(5, rating))) + '☆'.repeat(Math.max(0, 5 - rating));
-      return `
-        <div class="review-rating">
-          <span class="review-stars" aria-hidden="true">${stars}</span>
-          <span class="review-rating-label">${rating}/5 rating</span>
-        </div>
-      `;
+    function feedbackSentiment(feedback) {
+      if (Number(feedback.stars || 0) >= 4) return 'positive';
+      if (Number(feedback.stars || 0) <= 2) return 'negative';
+      return 'neutral';
     }
 
-    function renderTranscriptMarkup(transcriptText) {
-      const normalized = String(transcriptText || '').trim();
-      if (!normalized) {
-        return '<span class="muted">Transcript not available yet.</span>';
-      }
+    function pendingReviewCalls() {
+      return recentCallsCache.filter((call) => {
+        const isCompleted = String(call.outcome || '').toLowerCase() === 'completed';
+        const needsTranscript = String(call.transcript_status || '').toLowerCase() !== 'completed';
+        const needsAnalysis = String(call.analysis_status || '').toLowerCase() !== 'completed';
+        const missingRating = !Number(call.extracted_rating || 0);
+        return isCompleted && (needsTranscript || needsAnalysis || missingRating);
+      });
+    }
 
-      const lines = normalized.split('\n').map((line) => line.trim()).filter(Boolean);
-      return lines.map((line) => {
-        const match = line.match(/^\[([A-Z]+)\]:\s*(.*)$/);
-        const rawRole = String(match?.[1] || 'NOTE').toUpperCase();
-        const text = match?.[2] || line;
-        const roleClass = rawRole === 'AGENT' ? 'agent' : (rawRole === 'CUSTOMER' ? 'customer' : 'note');
-        return `
-          <div class="transcript-turn ${roleClass}">
-            <div class="transcript-role">${AppShell.escapeHtml(rawRole)}</div>
-            <div class="transcript-text">${AppShell.escapeHtml(text)}</div>
+    function buildReviewList(calls) {
+      const container = document.getElementById('needsReviewList');
+      if (!calls.length) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <strong>No calls need review</strong>
+            <div class="supporting-text">Completed calls will appear here when transcripts or ratings still need attention.</div>
           </div>
         `;
+        return;
+      }
+
+      container.innerHTML = calls.slice(0, 6).map((call) => `
+        <div class="compact-row">
+          <div>
+            <strong>${AppShell.escapeHtml(call.customer_name || 'Customer')}</strong>
+            <div class="muted">${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.outcome || 'completed')}</div>
+          </div>
+          <button class="secondary" type="button" onclick="openAnalysisModal(${call.id})">View Analysis</button>
+        </div>
+      `).join('');
+    }
+
+    function renderFeedbackBoard(feedback) {
+      const tableBody = document.getElementById('feedbackTableBody');
+      const mobileList = document.getElementById('mobileFeedbackList');
+
+      if (!feedback.length) {
+        const emptyMarkup = `
+          <div class="empty-state">
+            <strong>No feedback recorded yet.</strong>
+            <div class="supporting-text">Manual or AI-extracted reviews will appear here as soon as calls are processed.</div>
+          </div>
+        `;
+        tableBody.innerHTML = `<tr><td colspan="5">${emptyMarkup}</td></tr>`;
+        mobileList.innerHTML = emptyMarkup;
+        return;
+      }
+
+      tableBody.innerHTML = feedback.map((item) => {
+        const sentiment = feedbackSentiment(item);
+        return `
+          <tr>
+            <td>
+              <div class="row-title">${AppShell.escapeHtml(item.customer_name || 'Customer')}</div>
+              <div class="row-subtitle">${AppShell.escapeHtml(item.source || 'call')}</div>
+            </td>
+            <td><span class="status-badge ${sentiment}">${AppShell.formatStatusLabel(sentiment)}</span></td>
+            <td>${Number(item.stars || 0) ? `${item.stars}/5` : '--'}</td>
+            <td class="summary-cell">${AppShell.escapeHtml(item.review_text || '--')}</td>
+            <td>${AppShell.formatDateTime(item.submitted_at)}</td>
+          </tr>
+        `;
       }).join('');
+
+      mobileList.innerHTML = feedback.map((item) => {
+        const sentiment = feedbackSentiment(item);
+        return `
+          <article class="mobile-feedback-card">
+            <div class="mobile-feedback-head">
+              <div>
+                <strong>${AppShell.escapeHtml(item.customer_name || 'Customer')}</strong>
+                <div class="mobile-subtext">${AppShell.formatDateTime(item.submitted_at)}</div>
+              </div>
+              <span class="status-badge ${sentiment}">${AppShell.formatStatusLabel(sentiment)}</span>
+            </div>
+            <div class="mobile-subtext" style="margin-top:10px;">${AppShell.escapeHtml(item.review_text || '--')}</div>
+            <div class="mobile-subtext" style="margin-top:8px;">Rating: ${Number(item.stars || 0) ? `${item.stars}/5` : '--'}</div>
+          </article>
+        `;
+      }).join('');
+    }
+
+    function populateCustomerSelect() {
+      const select = document.getElementById('feedbackCustomer');
+      select.innerHTML = '<option value="">Select customer</option>' + customerCache.map((customer) => `
+        <option value="${customer.id}">${AppShell.escapeHtml(customer.name)} · ${AppShell.escapeHtml(customer.phone)}</option>
+      `).join('');
+    }
+
+    function renderMetrics() {
+      const reviewCalls = pendingReviewCalls();
+      const positiveFeedback = feedbackCache.filter((item) => Number(item.stars || 0) >= 4).length;
+      const pendingAnalysis = recentCallsCache.filter((call) => String(call.analysis_status || '').toLowerCase() !== 'completed').length;
+
+      document.getElementById('metricFeedbackTotal').textContent = feedbackCache.length;
+      document.getElementById('metricPositiveFeedback').textContent = positiveFeedback;
+      document.getElementById('metricNeedsReview').textContent = reviewCalls.length;
+      document.getElementById('metricPendingAnalysis').textContent = pendingAnalysis;
+
+      buildReviewList(reviewCalls);
+      renderFeedbackBoard(feedbackCache);
+    }
+
+    function openManualFeedbackModal() {
+      document.getElementById('manualFeedbackModal').classList.add('open');
+      document.getElementById('manualFeedbackModal').setAttribute('aria-hidden', 'false');
+    }
+
+    function closeManualFeedbackModal() {
+      document.getElementById('manualFeedbackModal').classList.remove('open');
+      document.getElementById('manualFeedbackModal').setAttribute('aria-hidden', 'true');
+    }
+
+    function clearManualFeedbackErrors() {
+      AppShell.clearFieldErrors(['feedbackCustomer', 'reviewStars', 'reviewText']);
+    }
+
+    async function submitManualFeedback() {
+      clearManualFeedbackErrors();
+      const payload = {
+        customer_id: Number(document.getElementById('feedbackCustomer').value || 0),
+        stars: Number(document.getElementById('reviewStars').value || 0),
+        review_text: document.getElementById('reviewText').value.trim()
+      };
+
+      try {
+        await AppShell.fetchJson(`${AppShell.API_BASE}/feedback/manual`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        AppShell.showAlert('Manual feedback added successfully');
+        document.getElementById('feedbackCustomer').value = '';
+        document.getElementById('reviewStars').value = '5';
+        document.getElementById('reviewText').value = '';
+        closeManualFeedbackModal();
+        await loadPageData();
+      } catch (error) {
+        AppShell.showAlert(error.message, 'error');
+      }
     }
 
     async function loadTranscriptForCall(callId) {
@@ -251,193 +355,79 @@
           AppShell.redirectToLogin();
           throw new Error('Authentication required');
         }
-        if (!response.ok) {
-          throw new Error('Transcript not available yet.');
-        }
+        if (!response.ok) throw new Error('Transcript not available yet');
         return response.text();
       } catch (error) {
         return `Transcript not available yet.\n${error.message}`;
       }
     }
 
-    function closeAnalysisModal() {
-      const modal = document.getElementById('analysisModal');
-      modal.classList.remove('open');
-      modal.setAttribute('aria-hidden', 'true');
-    }
-
     async function openAnalysisModal(callId) {
       const call = recentCallsCache.find((item) => Number(item.id) === Number(callId));
       if (!call) {
-        AppShell.showAlert('Analysis details not found for this call', 'error');
+        AppShell.showAlert('Call analysis not found', 'error');
         return;
       }
-
       document.getElementById('analysisModalTitle').textContent = `Analysis for ${call.customer_name || 'Customer'}`;
-      document.getElementById('analysisModalSubtitle').textContent = `Call SID: ${call.twilio_sid || '--'}`;
-      document.getElementById('analysisRatingValue').textContent = call.extracted_rating ? `${call.extracted_rating}/5` : 'Not captured';
-      document.getElementById('analysisOutcomeValue').textContent = AppShell.formatStatusLabel(call.outcome || 'completed');
-      document.getElementById('analysisStatusValue').textContent = `Recording: ${AppShell.formatStatusLabel(call.recording_status || 'pending')} | Transcript: ${AppShell.formatStatusLabel(call.transcript_status || 'pending')} | AI: ${AppShell.formatStatusLabel(call.analysis_status || 'pending')}`;
-      document.getElementById('analysisCalledAtValue').textContent = AppShell.formatDateTime(call.called_at);
+      document.getElementById('analysisModalSubtitle').textContent = AppShell.formatDateTime(call.called_at);
+      document.getElementById('analysisRatingValue').textContent = call.extracted_rating ? `${call.extracted_rating}/5` : '--';
+      document.getElementById('analysisOutcomeValue').textContent = AppShell.formatStatusLabel(call.outcome || '--');
+      document.getElementById('analysisStatusValue').textContent = AppShell.formatStatusLabel(call.analysis_status || 'pending');
       document.getElementById('analysisSummaryValue').textContent = call.analysis_summary || call.report_excerpt || 'Analysis summary not available yet.';
-      document.getElementById('analysisReviewValue').innerHTML = `${buildStarMarkup(call.extracted_rating)}<div>${AppShell.escapeHtml(call.extracted_review_text || 'No review extracted yet.')}</div>`;
-      document.getElementById('analysisTranscriptValue').innerHTML = '<span class="muted">Loading transcript...</span>';
+      document.getElementById('analysisReviewValue').innerHTML = `${AppShell.escapeHtml(call.extracted_review_text || 'No review extracted yet.')}`;
 
       const recordingWrap = document.getElementById('analysisRecordingWrap');
       if (call.recording_url || call.recording_sid || String(call.recording_status || '').toLowerCase() === 'completed') {
-        recordingWrap.innerHTML = `
-          <audio class="audio-player" controls preload="none" src="${AppShell.API_BASE}/calls/${call.id}/recording"></audio>
-          <div class="helper-text">If the recording takes a moment, the system will fetch the latest playable version automatically.</div>
-        `;
+        recordingWrap.innerHTML = `<audio class="audio-player" controls preload="none" src="${AppShell.API_BASE}/calls/${call.id}/recording"></audio>`;
       } else {
         recordingWrap.textContent = 'Recording not available yet.';
       }
 
-      const modal = document.getElementById('analysisModal');
-      modal.classList.add('open');
-      modal.setAttribute('aria-hidden', 'false');
-
-      const transcriptText = await loadTranscriptForCall(call.id);
-      document.getElementById('analysisTranscriptValue').innerHTML = renderTranscriptMarkup(transcriptText);
+      document.getElementById('analysisTranscriptValue').textContent = 'Loading transcript...';
+      document.getElementById('analysisModal').classList.add('open');
+      document.getElementById('analysisModal').setAttribute('aria-hidden', 'false');
+      const transcript = await loadTranscriptForCall(call.id);
+      document.getElementById('analysisTranscriptValue').textContent = transcript;
     }
 
-    function populateCustomerDropdown() {
-      const select = document.getElementById('feedbackCustomer');
-      const selected = select.value;
-      select.innerHTML = '<option value="">-- Select customer --</option>';
-      customerCache.forEach((customer) => {
-        const option = document.createElement('option');
-        option.value = customer.id;
-        option.textContent = `${customer.name} (${customer.phone})`;
-        select.appendChild(option);
-      });
-      if (selected) select.value = selected;
+    function closeAnalysisModal() {
+      document.getElementById('analysisModal').classList.remove('open');
+      document.getElementById('analysisModal').setAttribute('aria-hidden', 'true');
     }
 
-    function renderFeedbackSummary() {
-      const positiveCount = feedbackCache.filter((item) => Number(item.stars || 0) >= 4 || String(item.category || '').toLowerCase() === 'positive').length;
-      const reviewCount = recentCallsCache.filter((call) => String(call.outcome || '').toLowerCase() === 'completed').length;
-      document.getElementById('feedbackSummaryTotal').textContent = feedbackCache.length;
-      document.getElementById('feedbackSummaryPositive').textContent = positiveCount;
-      document.getElementById('feedbackSummaryReview').textContent = reviewCount;
-      document.getElementById('feedbackExecutiveSummary').innerHTML = `
-        <div class="list-item"><strong>Signal</strong><span class="muted">${positiveCount} strong reviews out of ${feedbackCache.length || 0} total captured feedback items.</span></div>
-        <div class="list-item"><strong>Review queue</strong><span class="muted">${reviewCount} completed calls are ready for rating, transcript, or recording review.</span></div>
-        <div class="list-item"><strong>Manual capture role</strong><span class="muted">Use the manual form only for staff-collected feedback that did not come through the call flow.</span></div>
-      `;
-    }
-
-    function renderFeedback() {
-      const tbody = document.getElementById('feedbackTableBody');
-      document.getElementById('feedbackListMeta').textContent = `${feedbackCache.length} record${feedbackCache.length === 1 ? '' : 's'}`;
-      if (!feedbackCache.length) {
-        tbody.innerHTML = `
-              <tr>
-            <td colspan="6">
-              <div class="empty-state">
-                <div class="empty-icon">FB</div>
-                <strong>No feedback recorded yet</strong>
-                <div class="supporting-text">Feedback entries and call analysis will appear here.</div>
-              </div>
-            </td>
-          </tr>
-        `;
-        return;
-      }
-
-      tbody.innerHTML = feedbackCache.map((row) => {
-        const actionButton = row.call_id
-          ? `<button class="ghost" type="button" onclick="openAnalysisModal(${row.call_id})">Analysis details</button>`
-          : '<span class="muted">Manual entry</span>';
-
-        return `
-        <tr>
-          <td>${AppShell.escapeHtml(row.customer_name)}</td>
-          <td>${AppShell.escapeHtml(row.review_text || '--')}</td>
-          <td><span class="badge ${AppShell.escapeHtml(row.category || 'pending')}">${AppShell.formatStatusLabel(row.category || 'pending')}</span></td>
-          <td>${AppShell.escapeHtml(String(row.stars || '--'))}</td>
-          <td>${actionButton}</td>
-          <td>${AppShell.formatDateTime(row.submitted_at)}</td>
-        </tr>
-      `;
-      }).join('');
-    }
-
-    function renderRecentCallInsights() {
-      const container = document.getElementById('recentCallInsights');
-      if (!recentCallsCache.length) {
-        container.innerHTML = `
-          <div class="empty-state">
-            <div class="empty-icon">CL</div>
-            <strong>No recent calls found</strong>
-            <div class="supporting-text">Recent call summaries will appear after outbound activity.</div>
-          </div>
-        `;
-        return;
-      }
-
-      container.innerHTML = recentCallsCache.slice(0, 6).map((call) => `
-        <div class="list-item">
-          <strong>${AppShell.escapeHtml(call.customer_name || 'Customer')}</strong>
-          <span class="muted">${AppShell.formatStatusLabel(call.outcome || 'pending')} • ${AppShell.formatDateTime(call.called_at)}</span>
-          <div class="supporting-text">${AppShell.escapeHtml(call.analysis_summary || call.report_excerpt || call.extracted_review_text || 'Analysis is still processing.')}</div>
-          <div class="button-row" style="margin-top: 10px;">
-            <button class="ghost" type="button" onclick="openAnalysisModal(${call.id})">Analysis details</button>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    async function loadData() {
-      const [customers, feedback, calls] = await Promise.all([
+    async function loadPageData() {
+      const [customers, feedback, recentCalls] = await Promise.all([
         AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
         AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
       ]);
-      customerCache = Array.isArray(customers) ? customers : [];
-      feedbackCache = Array.isArray(feedback) ? feedback : [];
-      recentCallsCache = Array.isArray(calls) ? calls : [];
-      populateCustomerDropdown();
-      renderFeedbackSummary();
-      renderFeedback();
-      renderRecentCallInsights();
-    }
-
-    async function submitFeedback() {
-      AppShell.clearFieldErrors(['feedbackCustomer', 'reviewText', 'reviewStars']);
-      const payload = {
-        customer_id: document.getElementById('feedbackCustomer').value,
-        review_text: document.getElementById('reviewText').value.trim(),
-        stars: Number(document.getElementById('reviewStars').value || 0)
-      };
-
-      try {
-        const result = await AppShell.fetchJson(`${AppShell.API_BASE}/feedback/manual`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        AppShell.showAlert(`Feedback submitted and categorized as ${result.category}`);
-        document.getElementById('reviewText').value = '';
-        document.getElementById('feedbackCustomer').value = '';
-        document.getElementById('reviewStars').value = '3';
-        await loadData();
-      } catch (error) {
-        AppShell.showAlert(error.message, 'error');
-      }
+      customerCache = customers;
+      feedbackCache = feedback;
+      recentCallsCache = recentCalls;
+      populateCustomerSelect();
+      renderMetrics();
     }
 
     document.addEventListener('DOMContentLoaded', async () => {
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
-      document.getElementById('submitFeedbackButton').addEventListener('click', submitFeedback);
+      document.getElementById('openManualFeedbackButton').addEventListener('click', openManualFeedbackModal);
+      document.getElementById('mobileManualFeedbackFab').addEventListener('click', openManualFeedbackModal);
+      document.getElementById('closeManualFeedbackModal').addEventListener('click', closeManualFeedbackModal);
+      document.getElementById('submitFeedbackButton').addEventListener('click', submitManualFeedback);
       document.getElementById('analysisModalClose').addEventListener('click', closeAnalysisModal);
-      document.getElementById('analysisModal').addEventListener('click', (event) => {
-        if (event.target.id === 'analysisModal') {
-          closeAnalysisModal();
-        }
+      document.getElementById('manualFeedbackModal').addEventListener('click', (event) => {
+        if (event.target.id === 'manualFeedbackModal') closeManualFeedbackModal();
       });
-      await loadData();
+      document.getElementById('analysisModal').addEventListener('click', (event) => {
+        if (event.target.id === 'analysisModal') closeAnalysisModal();
+      });
+
+      try {
+        await loadPageData();
+      } catch (error) {
+        AppShell.showAlert(error.message, 'error');
+      }
     });
 
     window.openAnalysisModal = openAnalysisModal;

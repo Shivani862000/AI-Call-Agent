@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Overview</title>
+  <title>Operations Overview</title>
   <link rel="stylesheet" href="/app-shell.css">
 </head>
-<body class="admin-overview-page">
+<body class="poc-page overview-page">
   <div class="app-shell">
     <aside class="sidebar">
       <div>
@@ -14,7 +14,7 @@
           <div class="brand-mark">PL</div>
           <div class="brand-copy">
             <h1>Path Lab Console</h1>
-            <p>Focused admin workspace</p>
+            <p>AI follow-up POC</p>
           </div>
         </div>
 
@@ -25,213 +25,150 @@
           <a href="/reports.html" class="nav-link">Reports</a>
         </nav>
       </div>
-
-     
     </aside>
 
     <main class="main-panel">
       <header class="page-header">
         <div class="page-title-wrap">
-          <div class="page-kicker">Admin home</div>
           <h2>Operations Overview</h2>
-          <div class="page-subtitle">
-            <span class="pill">Admin</span>
-            <span id="dashboardSubtitle">Loading live operations summary...</span>
-          </div>
+          <div class="page-subtitle">Today's AI calling activity and follow-up status.</div>
         </div>
         <div class="header-actions">
-          <button id="logoutButton" class="ghost logout-pill" type="button" aria-label="Logout admin">
-            <span class="logout-pill-icon" aria-hidden="true">↗</span>
-            <span>Logout</span>
-          </button>
+          <a href="/customers.html" class="primary button-link">Schedule New Call</a>
+          <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
       </header>
 
       <div id="alertContainer" class="alert-stack"></div>
 
-      <section class="summary-strip">
-        <article class="summary-mini">
-          <span class="summary-mini-label">Customers tracked</span>
-          <span id="overviewSummaryCustomers" class="summary-mini-value">0</span>
-          <span class="summary-mini-note">Call queue records currently in circulation.</span>
+      <section class="poc-metrics-grid">
+        <article class="metric-card">
+          <div class="metric-label">Total Customers</div>
+          <div class="metric-value" id="metricCustomers">0</div>
+          <div class="metric-note">Active records in the follow-up queue.</div>
         </article>
-        <article class="summary-mini">
-          <span class="summary-mini-label">Active reminders</span>
-          <span id="overviewSummaryClients" class="summary-mini-value">0</span>
-          <span class="summary-mini-note">Clients with anniversary care reminders enabled.</span>
+        <article class="metric-card">
+          <div class="metric-label">Calls Scheduled</div>
+          <div class="metric-value" id="metricScheduled">0</div>
+          <div class="metric-note">Customers waiting for outreach.</div>
         </article>
-        <article class="summary-mini">
-          <span class="summary-mini-label">Calls today</span>
-          <span id="overviewSummaryCalls" class="summary-mini-value">0</span>
-          <span class="summary-mini-note">Outbound activity recorded in today’s operations window.</span>
+        <article class="metric-card">
+          <div class="metric-label">Calls Completed</div>
+          <div class="metric-value" id="metricCompleted">0</div>
+          <div class="metric-note">Finished calls with outcomes recorded.</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Feedback Captured</div>
+          <div class="metric-value" id="metricFeedback">0</div>
+          <div class="metric-note">Manual or AI-extracted feedback entries.</div>
         </article>
       </section>
 
-      <section class="card">
-        <div class="card-header">
-          <div>
-            <div class="card-title">Overview only</div>
-            <div class="card-subtitle">This page is intentionally limited to summary signals. Use the page navigation to move into customers, clients, feedback, or reports.</div>
+      <section class="poc-grid-2">
+        <article class="poc-card">
+          <div class="poc-card-header">
+            <div>
+              <h3 class="poc-card-title">Today's Activity</h3>
+              <div class="poc-card-subtitle">A quick operational snapshot for the demo.</div>
+            </div>
           </div>
+          <div id="todayActivityList" class="compact-list"></div>
+        </article>
+
+        <div class="poc-stack">
+          <article class="poc-card">
+            <div class="poc-card-header">
+              <div>
+                <h3 class="poc-card-title">Quick Actions</h3>
+                <div class="poc-card-subtitle">Jump straight into the three core POC workflows.</div>
+              </div>
+            </div>
+            <div class="quick-action-grid">
+              <a href="/customers.html" class="primary button-link">Schedule New Call</a>
+              <a href="/customers.html#queueSection" class="secondary button-link">View Queue</a>
+              <a href="/feedback.html" class="secondary button-link">Open Feedback</a>
+            </div>
+          </article>
+
+          <article class="poc-card">
+            <div class="poc-card-header">
+              <div>
+                <h3 class="poc-card-title">Recent Call Activity</h3>
+                <div class="poc-card-subtitle">Latest three calls for quick review.</div>
+              </div>
+            </div>
+            <div id="recentCallActivity" class="simple-call-list"></div>
+          </article>
         </div>
-        <div class="list-block">
-          <div class="list-item">
-            <strong>Navigation</strong>
-            <span class="muted">Use the top navigation on desktop or the bottom tabs on mobile to open the operational pages.</span>
-          </div>
-        </div>
-      </section>
-
-      <div class="section-divider">
-        <h3>Snapshot</h3>
-        <span>Quick operational reading before you dive deeper.</span>
-      </div>
-
-      <section class="stats-grid">
-        <article class="stat-card">
-          <div class="stat-label">Total customers</div>
-          <div class="stat-number" id="totalCustomers">0</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">Active client reminders</div>
-          <div class="stat-number" id="activeClients">0</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">Calls today</div>
-          <div class="stat-number" id="callsToday">0</div>
-        </article>
-        <article class="stat-card">
-          <div class="stat-label">Feedback captured</div>
-          <div class="stat-number" id="feedbackCount">0</div>
-        </article>
-      </section>
-
-      <section class="two-column-grid">
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Daily performance</div>
-              <div class="card-subtitle">What happened today across calling and review collection</div>
-            </div>
-          </div>
-          <div class="list-block" id="dailyPerformanceList"></div>
-        </article>
-
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Weekly summary</div>
-              <div class="card-subtitle">A quick read before you go into the full reports page</div>
-            </div>
-          </div>
-          <div class="list-block">
-            <div class="list-item">
-              <strong>Summary</strong>
-              <span id="weeklySummaryText" class="muted">Loading weekly summary...</span>
-            </div>
-            <div class="list-item">
-              <strong>Hot leads</strong>
-              <span id="hotLeadsText" class="muted">Loading...</span>
-            </div>
-            <div class="list-item">
-              <strong>Pending items</strong>
-              <span id="pendingSummaryText" class="muted">Loading...</span>
-            </div>
-          </div>
-        </article>
-      </section>
-
-      <section class="two-column-grid">
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Upcoming annual reminders</div>
-              <div class="card-subtitle">Clients whose anniversary care calls need attention soon</div>
-            </div>
-          </div>
-          <div id="upcomingClientsList" class="list-block"></div>
-        </article>
-
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Owner digest snapshot</div>
-              <div class="card-subtitle">Revenue pipeline, alerts, and what leadership should notice</div>
-            </div>
-          </div>
-          <div class="list-block">
-            <div class="list-item">
-              <strong>Digest</strong>
-              <span id="ownerDigestText" class="muted">Loading owner digest...</span>
-            </div>
-            <div class="list-item">
-              <strong>Revenue pipeline</strong>
-              <span id="ownerRevenueText" class="muted">Loading...</span>
-            </div>
-            <div class="list-item">
-              <strong>Priority alerts</strong>
-              <span id="ownerAlertsText" class="muted">Loading...</span>
-            </div>
-          </div>
-        </article>
       </section>
     </main>
   </div>
 
   <script src="/app-shell.js"></script>
   <script>
-    async function loadOverview() {
-      const [customers, clients, report, weekly, owner, feedback] = await Promise.all([
-        AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/clients`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/reports/preview`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/reports/weekly-preview`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/reports/owner-preview`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/feedback`)
-      ]);
+    function isToday(value) {
+      if (!value) return false;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return false;
+      const now = new Date();
+      return date.toDateString() === now.toDateString();
+    }
 
-      const activeClients = clients.filter((client) => String(client.status || 'active') === 'active' && Number(client.annual_reminder_enabled || 0));
-      const upcomingClients = [...activeClients]
-        .sort((a, b) => String(a.next_annual_reminder_date || '9999-12-31').localeCompare(String(b.next_annual_reminder_date || '9999-12-31')))
-        .slice(0, 5);
-
-      document.getElementById('totalCustomers').textContent = customers.length || 0;
-      document.getElementById('activeClients').textContent = activeClients.length || 0;
-      document.getElementById('callsToday').textContent = report.total_calls || 0;
-      document.getElementById('feedbackCount').textContent = feedback.length || 0;
-      document.getElementById('overviewSummaryCustomers').textContent = customers.length || 0;
-      document.getElementById('overviewSummaryClients').textContent = activeClients.length || 0;
-      document.getElementById('overviewSummaryCalls').textContent = report.total_calls || 0;
-      document.getElementById('dashboardSubtitle').textContent = `${customers.length || 0} customers, ${activeClients.length || 0} active client reminders, ${report.total_calls || 0} calls today.`;
-
-      document.getElementById('dailyPerformanceList').innerHTML = `
-        <div class="list-item"><strong>Reviews collected</strong><span class="muted">${report.feedback_count || 0} feedback entries captured today.</span></div>
-        <div class="list-item"><strong>Consent granted</strong><span class="muted">${report.consent_given || 0} customers allowed follow-up and workflow continuation.</span></div>
-        <div class="list-item"><strong>WhatsApp sent</strong><span class="muted">${report.whatsapp_sent || 0} follow-up messages were triggered.</span></div>
+    function renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls }) {
+      document.getElementById('todayActivityList').innerHTML = `
+        <div class="compact-row"><div><strong>Calls scheduled today</strong><div class="muted">Customers added or re-queued for today's follow-up flow.</div></div><strong>${scheduledToday}</strong></div>
+        <div class="compact-row"><div><strong>Calls completed</strong><div class="muted">Calls that finished and moved into outcome tracking.</div></div><strong>${completedToday}</strong></div>
+        <div class="compact-row"><div><strong>Pending calls</strong><div class="muted">Customers still waiting for first dial or retry.</div></div><strong>${pendingCalls}</strong></div>
+        <div class="compact-row"><div><strong>Failed calls</strong><div class="muted">Busy, no-answer, or failed outcomes needing attention.</div></div><strong>${failedCalls}</strong></div>
       `;
+    }
 
-      document.getElementById('weeklySummaryText').textContent = weekly.summary_text || 'Weekly summary unavailable.';
-      document.getElementById('hotLeadsText').textContent = (weekly.hot_lead_names || []).join(', ') || 'No hot leads identified.';
-      document.getElementById('pendingSummaryText').textContent = (weekly.pending_summary || []).join(' | ') || 'No pending follow-ups.';
-      document.getElementById('ownerDigestText').textContent = owner.digest_text || 'Owner digest unavailable.';
-      document.getElementById('ownerRevenueText').textContent = AppShell.formatCurrencyInr(owner.roi_snapshot?.revenue_pipeline_estimate || 0);
-      document.getElementById('ownerAlertsText').textContent = (owner.alerts || []).map((item) => `${item.customer_name}: ${item.headline}`).join(' | ') || 'No priority alerts right now.';
-
-      const upcomingHtml = upcomingClients.length
-        ? upcomingClients.map((client) => `
-            <div class="list-item">
-              <strong>${AppShell.escapeHtml(client.name)}</strong>
-              <span class="muted">${AppShell.escapeHtml(client.treatment_type || '--')} • ${AppShell.formatDate(client.next_annual_reminder_date)} at ${AppShell.escapeHtml(client.annual_reminder_slot || '--:--')}</span>
-            </div>
-          `).join('')
-        : `
+    function renderRecentCalls(calls) {
+      const container = document.getElementById('recentCallActivity');
+      const recent = calls.slice(0, 3);
+      if (!recent.length) {
+        container.innerHTML = `
           <div class="empty-state">
-            <div class="empty-icon">AR</div>
-            <strong>No annual reminders pending</strong>
-            <div class="supporting-text">Client anniversary reminders will show here once records are added.</div>
+            <strong>No recent calls yet</strong>
+            <div class="supporting-text">Scheduled calls will appear here once the team starts the demo flow.</div>
           </div>
         `;
-      document.getElementById('upcomingClientsList').innerHTML = upcomingHtml;
+        return;
+      }
+
+      container.innerHTML = recent.map((call) => `
+        <div class="simple-call-item">
+          <div>
+            <strong>${AppShell.escapeHtml(call.customer_name || 'Customer')}</strong>
+            <span>${AppShell.formatDateTime(call.called_at)}</span>
+          </div>
+          <span class="status-badge ${AppShell.escapeHtml(String(call.outcome || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || 'pending')}</span>
+        </div>
+      `).join('');
+    }
+
+    async function loadOverview() {
+      const [customers, feedback, recentCalls] = await Promise.all([
+        AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
+        AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
+        AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
+      ]);
+
+      const scheduledStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
+      const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
+      const scheduledToday = customers.filter((customer) => isToday(customer.created_at) || isToday(customer.updated_at)).length;
+      const completedCalls = recentCalls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
+      const completedToday = completedCalls.filter((call) => isToday(call.called_at)).length;
+      const pendingCalls = customers.filter((customer) => scheduledStatuses.has(String(customer.status || '').toLowerCase())).length;
+      const failedCalls = recentCalls.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
+
+      document.getElementById('metricCustomers').textContent = customers.length;
+      document.getElementById('metricScheduled').textContent = pendingCalls;
+      document.getElementById('metricCompleted').textContent = completedCalls.length;
+      document.getElementById('metricFeedback').textContent = feedback.length;
+
+      renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls });
+      renderRecentCalls(recentCalls);
     }
 
     document.addEventListener('DOMContentLoaded', async () => {

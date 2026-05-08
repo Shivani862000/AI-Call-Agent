@@ -6,7 +6,7 @@
   <title>Reports</title>
   <link rel="stylesheet" href="/app-shell.css">
 </head>
-<body>
+<body class="poc-page reports-page">
   <div class="app-shell">
     <aside class="sidebar">
       <div>
@@ -14,9 +14,10 @@
           <div class="brand-mark">PL</div>
           <div class="brand-copy">
             <h1>Path Lab Console</h1>
-            <p>Reporting workspace</p>
+            <p>AI follow-up POC</p>
           </div>
         </div>
+
         <nav class="nav-list">
           <a href="/admin.html" class="nav-link">Overview</a>
           <a href="/customers.html" class="nav-link">Customers</a>
@@ -24,185 +25,220 @@
           <a href="/reports.html" class="nav-link active">Reports</a>
         </nav>
       </div>
-      <div class="sidebar-footer">
-        <strong>Reports page</strong>
-        <span>Decision-ready summaries, not just raw counts.</span>
-      </div>
     </aside>
 
     <main class="main-panel">
       <header class="page-header">
         <div class="page-title-wrap">
           <h2>Reports</h2>
-          <div class="page-subtitle">
-            <span class="pill">Improved reporting</span>
-            <span>Operational performance, weekly narrative, ROI, and leadership digest in one place.</span>
-          </div>
+          <div class="page-subtitle">Call outcomes and feedback summary.</div>
         </div>
         <div class="header-actions">
-          <button id="generateDailyButton" class="secondary" type="button">Generate daily</button>
-          <button id="generateWeeklyButton" class="primary" type="button">Generate weekly</button>
-          <button id="sendDigestButton" class="ghost" type="button">Send owner digest</button>
-          <button id="logoutButton" class="ghost" type="button">Logout</button>
+          <button id="exportReportButton" class="primary" type="button">Export Report</button>
+          <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
       </header>
 
       <div id="alertContainer" class="alert-stack"></div>
 
-      <section class="stats-grid">
-        <article class="stat-card">
-          <div class="stat-label">Calls today</div>
-          <div class="stat-number" id="reportCallsToday">0</div>
+      <section class="poc-metrics-grid">
+        <article class="metric-card">
+          <div class="metric-label">Total Calls</div>
+          <div class="metric-value" id="reportTotalCalls">0</div>
+          <div class="metric-note">Recent calls available in this POC window.</div>
         </article>
-        <article class="stat-card">
-          <div class="stat-label">Feedback count</div>
-          <div class="stat-number" id="reportFeedbackCount">0</div>
+        <article class="metric-card">
+          <div class="metric-label">Completed</div>
+          <div class="metric-value" id="reportCompletedCalls">0</div>
+          <div class="metric-note">Calls finished with an outcome.</div>
         </article>
-        <article class="stat-card">
-          <div class="stat-label">Revenue pipeline</div>
-          <div class="stat-number" id="reportRevenuePipeline">Rs 0</div>
+        <article class="metric-card">
+          <div class="metric-label">Failed</div>
+          <div class="metric-value" id="reportFailedCalls">0</div>
+          <div class="metric-note">Busy, failed, or no-answer call attempts.</div>
         </article>
-        <article class="stat-card">
-          <div class="stat-label">ROI multiple</div>
-          <div class="stat-number" id="reportRoiMultiple">0x</div>
-        </article>
-      </section>
-
-      <section class="three-column-grid">
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Daily operational snapshot</div>
-              <div class="card-subtitle">Same-day activity that the admin team should monitor.</div>
-            </div>
-          </div>
-          <div id="dailyReportList" class="list-block"></div>
-        </article>
-
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Weekly summary</div>
-              <div class="card-subtitle">Narrative summary plus lead and complaint context.</div>
-            </div>
-          </div>
-          <div id="weeklyReportList" class="list-block"></div>
-        </article>
-
-        <article class="card">
-          <div class="card-header">
-            <div>
-              <div class="card-title">Leadership digest</div>
-              <div class="card-subtitle">Morning-brief style output for owners or managers.</div>
-            </div>
-          </div>
-          <div id="ownerDigestList" class="list-block"></div>
+        <article class="metric-card">
+          <div class="metric-label">Average Rating</div>
+          <div class="metric-value" id="reportAverageRating">0.0</div>
+          <div class="metric-note">Average from captured feedback ratings.</div>
         </article>
       </section>
 
-      <section class="two-column-grid">
-        <article class="card">
-          <div class="card-header">
+      <section class="report-split">
+        <article class="poc-card">
+          <div class="poc-card-header">
             <div>
-              <div class="card-title">Priority alerts</div>
-              <div class="card-subtitle">Customers that need human attention or immediate follow-up.</div>
+              <h3 class="poc-card-title">Call Outcome Summary</h3>
+              <div class="poc-card-subtitle">Simple outcome counts for the demo narrative.</div>
             </div>
           </div>
-          <div id="priorityAlertsList" class="list-block"></div>
+          <div class="poc-mini-grid">
+            <article class="mini-stat">
+              <strong id="outcomeCompleted">0</strong>
+              <span>Completed</span>
+            </article>
+            <article class="mini-stat">
+              <strong id="outcomePending">0</strong>
+              <span>Pending</span>
+            </article>
+            <article class="mini-stat">
+              <strong id="outcomeFailed">0</strong>
+              <span>Failed</span>
+            </article>
+          </div>
         </article>
 
-        <article class="card">
-          <div class="card-header">
+        <article class="poc-card">
+          <div class="poc-card-header">
             <div>
-              <div class="card-title">Business intelligence</div>
-              <div class="card-subtitle">Best slots, objections, and campaign ROI surfaced in plain language.</div>
+              <h3 class="poc-card-title">Feedback Summary</h3>
+              <div class="poc-card-subtitle">Sentiment split from captured feedback records.</div>
             </div>
           </div>
-          <div id="businessIntelList" class="list-block"></div>
+          <div class="poc-mini-grid">
+            <article class="mini-stat">
+              <strong id="feedbackPositive">0</strong>
+              <span>Positive</span>
+            </article>
+            <article class="mini-stat">
+              <strong id="feedbackNeutral">0</strong>
+              <span>Neutral</span>
+            </article>
+            <article class="mini-stat">
+              <strong id="feedbackNegative">0</strong>
+              <span>Negative</span>
+            </article>
+          </div>
         </article>
+      </section>
+
+      <section class="table-card">
+        <div class="poc-card-header">
+          <div>
+            <h3 class="poc-card-title">Recent Reports</h3>
+            <div class="poc-card-subtitle">A small reporting table for the demo walkthrough.</div>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Calls</th>
+                <th>Completed</th>
+                <th>Feedback</th>
+                <th>Success Rate</th>
+              </tr>
+            </thead>
+            <tbody id="reportsTableBody"></tbody>
+          </table>
+        </div>
       </section>
     </main>
   </div>
 
   <script src="/app-shell.js"></script>
   <script>
+    function sentimentFromFeedback(item) {
+      if (Number(item.stars || 0) >= 4) return 'positive';
+      if (Number(item.stars || 0) <= 2) return 'negative';
+      return 'neutral';
+    }
+
+    function isThisWeek(value) {
+      if (!value) return false;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return false;
+      const now = new Date();
+      const day = now.getDay() || 7;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - day + 1);
+      monday.setHours(0, 0, 0, 0);
+      return date >= monday;
+    }
+
+    function isToday(value) {
+      if (!value) return false;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return false;
+      return date.toDateString() === new Date().toDateString();
+    }
+
+    function renderReportsTable({ recentCalls, feedback }) {
+      const rows = [
+        {
+          label: 'Today',
+          calls: recentCalls.filter((item) => isToday(item.called_at)),
+          feedback: feedback.filter((item) => isToday(item.submitted_at))
+        },
+        {
+          label: 'This Week',
+          calls: recentCalls.filter((item) => isThisWeek(item.called_at)),
+          feedback: feedback.filter((item) => isThisWeek(item.submitted_at))
+        },
+        {
+          label: 'POC Snapshot',
+          calls: recentCalls,
+          feedback
+        }
+      ];
+
+      document.getElementById('reportsTableBody').innerHTML = rows.map((row) => {
+        const completed = row.calls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed').length;
+        const successRate = row.calls.length ? `${Math.round((completed / row.calls.length) * 100)}%` : '0%';
+        return `
+          <tr>
+            <td>${row.label}</td>
+            <td>${row.calls.length}</td>
+            <td>${completed}</td>
+            <td>${row.feedback.length}</td>
+            <td>${successRate}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
     async function loadReports() {
-      const [daily, weekly, owner] = await Promise.all([
+      const [preview, recentCalls, feedback] = await Promise.all([
         AppShell.fetchJson(`${AppShell.API_BASE}/reports/preview`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/reports/weekly-preview`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/reports/owner-preview`)
+        AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`),
+        AppShell.fetchJson(`${AppShell.API_BASE}/feedback`)
       ]);
 
-      document.getElementById('reportCallsToday').textContent = daily.total_calls || 0;
-      document.getElementById('reportFeedbackCount').textContent = daily.feedback_count || 0;
-      document.getElementById('reportRevenuePipeline').textContent = AppShell.formatCurrencyInr(owner.roi_snapshot?.revenue_pipeline_estimate || 0);
-      document.getElementById('reportRoiMultiple').textContent = `${Number(owner.roi_snapshot?.roi_multiple || 0).toFixed(1)}x`;
+      const completedCalls = recentCalls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
+      const failedCalls = recentCalls.filter((call) => ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase()));
+      const positive = feedback.filter((item) => sentimentFromFeedback(item) === 'positive').length;
+      const neutral = feedback.filter((item) => sentimentFromFeedback(item) === 'neutral').length;
+      const negative = feedback.filter((item) => sentimentFromFeedback(item) === 'negative').length;
+      const averageRating = feedback.length
+        ? (feedback.reduce((sum, item) => sum + Number(item.stars || 0), 0) / feedback.length).toFixed(1)
+        : '0.0';
 
-      document.getElementById('dailyReportList').innerHTML = `
-        <div class="list-item"><strong>Daily summary</strong><span class="muted">${AppShell.escapeHtml(daily.summary_text || 'Daily summary unavailable.')}</span></div>
-        <div class="list-item"><strong>Consent given</strong><span class="muted">${daily.consent_given || 0} customers moved forward with consent-based flow.</span></div>
-        <div class="list-item"><strong>WhatsApp follow-ups</strong><span class="muted">${daily.whatsapp_sent || 0} WhatsApp follow-ups were sent today.</span></div>
-      `;
+      document.getElementById('reportTotalCalls').textContent = recentCalls.length || preview.total_calls || 0;
+      document.getElementById('reportCompletedCalls').textContent = completedCalls.length;
+      document.getElementById('reportFailedCalls').textContent = failedCalls.length;
+      document.getElementById('reportAverageRating').textContent = averageRating;
 
-      document.getElementById('weeklyReportList').innerHTML = `
-        <div class="list-item"><strong>Weekly summary</strong><span class="muted">${AppShell.escapeHtml(weekly.summary_text || 'Weekly summary unavailable.')}</span></div>
-        <div class="list-item"><strong>Top insights</strong><span class="muted">${AppShell.escapeHtml((weekly.top_insights || []).join(' | ') || 'No top insights yet.')}</span></div>
-        <div class="list-item"><strong>Hot leads and pending items</strong><span class="muted">Hot leads: ${AppShell.escapeHtml((weekly.hot_lead_names || []).join(', ') || 'None')} | Pending: ${AppShell.escapeHtml((weekly.pending_summary || []).join(' | ') || 'None')}</span></div>
-      `;
+      document.getElementById('outcomeCompleted').textContent = completedCalls.length;
+      document.getElementById('outcomePending').textContent = Math.max(0, (preview.total_calls || 0) - completedCalls.length - failedCalls.length);
+      document.getElementById('outcomeFailed').textContent = failedCalls.length;
 
-      document.getElementById('ownerDigestList').innerHTML = `
-        <div class="list-item"><strong>Digest text</strong><span class="muted">${AppShell.escapeHtml(owner.digest_text || 'Owner digest unavailable.')}</span></div>
-        <div class="list-item"><strong>Yesterday snapshot</strong><span class="muted">Calls: ${owner.yesterday_snapshot?.calls || 0} | Hot leads: ${owner.yesterday_snapshot?.hot_leads || 0} | Complaints: ${owner.yesterday_snapshot?.complaints || 0}</span></div>
-        <div class="list-item"><strong>Cost and savings</strong><span class="muted">AI ops: ${AppShell.formatCurrencyInr(owner.roi_snapshot?.ai_ops_cost_estimate || 0)} | Saving vs staff: ${AppShell.formatCurrencyInr(owner.roi_snapshot?.estimated_saving_vs_staff || 0)}</span></div>
-      `;
+      document.getElementById('feedbackPositive').textContent = positive;
+      document.getElementById('feedbackNeutral').textContent = neutral;
+      document.getElementById('feedbackNegative').textContent = negative;
 
-      const alerts = owner.alerts || [];
-      document.getElementById('priorityAlertsList').innerHTML = alerts.length
-        ? alerts.map((alert) => `
-            <div class="list-item">
-              <strong>${AppShell.escapeHtml(alert.customer_name || 'Customer')}</strong>
-              <span class="muted">${AppShell.escapeHtml(alert.headline || '--')}</span>
-              <div class="supporting-text">${AppShell.escapeHtml(alert.summary || '')}</div>
-            </div>
-          `).join('')
-        : `
-          <div class="empty-state">
-            <div class="empty-icon">AL</div>
-            <strong>No priority alerts right now</strong>
-            <div class="supporting-text">Risk alerts and hot lead escalations will appear here.</div>
-          </div>
-        `;
-
-      document.getElementById('businessIntelList').innerHTML = `
-        <div class="list-item"><strong>Best call slots</strong><span class="muted">${AppShell.escapeHtml((owner.best_slots || []).join(' | ') || 'Not enough history yet.')}</span></div>
-        <div class="list-item"><strong>Best scripts</strong><span class="muted">${AppShell.escapeHtml((owner.best_scripts || []).join(' | ') || 'No script comparison available yet.')}</span></div>
-        <div class="list-item"><strong>Common objections</strong><span class="muted">${AppShell.escapeHtml((owner.common_objections || []).map((item) => `${item.label} (${item.count})`).join(' | ') || 'No recurring objections detected.')}</span></div>
-      `;
+      renderReportsTable({ recentCalls, feedback });
     }
 
-    async function generateDailyReport() {
-      const result = await AppShell.fetchJson(`${AppShell.API_BASE}/reports/generate`, { method: 'POST' });
-      AppShell.showAlert(result.message || 'Daily report generated successfully');
+    function exportReport() {
       window.location.href = `${AppShell.API_BASE}/reports/download?t=${Date.now()}`;
-    }
-
-    async function generateWeeklyReport() {
-      const result = await AppShell.fetchJson(`${AppShell.API_BASE}/reports/weekly-generate`, { method: 'POST' });
-      AppShell.showAlert(result.message || 'Weekly report generated successfully');
-      window.location.href = `${AppShell.API_BASE}/reports/weekly-download?t=${Date.now()}`;
-    }
-
-    async function sendOwnerDigest() {
-      const result = await AppShell.fetchJson(`${AppShell.API_BASE}/reports/owner-digest/send`, { method: 'POST' });
-      AppShell.showAlert(result.success ? 'Owner digest sent successfully' : 'Owner digest could not be sent', result.success ? 'success' : 'error');
     }
 
     document.addEventListener('DOMContentLoaded', async () => {
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
-      document.getElementById('generateDailyButton').addEventListener('click', generateDailyReport);
-      document.getElementById('generateWeeklyButton').addEventListener('click', generateWeeklyReport);
-      document.getElementById('sendDigestButton').addEventListener('click', sendOwnerDigest);
+      document.getElementById('exportReportButton').addEventListener('click', exportReport);
       try {
         await loadReports();
       } catch (error) {
