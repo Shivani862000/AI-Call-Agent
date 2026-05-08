@@ -1240,17 +1240,42 @@ function shouldAutoHangupAfterAgentTurn(text) {
 
   return [
     /(^|\b)(goodbye|bye|alvida)(\b|$)/i,
+    /(^|\b)(namaste|dhanyavaad|shukriya)(\b|$)/i,
     /apna dhyaan rakh/i,
+    /din shubh ho/i,
+    /aapka samay dene ke liye/i,
+    /aapke feedback ke liye dhanyavaad/i,
+    /aapka feedback bahut/i,
     /aapne jo feedback diya uske liye/i,
     /bahut (bahut )?dhanyawa?d/i,
-    /hum (aapko|apko) (ek )?whatsapp message bhejenge/i,
+    /hum (aapko|apko) (ek )?whatsapp (par )?(message|link) bhejenge/i,
+    /google form ka link/i,
     /have a great day/i
   ].some((pattern) => pattern.test(normalized));
 }
 
 function estimateHangupDelayMs(text) {
-  const length = String(text || '').trim().length;
-  return Math.min(10000, Math.max(4500, 2500 + (length * 35)));
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!normalized) {
+    return 4500;
+  }
+
+  const strongClosingPatterns = [
+    /google form/i,
+    /whatsapp/i,
+    /din shubh ho/i,
+    /goodbye/i,
+    /namaste/i,
+    /aapka samay dene ke liye/i,
+    /aapke feedback ke liye dhanyavaad/i
+  ];
+
+  if (strongClosingPatterns.some((pattern) => pattern.test(normalized))) {
+    return 1800;
+  }
+
+  const length = normalized.length;
+  return Math.min(7000, Math.max(2800, 1800 + (length * 24)));
 }
 
 function buildTranscriptPreviewText(text, maxLines = 4) {
@@ -1556,6 +1581,30 @@ function printTranscript(transcript) {
   });
 
   console.log('════════════════════════════════════\n');
+}
+
+function isCustomerHangupIntent(text) {
+  const normalized = String(text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) {
+    return false;
+  }
+
+  const patterns = [
+    /\b(phone|call)\s+(kaat\s+do|kat\s+do|cut\s+do|band\s+karo|disconnect\s+karo|rakh\s+do)\b/i,
+    /\b(kat|cut|disconnect|hang\s*up|band)\s+(the\s+)?(call|phone)\b/i,
+    /\b(call|phone)\s+(band|close|disconnect|hangup)\s+(kar\s+do|karo)\b/i,
+    /\bmain\s+(call|phone)\s+(rakh\s+raha|rakh\s+rahi)\s+(hoon|hu)\b/i,
+    /\bbaad\s+mein\s+baat\s+karte\s+hai?n?\b/i,
+    /\bnot\s+interested\b/i,
+    /\bcall\s+mat\s+karo\b/i
+  ];
+
+  return patterns.some((pattern) => pattern.test(normalized));
 }
 
 function pushTranscriptTurn(transcript, role, text) {
@@ -2565,6 +2614,29 @@ function setupOrchestratedStream(twilioWs, req) {
     }, delayMs);
   }
 
+  function closeLegacyCallForCustomerRequest(text) {
+    if (!isCustomerHangupIntent(text) || callClosed) {
+      return false;
+    }
+
+    callClosed = true;
+    clearAutoHangupTimer();
+    clearGeminiOpeningPromptRetry();
+    console.log(`[HANGUP REQUEST] Customer asked to end the legacy call: "${text}"`);
+    refreshLiveCallState({ status: 'completed' }).catch(() => {});
+    printTranscriptOnce();
+    persistTranscriptOnce().catch((error) => {
+      console.error('[FEEDBACK SAVE ERROR]', error.message);
+    });
+    if (aiWs?.readyState === WebSocket.OPEN) {
+      aiWs.close();
+    }
+    if (twilioWs.readyState === WebSocket.OPEN) {
+      twilioWs.close();
+    }
+    return true;
+  }
+
   function sendAudioToCaller(base64Payload) {
     if (!streamSid || !base64Payload || callClosed || twilioWs.readyState !== WebSocket.OPEN) {
       return;
@@ -2765,6 +2837,18 @@ function setupOrchestratedStream(twilioWs, req) {
     pushTranscriptTurn(transcript, 'CUSTOMER', normalized);
     console.log(`[CUSTOMER]: ${normalized}`);
     evaluateAndStoreSentiment(normalized).catch(() => {});
+    if (isCustomerHangupIntent(normalized)) {
+      console.log(`[HANGUP REQUEST] Customer asked to end the orchestrated call: "${normalized}"`);
+      clearCallerPlaybackBuffer();
+      closeCallSession('completed').catch((error) => {
+        console.error('[HANGUP REQUEST ERROR]', error.message);
+      }).finally(() => {
+        if (twilioWs.readyState === WebSocket.OPEN) {
+          twilioWs.close();
+        }
+      });
+      return;
+    }
     queueAssistantTurn(normalized).catch((error) => {
       console.error('[ASSISTANT TURN ERROR]', error.message);
     });
@@ -3188,6 +3272,29 @@ wss.on('connection', (twilioWs, req) => {
     }, delayMs);
   }
 
+  function closeLegacyCallForCustomerRequest(text) {
+    if (!isCustomerHangupIntent(text) || callClosed) {
+      return false;
+    }
+
+    callClosed = true;
+    clearAutoHangupTimer();
+    clearGeminiOpeningPromptRetry();
+    console.log(`[HANGUP REQUEST] Customer asked to end the legacy call: "${text}"`);
+    refreshLiveCallState({ status: 'completed' }).catch(() => {});
+    printTranscriptOnce();
+    persistTranscriptOnce().catch((error) => {
+      console.error('[FEEDBACK SAVE ERROR]', error.message);
+    });
+    if (aiWs?.readyState === WebSocket.OPEN) {
+      aiWs.close();
+    }
+    if (twilioWs.readyState === WebSocket.OPEN) {
+      twilioWs.close();
+    }
+    return true;
+  }
+
   function sendAudioToCaller(base64Payload) {
     if (!streamSid || !base64Payload) {
       return;
@@ -3411,6 +3518,9 @@ wss.on('connection', (twilioWs, req) => {
           clearAutoHangupTimer();
           pushTranscriptTurn(transcript, 'CUSTOMER', message.serverContent.inputTranscription.text);
           console.log(`[CUSTOMER]: ${message.serverContent.inputTranscription.text}`);
+          if (closeLegacyCallForCustomerRequest(message.serverContent.inputTranscription.text)) {
+            return;
+          }
           const sentiment = evaluateLiveSentimentLabel(message.serverContent.inputTranscription.text);
           const redFlag = sentiment.label === 'negative';
           refreshLiveCallState({
@@ -3502,6 +3612,9 @@ wss.on('connection', (twilioWs, req) => {
         clearAutoHangupTimer();
         pushTranscriptTurn(transcript, 'CUSTOMER', message.transcript);
         console.log(`[CUSTOMER]: ${message.transcript}`);
+        if (closeLegacyCallForCustomerRequest(message.transcript)) {
+          return;
+        }
         const sentiment = evaluateLiveSentimentLabel(message.transcript);
         const redFlag = sentiment.label === 'negative';
         refreshLiveCallState({

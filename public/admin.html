@@ -171,8 +171,10 @@
         <div>
           <h3 id="overviewNewCallTitle" class="poc-card-title">Schedule New Call</h3>
         </div>
-        <button id="closeOverviewNewCallModal" class="secondary modal-close modal-close-icon" type="button" aria-label="Close schedule call modal">&times;</button>
+        <button id="closeOverviewNewCallModal" class="secondary modal-close" type="button">Close</button>
       </div>
+
+      <input id="overviewEditingCustomerId" type="hidden">
 
       <div class="poc-form-grid">
         <label class="span-2">
@@ -193,7 +195,7 @@
       </div>
 
       <details id="overviewCareDetailsToggle" class="details-toggle">
-        <summary>+ Additional Details</summary>
+        <summary>Additional Care Details</summary>
         <div class="details-content">
           <div class="poc-form-grid">
             <label>
@@ -215,8 +217,7 @@
         </div>
       </details>
 
-      <div class="button-row overview-modal-actions">
-        <button id="cancelOverviewNewCall" class="secondary" type="button">Cancel</button>
+      <div class="button-row" style="margin-top: 18px;">
         <button id="submitOverviewNewCall" class="primary" type="button">Schedule Call</button>
       </div>
     </div>
@@ -319,6 +320,7 @@
     }
 
     function resetOverviewNewCallForm() {
+      document.getElementById('overviewEditingCustomerId').value = '';
       document.getElementById('overviewCallCustomerName').value = '';
       document.getElementById('overviewCallCustomerPhone').value = '';
       document.getElementById('overviewCallCustomerTime').value = '';
@@ -493,7 +495,6 @@
       document.getElementById('closeOverviewMobileMenuSheet').addEventListener('click', () => closeOverviewSheet('overviewMobileMenuSheet'));
       document.getElementById('overviewMobileMenuLogout').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('closeOverviewNewCallModal').addEventListener('click', closeOverviewNewCallModal);
-      document.getElementById('cancelOverviewNewCall').addEventListener('click', closeOverviewNewCallModal);
       document.getElementById('submitOverviewNewCall').addEventListener('click', submitOverviewNewCall);
       document.getElementById('overviewCallCustomerPhone').addEventListener('input', (event) => {
         event.target.value = formatPhoneForInput(event.target.value);
