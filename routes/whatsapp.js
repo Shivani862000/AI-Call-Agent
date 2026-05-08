@@ -20,10 +20,9 @@ router.post('/send/:callId', async (req, res) => {
     }
 
     // Build WhatsApp message
-    const message = `Hi ${customer.name}! Thank you for speaking with us. 
-We'd love your feedback — it takes less than a minute. 
-Please leave us a Google review here: ${process.env.GOOGLE_REVIEW_LINK}
-Thank you!`;
+    const message = `Namaste ${customer.name}! Aapse baat karne ke liye dhanyavaad.
+Kripya WhatsApp par yeh Google Form fill karke apna feedback share kar dijiye: ${process.env.GOOGLE_REVIEW_LINK}
+Dhanyavaad!`;
 
     // Send via Exotel
     const result = await sendWhatsAppMessage(customer.phone, message);

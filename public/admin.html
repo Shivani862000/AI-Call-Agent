@@ -28,18 +28,49 @@
     </aside>
 
     <main class="main-panel">
-      <header class="page-header">
+      <section class="mobile-ops-header mobile-only">
+        <div class="mobile-ops-bar">
+          <div>
+            <div class="mobile-ops-title">Operations Overview</div>
+            <div class="mobile-ops-subtitle">Lightweight AI follow-up control center.</div>
+          </div>
+          <div class="mobile-ops-actions">
+            <button id="mobileOverviewMenuButton" class="mobile-icon-button" type="button" aria-label="Open menu">...</button>
+          </div>
+        </div>
+      </section>
+
+      <header class="page-header desktop-page-header">
         <div class="page-title-wrap">
           <h2>Operations Overview</h2>
           <div class="page-subtitle">Today's AI calling activity and follow-up status.</div>
         </div>
         <div class="header-actions">
-          <a href="/customers.html" class="primary button-link">Schedule New Call</a>
+          <button id="desktopOverviewNewCallButton" class="primary" type="button">Schedule New Call</button>
           <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
       </header>
 
       <div id="alertContainer" class="alert-stack"></div>
+
+      <section class="mobile-stat-strip mobile-only" aria-label="Overview stats">
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileMetricCustomers">0</span>
+          <span class="mobile-stat-label">Customers</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileMetricScheduled">0</span>
+          <span class="mobile-stat-label">Scheduled</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileMetricCompleted">0</span>
+          <span class="mobile-stat-label">Completed</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileMetricFeedback">0</span>
+          <span class="mobile-stat-label">Feedback</span>
+        </div>
+      </section>
 
       <section class="poc-metrics-grid">
         <article class="metric-card">
@@ -64,6 +95,26 @@
         </article>
       </section>
 
+      <section class="mobile-overview-stack mobile-only">
+        <article class="poc-card mobile-overview-card mobile-overview-card--summary">
+          <div class="poc-card-header compact-overview-header">
+            <div>
+              <h3 class="poc-card-title">Today's Activity</h3>
+            </div>
+          </div>
+          <div id="mobileTodayActivityList" class="mobile-activity-list"></div>
+        </article>
+
+        <article class="poc-card mobile-overview-card">
+          <div class="poc-card-header compact-overview-header">
+            <div>
+              <h3 class="poc-card-title">Recent Calls</h3>
+            </div>
+          </div>
+          <div id="mobileRecentCallActivity" class="mobile-recent-call-list"></div>
+        </article>
+      </section>
+
       <section class="poc-grid-2">
         <article class="poc-card">
           <div class="poc-card-header">
@@ -84,7 +135,7 @@
               </div>
             </div>
             <div class="quick-action-grid">
-              <a href="/customers.html" class="primary button-link">Schedule New Call</a>
+              <button id="desktopQuickNewCallButton" class="primary" type="button">Schedule New Call</button>
               <a href="/customers.html#queueSection" class="secondary button-link">View Queue</a>
               <a href="/feedback.html" class="secondary button-link">Open Feedback</a>
             </div>
@@ -104,14 +155,249 @@
     </main>
   </div>
 
+  <button id="mobileOverviewFloatingCta" class="mobile-floating-cta mobile-only" type="button">New Call</button>
+
+  <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
+    <a href="/admin.html" class="mobile-dock-link active">Overview</a>
+    <a href="/customers.html" class="mobile-dock-link">Customers</a>
+    <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
+    <a href="/reports.html" class="mobile-dock-link">Reports</a>
+  </nav>
+
+  <div id="overviewNewCallModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-panel modal-panel--narrow" role="dialog" aria-modal="true" aria-labelledby="overviewNewCallTitle">
+      <div class="mobile-sheet-handle mobile-only"></div>
+      <div class="poc-card-header modal-sheet-header">
+        <div>
+          <h3 id="overviewNewCallTitle" class="poc-card-title">Schedule New Call</h3>
+        </div>
+        <button id="closeOverviewNewCallModal" class="secondary modal-close modal-close-icon" type="button" aria-label="Close schedule call modal">&times;</button>
+      </div>
+
+      <div class="poc-form-grid">
+        <label class="span-2">
+          Customer Name
+          <input id="overviewCallCustomerName" type="text" maxlength="100" placeholder="e.g. Rahul Sharma">
+          <span class="error-text" id="overviewCallCustomerNameError"></span>
+        </label>
+        <label>
+          Phone Number
+          <input id="overviewCallCustomerPhone" type="tel" placeholder="+91 98765 43210">
+          <span class="error-text" id="overviewCallCustomerPhoneError"></span>
+        </label>
+        <label>
+          Call Time
+          <input id="overviewCallCustomerTime" type="time">
+          <span class="error-text" id="overviewCallCustomerTimeError"></span>
+        </label>
+      </div>
+
+      <details id="overviewCareDetailsToggle" class="details-toggle">
+        <summary>+ Additional Details</summary>
+        <div class="details-content">
+          <div class="poc-form-grid">
+            <label>
+              DOB
+              <input id="overviewCareDob" type="date">
+              <span class="error-text" id="overviewCareDobError"></span>
+            </label>
+            <label>
+              Last Visit
+              <input id="overviewCareLastVisit" type="date">
+              <span class="error-text" id="overviewCareLastVisitError"></span>
+            </label>
+            <label class="span-2">
+              Treatment Type
+              <input id="overviewCareTreatment" type="text" placeholder="e.g. Blood test">
+              <span class="error-text" id="overviewCareTreatmentError"></span>
+            </label>
+          </div>
+        </div>
+      </details>
+
+      <div class="button-row overview-modal-actions">
+        <button id="cancelOverviewNewCall" class="secondary" type="button">Cancel</button>
+        <button id="submitOverviewNewCall" class="primary" type="button">Schedule Call</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="overviewMobileMenuSheet" class="modal-backdrop mobile-sheet-backdrop" aria-hidden="true">
+    <div class="modal-panel mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="overviewMobileMenuTitle">
+      <div class="mobile-sheet-handle"></div>
+      <div class="mobile-sheet-title-row">
+        <h3 id="overviewMobileMenuTitle" class="poc-card-title">Menu</h3>
+        <button id="closeOverviewMobileMenuSheet" class="secondary modal-close modal-close-icon" type="button" aria-label="Close menu">&times;</button>
+      </div>
+      <div class="mobile-sheet-actions">
+        <button id="overviewMobileMenuLogout" class="mobile-sheet-action" type="button">Logout</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/app-shell.js"></script>
   <script>
+    let clientCache = [];
+
     function isToday(value) {
       if (!value) return false;
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return false;
       const now = new Date();
       return date.toDateString() === now.toDateString();
+    }
+
+    function normalizePhoneForApi(value) {
+      const digits = String(value || '').replace(/\D/g, '');
+      if (!digits) return '';
+      if (digits.length === 10) return `+91${digits}`;
+      if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
+      if (digits.length > 12) return `+${digits.slice(-12)}`;
+      return `+${digits}`;
+    }
+
+    function formatPhoneForInput(value) {
+      const digits = String(value || '').replace(/\D/g, '').slice(-12);
+      const national = digits.startsWith('91') ? digits.slice(2) : digits;
+      if (national.length <= 5) return national ? `+91 ${national}` : '';
+      return `+91 ${national.slice(0, 5)} ${national.slice(5, 10)}`.trim();
+    }
+
+    function getClientByPhone(phone) {
+      const normalized = normalizePhoneForApi(phone);
+      return clientCache.find((client) => normalizePhoneForApi(client.phone) === normalized) || null;
+    }
+
+    function clearOverviewFormErrors() {
+      AppShell.clearFieldErrors([
+        'overviewCallCustomerName',
+        'overviewCallCustomerPhone',
+        'overviewCallCustomerTime',
+        'overviewCareDob',
+        'overviewCareLastVisit',
+        'overviewCareTreatment'
+      ]);
+    }
+
+    function getOverviewNewCallPayload() {
+      return {
+        name: document.getElementById('overviewCallCustomerName').value.trim(),
+        phone: normalizePhoneForApi(document.getElementById('overviewCallCustomerPhone').value),
+        preferred_slot: document.getElementById('overviewCallCustomerTime').value.trim()
+      };
+    }
+
+    function getOverviewCarePayload(customerPayload) {
+      return {
+        name: customerPayload.name,
+        phone: customerPayload.phone,
+        date_of_birth: document.getElementById('overviewCareDob').value || '',
+        last_visit_date: document.getElementById('overviewCareLastVisit').value || '',
+        treatment_type: document.getElementById('overviewCareTreatment').value.trim(),
+        annual_reminder_enabled: 1,
+        annual_reminder_slot: customerPayload.preferred_slot || '10:00',
+        notes: '',
+        status: 'active'
+      };
+    }
+
+    function validateOverviewNewCall(payload) {
+      const fieldErrors = {};
+      if (!payload.name || payload.name.length < 2) fieldErrors.overviewCallCustomerName = 'Customer name is required';
+      if (!/^\+\d{12}$/.test(payload.phone)) fieldErrors.overviewCallCustomerPhone = 'Use a valid Indian mobile number';
+      if (!payload.preferred_slot) fieldErrors.overviewCallCustomerTime = 'Call time is required';
+      return fieldErrors;
+    }
+
+    function validateOverviewCareDetails(payload) {
+      const hasAny = payload.date_of_birth || payload.last_visit_date || payload.treatment_type;
+      if (!hasAny) return {};
+      const fieldErrors = {};
+      if (!payload.last_visit_date) fieldErrors.overviewCareLastVisit = 'Last visit is required when adding care details';
+      if (!payload.treatment_type) fieldErrors.overviewCareTreatment = 'Treatment type is required when adding care details';
+      return fieldErrors;
+    }
+
+    function resetOverviewNewCallForm() {
+      document.getElementById('overviewCallCustomerName').value = '';
+      document.getElementById('overviewCallCustomerPhone').value = '';
+      document.getElementById('overviewCallCustomerTime').value = '';
+      document.getElementById('overviewCareDob').value = '';
+      document.getElementById('overviewCareLastVisit').value = '';
+      document.getElementById('overviewCareTreatment').value = '';
+      document.getElementById('overviewCareDetailsToggle').open = false;
+      clearOverviewFormErrors();
+    }
+
+    function openOverviewNewCallModal() {
+      resetOverviewNewCallForm();
+      document.getElementById('overviewNewCallModal').classList.add('open');
+      document.getElementById('overviewNewCallModal').setAttribute('aria-hidden', 'false');
+      window.requestAnimationFrame(() => document.getElementById('overviewCallCustomerName').focus());
+    }
+
+    function closeOverviewNewCallModal() {
+      document.getElementById('overviewNewCallModal').classList.remove('open');
+      document.getElementById('overviewNewCallModal').setAttribute('aria-hidden', 'true');
+    }
+
+    async function saveOverviewClientRecord(payload) {
+      const existingClient = getClientByPhone(payload.phone);
+      const endpoint = existingClient ? `${AppShell.API_BASE}/clients/${existingClient.id}` : `${AppShell.API_BASE}/clients`;
+      const method = existingClient ? 'PUT' : 'POST';
+      await AppShell.fetchJson(endpoint, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }
+
+    async function submitOverviewNewCall() {
+      clearOverviewFormErrors();
+      const payload = getOverviewNewCallPayload();
+      const carePayload = getOverviewCarePayload(payload);
+      const fieldErrors = {
+        ...validateOverviewNewCall(payload),
+        ...validateOverviewCareDetails(carePayload)
+      };
+
+      if (Object.keys(fieldErrors).length) {
+        AppShell.applyFieldErrors(fieldErrors);
+        AppShell.showAlert('Please fix the highlighted fields', 'error');
+        return;
+      }
+
+      try {
+        await AppShell.fetchJson(`${AppShell.API_BASE}/customers`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (carePayload.last_visit_date || carePayload.treatment_type || carePayload.date_of_birth) {
+          await saveOverviewClientRecord(carePayload);
+        }
+
+        AppShell.showAlert('Call scheduled successfully');
+        closeOverviewNewCallModal();
+        await loadOverview();
+      } catch (error) {
+        AppShell.showAlert(error.message, 'error');
+      }
+    }
+
+    function openOverviewSheet(id) {
+      const element = document.getElementById(id);
+      if (!element) return;
+      element.classList.add('open');
+      element.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeOverviewSheet(id) {
+      const element = document.getElementById(id);
+      if (!element) return;
+      element.classList.remove('open');
+      element.setAttribute('aria-hidden', 'true');
     }
 
     function renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls }) {
@@ -121,18 +407,28 @@
         <div class="compact-row"><div><strong>Pending calls</strong><div class="muted">Customers still waiting for first dial or retry.</div></div><strong>${pendingCalls}</strong></div>
         <div class="compact-row"><div><strong>Failed calls</strong><div class="muted">Busy, no-answer, or failed outcomes needing attention.</div></div><strong>${failedCalls}</strong></div>
       `;
+
+      document.getElementById('mobileTodayActivityList').innerHTML = `
+        <div class="mobile-activity-row"><span>Scheduled</span><strong>${scheduledToday}</strong></div>
+        <div class="mobile-activity-row"><span>Completed</span><strong>${completedToday}</strong></div>
+        <div class="mobile-activity-row"><span>Pending</span><strong>${pendingCalls}</strong></div>
+        <div class="mobile-activity-row"><span>Failed</span><strong>${failedCalls}</strong></div>
+      `;
     }
 
     function renderRecentCalls(calls) {
       const container = document.getElementById('recentCallActivity');
+      const mobileContainer = document.getElementById('mobileRecentCallActivity');
       const recent = calls.slice(0, 3);
       if (!recent.length) {
-        container.innerHTML = `
+        const emptyMarkup = `
           <div class="empty-state">
             <strong>No recent calls yet</strong>
             <div class="supporting-text">Scheduled calls will appear here once the team starts the demo flow.</div>
           </div>
         `;
+        container.innerHTML = emptyMarkup;
+        mobileContainer.innerHTML = emptyMarkup;
         return;
       }
 
@@ -145,14 +441,26 @@
           <span class="status-badge ${AppShell.escapeHtml(String(call.outcome || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || 'pending')}</span>
         </div>
       `).join('');
+
+      mobileContainer.innerHTML = recent.map((call) => `
+        <article class="mobile-recent-call-card">
+          <div>
+            <strong>${AppShell.escapeHtml(call.customer_name || 'Customer')}</strong>
+            <div class="mobile-subtext">${AppShell.formatDateTime(call.called_at)}</div>
+          </div>
+          <span class="status-badge ${AppShell.escapeHtml(String(call.outcome || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || 'pending')}</span>
+        </article>
+      `).join('');
     }
 
     async function loadOverview() {
-      const [customers, feedback, recentCalls] = await Promise.all([
+      const [customers, feedback, recentCalls, clients] = await Promise.all([
         AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
         AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
+        AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`),
+        AppShell.fetchJson(`${AppShell.API_BASE}/clients`)
       ]);
+      clientCache = clients;
 
       const scheduledStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
       const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
@@ -166,6 +474,10 @@
       document.getElementById('metricScheduled').textContent = pendingCalls;
       document.getElementById('metricCompleted').textContent = completedCalls.length;
       document.getElementById('metricFeedback').textContent = feedback.length;
+      document.getElementById('mobileMetricCustomers').textContent = customers.length;
+      document.getElementById('mobileMetricScheduled').textContent = pendingCalls;
+      document.getElementById('mobileMetricCompleted').textContent = completedCalls.length;
+      document.getElementById('mobileMetricFeedback').textContent = feedback.length;
 
       renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls });
       renderRecentCalls(recentCalls);
@@ -174,6 +486,33 @@
     document.addEventListener('DOMContentLoaded', async () => {
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
+      document.getElementById('desktopOverviewNewCallButton').addEventListener('click', openOverviewNewCallModal);
+      document.getElementById('desktopQuickNewCallButton').addEventListener('click', openOverviewNewCallModal);
+      document.getElementById('mobileOverviewFloatingCta').addEventListener('click', openOverviewNewCallModal);
+      document.getElementById('mobileOverviewMenuButton').addEventListener('click', () => openOverviewSheet('overviewMobileMenuSheet'));
+      document.getElementById('closeOverviewMobileMenuSheet').addEventListener('click', () => closeOverviewSheet('overviewMobileMenuSheet'));
+      document.getElementById('overviewMobileMenuLogout').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
+      document.getElementById('closeOverviewNewCallModal').addEventListener('click', closeOverviewNewCallModal);
+      document.getElementById('cancelOverviewNewCall').addEventListener('click', closeOverviewNewCallModal);
+      document.getElementById('submitOverviewNewCall').addEventListener('click', submitOverviewNewCall);
+      document.getElementById('overviewCallCustomerPhone').addEventListener('input', (event) => {
+        event.target.value = formatPhoneForInput(event.target.value);
+      });
+      document.getElementById('overviewNewCallModal').addEventListener('click', (event) => {
+        if (event.target.id === 'overviewNewCallModal') closeOverviewNewCallModal();
+      });
+      document.getElementById('overviewMobileMenuSheet').addEventListener('click', (event) => {
+        if (event.target.id === 'overviewMobileMenuSheet') closeOverviewSheet('overviewMobileMenuSheet');
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        if (document.getElementById('overviewNewCallModal').classList.contains('open')) {
+          closeOverviewNewCallModal();
+        }
+        if (document.getElementById('overviewMobileMenuSheet').classList.contains('open')) {
+          closeOverviewSheet('overviewMobileMenuSheet');
+        }
+      });
       try {
         await loadOverview();
       } catch (error) {

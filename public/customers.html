@@ -28,19 +28,46 @@
     </aside>
 
     <main class="main-panel">
-      <header class="page-header">
+      <section class="mobile-ops-header mobile-only">
+        <div class="mobile-ops-bar">
+          <div class="mobile-ops-title">Outbound Calls</div>
+          <div class="mobile-ops-actions">
+            <button id="mobileHeaderMenuButton" class="mobile-icon-button" type="button" aria-label="Open menu">...</button>
+          </div>
+        </div>
+      </section>
+
+      <header class="page-header desktop-page-header">
         <div class="page-title-wrap">
           <h2>Outbound Calls</h2>
           <div class="page-subtitle">Schedule and manage AI follow-up calls.</div>
         </div>
         <div class="header-actions">
           <button id="newCallButton" class="primary" type="button">New Call</button>
-          <a href="#queueSection" class="secondary button-link desktop-action">Queue</a>
           <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
       </header>
 
       <div id="alertContainer" class="alert-stack"></div>
+
+      <section class="mobile-stat-strip mobile-only" aria-label="Call stats">
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileScheduledMetric">0</span>
+          <span class="mobile-stat-label">Scheduled</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobilePendingMetric">0</span>
+          <span class="mobile-stat-label">Pending</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileCompletedMetric">0</span>
+          <span class="mobile-stat-label">Completed</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileFailedMetric">0</span>
+          <span class="mobile-stat-label">Failed</span>
+        </div>
+      </section>
 
       <section class="poc-metrics-grid">
         <article class="metric-card">
@@ -74,8 +101,8 @@
         </div>
 
         <div class="search-row">
-          <input id="customerSearch" class="search-input" type="search" placeholder="Search customer or phone">
-          <select id="statusFilter" class="table-filter">
+          <input id="customerSearch" class="search-input mobile-only" type="search" placeholder="Search customer or phone">
+          <select id="statusFilter" class="table-filter desktop-only">
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
             <option value="called">Called</option>
@@ -84,6 +111,7 @@
             <option value="failed">Failed</option>
             <option value="retry_scheduled">Retry scheduled</option>
           </select>
+          <button id="mobileFilterButton" class="mobile-filter-button mobile-only" type="button" aria-label="Open filters">Filter</button>
         </div>
 
         <div class="table-wrap desktop-only">
@@ -106,14 +134,21 @@
     </main>
   </div>
 
-  <button id="mobileNewCallFab" class="poc-fab" type="button">New Call</button>
+  <button id="mobileFloatingNewCallButton" class="mobile-floating-cta mobile-only" type="button">New Call</button>
+
+  <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
+    <a href="/admin.html" class="mobile-dock-link">Overview</a>
+    <a href="/customers.html" class="mobile-dock-link active">Customers</a>
+    <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
+    <a href="/reports.html" class="mobile-dock-link">Reports</a>
+  </nav>
 
   <div id="newCallModal" class="modal-backdrop" aria-hidden="true">
     <div class="modal-panel modal-panel--narrow" role="dialog" aria-modal="true" aria-labelledby="newCallModalTitle">
-      <div class="poc-card-header">
+      <div class="mobile-sheet-handle mobile-only"></div>
+      <div class="poc-card-header modal-sheet-header">
         <div>
           <h3 id="newCallModalTitle" class="poc-card-title">Schedule New Call</h3>
-          <div class="poc-card-subtitle">Capture the essentials for the demo follow-up call.</div>
         </div>
         <button id="closeNewCallModal" class="secondary modal-close" type="button">Close</button>
       </div>
@@ -169,6 +204,7 @@
 
   <div id="analysisModal" class="modal-backdrop" aria-hidden="true">
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle">
+      <div class="mobile-sheet-handle mobile-only"></div>
       <div class="poc-card-header">
         <div>
           <h3 id="analysisModalTitle" class="poc-card-title">Call Analysis</h3>
@@ -192,7 +228,7 @@
         </article>
       </section>
 
-      <section class="poc-card" style="margin-bottom: 14px;">
+      <section  style="margin-bottom: 14px;">
         <h4 class="poc-card-title" style="font-size:16px;">Recording</h4>
         <div id="analysisRecordingWrap" class="poc-card-subtitle" style="margin-top:10px;">Recording not available yet.</div>
       </section>
@@ -214,11 +250,56 @@
     </div>
   </div>
 
+  <div id="mobileMenuSheet" class="modal-backdrop mobile-sheet-backdrop" aria-hidden="true">
+    <div class="modal-panel mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="mobileMenuTitle">
+      <div class="mobile-sheet-handle"></div>
+      <div class="mobile-sheet-title-row">
+        <button id="mobileMenuLogoutAction" class="mobile-sheet-action" type="button">Logout</button>
+        <button id="closeMobileMenuSheet" class="secondary modal-close" type="button">Close</button>
+      </div>
+     
+    </div>
+  </div>
+
+  <div id="mobileFilterSheet" class="modal-backdrop mobile-sheet-backdrop" aria-hidden="true">
+    <div class="modal-panel mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="mobileFilterTitle">
+      <div class="mobile-sheet-handle"></div>
+      <div class="mobile-sheet-title-row">
+        <h3 id="mobileFilterTitle" class="poc-card-title">Filter Calls</h3>
+        <button id="closeMobileFilterSheet" class="secondary modal-close" type="button">Close</button>
+      </div>
+      <div class="mobile-sheet-actions mobile-filter-options">
+        <button class="mobile-sheet-action mobile-filter-option active" type="button" data-filter-value="">All</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="pending">Pending</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="completed">Completed</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="failed">Failed</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="retry_scheduled">Retry Scheduled</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="mobileActionSheet" class="modal-backdrop mobile-sheet-backdrop" aria-hidden="true">
+    <div class="modal-panel mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="mobileActionTitle">
+      <div class="mobile-sheet-handle"></div>
+      <div class="mobile-sheet-title-row">
+        <h3 id="mobileActionTitle" class="poc-card-title">Call Actions</h3>
+        <button id="closeMobileActionSheet" class="secondary modal-close" type="button">Close</button>
+      </div>
+      <div class="mobile-sheet-actions">
+        <button id="mobileActionEdit" class="mobile-sheet-action" type="button">Edit</button>
+        <button id="mobileActionDelete" class="mobile-sheet-action mobile-sheet-action--danger" type="button">Delete</button>
+        <button id="mobileActionAnalysis" class="mobile-sheet-action" type="button">View Analysis</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/app-shell.js"></script>
   <script>
     let customerCache = [];
     let clientCache = [];
     let recentCallsCache = [];
+    let activeMobileActionCustomerId = null;
+    let activeMobileActionCallId = null;
 
     function normalizePhoneForApi(value) {
       const digits = String(value || '').replace(/\D/g, '');
@@ -493,15 +574,80 @@
       document.getElementById('analysisModal').setAttribute('aria-hidden', 'true');
     }
 
+    function openSheet(id) {
+      const element = document.getElementById(id);
+      if (!element) return;
+      element.classList.add('open');
+      element.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeSheet(id) {
+      const element = document.getElementById(id);
+      if (!element) return;
+      element.classList.remove('open');
+      element.setAttribute('aria-hidden', 'true');
+    }
+
+    function openMobileMenuSheet() {
+      openSheet('mobileMenuSheet');
+    }
+
+    function closeMobileMenuSheet() {
+      closeSheet('mobileMenuSheet');
+    }
+
+    function syncMobileFilterOptions() {
+      const activeValue = document.getElementById('statusFilter').value;
+      document.querySelectorAll('.mobile-filter-option').forEach((button) => {
+        button.classList.toggle('active', button.dataset.filterValue === activeValue);
+      });
+    }
+
+    function openMobileFilterSheet() {
+      syncMobileFilterOptions();
+      openSheet('mobileFilterSheet');
+    }
+
+    function closeMobileFilterSheet() {
+      closeSheet('mobileFilterSheet');
+    }
+
+    function openMobileActionSheet(customerId, callId = null) {
+      activeMobileActionCustomerId = Number(customerId) || null;
+      activeMobileActionCallId = Number(callId) || null;
+      document.getElementById('mobileActionAnalysis').disabled = !activeMobileActionCallId;
+      openSheet('mobileActionSheet');
+    }
+
+    function closeMobileActionSheet() {
+      activeMobileActionCustomerId = null;
+      activeMobileActionCallId = null;
+      closeSheet('mobileActionSheet');
+    }
+
+    function getDisplayAgentName(customerId) {
+      const latestCall = getLatestCall(customerId);
+      return latestCall?.agent_name || 'Default Feedback Agent';
+    }
+
     function renderMetrics(filteredCustomers = customerCache) {
       const pendingStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
       const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
       const completedCalls = recentCallsCache.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
 
-      document.getElementById('scheduledTodayMetric').textContent = customerCache.filter((customer) => isToday(customer.created_at) || isToday(customer.updated_at)).length;
-      document.getElementById('pendingCallsMetric').textContent = customerCache.filter((customer) => pendingStatuses.has(String(customer.status || '').toLowerCase())).length;
-      document.getElementById('completedCallsMetric').textContent = completedCalls.length;
-      document.getElementById('failedCallsMetric').textContent = recentCallsCache.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
+      const scheduledCount = customerCache.filter((customer) => isToday(customer.created_at) || isToday(customer.updated_at)).length;
+      const pendingCount = customerCache.filter((customer) => pendingStatuses.has(String(customer.status || '').toLowerCase())).length;
+      const completedCount = completedCalls.length;
+      const failedCount = recentCallsCache.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
+
+      document.getElementById('scheduledTodayMetric').textContent = scheduledCount;
+      document.getElementById('pendingCallsMetric').textContent = pendingCount;
+      document.getElementById('completedCallsMetric').textContent = completedCount;
+      document.getElementById('failedCallsMetric').textContent = failedCount;
+      document.getElementById('mobileScheduledMetric').textContent = scheduledCount;
+      document.getElementById('mobilePendingMetric').textContent = pendingCount;
+      document.getElementById('mobileCompletedMetric').textContent = completedCount;
+      document.getElementById('mobileFailedMetric').textContent = failedCount;
       document.getElementById('queueMeta').textContent = `${filteredCustomers.length} records in the active queue`;
     }
 
@@ -548,15 +694,10 @@
             <td><span class="status-badge ${AppShell.escapeHtml(String(customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(customer.status || 'pending')}</span></td>
             <td>
               <div class="table-actions">
-                <button class="warning" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
+                <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
                 ${contextButton}
-                <details class="more-menu">
-                  <summary>More</summary>
-                  <div class="more-menu-list">
-                    <button class="secondary" type="button" onclick="openNewCallModal(${customer.id})">Edit</button>
-                    <button class="danger" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
-                  </div>
-                </details>
+                <button class="secondary desktop-action-button" type="button" onclick="openNewCallModal(${customer.id})">Edit</button>
+                <button class="danger desktop-action-button" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
               </div>
             </td>
           </tr>
@@ -579,30 +720,23 @@
       container.innerHTML = customers.map((customer) => {
         const latestCall = getLatestCall(customer.id);
         const completedCall = getLatestCompletedCall(customer.id);
+        const actionButton = completedCall
+          ? `<button class="secondary mobile-action-button" type="button" onclick="openAnalysisModal(${completedCall.id})">Analysis</button>`
+          : `<button class="secondary mobile-action-button" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
         return `
           <article class="mobile-call-card">
             <div class="mobile-call-head">
               <div>
                 <strong>${AppShell.escapeHtml(customer.name || 'Customer')}</strong>
                 <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</div>
-                <div class="mobile-subtext">${AppShell.escapeHtml(customer.preferred_slot || '--:--')}</div>
               </div>
               <span class="status-badge ${AppShell.escapeHtml(String(customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(customer.status || 'pending')}</span>
             </div>
             <div class="mobile-subtext">${latestCall ? AppShell.formatDateTime(latestCall.called_at) : 'No call history yet'}</div>
             <div class="mobile-call-actions">
-              <button class="warning" type="button" onclick="triggerCallNow(${customer.id})">Call</button>
-              ${completedCall
-                ? `<button class="secondary" type="button" onclick="openAnalysisModal(${completedCall.id})">Analysis</button>`
-                : `<button class="secondary" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`
-              }
-              <details class="more-menu">
-                <summary>More</summary>
-                <div class="more-menu-list">
-                  <button class="secondary" type="button" onclick="openNewCallModal(${customer.id})">Edit</button>
-                  <button class="danger" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
-                </div>
-              </details>
+              <button class="warning mobile-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
+              ${actionButton}
+              <button class="secondary mobile-more-button" type="button" onclick="openMobileActionSheet(${customer.id}, ${completedCall ? completedCall.id : 'null'})">More</button>
             </div>
           </article>
         `;
@@ -632,12 +766,44 @@
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('newCallButton').addEventListener('click', () => openNewCallModal());
-      document.getElementById('mobileNewCallFab').addEventListener('click', () => openNewCallModal());
+      document.getElementById('mobileFloatingNewCallButton').addEventListener('click', () => openNewCallModal());
+      document.getElementById('mobileHeaderMenuButton').addEventListener('click', openMobileMenuSheet);
+      document.getElementById('mobileFilterButton').addEventListener('click', openMobileFilterSheet);
+      document.getElementById('closeMobileMenuSheet').addEventListener('click', closeMobileMenuSheet);
+      document.getElementById('closeMobileFilterSheet').addEventListener('click', closeMobileFilterSheet);
+      document.getElementById('closeMobileActionSheet').addEventListener('click', closeMobileActionSheet);
+      
+      document.getElementById('mobileMenuLogoutAction').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
+      document.getElementById('mobileActionEdit').addEventListener('click', () => {
+        if (activeMobileActionCustomerId) openNewCallModal(activeMobileActionCustomerId);
+        closeMobileActionSheet();
+      });
+      document.getElementById('mobileActionDelete').addEventListener('click', async () => {
+        const customerId = activeMobileActionCustomerId;
+        closeMobileActionSheet();
+        if (customerId) await deleteCustomer(customerId);
+      });
+      document.getElementById('mobileActionAnalysis').addEventListener('click', async () => {
+        const callId = activeMobileActionCallId;
+        closeMobileActionSheet();
+        if (callId) await openAnalysisModal(callId);
+      });
       document.getElementById('closeNewCallModal').addEventListener('click', closeNewCallModal);
       document.getElementById('scheduleCallSubmit').addEventListener('click', submitNewCall);
       document.getElementById('analysisModalClose').addEventListener('click', closeAnalysisModal);
       document.getElementById('customerSearch').addEventListener('input', renderQueue);
-      document.getElementById('statusFilter').addEventListener('change', renderQueue);
+      document.getElementById('statusFilter').addEventListener('change', () => {
+        syncMobileFilterOptions();
+        renderQueue();
+      });
+      document.querySelectorAll('.mobile-filter-option').forEach((button) => {
+        button.addEventListener('click', () => {
+          document.getElementById('statusFilter').value = button.dataset.filterValue || '';
+          syncMobileFilterOptions();
+          closeMobileFilterSheet();
+          renderQueue();
+        });
+      });
       document.getElementById('callCustomerPhone').addEventListener('input', (event) => {
         event.target.value = formatPhoneForInput(event.target.value);
       });
@@ -646,6 +812,11 @@
       });
       document.getElementById('analysisModal').addEventListener('click', (event) => {
         if (event.target.id === 'analysisModal') closeAnalysisModal();
+      });
+      ['mobileMenuSheet', 'mobileFilterSheet', 'mobileActionSheet'].forEach((id) => {
+        document.getElementById(id).addEventListener('click', (event) => {
+          if (event.target.id === id) closeSheet(id);
+        });
       });
 
       try {
@@ -660,6 +831,7 @@
     window.deleteCustomer = deleteCustomer;
     window.openAnalysisModal = openAnalysisModal;
     window.openNewCallModal = openNewCallModal;
+    window.openMobileActionSheet = openMobileActionSheet;
   </script>
 </body>
 </html>

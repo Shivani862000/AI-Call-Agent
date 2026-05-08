@@ -226,6 +226,14 @@ function normalizeGeminiModelName(modelName) {
   return normalized.startsWith('models/') ? normalized : `models/${normalized}`;
 }
 
+function resolveRealtimeModelName(modelName) {
+  const candidate = String(modelName || '').trim();
+  if (AI_PROVIDER === 'gemini') {
+    return normalizeGeminiModelName(candidate || REALTIME_MODEL);
+  }
+  return candidate || REALTIME_MODEL;
+}
+
 const REQUESTED_GEMINI_MODEL = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
 const GEMINI_MODEL = normalizeGeminiModelName(REQUESTED_GEMINI_MODEL);
 if (GEMINI_MODEL !== String(REQUESTED_GEMINI_MODEL || '').trim()) {
@@ -233,6 +241,7 @@ if (GEMINI_MODEL !== String(REQUESTED_GEMINI_MODEL || '').trim()) {
 }
 const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
 const REALTIME_MODEL = AI_PROVIDER === 'gemini' ? GEMINI_MODEL : OPENAI_REALTIME_MODEL;
+const GEMINI_OPENING_RETRY_MS = Math.max(Number(process.env.GEMINI_OPENING_RETRY_MS || 1500) || 1500, 800);
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
 const HARDCODED_PUBLIC_BASE_URL = 'https://winter-undeclamatory-unstammeringly.ngrok-free.dev';
 const SERVER_NAME_BASE_URL = process.env.SERVER_NAME ? `https://${String(process.env.SERVER_NAME).replace(/^https?:\/\//i, '').replace(/\/+$/g, '')}` : '';
@@ -243,7 +252,7 @@ const PUBLIC_BASE_URL = (
   || SERVER_NAME_BASE_URL
   || HARDCODED_PUBLIC_BASE_URL
 ).replace(/\/$/, '');
-const GEMINI_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+const GEMINI_WS_BASE_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
 const liveCallState = new Map();
@@ -355,33 +364,33 @@ Then ask if they have 2-3 minutes to share feedback about their recent visit.
 If they say no or are busy — thank them politely and end the call.
 
 2. OVERALL EXPERIENCE
-Ask: "How was your overall experience at our collection center?"
+Ask: "Aapka recent visit ka experience kaisa raha?"
 Listen fully. Acknowledge their response warmly before moving on.
 
 3. CLEANLINESS
-Ask: "How did you find the cleanliness and hygiene of the center?"
+Ask: "Center ki safai aur hygiene aapko kaisi lagi?"
 If negative, ask: "Could you tell me more about what you noticed?"
 
 4. STAFF BEHAVIOUR
-Ask: "How was the behavior and attitude of our staff towards you?"
+Ask: "Hamare staff ka behaviour aur support aapko kaisa laga?"
 If they mention a specific person (positive or negative), note the name.
 Ask: "Is there anyone from our team you would like to specially highlight?"
 
 5. WAITING TIME & PROCESS
-Ask: "How was the waiting time and the sample collection process? Was everything explained clearly to you?"
+Ask: "Waiting time aur sample collection process aapko kaisa laga? Kya sab kuch clearly samjhaya gaya tha?"
 
 6. OVERALL RATING
 Ask: "On a scale of 1 to 5, where 5 is excellent, how would you rate your overall experience?"
 Wait for a number. If unclear, gently re-ask once.
 
 7. IMPROVEMENT SUGGESTIONS
-Ask: "Is there anything you feel we could do better to improve your experience?"
+Ask: "Kya aap koi ek suggestion dena chahenge jisse hum service aur better kar saken?"
 Let them speak freely. Do not rush this.
 
 8. CLOSING
 Thank them sincerely by name.
 Tell them their feedback is valuable and will help improve the service.
-Mention: "We will also send you a WhatsApp message with a link to leave a Google review if you are comfortable — it really helps us grow."
+Mention: "Hum aapko WhatsApp par ek Google Form ka link bhejenge. Agar aap chahein to usse fill karke apna feedback share kar dijiye."
 Say a warm goodbye.
 
 RULES:
@@ -418,7 +427,7 @@ function buildAgentSystemPrompt(clientName, customerName, agentConfig = null) {
 function buildDefaultOpeningPrompt(clientName, customerName) {
   return [
     `Start the call with a short Hindi greeting as Priya from ${clientName}.`,
-    `Say: "Namaste, kya main ${customerName} se baat kar rahi hoon? Main Priya bol rahi hoon, ${clientName} se. Kya aapke paas 2 se 3 minute hain?"`,
+    `Say exactly one short line: "Namaste ${customerName} ji, main Priya ${clientName} se bol rahi hoon. Kya abhi 2 minute baat ho sakti hai?"`,
     'Keep the first turn short, warm, and clearly spoken in Hindi.',
     'After the greeting, continue the feedback conversation naturally using the system instructions.'
   ].join(' ');
@@ -624,7 +633,7 @@ function getScriptedCopy(language, customerName = process.env.CUSTOMER_NAME, cli
       noConsentResponse: 'We did not receive a response. Thank you for your time. Goodbye.',
       rating: 'Thank you. How was your overall experience at our collection center? On a scale of 1 to 5, where 5 is excellent, please say the number or press it now.',
       noRatingResponse: 'We did not receive a rating. Thank you for your time. Goodbye.',
-      closing: 'Thank you for your feedback. We appreciate your time and will use it to improve our service. We may also send you a WhatsApp message with a review link if you are comfortable. Goodbye.'
+      closing: 'Thank you for your feedback. We appreciate your time. We will also send you a WhatsApp message with a Google Form link so you can share your feedback there as well. Goodbye.'
     };
   }
 
@@ -636,7 +645,7 @@ function getScriptedCopy(language, customerName = process.env.CUSTOMER_NAME, cli
     noConsentResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
     rating: 'Dhanyavaad. Hamare collection center mein aapka overall experience kaisa tha? 1 se 5 tak rating dijiye, jahan 5 excellent hai. Number boliye ya key dabaiye.',
     noRatingResponse: 'Humein aapki rating nahin mili. Dhanyavaad. Namaste.',
-    closing: 'Aapke feedback ke liye dhanyavaad. Aapki rai hamari service improve karne mein madad karegi. Agar aap chahein to hum WhatsApp par ek review link bhi bhej sakte hain. Namaste.'
+    closing: 'Aapke feedback ke liye dhanyavaad. Aapki rai hamari service improve karne mein madad karegi. Hum aapko WhatsApp par Google Form ka link bhi bhejenge. Aap chahein to use fill karke apna feedback share kar sakte hain. Namaste.'
   };
 }
 
@@ -854,7 +863,15 @@ function getMediaPayload(message = {}) {
 }
 
 function usesGeminiRealtimeTextInput(modelName) {
-  return String(modelName || '').includes('gemini-3.1');
+  return /gemini-3\.1/i.test(String(modelName || ''));
+}
+
+function buildGeminiWsUrl() {
+  const url = new URL(GEMINI_WS_BASE_URL);
+  if (process.env.GEMINI_API_KEY) {
+    url.searchParams.set('key', process.env.GEMINI_API_KEY);
+  }
+  return url.toString();
 }
 
 function createDeepgramListenUrl() {
@@ -1040,6 +1057,29 @@ async function ensureCustomerForCall({ customerId, customerName, customerPhone }
   );
 
   return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+}
+
+async function claimCustomerForOutboundCall(customerId) {
+  const result = await dbRun(
+    `UPDATE customers
+        SET status = ?,
+            last_called_at = ?
+      WHERE id = ?
+        AND COALESCE(status, 'pending') != 'calling'`,
+    ['calling', new Date().toISOString(), customerId]
+  );
+
+  return result.changes > 0;
+}
+
+async function releaseCustomerOutboundClaim(customerId, fallbackStatus = 'pending') {
+  await dbRun(
+    `UPDATE customers
+        SET status = ?
+      WHERE id = ?
+        AND status = 'calling'`,
+    [fallbackStatus, customerId]
+  );
 }
 
 async function ensureCustomerForClientReminder(client) {
@@ -1601,12 +1641,13 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/agents', agentsRouter);
 
 app.post('/call/start', async (req, res) => {
+  let customer = null;
   try {
     const customerPhone = req.body.customerPhone || process.env.CUSTOMER_PHONE;
     const customerName = req.body.customerName || process.env.CUSTOMER_NAME;
     const requestedCustomerId = req.body.customerId;
     const requestedAgentId = Number(req.body.agentId || req.query.agentId || 0) || null;
-    let customer = await ensureCustomerForCall({
+    customer = await ensureCustomerForCall({
       customerId: requestedCustomerId,
       customerName,
       customerPhone
@@ -1618,6 +1659,11 @@ app.post('/call/start', async (req, res) => {
     const blockedReason = shouldBlockCustomerCall(customer);
     if (blockedReason) {
       return res.status(409).json({ success: false, error: blockedReason });
+    }
+
+    const claimed = await claimCustomerForOutboundCall(customer.id);
+    if (!claimed) {
+      return res.status(409).json({ success: false, error: 'A call for this customer is already in progress' });
     }
 
     console.log(
@@ -1670,6 +1716,13 @@ app.post('/call/start', async (req, res) => {
     console.log(`[CALL STARTED] SID: ${call.sid}`);
     res.json({ success: true, sid: call.sid, callId: result.lastID, customerId: customer.id, agentId: agentConfig?.id || null });
   } catch (error) {
+    if (customer?.id) {
+      try {
+        await releaseCustomerOutboundClaim(customer.id, customer.status || 'pending');
+      } catch (releaseError) {
+        console.error('[CALL CLAIM RELEASE ERROR]', releaseError.message);
+      }
+    }
     console.error('[ERROR starting call]', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
@@ -1907,8 +1960,9 @@ app.post('/call/recording-status', async (req, res) => {
 });
 
 app.post('/api/calls/initiate/:customerId', async (req, res) => {
+  let customer = null;
   try {
-    let customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.customerId]);
+    customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.customerId]);
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -1919,6 +1973,11 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
     const blockedReason = shouldBlockCustomerCall(customer);
     if (blockedReason) {
       return res.status(409).json({ error: blockedReason });
+    }
+
+    const claimed = await claimCustomerForOutboundCall(customer.id);
+    if (!claimed) {
+      return res.status(409).json({ error: 'A call for this customer is already in progress' });
     }
 
     const call = await placeRealtimeCall({
@@ -1950,6 +2009,13 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
     await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
     res.json({ message: 'Call initiated', callId: result.lastID, sid: call.sid, agentId: agentConfig?.id || null, agentName: agentConfig?.name || null });
   } catch (error) {
+    if (customer?.id) {
+      try {
+        await releaseCustomerOutboundClaim(customer.id, customer.status || 'pending');
+      } catch (releaseError) {
+        console.error('[API CALL CLAIM RELEASE ERROR]', releaseError.message);
+      }
+    }
     console.error('[API CALL INITIATE ERROR]', error.message);
     res.status(500).json({ error: error.message });
   }
@@ -2379,7 +2445,7 @@ function setupOrchestratedStream(twilioWs, req) {
 
   const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName, activeAgentConfig);
   const getActiveOpeningPrompt = () => buildOpeningPrompt(activeClientName, activeCustomerName, activeAgentConfig);
-  const getActiveModelName = () => activeAgentConfig?.llm_model || REALTIME_MODEL;
+  const getActiveModelName = () => resolveRealtimeModelName(activeAgentConfig?.llm_model || REALTIME_MODEL);
 
   const printTranscriptOnce = () => {
     if (!transcriptPrinted) {
@@ -2911,8 +2977,14 @@ wss.on('connection', (twilioWs, req) => {
   let transcriptPrinted = false;
   const transcript = [];
   let geminiSetupComplete = false;
+  let geminiSetupWatchdogTimer = null;
   let geminiOpeningPromptRetryTimer = null;
   let geminiAudioReceived = false;
+  let geminiInboundAudioLogged = false;
+  let geminiFirstAudibleResponseLogged = false;
+  let geminiSessionOpenedAt = 0;
+  let geminiSetupCompletedAt = 0;
+  let geminiOpeningPromptSentAt = 0;
   let aiSessionStarting = false;
   let activeCustomerName = process.env.CUSTOMER_NAME || 'Customer';
   let activeClientName = CLIENT_NAME;
@@ -2928,7 +3000,7 @@ wss.on('connection', (twilioWs, req) => {
 
   const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName, activeAgentConfig);
   const getActiveOpeningPrompt = () => buildOpeningPrompt(activeClientName, activeCustomerName, activeAgentConfig);
-  const getActiveModelName = () => activeAgentConfig?.llm_model || REALTIME_MODEL;
+  const getActiveModelName = () => resolveRealtimeModelName(activeAgentConfig?.llm_model || REALTIME_MODEL);
 
   const printTranscriptOnce = () => {
     if (!transcriptPrinted) {
@@ -3029,13 +3101,52 @@ wss.on('connection', (twilioWs, req) => {
     }
   }
 
-  function sendGeminiOpeningPrompt(promptText, label = 'opening') {
+  function clearGeminiSetupWatchdog() {
+    if (geminiSetupWatchdogTimer) {
+      clearTimeout(geminiSetupWatchdogTimer);
+      geminiSetupWatchdogTimer = null;
+    }
+  }
+
+  function sendGeminiClientTurn(text, options = {}) {
+    const safeText = String(text || '').trim();
+    if (!safeText || aiWs?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const userTurnText = options.interrupt
+      ? `Ignore any unfinished previous reply and respond to this message now. ${safeText}`
+      : safeText;
+
+    const payload = {
+      clientContent: {
+        turns: [
+          {
+            role: 'user',
+            parts: [{ text: userTurnText }]
+          }
+        ],
+        turnComplete: true
+      }
+    };
+
+    aiWs.send(JSON.stringify(payload));
+  }
+
+  function sendGeminiOpeningPrompt(promptText, label = 'opening', options = {}) {
     const safePrompt = String(promptText || '').trim();
     if (!safePrompt || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
       return;
     }
 
+    geminiFirstAudibleResponseLogged = false;
+    geminiOpeningPromptSentAt = Date.now();
     console.log(`[GEMINI] Sending ${label} prompt (${safePrompt.length} chars)`);
+
+    if (options.forceClientTurn) {
+      sendGeminiClientTurn(safePrompt, { interrupt: options.interrupt });
+      return;
+    }
 
     if (usesGeminiRealtimeTextInput(getActiveModelName())) {
       aiWs.send(JSON.stringify({
@@ -3046,17 +3157,7 @@ wss.on('connection', (twilioWs, req) => {
       return;
     }
 
-    aiWs.send(JSON.stringify({
-      clientContent: {
-        turns: [
-          {
-            role: 'user',
-            parts: [{ text: safePrompt }]
-          }
-        ],
-        turnComplete: true
-      }
-    }));
+    sendGeminiClientTurn(safePrompt, { interrupt: options.interrupt });
   }
 
   function scheduleAutoHangupFromAgentText(text) {
@@ -3221,15 +3322,16 @@ wss.on('connection', (twilioWs, req) => {
 
   function createGeminiSession() {
     aiSessionStarting = true;
-    aiWs = new WebSocket(GEMINI_WS_URL, {
-      headers: {
-        'x-goog-api-key': process.env.GEMINI_API_KEY
-      }
-    });
+    geminiSetupComplete = false;
+    geminiAudioReceived = false;
+    clearGeminiOpeningPromptRetry();
+    clearGeminiSetupWatchdog();
+    aiWs = new WebSocket(buildGeminiWsUrl());
 
     aiWs.on('open', () => {
+      geminiSessionOpenedAt = Date.now();
       console.log('[GEMINI] Live session opened');
-      aiWs.send(JSON.stringify({
+      const configMessage = {
         setup: {
           model: getActiveModelName(),
           generationConfig: {
@@ -3253,7 +3355,15 @@ wss.on('connection', (twilioWs, req) => {
           inputAudioTranscription: {},
           outputAudioTranscription: {}
         }
-      }));
+      };
+      console.log(`[GEMINI] Sending config model=${getActiveModelName()} voice=${GEMINI_VOICE} transport=${transportMode}`);
+      aiWs.send(JSON.stringify(configMessage));
+      geminiSetupWatchdogTimer = setTimeout(() => {
+        if (callClosed || geminiSetupComplete || aiWs?.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        console.warn('[GEMINI] Config acknowledged connection, but setupComplete is still missing after 3000ms.');
+      }, 3000);
     });
   }
 
@@ -3264,29 +3374,36 @@ wss.on('connection', (twilioWs, req) => {
       try {
         message = JSON.parse(raw.toString());
       } catch (error) {
-        console.error(`[${AI_PROVIDER.toUpperCase()}] Failed to parse message:`, error.message);
+        console.error(`[${AI_PROVIDER.toUpperCase()}] Failed to parse message:`, error.message, 'raw=', raw.toString());
         return;
       }
 
       if (AI_PROVIDER === 'gemini') {
         if (message.setupComplete) {
           geminiSetupComplete = true;
+          geminiSetupCompletedAt = Date.now();
+          clearGeminiSetupWatchdog();
           console.log('[GEMINI] Session configured');
           console.log(`[GEMINI] Config model=${getActiveModelName()} voice=${GEMINI_VOICE} transport=${transportMode}`);
+          if (geminiSessionOpenedAt) {
+            console.log(`[GEMINI] setupComplete received after ${geminiSetupCompletedAt - geminiSessionOpenedAt}ms`);
+          }
 
           geminiAudioReceived = false;
+          geminiInboundAudioLogged = false;
           clearGeminiOpeningPromptRetry();
-          sendGeminiOpeningPrompt(getActiveOpeningPrompt(), 'initial');
+          sendGeminiOpeningPrompt(getActiveOpeningPrompt(), 'initial', { forceClientTurn: true });
           geminiOpeningPromptRetryTimer = setTimeout(() => {
             if (callClosed || geminiAudioReceived || aiWs?.readyState !== WebSocket.OPEN) {
               return;
             }
-            console.warn('[GEMINI] No audible response detected after the opening prompt; retrying with a shorter opener.');
+            console.warn('[GEMINI] No audible response detected after the opening prompt; sending an interrupt-style fallback opener.');
             sendGeminiOpeningPrompt(
-              `Namaste, kya main ${activeCustomerName} se baat kar rahi hoon? Main Priya bol rahi hoon, ${activeClientName} se. Kya aapke paas 2 se 3 minute hain?`,
-              'retry'
+              `Abhi ek line me bolo: "Namaste ${activeCustomerName} ji, kya abhi 2 minute baat ho sakti hai?"`,
+              'retry',
+              { forceClientTurn: true, interrupt: true }
             );
-          }, 7000);
+          }, GEMINI_OPENING_RETRY_MS);
           return;
         }
 
@@ -3327,6 +3444,13 @@ wss.on('connection', (twilioWs, req) => {
 
           geminiAudioReceived = true;
           clearGeminiOpeningPromptRetry();
+          if (!geminiFirstAudibleResponseLogged && geminiOpeningPromptSentAt) {
+            console.log(`[GEMINI] First audible response after ${Date.now() - geminiOpeningPromptSentAt}ms from the last prompt`);
+          }
+          if (!geminiFirstAudibleResponseLogged && geminiSetupCompletedAt) {
+            console.log(`[GEMINI] First audible response after ${Date.now() - geminiSetupCompletedAt}ms from setupComplete`);
+          }
+          geminiFirstAudibleResponseLogged = true;
           const pcm16 = Buffer.from(part.inlineData.data, 'base64');
           const sourceRate = parsePcmRate(part.inlineData.mimeType, 24000);
           const resampled = resamplePcm16(pcm16, sourceRate, 8000);
@@ -3343,6 +3467,10 @@ wss.on('connection', (twilioWs, req) => {
 
         if (message.error) {
           console.error('[GEMINI ERROR]', JSON.stringify(message, null, 2));
+        }
+
+        if (!message.setupComplete && !message.serverContent && !message.usageMetadata && !message.goAway && !message.sessionResumptionUpdate) {
+          console.log('[GEMINI MESSAGE]', JSON.stringify(message, null, 2));
         }
         return;
       }
@@ -3389,13 +3517,17 @@ wss.on('connection', (twilioWs, req) => {
       }
     });
 
-    aiWs.on('close', () => {
+    aiWs.on('close', (code, reasonBuffer) => {
       aiSessionStarting = false;
-      console.log(`[${AI_PROVIDER.toUpperCase()}] Realtime session closed`);
+      clearGeminiSetupWatchdog();
+      clearGeminiOpeningPromptRetry();
+      const reason = Buffer.isBuffer(reasonBuffer) ? reasonBuffer.toString() : String(reasonBuffer || '');
+      console.log(`[${AI_PROVIDER.toUpperCase()}] Realtime session closed code=${code ?? 'unknown'} reason=${reason || 'n/a'}`);
     });
 
     aiWs.on('error', (error) => {
       aiSessionStarting = false;
+      clearGeminiSetupWatchdog();
       console.error(`[${AI_PROVIDER.toUpperCase()} WS ERROR]`, error.message);
     });
   }
@@ -3479,8 +3611,9 @@ wss.on('connection', (twilioWs, req) => {
         const pcm16 = transportMode === 'exotel'
           ? Buffer.from(payload, 'base64')
           : decodeMuLaw(payload);
-        if (!geminiAudioReceived) {
+        if (!geminiInboundAudioLogged) {
           console.log(`[GEMINI] First inbound audio chunk received (${pcm16.length} bytes)`);
+          geminiInboundAudioLogged = true;
         }
         aiWs.send(JSON.stringify({
           realtimeInput: {

@@ -28,7 +28,19 @@
     </aside>
 
     <main class="main-panel">
-      <header class="page-header">
+      <section class="mobile-ops-header mobile-only">
+        <div class="mobile-ops-bar">
+          <div>
+            <div class="mobile-ops-title">Feedback</div>
+            <div class="mobile-ops-subtitle">Review AI call outcomes</div>
+          </div>
+          <div class="mobile-ops-actions">
+            <button id="mobileFeedbackMenuButton" class="mobile-icon-button" type="button" aria-label="Open menu">...</button>
+          </div>
+        </div>
+      </section>
+
+      <header class="page-header desktop-page-header">
         <div class="page-title-wrap">
           <h2>Feedback</h2>
           <div class="page-subtitle">Review call feedback, transcripts, and customer sentiment.</div>
@@ -40,6 +52,21 @@
       </header>
 
       <div id="alertContainer" class="alert-stack"></div>
+
+      <section class="mobile-stat-strip mobile-only" aria-label="Feedback stats">
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileMetricNeedsReview">0</span>
+          <span class="mobile-stat-label">Needs review</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileMetricPendingAnalysis">0</span>
+          <span class="mobile-stat-label">Pending</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileMetricPositiveFeedback">0</span>
+          <span class="mobile-stat-label">Positive</span>
+        </div>
+      </section>
 
       <section class="poc-metrics-grid">
         <article class="metric-card">
@@ -61,6 +88,17 @@
           <div class="metric-label">Pending Analysis</div>
           <div class="metric-value" id="metricPendingAnalysis">0</div>
           <div class="metric-note">Calls waiting on transcript or analysis completion.</div>
+        </article>
+      </section>
+
+      <section class="mobile-feedback-stack mobile-only">
+        <article class="poc-card mobile-feedback-review-card">
+          <div class="poc-card-header compact-overview-header">
+            <div>
+              <h3 class="poc-card-title">Calls Needing Review</h3>
+            </div>
+          </div>
+          <div id="mobileNeedsReviewList" class="mobile-review-list"></div>
         </article>
       </section>
 
@@ -104,16 +142,24 @@
     </main>
   </div>
 
-  <button id="mobileManualFeedbackFab" class="poc-fab" type="button">Add Feedback</button>
+  <button id="mobileManualFeedbackFab" class="mobile-floating-cta mobile-only" type="button">+ Add Feedback</button>
+
+  <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
+    <a href="/admin.html" class="mobile-dock-link">Overview</a>
+    <a href="/customers.html" class="mobile-dock-link">Customers</a>
+    <a href="/feedback.html" class="mobile-dock-link active">Feedback</a>
+    <a href="/reports.html" class="mobile-dock-link">Reports</a>
+  </nav>
 
   <div id="manualFeedbackModal" class="modal-backdrop" aria-hidden="true">
     <div class="modal-panel modal-panel--narrow" role="dialog" aria-modal="true" aria-labelledby="manualFeedbackTitle">
-      <div class="poc-card-header">
+      <div class="mobile-sheet-handle mobile-only"></div>
+      <div class="poc-card-header modal-sheet-header">
         <div>
           <h3 id="manualFeedbackTitle" class="poc-card-title">Add Manual Feedback</h3>
           <div class="poc-card-subtitle">Use this only when feedback is collected outside the AI call flow.</div>
         </div>
-        <button id="closeManualFeedbackModal" class="secondary modal-close" type="button">Close</button>
+        <button id="closeManualFeedbackModal" class="secondary modal-close modal-close-icon" type="button" aria-label="Close add feedback modal">&times;</button>
       </div>
 
       <div class="poc-form-grid">
@@ -147,49 +193,75 @@
   </div>
 
   <div id="analysisModal" class="modal-backdrop" aria-hidden="true">
-    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle">
-      <div class="poc-card-header">
+    <div class="modal-panel analysis-modal-panel" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle">
+      <div class="mobile-sheet-handle mobile-only"></div>
+      <div class="poc-card-header modal-sheet-header analysis-modal-header">
         <div>
           <h3 id="analysisModalTitle" class="poc-card-title">Call Analysis</h3>
           <div id="analysisModalSubtitle" class="poc-card-subtitle">Loading details...</div>
         </div>
-        <button id="analysisModalClose" class="secondary modal-close" type="button">Close</button>
+        <button id="analysisModalClose" class="secondary modal-close modal-close-icon" type="button" aria-label="Close analysis modal">&times;</button>
       </div>
 
-      <section class="poc-mini-grid" style="margin-bottom: 16px;">
-        <article class="mini-stat">
-          <strong id="analysisRatingValue">--</strong>
-          <span>Rating</span>
-        </article>
-        <article class="mini-stat">
-          <strong id="analysisOutcomeValue">--</strong>
-          <span>Outcome</span>
-        </article>
-        <article class="mini-stat">
-          <strong id="analysisStatusValue">--</strong>
-          <span>Processing</span>
-        </article>
+      <section class="analysis-primary-stack">
+        <section class="poc-card analysis-section-card">
+          <div class="analysis-section-header">
+            <h4 class="poc-card-title analysis-section-title">Outcome</h4>
+            <span id="analysisOutcomeValue" class="status-badge pending">--</span>
+          </div>
+          <div class="analysis-meta-grid">
+            <div class="analysis-meta-item">
+              <span>Rating</span>
+              <strong id="analysisRatingValue">--</strong>
+            </div>
+            <div class="analysis-meta-item">
+              <span>Processing</span>
+              <strong id="analysisStatusValue">--</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="poc-card analysis-section-card">
+          <h4 class="poc-card-title analysis-section-title">Recording</h4>
+          <div id="analysisRecordingWrap" class="poc-card-subtitle analysis-section-copy">Recording not available yet.</div>
+        </section>
+
+        <section class="poc-card analysis-section-card">
+          <h4 class="poc-card-title analysis-section-title">Summary</h4>
+          <div id="analysisSummaryValue" class="poc-card-subtitle analysis-section-copy">Analysis summary not available yet.</div>
+        </section>
       </section>
 
-      <section class="poc-card" style="margin-bottom: 14px;">
-        <h4 class="poc-card-title" style="font-size:16px;">Recording</h4>
-        <div id="analysisRecordingWrap" class="poc-card-subtitle" style="margin-top:10px;">Recording not available yet.</div>
-      </section>
+      <details class="details-toggle analysis-details-toggle">
+        <summary>Customer Review</summary>
+        <div class="details-content">
+          <section class="poc-card analysis-section-card analysis-section-card--nested">
+            <div id="analysisReviewValue" class="poc-card-subtitle analysis-section-copy">No review extracted yet.</div>
+          </section>
+        </div>
+      </details>
 
-      <section class="poc-card" style="margin-bottom: 14px;">
-        <h4 class="poc-card-title" style="font-size:16px;">Summary</h4>
-        <div id="analysisSummaryValue" class="poc-card-subtitle" style="margin-top:10px;">Analysis summary not available yet.</div>
-      </section>
+      <details class="details-toggle analysis-details-toggle">
+        <summary>Full Transcript</summary>
+        <div class="details-content">
+          <section class="poc-card analysis-section-card analysis-section-card--nested">
+            <div id="analysisTranscriptValue" class="poc-card-subtitle analysis-section-copy">Transcript not available yet.</div>
+          </section>
+        </div>
+      </details>
+    </div>
+  </div>
 
-      <section class="poc-card" style="margin-bottom: 14px;">
-        <h4 class="poc-card-title" style="font-size:16px;">Customer Review</h4>
-        <div id="analysisReviewValue" class="poc-card-subtitle" style="margin-top:10px;">No review extracted yet.</div>
-      </section>
-
-      <section class="poc-card">
-        <h4 class="poc-card-title" style="font-size:16px;">Transcript</h4>
-        <div id="analysisTranscriptValue" class="poc-card-subtitle" style="margin-top:10px;">Transcript not available yet.</div>
-      </section>
+  <div id="feedbackMobileMenuSheet" class="modal-backdrop mobile-sheet-backdrop" aria-hidden="true">
+    <div class="modal-panel mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="feedbackMobileMenuTitle">
+      <div class="mobile-sheet-handle"></div>
+      <div class="mobile-sheet-title-row">
+        <h3 id="feedbackMobileMenuTitle" class="poc-card-title">Menu</h3>
+        <button id="closeFeedbackMobileMenuSheet" class="secondary modal-close modal-close-icon" type="button" aria-label="Close menu">&times;</button>
+      </div>
+      <div class="mobile-sheet-actions">
+        <button id="feedbackMobileMenuLogout" class="mobile-sheet-action" type="button">Logout</button>
+      </div>
     </div>
   </div>
 
@@ -217,13 +289,16 @@
 
     function buildReviewList(calls) {
       const container = document.getElementById('needsReviewList');
+      const mobileContainer = document.getElementById('mobileNeedsReviewList');
       if (!calls.length) {
-        container.innerHTML = `
+        const emptyMarkup = `
           <div class="empty-state">
             <strong>No calls need review</strong>
             <div class="supporting-text">Completed calls will appear here when transcripts or ratings still need attention.</div>
           </div>
         `;
+        container.innerHTML = emptyMarkup;
+        mobileContainer.innerHTML = emptyMarkup;
         return;
       }
 
@@ -235,6 +310,24 @@
           </div>
           <button class="secondary" type="button" onclick="openAnalysisModal(${call.id})">View Analysis</button>
         </div>
+      `).join('');
+
+      mobileContainer.innerHTML = calls.slice(0, 6).map((call) => `
+        <article class="mobile-review-card">
+          <div class="mobile-review-head">
+            <div>
+              <strong>${AppShell.escapeHtml(call.customer_name || 'Customer')}</strong>
+              <div class="mobile-subtext">${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.outcome || 'completed')}</div>
+            </div>
+          </div>
+          <div class="mobile-review-status-row">
+           
+            <span class="mobile-review-status">Needs review</span>
+            <button class="mobile-review-button" type="button" onclick="openAnalysisModal(${call.id})">View Analysis</button>
+          
+            </div>
+         
+        </article>
       `).join('');
     }
 
@@ -304,6 +397,9 @@
       document.getElementById('metricPositiveFeedback').textContent = positiveFeedback;
       document.getElementById('metricNeedsReview').textContent = reviewCalls.length;
       document.getElementById('metricPendingAnalysis').textContent = pendingAnalysis;
+      document.getElementById('mobileMetricNeedsReview').textContent = reviewCalls.length;
+      document.getElementById('mobileMetricPendingAnalysis').textContent = pendingAnalysis;
+      document.getElementById('mobileMetricPositiveFeedback').textContent = positiveFeedback;
 
       buildReviewList(reviewCalls);
       renderFeedbackBoard(feedbackCache);
@@ -395,6 +491,20 @@
       document.getElementById('analysisModal').setAttribute('aria-hidden', 'true');
     }
 
+    function openFeedbackSheet(id) {
+      const element = document.getElementById(id);
+      if (!element) return;
+      element.classList.add('open');
+      element.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeFeedbackSheet(id) {
+      const element = document.getElementById(id);
+      if (!element) return;
+      element.classList.remove('open');
+      element.setAttribute('aria-hidden', 'true');
+    }
+
     async function loadPageData() {
       const [customers, feedback, recentCalls] = await Promise.all([
         AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
@@ -413,6 +523,9 @@
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('openManualFeedbackButton').addEventListener('click', openManualFeedbackModal);
       document.getElementById('mobileManualFeedbackFab').addEventListener('click', openManualFeedbackModal);
+      document.getElementById('mobileFeedbackMenuButton').addEventListener('click', () => openFeedbackSheet('feedbackMobileMenuSheet'));
+      document.getElementById('closeFeedbackMobileMenuSheet').addEventListener('click', () => closeFeedbackSheet('feedbackMobileMenuSheet'));
+      document.getElementById('feedbackMobileMenuLogout').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('closeManualFeedbackModal').addEventListener('click', closeManualFeedbackModal);
       document.getElementById('submitFeedbackButton').addEventListener('click', submitManualFeedback);
       document.getElementById('analysisModalClose').addEventListener('click', closeAnalysisModal);
@@ -421,6 +534,15 @@
       });
       document.getElementById('analysisModal').addEventListener('click', (event) => {
         if (event.target.id === 'analysisModal') closeAnalysisModal();
+      });
+      document.getElementById('feedbackMobileMenuSheet').addEventListener('click', (event) => {
+        if (event.target.id === 'feedbackMobileMenuSheet') closeFeedbackSheet('feedbackMobileMenuSheet');
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        if (document.getElementById('manualFeedbackModal').classList.contains('open')) closeManualFeedbackModal();
+        if (document.getElementById('analysisModal').classList.contains('open')) closeAnalysisModal();
+        if (document.getElementById('feedbackMobileMenuSheet').classList.contains('open')) closeFeedbackSheet('feedbackMobileMenuSheet');
       });
 
       try {

@@ -28,39 +28,113 @@
     </aside>
 
     <main class="main-panel">
-      <header class="page-header">
+      <section class="mobile-ops-header mobile-only">
+        <div class="mobile-ops-bar">
+          <div>
+            <div class="mobile-ops-title">Reports</div>
+            <div class="mobile-ops-subtitle">AI follow-up performance snapshot</div>
+          </div>
+          <div class="mobile-ops-actions">
+            <button id="mobileExportReportButton" class="mobile-export-button" type="button" aria-label="Export report">↓ Export</button>
+          </div>
+        </div>
+      </section>
+
+      <header class="page-header desktop-page-header">
         <div class="page-title-wrap">
           <h2>Reports</h2>
-          <div class="page-subtitle">Call outcomes and feedback summary.</div>
+          <div class="page-subtitle">AI follow-up performance snapshot</div>
         </div>
         <div class="header-actions">
           <button id="exportReportButton" class="primary" type="button">Export Report</button>
-          <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
       </header>
 
       <div id="alertContainer" class="alert-stack"></div>
 
+      <section class="mobile-stat-strip mobile-only" aria-label="Reports stats">
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileReportTotalCalls">0</span>
+          <span class="mobile-stat-label">Calls</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileReportCompletedCalls">0</span>
+          <span class="mobile-stat-label">Completed</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileReportFailedCalls">0</span>
+          <span class="mobile-stat-label">Failed</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileReportAverageRating">0.0</span>
+          <span class="mobile-stat-label">Rating</span>
+        </div>
+      </section>
+
       <section class="poc-metrics-grid">
         <article class="metric-card">
           <div class="metric-label">Total Calls</div>
           <div class="metric-value" id="reportTotalCalls">0</div>
-          <div class="metric-note">Recent calls available in this POC window.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Completed</div>
           <div class="metric-value" id="reportCompletedCalls">0</div>
-          <div class="metric-note">Calls finished with an outcome.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Failed</div>
           <div class="metric-value" id="reportFailedCalls">0</div>
-          <div class="metric-note">Busy, failed, or no-answer call attempts.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Average Rating</div>
           <div class="metric-value" id="reportAverageRating">0.0</div>
-          <div class="metric-note">Average from captured feedback ratings.</div>
+        </article>
+      </section>
+
+      <section class="mobile-reports-stack mobile-only">
+        <article class="poc-card mobile-reports-card mobile-reports-card--outcomes">
+          <div class="poc-card-header compact-overview-header">
+            <div>
+              <h3 class="poc-card-title">Outcome Summary</h3>
+            </div>
+          </div>
+          <div class="mobile-report-outcomes">
+            <div class="mobile-report-outcome-row">
+              <span>Completed</span>
+              <strong id="mobileOutcomeCompleted">0</strong>
+            </div>
+            <div class="mobile-report-outcome-row">
+              <span>Pending</span>
+              <strong id="mobileOutcomePending">0</strong>
+            </div>
+            <div class="mobile-report-outcome-row">
+              <span>Failed</span>
+              <strong id="mobileOutcomeFailed">0</strong>
+            </div>
+          </div>
+        </article>
+
+        <section class="mobile-report-sentiment">
+          <div class="mobile-report-sentiment-pill positive">
+            <span>Positive</span>
+            <strong id="mobileFeedbackPositive">0</strong>
+          </div>
+          <div class="mobile-report-sentiment-pill neutral">
+            <span>Neutral</span>
+            <strong id="mobileFeedbackNeutral">0</strong>
+          </div>
+          <div class="mobile-report-sentiment-pill negative">
+            <span>Negative</span>
+            <strong id="mobileFeedbackNegative">0</strong>
+          </div>
+        </section>
+
+        <article class="poc-card mobile-reports-card">
+          <div class="poc-card-header compact-overview-header">
+            <div>
+              <h3 class="poc-card-title">Recent Activity</h3>
+            </div>
+          </div>
+          <div id="mobileReportsActivityList" class="mobile-report-activity-list"></div>
         </article>
       </section>
 
@@ -69,22 +143,37 @@
           <div class="poc-card-header">
             <div>
               <h3 class="poc-card-title">Call Outcome Summary</h3>
-              <div class="poc-card-subtitle">Simple outcome counts for the demo narrative.</div>
+              <div class="poc-card-subtitle">A quick view of what happened in the follow-up flow.</div>
             </div>
           </div>
-          <div class="poc-mini-grid">
-            <article class="mini-stat">
-              <strong id="outcomeCompleted">0</strong>
-              <span>Completed</span>
-            </article>
-            <article class="mini-stat">
-              <strong id="outcomePending">0</strong>
-              <span>Pending</span>
-            </article>
-            <article class="mini-stat">
-              <strong id="outcomeFailed">0</strong>
-              <span>Failed</span>
-            </article>
+          <div class="report-outcome-list">
+            <div class="report-outcome-row">
+              <div>
+                <strong>Completed</strong>
+                <span>Calls finished successfully</span>
+              </div>
+              <div class="report-outcome-value">
+                <strong id="outcomeCompleted">0</strong>
+              </div>
+            </div>
+            <div class="report-outcome-row">
+              <div>
+                <strong>Pending</strong>
+                <span>Still waiting for follow-up or analysis</span>
+              </div>
+              <div class="report-outcome-value">
+                <strong id="outcomePending">0</strong>
+              </div>
+            </div>
+            <div class="report-outcome-row">
+              <div>
+                <strong>Failed</strong>
+                <span>Busy, no-answer, or failed attempts</span>
+              </div>
+              <div class="report-outcome-value">
+                <strong id="outcomeFailed">0</strong>
+              </div>
+            </div>
           </div>
         </article>
 
@@ -92,22 +181,22 @@
           <div class="poc-card-header">
             <div>
               <h3 class="poc-card-title">Feedback Summary</h3>
-              <div class="poc-card-subtitle">Sentiment split from captured feedback records.</div>
+              <div class="poc-card-subtitle">A soft sentiment snapshot from captured reviews.</div>
             </div>
           </div>
-          <div class="poc-mini-grid">
-            <article class="mini-stat">
-              <strong id="feedbackPositive">0</strong>
+          <div class="report-sentiment-strip">
+            <div class="report-sentiment-pill positive">
               <span>Positive</span>
-            </article>
-            <article class="mini-stat">
-              <strong id="feedbackNeutral">0</strong>
+              <strong id="feedbackPositive">0</strong>
+            </div>
+            <div class="report-sentiment-pill neutral">
               <span>Neutral</span>
-            </article>
-            <article class="mini-stat">
-              <strong id="feedbackNegative">0</strong>
+              <strong id="feedbackNeutral">0</strong>
+            </div>
+            <div class="report-sentiment-pill negative">
               <span>Negative</span>
-            </article>
+              <strong id="feedbackNegative">0</strong>
+            </div>
           </div>
         </article>
       </section>
@@ -115,28 +204,21 @@
       <section class="table-card">
         <div class="poc-card-header">
           <div>
-            <h3 class="poc-card-title">Recent Reports</h3>
-            <div class="poc-card-subtitle">A small reporting table for the demo walkthrough.</div>
+            <h3 class="poc-card-title">Recent Report Activity</h3>
+            <div class="poc-card-subtitle">A lightweight performance view for today, this week, and the current snapshot.</div>
           </div>
         </div>
-
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Calls</th>
-                <th>Completed</th>
-                <th>Feedback</th>
-                <th>Success Rate</th>
-              </tr>
-            </thead>
-            <tbody id="reportsTableBody"></tbody>
-          </table>
-        </div>
+        <div id="reportsActivityList" class="report-activity-list"></div>
       </section>
     </main>
   </div>
+
+  <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
+    <a href="/admin.html" class="mobile-dock-link">Overview</a>
+    <a href="/customers.html" class="mobile-dock-link">Customers</a>
+    <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
+    <a href="/reports.html" class="mobile-dock-link active">Reports</a>
+  </nav>
 
   <script src="/app-shell.js"></script>
   <script>
@@ -165,7 +247,7 @@
       return date.toDateString() === new Date().toDateString();
     }
 
-    function renderReportsTable({ recentCalls, feedback }) {
+    function renderReportsActivity({ recentCalls, feedback }) {
       const rows = [
         {
           label: 'Today',
@@ -184,19 +266,45 @@
         }
       ];
 
-      document.getElementById('reportsTableBody').innerHTML = rows.map((row) => {
+      const desktopContainer = document.getElementById('reportsActivityList');
+      const mobileContainer = document.getElementById('mobileReportsActivityList');
+
+      const desktopMarkup = rows.map((row) => {
         const completed = row.calls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed').length;
         const successRate = row.calls.length ? `${Math.round((completed / row.calls.length) * 100)}%` : '0%';
         return `
-          <tr>
-            <td>${row.label}</td>
-            <td>${row.calls.length}</td>
-            <td>${completed}</td>
-            <td>${row.feedback.length}</td>
-            <td>${successRate}</td>
-          </tr>
+          <article class="report-activity-row">
+            <div class="report-activity-main">
+              <strong>${row.label}</strong>
+              <span>${row.calls.length} calls · ${row.feedback.length} feedback</span>
+            </div>
+            <div class="report-activity-side">
+              <strong>${successRate}</strong>
+              <span>success</span>
+            </div>
+          </article>
         `;
       }).join('');
+
+      const mobileMarkup = rows.map((row) => {
+        const completed = row.calls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed').length;
+        const successRate = row.calls.length ? `${Math.round((completed / row.calls.length) * 100)}%` : '0%';
+        const statusTone = successRate === '0%' ? 'negative' : Number.parseInt(successRate, 10) >= 60 ? 'positive' : 'neutral';
+        return `
+          <article class="mobile-report-activity-card">
+            <div class="mobile-review-head">
+              <div>
+                <strong>${row.label}</strong>
+                <div class="mobile-subtext">${row.calls.length} calls · ${completed} completed</div>
+              </div>
+              <span class="status-badge ${statusTone}">${successRate}</span>
+            </div>
+          </article>
+        `;
+      }).join('');
+
+      desktopContainer.innerHTML = desktopMarkup;
+      mobileContainer.innerHTML = mobileMarkup;
     }
 
     async function loadReports() {
@@ -219,16 +327,26 @@
       document.getElementById('reportCompletedCalls').textContent = completedCalls.length;
       document.getElementById('reportFailedCalls').textContent = failedCalls.length;
       document.getElementById('reportAverageRating').textContent = averageRating;
+      document.getElementById('mobileReportTotalCalls').textContent = recentCalls.length || preview.total_calls || 0;
+      document.getElementById('mobileReportCompletedCalls').textContent = completedCalls.length;
+      document.getElementById('mobileReportFailedCalls').textContent = failedCalls.length;
+      document.getElementById('mobileReportAverageRating').textContent = averageRating;
 
       document.getElementById('outcomeCompleted').textContent = completedCalls.length;
       document.getElementById('outcomePending').textContent = Math.max(0, (preview.total_calls || 0) - completedCalls.length - failedCalls.length);
       document.getElementById('outcomeFailed').textContent = failedCalls.length;
+      document.getElementById('mobileOutcomeCompleted').textContent = completedCalls.length;
+      document.getElementById('mobileOutcomePending').textContent = Math.max(0, (preview.total_calls || 0) - completedCalls.length - failedCalls.length);
+      document.getElementById('mobileOutcomeFailed').textContent = failedCalls.length;
 
       document.getElementById('feedbackPositive').textContent = positive;
       document.getElementById('feedbackNeutral').textContent = neutral;
       document.getElementById('feedbackNegative').textContent = negative;
+      document.getElementById('mobileFeedbackPositive').textContent = positive;
+      document.getElementById('mobileFeedbackNeutral').textContent = neutral;
+      document.getElementById('mobileFeedbackNegative').textContent = negative;
 
-      renderReportsTable({ recentCalls, feedback });
+      renderReportsActivity({ recentCalls, feedback });
     }
 
     function exportReport() {
@@ -237,8 +355,8 @@
 
     document.addEventListener('DOMContentLoaded', async () => {
       await AppShell.ensureAuthenticatedSession();
-      document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('exportReportButton').addEventListener('click', exportReport);
+      document.getElementById('mobileExportReportButton').addEventListener('click', exportReport);
       try {
         await loadReports();
       } catch (error) {
