@@ -14,7 +14,7 @@
           <div class="brand-mark">PL</div>
           <div class="brand-copy">
             <h1>Path Lab Console</h1>
-            <p>AI follow-up POC</p>
+            <p>Patient follow-up operations</p>
           </div>
         </div>
 
@@ -40,7 +40,7 @@
       <header class="page-header desktop-page-header">
         <div class="page-title-wrap">
           <h2>Outbound Calls</h2>
-          <div class="page-subtitle">Schedule and manage AI follow-up calls.</div>
+          <div class="page-subtitle">Schedule and manage patient follow-up calls.</div>
         </div>
         <div class="header-actions">
           <button id="newCallButton" class="primary" type="button">New Call</button>
@@ -73,22 +73,22 @@
         <article class="metric-card">
           <div class="metric-label">Scheduled Today</div>
           <div class="metric-value" id="scheduledTodayMetric">0</div>
-          <div class="metric-note">Records prepared for today's calling flow.</div>
+          <div class="metric-note">Patients prepared for today's calling schedule.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Pending Calls</div>
           <div class="metric-value" id="pendingCallsMetric">0</div>
-          <div class="metric-note">Still awaiting first dial or retry.</div>
+          <div class="metric-note">Still waiting for the first call or a retry.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Completed Calls</div>
           <div class="metric-value" id="completedCallsMetric">0</div>
-          <div class="metric-note">Calls with final outcomes recorded.</div>
+          <div class="metric-note">Calls completed with a recorded outcome.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Failed Calls</div>
           <div class="metric-value" id="failedCallsMetric">0</div>
-          <div class="metric-note">Busy, no-answer, or failed calls.</div>
+          <div class="metric-note">Busy, no-answer, or unsuccessful calls.</div>
         </article>
       </section>
 
@@ -96,12 +96,12 @@
         <div class="poc-card-header">
           <div>
             <h3 class="poc-card-title">Scheduled Calls</h3>
-            <div class="poc-card-subtitle" id="queueMeta">Manage the current outbound queue.</div>
+            <div class="poc-card-subtitle" id="queueMeta">Manage the current patient calling queue.</div>
           </div>
         </div>
 
         <div class="search-row">
-          <input id="customerSearch" class="search-input mobile-only" type="search" placeholder="Search customer or phone">
+          <input id="customerSearch" class="search-input mobile-only" type="search" placeholder="Search patient or phone">
           <select id="statusFilter" class="table-filter desktop-only">
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
@@ -118,7 +118,7 @@
           <table>
             <thead>
               <tr>
-                <th>Customer</th>
+                <th>Patient</th>
                 <th>Phone</th>
                 <th>Call Time</th>
                 <th>Status</th>
@@ -157,7 +157,7 @@
 
       <div class="poc-form-grid">
         <label class="span-2">
-          Customer Name
+          Patient Name
           <input id="callCustomerName" type="text" maxlength="100" placeholder="e.g. Rahul Sharma">
           <span class="error-text" id="callCustomerNameError"></span>
         </label>
@@ -239,7 +239,7 @@
       </section>
 
       <section class="poc-card" style="margin-bottom: 14px;">
-        <h4 class="poc-card-title" style="font-size:16px;">Customer Review</h4>
+        <h4 class="poc-card-title" style="font-size:16px;">Patient Review</h4>
         <div id="analysisReviewValue" class="poc-card-subtitle" style="margin-top:10px;">No review extracted yet.</div>
       </section>
 
@@ -381,7 +381,7 @@
 
     function validateNewCall(payload) {
       const fieldErrors = {};
-      if (!payload.name || payload.name.length < 2) fieldErrors.callCustomerName = 'Customer name is required';
+      if (!payload.name || payload.name.length < 2) fieldErrors.callCustomerName = 'Patient name is required';
       if (!/^\+\d{12}$/.test(payload.phone)) fieldErrors.callCustomerPhone = 'Use a valid Indian mobile number';
       if (!payload.preferred_slot) fieldErrors.callCustomerTime = 'Call time is required';
       return fieldErrors;
@@ -514,7 +514,7 @@
       if (!confirm('Delete this customer and related call data?')) return;
       try {
         await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}`, { method: 'DELETE' });
-        AppShell.showAlert('Customer deleted successfully');
+        AppShell.showAlert('Patient record deleted successfully');
         await loadPageData();
       } catch (error) {
         AppShell.showAlert(error.message, 'error');
@@ -547,7 +547,7 @@
         AppShell.showAlert('Call analysis not found', 'error');
         return;
       }
-      document.getElementById('analysisModalTitle').textContent = `Analysis for ${call.customer_name || 'Customer'}`;
+      document.getElementById('analysisModalTitle').textContent = `Analysis for ${call.customer_name || 'Patient'}`;
       document.getElementById('analysisModalSubtitle').textContent = AppShell.formatDateTime(call.called_at);
       document.getElementById('analysisRatingValue').textContent = call.extracted_rating ? `${call.extracted_rating}/5` : '--';
       document.getElementById('analysisOutcomeValue').textContent = AppShell.formatStatusLabel(call.outcome || '--');
@@ -669,7 +669,7 @@
             <td colspan="5">
               <div class="empty-state">
                 <strong>No scheduled calls found</strong>
-                <div class="supporting-text">Use New Call to add the next follow-up record.</div>
+                <div class="supporting-text">Add a patient to schedule the next follow-up call.</div>
               </div>
             </td>
           </tr>
@@ -686,7 +686,7 @@
         return `
           <tr>
             <td>
-              <div class="row-title">${AppShell.escapeHtml(customer.name || 'Customer')}</div>
+              <div class="row-title">${AppShell.escapeHtml(customer.name || 'Patient')}</div>
               <div class="row-subtitle">ID #${customer.id}</div>
             </td>
             <td>${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</td>
@@ -711,7 +711,7 @@
         container.innerHTML = `
           <div class="empty-state">
             <strong>No scheduled calls found</strong>
-            <div class="supporting-text">Tap New Call to add the next follow-up record.</div>
+            <div class="supporting-text">Tap New Call to schedule the next patient follow-up.</div>
           </div>
         `;
         return;
@@ -727,7 +727,7 @@
           <article class="mobile-call-card">
             <div class="mobile-call-head">
               <div>
-                <strong>${AppShell.escapeHtml(customer.name || 'Customer')}</strong>
+                <strong>${AppShell.escapeHtml(customer.name || 'Patient')}</strong>
                 <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</div>
               </div>
               <span class="status-badge ${AppShell.escapeHtml(String(customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(customer.status || 'pending')}</span>

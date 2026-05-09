@@ -14,7 +14,7 @@
           <div class="brand-mark">PL</div>
           <div class="brand-copy">
             <h1>Path Lab Console</h1>
-            <p>AI follow-up POC</p>
+            <p>Patient follow-up operations</p>
           </div>
         </div>
 
@@ -32,7 +32,7 @@
         <div class="mobile-ops-bar">
           <div>
             <div class="mobile-ops-title">Operations Overview</div>
-            <div class="mobile-ops-subtitle">Lightweight AI follow-up control center.</div>
+            <div class="mobile-ops-subtitle">Daily follow-up activity for KC Prashant Path Lab.</div>
           </div>
           <div class="mobile-ops-actions">
             <button id="mobileOverviewMenuButton" class="mobile-icon-button" type="button" aria-label="Open menu">...</button>
@@ -56,7 +56,7 @@
       <section class="mobile-stat-strip mobile-only" aria-label="Overview stats">
         <div class="mobile-stat-pill">
           <span class="mobile-stat-count" id="mobileMetricCustomers">0</span>
-          <span class="mobile-stat-label">Customers</span>
+          <span class="mobile-stat-label">Patients</span>
         </div>
         <div class="mobile-stat-pill">
           <span class="mobile-stat-count" id="mobileMetricScheduled">0</span>
@@ -74,7 +74,7 @@
 
       <section class="poc-metrics-grid">
         <article class="metric-card">
-          <div class="metric-label">Total Customers</div>
+          <div class="metric-label">Total Patients</div>
           <div class="metric-value" id="metricCustomers">0</div>
           <div class="metric-note">Active records in the follow-up queue.</div>
         </article>
@@ -91,7 +91,7 @@
         <article class="metric-card">
           <div class="metric-label">Feedback Captured</div>
           <div class="metric-value" id="metricFeedback">0</div>
-          <div class="metric-note">Manual or AI-extracted feedback entries.</div>
+          <div class="metric-note">Feedback captured from calls and manual updates.</div>
         </article>
       </section>
 
@@ -120,7 +120,7 @@
           <div class="poc-card-header">
             <div>
               <h3 class="poc-card-title">Today's Activity</h3>
-              <div class="poc-card-subtitle">A quick operational snapshot for the demo.</div>
+              <div class="poc-card-subtitle">A quick view of today's follow-up activity.</div>
             </div>
           </div>
           <div id="todayActivityList" class="compact-list"></div>
@@ -131,13 +131,13 @@
             <div class="poc-card-header">
               <div>
                 <h3 class="poc-card-title">Quick Actions</h3>
-                <div class="poc-card-subtitle">Jump straight into the three core POC workflows.</div>
+                <div class="poc-card-subtitle">Go directly to scheduling, call queue, or feedback review.</div>
               </div>
             </div>
             <div class="quick-action-grid">
               <button id="desktopQuickNewCallButton" class="primary" type="button">Schedule New Call</button>
               <a href="/customers.html#queueSection" class="secondary button-link">View Queue</a>
-              <a href="/feedback.html" class="secondary button-link">Open Feedback</a>
+              <a href="/feedback.html" class="secondary button-link">Review Feedback</a>
             </div>
           </article>
 
@@ -145,7 +145,7 @@
             <div class="poc-card-header">
               <div>
                 <h3 class="poc-card-title">Recent Call Activity</h3>
-                <div class="poc-card-subtitle">Latest three calls for quick review.</div>
+                <div class="poc-card-subtitle">Most recent follow-up calls and outcomes.</div>
               </div>
             </div>
             <div id="recentCallActivity" class="simple-call-list"></div>
@@ -178,7 +178,7 @@
 
       <div class="poc-form-grid">
         <label class="span-2">
-          Customer Name
+          Patient Name
           <input id="overviewCallCustomerName" type="text" maxlength="100" placeholder="e.g. Rahul Sharma">
           <span class="error-text" id="overviewCallCustomerNameError"></span>
         </label>
@@ -304,7 +304,7 @@
 
     function validateOverviewNewCall(payload) {
       const fieldErrors = {};
-      if (!payload.name || payload.name.length < 2) fieldErrors.overviewCallCustomerName = 'Customer name is required';
+      if (!payload.name || payload.name.length < 2) fieldErrors.overviewCallCustomerName = 'Patient name is required';
       if (!/^\+\d{12}$/.test(payload.phone)) fieldErrors.overviewCallCustomerPhone = 'Use a valid Indian mobile number';
       if (!payload.preferred_slot) fieldErrors.overviewCallCustomerTime = 'Call time is required';
       return fieldErrors;
@@ -404,10 +404,10 @@
 
     function renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls }) {
       document.getElementById('todayActivityList').innerHTML = `
-        <div class="compact-row"><div><strong>Calls scheduled today</strong><div class="muted">Customers added or re-queued for today's follow-up flow.</div></div><strong>${scheduledToday}</strong></div>
-        <div class="compact-row"><div><strong>Calls completed</strong><div class="muted">Calls that finished and moved into outcome tracking.</div></div><strong>${completedToday}</strong></div>
-        <div class="compact-row"><div><strong>Pending calls</strong><div class="muted">Customers still waiting for first dial or retry.</div></div><strong>${pendingCalls}</strong></div>
-        <div class="compact-row"><div><strong>Failed calls</strong><div class="muted">Busy, no-answer, or failed outcomes needing attention.</div></div><strong>${failedCalls}</strong></div>
+        <div class="compact-row"><div><strong>Calls scheduled today</strong><div class="muted">Patients added today or queued again for follow-up.</div></div><strong>${scheduledToday}</strong></div>
+        <div class="compact-row"><div><strong>Calls completed</strong><div class="muted">Calls that ended with a recorded outcome.</div></div><strong>${completedToday}</strong></div>
+        <div class="compact-row"><div><strong>Pending calls</strong><div class="muted">Patients still waiting for the first call or a retry.</div></div><strong>${pendingCalls}</strong></div>
+        <div class="compact-row"><div><strong>Failed calls</strong><div class="muted">Busy, no-answer, or failed calls that may need follow-up.</div></div><strong>${failedCalls}</strong></div>
       `;
 
       document.getElementById('mobileTodayActivityList').innerHTML = `
@@ -426,7 +426,7 @@
         const emptyMarkup = `
           <div class="empty-state">
             <strong>No recent calls yet</strong>
-            <div class="supporting-text">Scheduled calls will appear here once the team starts the demo flow.</div>
+            <div class="supporting-text">Recent follow-up calls will appear here once calling activity starts.</div>
           </div>
         `;
         container.innerHTML = emptyMarkup;
@@ -437,7 +437,7 @@
       container.innerHTML = recent.map((call) => `
         <div class="simple-call-item">
           <div>
-            <strong>${AppShell.escapeHtml(call.customer_name || 'Customer')}</strong>
+            <strong>${AppShell.escapeHtml(call.customer_name || 'Patient')}</strong>
             <span>${AppShell.formatDateTime(call.called_at)}</span>
           </div>
           <span class="status-badge ${AppShell.escapeHtml(String(call.outcome || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || 'pending')}</span>
@@ -447,7 +447,7 @@
       mobileContainer.innerHTML = recent.map((call) => `
         <article class="mobile-recent-call-card">
           <div>
-            <strong>${AppShell.escapeHtml(call.customer_name || 'Customer')}</strong>
+            <strong>${AppShell.escapeHtml(call.customer_name || 'Patient')}</strong>
             <div class="mobile-subtext">${AppShell.formatDateTime(call.called_at)}</div>
           </div>
           <span class="status-badge ${AppShell.escapeHtml(String(call.outcome || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || 'pending')}</span>

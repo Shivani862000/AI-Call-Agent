@@ -14,7 +14,7 @@
           <div class="brand-mark">PL</div>
           <div class="brand-copy">
             <h1>Path Lab Console</h1>
-            <p>AI follow-up POC</p>
+            <p>Patient follow-up operations</p>
           </div>
         </div>
 
@@ -32,7 +32,7 @@
         <div class="mobile-ops-bar">
           <div>
             <div class="mobile-ops-title">Feedback</div>
-            <div class="mobile-ops-subtitle">Review AI call outcomes</div>
+            <div class="mobile-ops-subtitle">Review follow-up calls and captured feedback</div>
           </div>
           <div class="mobile-ops-actions">
             <button id="mobileFeedbackMenuButton" class="mobile-icon-button" type="button" aria-label="Open menu">...</button>
@@ -43,7 +43,7 @@
       <header class="page-header desktop-page-header">
         <div class="page-title-wrap">
           <h2>Feedback</h2>
-          <div class="page-subtitle">Review call feedback, transcripts, and customer sentiment.</div>
+          <div class="page-subtitle">Review patient feedback, transcripts, and call outcomes.</div>
         </div>
         <div class="header-actions">
           <button id="openManualFeedbackButton" class="primary" type="button">Add Manual Feedback</button>
@@ -72,22 +72,22 @@
         <article class="metric-card">
           <div class="metric-label">Feedback Captured</div>
           <div class="metric-value" id="metricFeedbackTotal">0</div>
-          <div class="metric-note">Recorded feedback entries across the POC flow.</div>
+          <div class="metric-note">Feedback entries captured from calls and manual updates.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Positive Feedback</div>
           <div class="metric-value" id="metricPositiveFeedback">0</div>
-          <div class="metric-note">Ratings and reviews worth showcasing.</div>
+          <div class="metric-note">Positive patient feedback received so far.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Needs Review</div>
           <div class="metric-value" id="metricNeedsReview">0</div>
-          <div class="metric-note">Completed calls that still need human review.</div>
+          <div class="metric-note">Completed calls that still need team review.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Pending Analysis</div>
           <div class="metric-value" id="metricPendingAnalysis">0</div>
-          <div class="metric-note">Calls waiting on transcript or analysis completion.</div>
+          <div class="metric-note">Calls waiting for transcript or analysis to finish.</div>
         </article>
       </section>
 
@@ -107,7 +107,7 @@
           <div class="poc-card-header">
             <div>
               <h3 class="poc-card-title">Calls Needing Review</h3>
-              <div class="poc-card-subtitle">Open analysis only for the conversations that need attention.</div>
+              <div class="poc-card-subtitle">Open analysis for the calls that need follow-up review.</div>
             </div>
           </div>
           <div id="needsReviewList" class="compact-list"></div>
@@ -117,7 +117,7 @@
           <div class="poc-card-header">
             <div>
               <h3 class="poc-card-title">Feedback Board</h3>
-              <div class="poc-card-subtitle">Latest captured feedback in one clean board.</div>
+              <div class="poc-card-subtitle">Recently captured feedback and review summaries.</div>
             </div>
           </div>
 
@@ -125,7 +125,7 @@
             <table>
               <thead>
                 <tr>
-                  <th>Customer</th>
+                  <th>Patient</th>
                   <th>Sentiment</th>
                   <th>Rating</th>
                   <th>Summary</th>
@@ -157,14 +157,14 @@
       <div class="poc-card-header modal-sheet-header">
         <div>
           <h3 id="manualFeedbackTitle" class="poc-card-title">Add Manual Feedback</h3>
-          <div class="poc-card-subtitle">Use this only when feedback is collected outside the AI call flow.</div>
+          <div class="poc-card-subtitle">Use this when feedback is shared by phone, WhatsApp, or in person.</div>
         </div>
         <button id="closeManualFeedbackModal" class="secondary modal-close modal-close-icon" type="button" aria-label="Close add feedback modal">&times;</button>
       </div>
 
       <div class="poc-form-grid">
         <label class="span-2">
-          Customer
+          Patient
           <select id="feedbackCustomer"></select>
           <span class="error-text" id="feedbackCustomerError"></span>
         </label>
@@ -181,7 +181,7 @@
         </label>
         <label class="span-2">
           Review
-          <textarea id="reviewText" placeholder="Write the customer's feedback here..."></textarea>
+          <textarea id="reviewText" placeholder="Write the patient's feedback here..."></textarea>
           <span class="error-text" id="reviewTextError"></span>
         </label>
       </div>
@@ -233,7 +233,7 @@
       </section>
 
       <details class="details-toggle analysis-details-toggle">
-        <summary>Customer Review</summary>
+        <summary>Patient Review</summary>
         <div class="details-content">
           <section class="poc-card analysis-section-card analysis-section-card--nested">
             <div id="analysisReviewValue" class="poc-card-subtitle analysis-section-copy">No review extracted yet.</div>
@@ -305,7 +305,7 @@
       container.innerHTML = calls.slice(0, 6).map((call) => `
         <div class="compact-row">
           <div>
-            <strong>${AppShell.escapeHtml(call.customer_name || 'Customer')}</strong>
+            <strong>${AppShell.escapeHtml(call.customer_name || 'Patient')}</strong>
             <div class="muted">${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.outcome || 'completed')}</div>
           </div>
           <button class="secondary" type="button" onclick="openAnalysisModal(${call.id})">View Analysis</button>
@@ -316,7 +316,7 @@
         <article class="mobile-review-card">
           <div class="mobile-review-head">
             <div>
-              <strong>${AppShell.escapeHtml(call.customer_name || 'Customer')}</strong>
+              <strong>${AppShell.escapeHtml(call.customer_name || 'Patient')}</strong>
               <div class="mobile-subtext">${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.outcome || 'completed')}</div>
             </div>
           </div>
@@ -352,7 +352,7 @@
         return `
           <tr>
             <td>
-              <div class="row-title">${AppShell.escapeHtml(item.customer_name || 'Customer')}</div>
+              <div class="row-title">${AppShell.escapeHtml(item.customer_name || 'Patient')}</div>
               <div class="row-subtitle">${AppShell.escapeHtml(item.source || 'call')}</div>
             </td>
             <td><span class="status-badge ${sentiment}">${AppShell.formatStatusLabel(sentiment)}</span></td>
@@ -369,7 +369,7 @@
           <article class="mobile-feedback-card">
             <div class="mobile-feedback-head">
               <div>
-                <strong>${AppShell.escapeHtml(item.customer_name || 'Customer')}</strong>
+                <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
                 <div class="mobile-subtext">${AppShell.formatDateTime(item.submitted_at)}</div>
               </div>
               <span class="status-badge ${sentiment}">${AppShell.formatStatusLabel(sentiment)}</span>
@@ -464,7 +464,7 @@
         AppShell.showAlert('Call analysis not found', 'error');
         return;
       }
-      document.getElementById('analysisModalTitle').textContent = `Analysis for ${call.customer_name || 'Customer'}`;
+      document.getElementById('analysisModalTitle').textContent = `Analysis for ${call.customer_name || 'Patient'}`;
       document.getElementById('analysisModalSubtitle').textContent = AppShell.formatDateTime(call.called_at);
       document.getElementById('analysisRatingValue').textContent = call.extracted_rating ? `${call.extracted_rating}/5` : '--';
       document.getElementById('analysisOutcomeValue').textContent = AppShell.formatStatusLabel(call.outcome || '--');

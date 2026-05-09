@@ -14,7 +14,7 @@
           <div class="brand-mark">PL</div>
           <div class="brand-copy">
             <h1>Path Lab Console</h1>
-            <p>AI follow-up POC</p>
+            <p>Patient follow-up operations</p>
           </div>
         </div>
 
@@ -32,7 +32,7 @@
         <div class="mobile-ops-bar">
           <div>
             <div class="mobile-ops-title">Reports</div>
-            <div class="mobile-ops-subtitle">AI follow-up performance snapshot</div>
+            <div class="mobile-ops-subtitle">Follow-up call performance snapshot</div>
           </div>
           <div class="mobile-ops-actions">
             <button id="mobileExportReportButton" class="mobile-export-button" type="button" aria-label="Export report">↓ Export</button>
@@ -43,7 +43,7 @@
       <header class="page-header desktop-page-header">
         <div class="page-title-wrap">
           <h2>Reports</h2>
-          <div class="page-subtitle">AI follow-up performance snapshot</div>
+          <div class="page-subtitle">Follow-up call performance snapshot</div>
         </div>
         <div class="header-actions">
           <button id="exportReportButton" class="primary" type="button">Export Report</button>
@@ -143,7 +143,7 @@
           <div class="poc-card-header">
             <div>
               <h3 class="poc-card-title">Call Outcome Summary</h3>
-              <div class="poc-card-subtitle">A quick view of what happened in the follow-up flow.</div>
+              <div class="poc-card-subtitle">A quick view of recent calling outcomes.</div>
             </div>
           </div>
           <div class="report-outcome-list">
@@ -159,7 +159,7 @@
             <div class="report-outcome-row">
               <div>
                 <strong>Pending</strong>
-                <span>Still waiting for follow-up or analysis</span>
+                <span>Still waiting for a call outcome or analysis update</span>
               </div>
               <div class="report-outcome-value">
                 <strong id="outcomePending">0</strong>
@@ -181,7 +181,7 @@
           <div class="poc-card-header">
             <div>
               <h3 class="poc-card-title">Feedback Summary</h3>
-              <div class="poc-card-subtitle">A soft sentiment snapshot from captured reviews.</div>
+              <div class="poc-card-subtitle">Sentiment trend from captured patient reviews.</div>
             </div>
           </div>
           <div class="report-sentiment-strip">
@@ -205,7 +205,7 @@
         <div class="poc-card-header">
           <div>
             <h3 class="poc-card-title">Recent Report Activity</h3>
-            <div class="poc-card-subtitle">A lightweight performance view for today, this week, and the current snapshot.</div>
+            <div class="poc-card-subtitle">A concise view of daily, weekly, and overall calling performance.</div>
           </div>
         </div>
         <div id="reportsActivityList" class="report-activity-list"></div>
@@ -260,7 +260,7 @@
           feedback: feedback.filter((item) => isThisWeek(item.submitted_at))
         },
         {
-          label: 'POC Snapshot',
+          label: 'Overall Snapshot',
           calls: recentCalls,
           feedback
         }
