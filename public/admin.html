@@ -54,30 +54,30 @@
       <div id="alertContainer" class="alert-stack"></div>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Overview stats">
-        <div class="mobile-stat-pill">
+        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-overview-filter="patients" aria-pressed="true">
           <span class="mobile-stat-count" id="mobileMetricCustomers">0</span>
           <span class="mobile-stat-label">Patients</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="scheduled" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricScheduled">0</span>
           <span class="mobile-stat-label">Scheduled</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="completed" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricCompleted">0</span>
           <span class="mobile-stat-label">Completed</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="feedback" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricFeedback">0</span>
           <span class="mobile-stat-label">Feedback</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="positive" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricPositiveFeedback">0</span>
           <span class="mobile-stat-label">Positive</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="negative" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricNegativeFeedback">0</span>
           <span class="mobile-stat-label">Negative</span>
-        </div>
+        </button>
       </section>
 
       <section class="poc-metrics-grid">
@@ -247,6 +247,7 @@
   <script src="/app-shell.js"></script>
   <script>
     let clientCache = [];
+    let activeOverviewFilter = 'patients';
 
     function isToday(value) {
       if (!value) return false;
@@ -410,30 +411,152 @@
       element.setAttribute('aria-hidden', 'true');
     }
 
-    function renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls, positiveFeedback, negativeFeedback }) {
+    function updateOverviewFilterButtons() {
+      document.querySelectorAll('[data-overview-filter]').forEach((button) => {
+        const isActive = button.dataset.overviewFilter === activeOverviewFilter;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      });
+    }
+
+    function renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls, positiveFeedback, negativeFeedback, totalPatients, feedbackItems }) {
+      const activityCards = {
+        patients: [
+          { label: 'Patients', value: totalPatients, note: 'Active records in the patient follow-up queue.' },
+          { label: 'Scheduled', value: scheduledToday, note: 'Patients added today or queued again for follow-up.' },
+          { label: 'Positive', value: positiveFeedback, note: 'Patients sharing a high-satisfaction experience.' },
+          { label: 'Negative', value: negativeFeedback, note: 'Patients who may need recovery or quick attention.' }
+        ],
+        scheduled: [
+          { label: 'Scheduled', value: scheduledToday, note: 'Patients added today or queued again for follow-up.' },
+          { label: 'Pending', value: pendingCalls, note: 'Patients still waiting for the first call or a retry.' },
+          { label: 'Completed', value: completedToday, note: 'Today’s completed follow-up calls.' },
+          { label: 'Failed', value: failedCalls, note: 'Busy, no-answer, or failed calls that may need follow-up.' }
+        ],
+        completed: [
+          { label: 'Completed', value: completedToday, note: 'Calls that ended with a recorded outcome today.' },
+          { label: 'Positive', value: positiveFeedback, note: 'High-satisfaction reviews captured from recent calls.' },
+          { label: 'Negative', value: negativeFeedback, note: 'Completed calls that still need recovery handling.' },
+          { label: 'Feedback', value: feedbackItems.length, note: 'Total captured feedback entries across all channels.' }
+        ],
+        feedback: [
+          { label: 'Feedback', value: feedbackItems.length, note: 'Feedback captured from calls and manual updates.' },
+          { label: 'Positive', value: positiveFeedback, note: 'Positive reviews helping reinforce strong service areas.' },
+          { label: 'Negative', value: negativeFeedback, note: 'Negative reviews highlighting service recovery tasks.' },
+          { label: 'Completed', value: completedToday, note: 'Completed calls feeding into the feedback pipeline.' }
+        ],
+        positive: [
+          { label: 'Positive', value: positiveFeedback, note: 'High-satisfaction feedback entries captured so far.' },
+          { label: 'Completed', value: completedToday, note: 'Completed calls contributing to positive sentiment.' },
+          { label: 'Feedback', value: feedbackItems.length, note: 'Total feedback entries available for review.' },
+          { label: 'Patients', value: totalPatients, note: 'Total patients currently in the calling database.' }
+        ],
+        negative: [
+          { label: 'Negative', value: negativeFeedback, note: 'Patients who may need callback or service recovery.' },
+          { label: 'Failed', value: failedCalls, note: 'Failed call attempts that can add to dissatisfaction risk.' },
+          { label: 'Pending', value: pendingCalls, note: 'Pending customers still waiting for a successful call.' },
+          { label: 'Feedback', value: feedbackItems.length, note: 'Total feedback entries available for review.' }
+        ]
+      };
+
+      const cards = activityCards[activeOverviewFilter] || activityCards.patients;
       document.getElementById('todayActivityList').innerHTML = `
-        <div class="compact-row"><div><strong>Calls scheduled today</strong><div class="muted">Patients added today or queued again for follow-up.</div></div><strong>${scheduledToday}</strong></div>
-        <div class="compact-row"><div><strong>Calls completed</strong><div class="muted">Calls that ended with a recorded outcome.</div></div><strong>${completedToday}</strong></div>
-        <div class="compact-row"><div><strong>Pending calls</strong><div class="muted">Patients still waiting for the first call or a retry.</div></div><strong>${pendingCalls}</strong></div>
-        <div class="compact-row"><div><strong>Failed calls</strong><div class="muted">Busy, no-answer, or failed calls that may need follow-up.</div></div><strong>${failedCalls}</strong></div>
-        <div class="compact-row"><div><strong>Positive feedback</strong><div class="muted">High-satisfaction reviews captured from recent calls.</div></div><strong>${positiveFeedback}</strong></div>
-        <div class="compact-row"><div><strong>Negative feedback</strong><div class="muted">Patients who may need recovery or quick follow-up.</div></div><strong>${negativeFeedback}</strong></div>
+        ${cards.map((item) => `<div class="compact-row"><div><strong>${item.label}</strong><div class="muted">${item.note}</div></div><strong>${item.value}</strong></div>`).join('')}
       `;
 
       document.getElementById('mobileTodayActivityList').innerHTML = `
-        <div class="mobile-activity-row"><span>Scheduled</span><strong>${scheduledToday}</strong></div>
-        <div class="mobile-activity-row"><span>Completed</span><strong>${completedToday}</strong></div>
-        <div class="mobile-activity-row"><span>Pending</span><strong>${pendingCalls}</strong></div>
-        <div class="mobile-activity-row"><span>Failed</span><strong>${failedCalls}</strong></div>
-        <div class="mobile-activity-row"><span>Positive</span><strong>${positiveFeedback}</strong></div>
-        <div class="mobile-activity-row"><span>Negative</span><strong>${negativeFeedback}</strong></div>
+        ${cards.map((item) => `<div class="mobile-activity-row"><span>${item.label}</span><strong>${item.value}</strong></div>`).join('')}
       `;
+      updateOverviewFilterButtons();
     }
 
-    function renderRecentCalls(calls) {
+    function renderRecentCalls(calls, feedbackItems = []) {
       const container = document.getElementById('recentCallActivity');
       const mobileContainer = document.getElementById('mobileRecentCallActivity');
-      const recent = calls.slice(0, 3);
+      const positiveFeedbackItems = feedbackItems.filter((item) => Number(item.stars || 0) >= 4);
+      const negativeFeedbackItems = feedbackItems.filter((item) => Number(item.stars || 0) > 0 && Number(item.stars || 0) <= 2);
+      const scheduledStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
+      let recent = calls.slice(0, 3);
+
+      if (activeOverviewFilter === 'scheduled') {
+        recent = calls.filter((call) => scheduledStatuses.has(String(call.outcome || '').toLowerCase())).slice(0, 3);
+      } else if (activeOverviewFilter === 'completed') {
+        recent = calls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed').slice(0, 3);
+      } else if (activeOverviewFilter === 'positive' || activeOverviewFilter === 'feedback') {
+        const sourceItems = activeOverviewFilter === 'positive'
+          ? positiveFeedbackItems
+          : feedbackItems.slice(0, 3);
+        if (!sourceItems.length) {
+          const emptyMarkup = `
+            <div class="empty-state">
+              <strong>No matching feedback yet</strong>
+              <div class="supporting-text">Feedback entries will appear here as calls are reviewed.</div>
+            </div>
+          `;
+          container.innerHTML = emptyMarkup;
+          mobileContainer.innerHTML = emptyMarkup;
+          return;
+        }
+
+        const feedbackMarkup = sourceItems.slice(0, 3).map((item) => {
+          const tone = Number(item.stars || 0) >= 4 ? 'positive' : Number(item.stars || 0) <= 2 ? 'negative' : 'neutral';
+          return `
+            <article class="mobile-recent-call-card">
+              <div>
+                <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
+                <div class="mobile-subtext">${AppShell.escapeHtml(item.review_text || 'No review text available')}</div>
+              </div>
+              <span class="status-badge ${tone}">${item.stars || '--'}/5</span>
+            </article>
+          `;
+        }).join('');
+
+        const desktopFeedbackMarkup = sourceItems.slice(0, 3).map((item) => {
+          const tone = Number(item.stars || 0) >= 4 ? 'positive' : Number(item.stars || 0) <= 2 ? 'negative' : 'neutral';
+          return `
+            <div class="simple-call-item">
+              <div>
+                <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
+                <span>${AppShell.escapeHtml(item.review_text || 'No review text available')}</span>
+              </div>
+              <span class="status-badge ${tone}">${item.stars || '--'}/5</span>
+            </div>
+          `;
+        }).join('');
+
+        container.innerHTML = desktopFeedbackMarkup;
+        mobileContainer.innerHTML = feedbackMarkup;
+        return;
+      } else if (activeOverviewFilter === 'negative') {
+        if (negativeFeedbackItems.length) {
+          const feedbackMarkup = negativeFeedbackItems.slice(0, 3).map((item) => `
+            <article class="mobile-recent-call-card">
+              <div>
+                <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
+                <div class="mobile-subtext">${AppShell.escapeHtml(item.review_text || 'No review text available')}</div>
+              </div>
+              <span class="status-badge negative">${item.stars || '--'}/5</span>
+            </article>
+          `).join('');
+
+          const desktopFeedbackMarkup = negativeFeedbackItems.slice(0, 3).map((item) => `
+            <div class="simple-call-item">
+              <div>
+                <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
+                <span>${AppShell.escapeHtml(item.review_text || 'No review text available')}</span>
+              </div>
+              <span class="status-badge negative">${item.stars || '--'}/5</span>
+            </div>
+          `).join('');
+
+          container.innerHTML = desktopFeedbackMarkup;
+          mobileContainer.innerHTML = feedbackMarkup;
+          return;
+        }
+
+        recent = calls.filter((call) => ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase())).slice(0, 3);
+      }
+
       if (!recent.length) {
         const emptyMarkup = `
           <div class="empty-state">
@@ -497,8 +620,15 @@
       document.getElementById('mobileMetricPositiveFeedback').textContent = positiveFeedback;
       document.getElementById('mobileMetricNegativeFeedback').textContent = negativeFeedback;
 
-      renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls, positiveFeedback, negativeFeedback });
-      renderRecentCalls(recentCalls);
+      renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls, positiveFeedback, negativeFeedback, totalPatients: customers.length, feedbackItems: feedback });
+      renderRecentCalls(recentCalls, feedback);
+    }
+
+    function applyOverviewFilter(filterName) {
+      activeOverviewFilter = filterName || 'patients';
+      loadOverview().catch((error) => {
+        AppShell.showAlert(error.message, 'error');
+      });
     }
 
     document.addEventListener('DOMContentLoaded', async () => {
@@ -508,6 +638,9 @@
       document.getElementById('desktopQuickNewCallButton').addEventListener('click', openOverviewNewCallModal);
       document.getElementById('mobileOverviewFloatingCta').addEventListener('click', openOverviewNewCallModal);
       document.getElementById('mobileOverviewMenuButton').addEventListener('click', () => openOverviewSheet('overviewMobileMenuSheet'));
+      document.querySelectorAll('[data-overview-filter]').forEach((button) => {
+        button.addEventListener('click', () => applyOverviewFilter(button.dataset.overviewFilter));
+      });
       document.getElementById('closeOverviewMobileMenuSheet').addEventListener('click', () => closeOverviewSheet('overviewMobileMenuSheet'));
       document.getElementById('overviewMobileMenuLogout').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('closeOverviewNewCallModal').addEventListener('click', closeOverviewNewCallModal);
