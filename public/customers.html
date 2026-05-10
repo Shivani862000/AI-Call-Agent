@@ -51,22 +51,22 @@
       <div id="alertContainer" class="alert-stack"></div>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Call stats">
-        <div class="mobile-stat-pill">
+        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-customer-filter="scheduled" aria-pressed="true">
           <span class="mobile-stat-count" id="mobileScheduledMetric">0</span>
           <span class="mobile-stat-label">Scheduled</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="pending" aria-pressed="false">
           <span class="mobile-stat-count" id="mobilePendingMetric">0</span>
           <span class="mobile-stat-label">Pending</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="completed" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileCompletedMetric">0</span>
           <span class="mobile-stat-label">Completed</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="failed" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileFailedMetric">0</span>
           <span class="mobile-stat-label">Failed</span>
-        </div>
+        </button>
       </section>
 
       <section class="poc-metrics-grid">
@@ -300,6 +300,7 @@
     let recentCallsCache = [];
     let activeMobileActionCustomerId = null;
     let activeMobileActionCallId = null;
+    let activeCustomerMetricFilter = 'scheduled';
 
     function normalizePhoneForApi(value) {
       const digits = String(value || '').replace(/\D/g, '');
@@ -339,6 +340,13 @@
 
     function getLatestCompletedCall(customerId) {
       return recentCallsCache.find((call) => Number(call.customer_id) === Number(customerId) && String(call.outcome || '').toLowerCase() === 'completed') || null;
+    }
+
+    function hasFailedCall(customerId) {
+      return recentCallsCache.some((call) => (
+        Number(call.customer_id) === Number(customerId)
+        && ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase())
+      ));
     }
 
     function getClientByPhone(phone) {
@@ -651,17 +659,50 @@
       document.getElementById('mobilePendingMetric').textContent = pendingCount;
       document.getElementById('mobileCompletedMetric').textContent = completedCount;
       document.getElementById('mobileFailedMetric').textContent = failedCount;
-      document.getElementById('queueMeta').textContent = `${filteredCustomers.length} records in the active queue`;
+      const queueCopy = {
+        scheduled: 'records scheduled today',
+        pending: 'records waiting for the next call attempt',
+        completed: 'records with completed call outcomes',
+        failed: 'records that need retry or follow-up'
+      };
+      document.getElementById('queueMeta').textContent = `${filteredCustomers.length} ${queueCopy[activeCustomerMetricFilter] || 'records in the active queue'}`;
+      updateCustomerMetricButtons();
     }
 
     function getFilteredCustomers() {
       const search = document.getElementById('customerSearch').value.trim().toLowerCase();
       const status = document.getElementById('statusFilter').value;
+      const pendingStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
       return customerCache.filter((customer) => {
         const matchesSearch = !search || `${customer.name} ${customer.phone}`.toLowerCase().includes(search);
         const matchesStatus = !status || String(customer.status || '').toLowerCase() === status;
-        return matchesSearch && matchesStatus;
+        let matchesMetricFilter = true;
+
+        if (activeCustomerMetricFilter === 'scheduled') {
+          matchesMetricFilter = isToday(customer.created_at) || isToday(customer.updated_at);
+        } else if (activeCustomerMetricFilter === 'pending') {
+          matchesMetricFilter = pendingStatuses.has(String(customer.status || '').toLowerCase());
+        } else if (activeCustomerMetricFilter === 'completed') {
+          matchesMetricFilter = Boolean(getLatestCompletedCall(customer.id));
+        } else if (activeCustomerMetricFilter === 'failed') {
+          matchesMetricFilter = hasFailedCall(customer.id);
+        }
+
+        return matchesSearch && matchesStatus && matchesMetricFilter;
       });
+    }
+
+    function updateCustomerMetricButtons() {
+      document.querySelectorAll('[data-customer-filter]').forEach((button) => {
+        const isActive = button.dataset.customerFilter === activeCustomerMetricFilter;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      });
+    }
+
+    function applyCustomerMetricFilter(filterName) {
+      activeCustomerMetricFilter = filterName || 'scheduled';
+      renderQueue();
     }
 
     function renderDesktopTable(customers) {
@@ -772,6 +813,9 @@
       document.getElementById('mobileFloatingNewCallButton').addEventListener('click', () => openNewCallModal(null, { mode: 'customer' }));
       document.getElementById('mobileHeaderMenuButton').addEventListener('click', openMobileMenuSheet);
       document.getElementById('mobileFilterButton').addEventListener('click', openMobileFilterSheet);
+      document.querySelectorAll('[data-customer-filter]').forEach((button) => {
+        button.addEventListener('click', () => applyCustomerMetricFilter(button.dataset.customerFilter));
+      });
       document.getElementById('closeMobileMenuSheet').addEventListener('click', closeMobileMenuSheet);
       document.getElementById('closeMobileFilterSheet').addEventListener('click', closeMobileFilterSheet);
       document.getElementById('closeMobileActionSheet').addEventListener('click', closeMobileActionSheet);
