@@ -54,14 +54,6 @@
       <div id="alertContainer" class="alert-stack"></div>
 
       <section class="desktop-filter-strip desktop-only" aria-label="Feedback filters">
-        <button class="desktop-filter-pill active" type="button" data-feedback-filter="needs_review" aria-pressed="true">
-          <span class="desktop-filter-count" id="desktopMetricNeedsReview">0</span>
-          <span class="desktop-filter-label">Needs review</span>
-        </button>
-        <button class="desktop-filter-pill" type="button" data-feedback-filter="pending" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricPendingAnalysis">0</span>
-          <span class="desktop-filter-label">Pending</span>
-        </button>
         <button class="desktop-filter-pill" type="button" data-feedback-filter="positive" aria-pressed="false">
           <span class="desktop-filter-count" id="desktopMetricPositiveFeedback">0</span>
           <span class="desktop-filter-label">Positive</span>
@@ -70,17 +62,17 @@
           <span class="desktop-filter-count" id="desktopMetricNegativeFeedback">0</span>
           <span class="desktop-filter-label">Negative</span>
         </button>
+        <button class="desktop-filter-pill" type="button" data-feedback-filter="pending" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopMetricPendingAnalysis">0</span>
+          <span class="desktop-filter-label">Pending</span>
+        </button>
+        <button class="desktop-filter-pill active" type="button" data-feedback-filter="needs_review" aria-pressed="true">
+          <span class="desktop-filter-count" id="desktopMetricNeedsReview">0</span>
+          <span class="desktop-filter-label">Needs review</span>
+        </button>
       </section>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Feedback stats">
-        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-mobile-filter="needs_review" aria-pressed="true">
-          <span class="mobile-stat-count" id="mobileMetricNeedsReview">0</span>
-          <span class="mobile-stat-label">Needs review</span>
-        </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="pending" aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricPendingAnalysis">0</span>
-          <span class="mobile-stat-label">Pending</span>
-        </button>
         <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="positive" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricPositiveFeedback">0</span>
           <span class="mobile-stat-label">Positive</span>
@@ -88,6 +80,14 @@
         <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="negative" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricNegativeFeedback">0</span>
           <span class="mobile-stat-label">Negative</span>
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="pending" aria-pressed="false">
+          <span class="mobile-stat-count" id="mobileMetricPendingAnalysis">0</span>
+          <span class="mobile-stat-label">Pending</span>
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-mobile-filter="needs_review" aria-pressed="true">
+          <span class="mobile-stat-count" id="mobileMetricNeedsReview">0</span>
+          <span class="mobile-stat-label">Needs review</span>
         </button>
       </section>
 
@@ -166,6 +166,7 @@
             </div>
           </div>
           <div id="mobileNeedsReviewList" class="mobile-review-list"></div>
+          <div id="mobileFeedbackListPagination" class="pagination-bar mobile-only"></div>
         </article>
       </section>
 
@@ -178,6 +179,7 @@
             </div>
           </div>
           <div id="needsReviewList" class="compact-list"></div>
+          <div id="needsReviewPagination" class="pagination-bar desktop-only"></div>
         </article>
 
         <article class="poc-card">
@@ -202,6 +204,7 @@
               <tbody id="feedbackTableBody"></tbody>
             </table>
           </div>
+          <div id="feedbackBoardPagination" class="pagination-bar desktop-only"></div>
 
           <div id="mobileFeedbackList" class="mobile-feedback-stack mobile-only"></div>
         </article>
@@ -338,6 +341,9 @@
     let feedbackCache = [];
     let recentCallsCache = [];
     let activeFeedbackFilter = 'needs_review';
+    let currentFeedbackListPage = 1;
+    let currentFeedbackBoardPage = 1;
+    const PAGE_SIZE = 10;
 
     function feedbackSentiment(feedback) {
       if (Number(feedback.stars || 0) >= 4) return 'positive';
@@ -455,6 +461,31 @@
       return negativeFeedbackEntries().filter((item) => matchesDateFilter(item.submitted_at, prefix));
     }
 
+    function getPagedItems(items, currentPage) {
+      const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+      const safePage = Math.min(Math.max(1, currentPage), totalPages);
+      const start = (safePage - 1) * PAGE_SIZE;
+      return {
+        items: items.slice(start, start + PAGE_SIZE),
+        totalPages,
+        currentPage: safePage
+      };
+    }
+
+    function renderPagination(containerId, currentPage, totalPages, onPageChangeName) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      if (totalPages <= 1) {
+        container.innerHTML = '';
+        return;
+      }
+      container.innerHTML = `
+        <button class="pagination-button" type="button" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
+        <span class="pagination-meta">Page ${currentPage} of ${totalPages}</span>
+        <button class="pagination-button" type="button" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
+      `;
+    }
+
     function buildReviewList(calls, titleText = 'Calls Needing Review') {
       const container = document.getElementById('needsReviewList');
       const title = document.querySelector('.poc-grid-2 .poc-card .poc-card-title');
@@ -470,7 +501,7 @@
         return;
       }
 
-      container.innerHTML = calls.slice(0, 6).map((call) => `
+      container.innerHTML = calls.map((call) => `
         <div class="compact-row">
           <div>
             <strong>${AppShell.escapeHtml(call.customer_name || 'Patient')}</strong>
@@ -496,7 +527,7 @@
         return;
       }
 
-      container.innerHTML = items.slice(0, 6).map((item) => `
+      container.innerHTML = items.map((item) => `
         <div class="compact-row">
           <div>
             <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
@@ -523,6 +554,7 @@
           ? getFilteredPositiveFeedback('mobile')
           : getFilteredNegativeFeedback('mobile');
         if (!feedback.length) {
+          renderPagination('mobileFeedbackListPagination', 1, 1, 'changeFeedbackListPage');
           container.innerHTML = `
             <div class="empty-state">
               <strong>No ${activeFeedbackFilter} feedback found</strong>
@@ -532,7 +564,9 @@
           return;
         }
 
-        container.innerHTML = feedback.map((item) => `
+        const paged = getPagedItems(feedback, currentFeedbackListPage);
+        currentFeedbackListPage = paged.currentPage;
+        container.innerHTML = paged.items.map((item) => `
           <article class="mobile-feedback-card mobile-feedback-card-inline">
             <div class="mobile-feedback-head">
               <div>
@@ -545,6 +579,7 @@
             <div class="mobile-subtext" style="margin-top:8px;">Rating: ${Number(item.stars || 0) ? `${item.stars}/5` : '--'}</div>
           </article>
         `).join('');
+        renderPagination('mobileFeedbackListPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
         return;
       }
 
@@ -553,6 +588,7 @@
         : getFilteredReviewCalls('mobile');
 
       if (!calls.length) {
+        renderPagination('mobileFeedbackListPagination', 1, 1, 'changeFeedbackListPage');
         const emptyState = activeFeedbackFilter === 'pending'
           ? {
             title: 'No pending calls found',
@@ -572,7 +608,9 @@
         return;
       }
 
-      container.innerHTML = calls.map((call) => `
+      const paged = getPagedItems(calls, currentFeedbackListPage);
+      currentFeedbackListPage = paged.currentPage;
+      container.innerHTML = paged.items.map((call) => `
         <article class="mobile-review-card">
           <div class="mobile-review-head">
             <div>
@@ -586,6 +624,7 @@
           </div>
         </article>
       `).join('');
+      renderPagination('mobileFeedbackListPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
     }
 
     function renderFeedbackBoard(feedback) {
@@ -598,6 +637,7 @@
       })();
 
       if (!desktopFeedback.length) {
+        renderPagination('feedbackBoardPagination', 1, 1, 'changeFeedbackBoardPage');
         const emptyMarkup = `
           <div class="empty-state">
             <strong>No feedback recorded yet.</strong>
@@ -609,7 +649,10 @@
         return;
       }
 
-      tableBody.innerHTML = desktopFeedback.map((item) => {
+      const paged = getPagedItems(desktopFeedback, currentFeedbackBoardPage);
+      currentFeedbackBoardPage = paged.currentPage;
+
+      tableBody.innerHTML = paged.items.map((item) => {
         const sentiment = feedbackSentiment(item);
         return `
           <tr>
@@ -641,6 +684,7 @@
           </article>
         `;
       }).join('');
+      renderPagination('feedbackBoardPagination', paged.currentPage, paged.totalPages, 'changeFeedbackBoardPage');
     }
 
     function populateCustomerSelect() {
@@ -678,15 +722,27 @@
       document.getElementById('mobileMetricNegativeFeedback').textContent = mobileNegativeFeedback.length;
 
       if (activeFeedbackFilter === 'positive' || activeFeedbackFilter === 'negative') {
-        buildDesktopFeedbackReviewList(
+        const paged = getPagedItems(
           activeFeedbackFilter === 'positive' ? desktopPositiveFeedback : desktopNegativeFeedback,
+          currentFeedbackListPage
+        );
+        currentFeedbackListPage = paged.currentPage;
+        buildDesktopFeedbackReviewList(
+          paged.items,
           activeFeedbackFilter
         );
+        renderPagination('needsReviewPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
       } else {
-        buildReviewList(
+        const paged = getPagedItems(
           activeFeedbackFilter === 'pending' ? desktopPendingAnalysis : desktopReviewCalls,
+          currentFeedbackListPage
+        );
+        currentFeedbackListPage = paged.currentPage;
+        buildReviewList(
+          paged.items,
           activeFeedbackFilter === 'pending' ? 'Pending Analysis' : 'Calls Needing Review'
         );
+        renderPagination('needsReviewPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
       }
       renderFeedbackBoard(feedbackCache);
       renderMobileFilteredList();
@@ -709,6 +765,18 @@
 
     function applyFeedbackFilter(filterName) {
       activeFeedbackFilter = filterName || 'needs_review';
+      currentFeedbackListPage = 1;
+      currentFeedbackBoardPage = 1;
+      renderMetrics();
+    }
+
+    function changeFeedbackListPage(pageNumber) {
+      currentFeedbackListPage = pageNumber;
+      renderMetrics();
+    }
+
+    function changeFeedbackBoardPage(pageNumber) {
+      currentFeedbackBoardPage = pageNumber;
       renderMetrics();
     }
 
@@ -843,16 +911,20 @@
       });
       document.getElementById('mobileDateFilter').addEventListener('change', () => {
         toggleCustomDateRange('mobile');
+        currentFeedbackListPage = 1;
+        currentFeedbackBoardPage = 1;
         renderMetrics();
       });
       document.getElementById('desktopDateFilter').addEventListener('change', () => {
         toggleCustomDateRange('desktop');
+        currentFeedbackListPage = 1;
+        currentFeedbackBoardPage = 1;
         renderMetrics();
       });
-      document.getElementById('mobileStartDate').addEventListener('change', renderMetrics);
-      document.getElementById('mobileEndDate').addEventListener('change', renderMetrics);
-      document.getElementById('desktopStartDate').addEventListener('change', renderMetrics);
-      document.getElementById('desktopEndDate').addEventListener('change', renderMetrics);
+      document.getElementById('mobileStartDate').addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
+      document.getElementById('mobileEndDate').addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
+      document.getElementById('desktopStartDate').addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
+      document.getElementById('desktopEndDate').addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
       document.getElementById('closeFeedbackMobileMenuSheet').addEventListener('click', () => closeFeedbackSheet('feedbackMobileMenuSheet'));
       document.getElementById('feedbackMobileMenuLogout').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('closeManualFeedbackModal').addEventListener('click', closeManualFeedbackModal);
@@ -885,6 +957,8 @@
 
     window.openAnalysisModal = openAnalysisModal;
     window.openAnalysisPage = openAnalysisPage;
+    window.changeFeedbackListPage = changeFeedbackListPage;
+    window.changeFeedbackBoardPage = changeFeedbackBoardPage;
   </script>
 </body>
 </html>

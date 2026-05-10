@@ -234,6 +234,7 @@
             </div>
           </div>
           <div id="mobileReportDetailList" class="mobile-report-detail-list"></div>
+          <div id="mobileReportDetailPagination" class="pagination-bar mobile-only"></div>
         </article>
 
         <article class="poc-card mobile-reports-card">
@@ -243,6 +244,7 @@
             </div>
           </div>
           <div id="mobilePriorityQueueList" class="mobile-report-detail-list"></div>
+          <div id="mobilePriorityQueuePagination" class="pagination-bar mobile-only"></div>
         </article>
 
         <article class="poc-card mobile-reports-card">
@@ -343,6 +345,8 @@
           </div>
         </div>
         <div id="reportsActivityList" class="report-activity-list"></div>
+        <div id="reportsActivityPagination" class="pagination-bar desktop-only"></div>
+        <div id="mobileReportsActivityPagination" class="pagination-bar mobile-only"></div>
       </section>
     </main>
   </div>
@@ -357,6 +361,10 @@
   <script src="/app-shell.js"></script>
   <script>
     let activeReportFilter = 'calls';
+    let currentReportDetailPage = 1;
+    let currentReportPriorityPage = 1;
+    let currentReportActivityPage = 1;
+    const PAGE_SIZE = 10;
 
     function sentimentFromFeedback(item) {
       if (Number(item.stars || 0) >= 4) return 'positive';
@@ -389,6 +397,31 @@
         button.classList.toggle('active', isActive);
         button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
       });
+    }
+
+    function getPagedItems(items, currentPage) {
+      const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+      const safePage = Math.min(Math.max(1, currentPage), totalPages);
+      const start = (safePage - 1) * PAGE_SIZE;
+      return {
+        items: items.slice(start, start + PAGE_SIZE),
+        totalPages,
+        currentPage: safePage
+      };
+    }
+
+    function renderPagination(containerId, currentPage, totalPages, onPageChangeName) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      if (totalPages <= 1) {
+        container.innerHTML = '';
+        return;
+      }
+      container.innerHTML = `
+        <button class="pagination-button" type="button" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
+        <span class="pagination-meta">Page ${currentPage} of ${totalPages}</span>
+        <button class="pagination-button" type="button" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
+      `;
     }
 
     function buildTrendDays(recentCalls) {
@@ -500,6 +533,7 @@
       }
 
       if (!queue.length) {
+        renderPagination('mobilePriorityQueuePagination', 1, 1, 'changeReportPriorityPage');
         container.innerHTML = `
           <div class="empty-state">
             <strong>No priority queue items</strong>
@@ -509,7 +543,9 @@
         return;
       }
 
-      container.innerHTML = queue.slice(0, 6).map((item) => `
+      const paged = getPagedItems(queue, currentReportPriorityPage);
+      currentReportPriorityPage = paged.currentPage;
+      container.innerHTML = paged.items.map((item) => `
         <article class="mobile-report-detail-card ${item.tone}">
           <div>
             <strong>${AppShell.escapeHtml(item.title)}</strong>
@@ -518,6 +554,7 @@
           <span class="mobile-report-detail-value">${AppShell.escapeHtml(item.value)}</span>
         </article>
       `).join('');
+      renderPagination('mobilePriorityQueuePagination', paged.currentPage, paged.totalPages, 'changeReportPriorityPage');
     }
 
     function renderMobileReportDetailList({ recentCalls, feedback }) {
@@ -574,6 +611,7 @@
       }
 
       if (!items.length) {
+        renderPagination('mobileReportDetailPagination', 1, 1, 'changeReportDetailPage');
         container.innerHTML = `
           <div class="empty-state">
             <strong>No report items found</strong>
@@ -583,7 +621,9 @@
         return;
       }
 
-      container.innerHTML = items.map((item) => `
+      const paged = getPagedItems(items, currentReportDetailPage);
+      currentReportDetailPage = paged.currentPage;
+      container.innerHTML = paged.items.map((item) => `
         <article class="mobile-report-detail-card ${item.tone}">
           <div>
             <strong>${AppShell.escapeHtml(item.title)}</strong>
@@ -592,6 +632,7 @@
           <span class="mobile-report-detail-value">${AppShell.escapeHtml(String(item.value || '--'))}</span>
         </article>
       `).join('');
+      renderPagination('mobileReportDetailPagination', paged.currentPage, paged.totalPages, 'changeReportDetailPage');
     }
 
     function renderMobilePulse(completedCalls, recentCalls, preview) {
@@ -662,7 +703,10 @@
       const desktopContainer = document.getElementById('reportsActivityList');
       const mobileContainer = document.getElementById('mobileReportsActivityList');
 
-      const desktopMarkup = rows.map((row) => {
+      const paged = getPagedItems(rows, currentReportActivityPage);
+      currentReportActivityPage = paged.currentPage;
+
+      const desktopMarkup = paged.items.map((row) => {
         const completed = row.calls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed').length;
         const failed = row.calls.filter((call) => ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase())).length;
         const avgRating = row.feedback.length
@@ -688,7 +732,7 @@
         `;
       }).join('');
 
-      const mobileMarkup = rows.map((row) => {
+      const mobileMarkup = paged.items.map((row) => {
         const completed = row.calls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed').length;
         const failed = row.calls.filter((call) => ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase())).length;
         const avgRating = row.feedback.length
@@ -716,6 +760,8 @@
 
       desktopContainer.innerHTML = desktopMarkup;
       mobileContainer.innerHTML = mobileMarkup;
+      renderPagination('reportsActivityPagination', paged.currentPage, paged.totalPages, 'changeReportActivityPage');
+      renderPagination('mobileReportsActivityPagination', paged.currentPage, paged.totalPages, 'changeReportActivityPage');
     }
 
     async function loadReports() {
@@ -798,6 +844,21 @@
       window.location.href = `${AppShell.API_BASE}/reports/download?t=${Date.now()}`;
     }
 
+    function changeReportDetailPage(pageNumber) {
+      currentReportDetailPage = pageNumber;
+      loadReports().catch((error) => AppShell.showAlert(error.message, 'error'));
+    }
+
+    function changeReportPriorityPage(pageNumber) {
+      currentReportPriorityPage = pageNumber;
+      loadReports().catch((error) => AppShell.showAlert(error.message, 'error'));
+    }
+
+    function changeReportActivityPage(pageNumber) {
+      currentReportActivityPage = pageNumber;
+      loadReports().catch((error) => AppShell.showAlert(error.message, 'error'));
+    }
+
     document.addEventListener('DOMContentLoaded', async () => {
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('exportReportButton').addEventListener('click', exportReport);
@@ -805,6 +866,9 @@
       document.querySelectorAll('[data-report-filter]').forEach((button) => {
         button.addEventListener('click', async () => {
           activeReportFilter = button.dataset.reportFilter || 'calls';
+          currentReportDetailPage = 1;
+          currentReportPriorityPage = 1;
+          currentReportActivityPage = 1;
           try {
             await loadReports();
           } catch (error) {
@@ -818,6 +882,10 @@
         AppShell.showAlert(error.message, 'error');
       }
     });
+
+    window.changeReportDetailPage = changeReportDetailPage;
+    window.changeReportPriorityPage = changeReportPriorityPage;
+    window.changeReportActivityPage = changeReportActivityPage;
   </script>
 </body>
 </html>

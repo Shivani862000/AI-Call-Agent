@@ -148,7 +148,10 @@
           </table>
         </div>
 
+        <div id="queuePaginationDesktop" class="pagination-bar desktop-only"></div>
+
         <div id="mobileCallList" class="mobile-call-stack mobile-only"></div>
+        <div id="queuePaginationMobile" class="pagination-bar mobile-only"></div>
       </section>
     </main>
   </div>
@@ -320,6 +323,8 @@
     let activeMobileActionCustomerId = null;
     let activeMobileActionCallId = null;
     let activeCustomerMetricFilter = 'scheduled';
+    let currentQueuePage = 1;
+    const PAGE_SIZE = 10;
 
     function normalizePhoneForApi(value) {
       const digits = String(value || '').replace(/\D/g, '');
@@ -725,7 +730,34 @@
 
     function applyCustomerMetricFilter(filterName) {
       activeCustomerMetricFilter = filterName || 'scheduled';
+      currentQueuePage = 1;
       renderQueue();
+    }
+
+    function getPagedItems(items, currentPage) {
+      const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+      const safePage = Math.min(Math.max(1, currentPage), totalPages);
+      const start = (safePage - 1) * PAGE_SIZE;
+      return {
+        items: items.slice(start, start + PAGE_SIZE),
+        totalPages,
+        currentPage: safePage,
+        totalItems: items.length
+      };
+    }
+
+    function renderPagination(containerId, currentPage, totalPages, onPageChangeName) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      if (totalPages <= 1) {
+        container.innerHTML = '';
+        return;
+      }
+      container.innerHTML = `
+        <button class="pagination-button" type="button" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
+        <span class="pagination-meta">Page ${currentPage} of ${totalPages}</span>
+        <button class="pagination-button" type="button" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
+      `;
     }
 
     function renderDesktopTable(customers) {
@@ -813,8 +845,17 @@
     function renderQueue() {
       const customers = getFilteredCustomers();
       renderMetrics(customers);
-      renderDesktopTable(customers);
-      renderMobileCards(customers);
+      const paged = getPagedItems(customers, currentQueuePage);
+      currentQueuePage = paged.currentPage;
+      renderDesktopTable(paged.items);
+      renderMobileCards(paged.items);
+      renderPagination('queuePaginationDesktop', paged.currentPage, paged.totalPages, 'changeQueuePage');
+      renderPagination('queuePaginationMobile', paged.currentPage, paged.totalPages, 'changeQueuePage');
+    }
+
+    function changeQueuePage(pageNumber) {
+      currentQueuePage = pageNumber;
+      renderQueue();
     }
 
     async function loadPageData() {
@@ -861,9 +902,13 @@
       document.getElementById('closeNewCallModal').addEventListener('click', closeNewCallModal);
       document.getElementById('scheduleCallSubmit').addEventListener('click', submitNewCall);
       document.getElementById('analysisModalClose').addEventListener('click', closeAnalysisModal);
-      document.getElementById('customerSearch').addEventListener('input', renderQueue);
+      document.getElementById('customerSearch').addEventListener('input', () => {
+        currentQueuePage = 1;
+        renderQueue();
+      });
       document.getElementById('statusFilter').addEventListener('change', () => {
         syncMobileFilterOptions();
+        currentQueuePage = 1;
         renderQueue();
       });
       document.querySelectorAll('.mobile-filter-option').forEach((button) => {
@@ -902,6 +947,7 @@
     window.openAnalysisModal = openAnalysisModal;
     window.openNewCallModal = openNewCallModal;
     window.openMobileActionSheet = openMobileActionSheet;
+    window.changeQueuePage = changeQueuePage;
   </script>
 </body>
 </html>
