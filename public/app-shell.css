@@ -2030,6 +2030,79 @@ body.poc-page .search-row .table-filter.desktop-only {
     gap: 8px;
   }
 
+  .mobile-report-pulse {
+    display: grid;
+    grid-template-columns: 116px minmax(0, 1fr);
+    gap: 14px;
+    align-items: center;
+  }
+
+  .mobile-report-pulse-ring {
+    position: relative;
+    width: 116px;
+    height: 116px;
+  }
+
+  .mobile-report-ring-chart {
+    width: 116px;
+    height: 116px;
+    transform: rotate(-90deg);
+  }
+
+  .mobile-report-ring-track,
+  .mobile-report-ring-value {
+    fill: none;
+    stroke-width: 12;
+  }
+
+  .mobile-report-ring-track {
+    stroke: #dbeafe;
+  }
+
+  .mobile-report-ring-value {
+    stroke: #2563eb;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.4s ease;
+  }
+
+  .mobile-report-ring-center {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    text-align: center;
+  }
+
+  .mobile-report-ring-center strong {
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .mobile-report-ring-center span {
+    margin-top: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: #64748b;
+  }
+
+  .mobile-report-pulse-copy {
+    display: grid;
+    gap: 6px;
+  }
+
+  .mobile-report-pulse-copy strong {
+    font-size: 16px;
+    line-height: 1.3;
+  }
+
+  .mobile-report-pulse-copy span {
+    font-size: 13px;
+    color: #64748b;
+    line-height: 1.5;
+  }
+
   .mobile-report-outcome-row {
     display: flex;
     align-items: center;
@@ -2058,6 +2131,48 @@ body.poc-page .search-row .table-filter.desktop-only {
     line-height: 1;
   }
 
+  .mobile-report-bars {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+  }
+
+  .mobile-report-bar-row {
+    display: grid;
+    gap: 6px;
+  }
+
+  .mobile-report-bar-row span {
+    font-size: 12px;
+    font-weight: 700;
+    color: #475569;
+  }
+
+  .mobile-report-bar-track {
+    height: 10px;
+    border-radius: 999px;
+    background: #edf2f7;
+    overflow: hidden;
+  }
+
+  .mobile-report-bar-fill {
+    height: 100%;
+    min-width: 10px;
+    border-radius: inherit;
+  }
+
+  .mobile-report-bar-fill.positive {
+    background: linear-gradient(90deg, #22c55e, #86efac);
+  }
+
+  .mobile-report-bar-fill.neutral {
+    background: linear-gradient(90deg, #94a3b8, #cbd5e1);
+  }
+
+  .mobile-report-bar-fill.negative {
+    background: linear-gradient(90deg, #ef4444, #fca5a5);
+  }
+
   .mobile-report-sentiment {
     overflow-x: auto;
     padding: 2px 0;
@@ -2075,6 +2190,100 @@ body.poc-page .search-row .table-filter.desktop-only {
   .mobile-report-activity-list {
     display: grid;
     gap: 10px;
+  }
+
+  .mobile-report-trend-chart {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 8px;
+    align-items: end;
+    min-height: 148px;
+  }
+
+  .mobile-trend-column {
+    display: grid;
+    gap: 6px;
+    justify-items: center;
+  }
+
+  .mobile-trend-bar-wrap {
+    display: flex;
+    align-items: flex-end;
+    min-height: 98px;
+  }
+
+  .mobile-trend-bar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    width: 28px;
+    min-height: 14px;
+    border-radius: 14px 14px 8px 8px;
+    background: linear-gradient(180deg, #dbeafe 0%, #bfdbfe 100%);
+    overflow: hidden;
+  }
+
+  .mobile-trend-bar-fill {
+    width: 100%;
+    border-radius: inherit;
+    background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+  }
+
+  .mobile-trend-column strong {
+    font-size: 13px;
+    line-height: 1;
+  }
+
+  .mobile-trend-column span {
+    font-size: 11px;
+    color: #64748b;
+  }
+
+  .mobile-report-detail-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .mobile-report-detail-card {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 14px;
+    border-radius: 18px;
+    border: 1px solid rgba(219, 228, 240, 0.72);
+    background: #f8fbff;
+  }
+
+  .mobile-report-detail-card strong {
+    display: block;
+    font-size: 14px;
+  }
+
+  .mobile-report-detail-card.positive {
+    background: rgba(240, 253, 244, 0.95);
+  }
+
+  .mobile-report-detail-card.negative {
+    background: rgba(254, 242, 242, 0.95);
+  }
+
+  .mobile-report-detail-card.neutral {
+    background: rgba(248, 250, 252, 0.98);
+  }
+
+  .mobile-report-detail-value {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.96);
+    font-size: 12px;
+    font-weight: 700;
+    color: #1d4ed8;
   }
 
   .mobile-report-activity-card {

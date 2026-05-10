@@ -53,22 +53,22 @@
       <div id="alertContainer" class="alert-stack"></div>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Reports stats">
-        <div class="mobile-stat-pill">
+        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-report-filter="calls" aria-pressed="true">
           <span class="mobile-stat-count" id="mobileReportTotalCalls">0</span>
           <span class="mobile-stat-label">Calls</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-report-filter="completed" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileReportCompletedCalls">0</span>
           <span class="mobile-stat-label">Completed</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-report-filter="failed" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileReportFailedCalls">0</span>
           <span class="mobile-stat-label">Failed</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-report-filter="rating" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileReportAverageRating">0.0</span>
           <span class="mobile-stat-label">Rating</span>
-        </div>
+        </button>
       </section>
 
       <section class="poc-metrics-grid">
@@ -91,6 +91,30 @@
       </section>
 
       <section class="mobile-reports-stack mobile-only">
+        <article class="poc-card mobile-reports-card">
+          <div class="poc-card-header compact-overview-header">
+            <div>
+              <h3 class="poc-card-title">Performance Pulse</h3>
+            </div>
+          </div>
+          <div class="mobile-report-pulse">
+            <div class="mobile-report-pulse-ring">
+              <svg viewBox="0 0 120 120" class="mobile-report-ring-chart" aria-hidden="true">
+                <circle cx="60" cy="60" r="44" class="mobile-report-ring-track"></circle>
+                <circle id="mobileReportRingValue" cx="60" cy="60" r="44" class="mobile-report-ring-value"></circle>
+              </svg>
+              <div class="mobile-report-ring-center">
+                <strong id="mobileSuccessRateValue">0%</strong>
+                <span>success</span>
+              </div>
+            </div>
+            <div class="mobile-report-pulse-copy">
+              <strong id="mobilePulseHeadline">No call activity yet</strong>
+              <span id="mobilePulseSubtext">Seed demo data to see weekly calling momentum.</span>
+            </div>
+          </div>
+        </article>
+
         <article class="poc-card mobile-reports-card mobile-reports-card--outcomes">
           <div class="poc-card-header compact-overview-header">
             <div>
@@ -111,6 +135,20 @@
               <strong id="mobileOutcomeFailed">0</strong>
             </div>
           </div>
+          <div class="mobile-report-bars">
+            <div class="mobile-report-bar-row">
+              <span>Completed</span>
+              <div class="mobile-report-bar-track"><div id="mobileCompletedBar" class="mobile-report-bar-fill positive"></div></div>
+            </div>
+            <div class="mobile-report-bar-row">
+              <span>Pending</span>
+              <div class="mobile-report-bar-track"><div id="mobilePendingBar" class="mobile-report-bar-fill neutral"></div></div>
+            </div>
+            <div class="mobile-report-bar-row">
+              <span>Failed</span>
+              <div class="mobile-report-bar-track"><div id="mobileFailedBar" class="mobile-report-bar-fill negative"></div></div>
+            </div>
+          </div>
         </article>
 
         <section class="mobile-report-sentiment">
@@ -127,6 +165,24 @@
             <strong id="mobileFeedbackNegative">0</strong>
           </div>
         </section>
+
+        <article class="poc-card mobile-reports-card">
+          <div class="poc-card-header compact-overview-header">
+            <div>
+              <h3 class="poc-card-title">7 Day Trend</h3>
+            </div>
+          </div>
+          <div id="mobileReportTrendChart" class="mobile-report-trend-chart"></div>
+        </article>
+
+        <article class="poc-card mobile-reports-card">
+          <div class="poc-card-header compact-overview-header">
+            <div>
+              <h3 id="mobileDetailTitle" class="poc-card-title">Recent Calls</h3>
+            </div>
+          </div>
+          <div id="mobileReportDetailList" class="mobile-report-detail-list"></div>
+        </article>
 
         <article class="poc-card mobile-reports-card">
           <div class="poc-card-header compact-overview-header">
@@ -222,6 +278,8 @@
 
   <script src="/app-shell.js"></script>
   <script>
+    let activeReportFilter = 'calls';
+
     function sentimentFromFeedback(item) {
       if (Number(item.stars || 0) >= 4) return 'positive';
       if (Number(item.stars || 0) <= 2) return 'negative';
@@ -245,6 +303,148 @@
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return false;
       return date.toDateString() === new Date().toDateString();
+    }
+
+    function updateReportFilterButtons() {
+      document.querySelectorAll('[data-report-filter]').forEach((button) => {
+        const isActive = button.dataset.reportFilter === activeReportFilter;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      });
+    }
+
+    function buildTrendDays(recentCalls) {
+      const days = [];
+      for (let offset = 6; offset >= 0; offset -= 1) {
+        const date = new Date();
+        date.setDate(date.getDate() - offset);
+        const label = date.toLocaleDateString([], { weekday: 'short' });
+        const dayCalls = recentCalls.filter((item) => {
+          const calledAt = new Date(item.called_at);
+          return !Number.isNaN(calledAt.getTime()) && calledAt.toDateString() === date.toDateString();
+        });
+        const completed = dayCalls.filter((item) => String(item.outcome || '').toLowerCase() === 'completed').length;
+        days.push({ label, total: dayCalls.length, completed });
+      }
+      return days;
+    }
+
+    function renderMobileTrendChart(recentCalls) {
+      const container = document.getElementById('mobileReportTrendChart');
+      const days = buildTrendDays(recentCalls);
+      const maxCalls = Math.max(...days.map((item) => item.total), 1);
+      container.innerHTML = days.map((day) => {
+        const height = Math.max(14, Math.round((day.total / maxCalls) * 92));
+        const successRate = day.total ? Math.round((day.completed / day.total) * 100) : 0;
+        return `
+          <article class="mobile-trend-column">
+            <div class="mobile-trend-bar-wrap">
+              <div class="mobile-trend-bar" style="height:${height}px;">
+                <div class="mobile-trend-bar-fill" style="height:${Math.max(10, Math.round((successRate / 100) * height))}px;"></div>
+              </div>
+            </div>
+            <strong>${day.total}</strong>
+            <span>${day.label}</span>
+          </article>
+        `;
+      }).join('');
+    }
+
+    function renderMobileReportDetailList({ recentCalls, feedback }) {
+      const container = document.getElementById('mobileReportDetailList');
+      const title = document.getElementById('mobileDetailTitle');
+      let items = [];
+
+      if (activeReportFilter === 'completed') {
+        title.textContent = 'Completed Calls';
+        items = recentCalls
+          .filter((item) => String(item.outcome || '').toLowerCase() === 'completed')
+          .slice(0, 6)
+          .map((item) => ({
+            title: item.customer_name || 'Patient',
+            subtitle: `${AppShell.formatDateTime(item.called_at)} · Rating ${item.extracted_rating || '--'}/5`,
+            tone: 'positive',
+            value: item.analysis_status ? AppShell.formatStatusLabel(item.analysis_status) : 'Completed'
+          }));
+      } else if (activeReportFilter === 'failed') {
+        title.textContent = 'Failed Call Follow-ups';
+        items = recentCalls
+          .filter((item) => ['failed', 'busy', 'no_answer'].includes(String(item.outcome || '').toLowerCase()))
+          .slice(0, 6)
+          .map((item) => ({
+            title: item.customer_name || 'Patient',
+            subtitle: `${AppShell.formatDateTime(item.called_at)} · ${AppShell.formatStatusLabel(item.outcome || 'failed')}`,
+            tone: 'negative',
+            value: item.follow_up_task || 'Retry needed'
+          }));
+      } else if (activeReportFilter === 'rating') {
+        title.textContent = 'Top Rated Feedback';
+        items = feedback
+          .slice()
+          .sort((a, b) => Number(b.stars || 0) - Number(a.stars || 0))
+          .slice(0, 6)
+          .map((item) => ({
+            title: item.customer_name || 'Patient',
+            subtitle: item.review_text || 'No review text available.',
+            tone: sentimentFromFeedback(item),
+            value: `${item.stars || '--'}/5`
+          }));
+      } else {
+        title.textContent = 'Recent Calls';
+        items = recentCalls.slice(0, 6).map((item) => ({
+          title: item.customer_name || 'Patient',
+          subtitle: `${AppShell.formatDateTime(item.called_at)} · ${AppShell.formatStatusLabel(item.outcome || 'pending')}`,
+          tone: ['failed', 'busy', 'no_answer'].includes(String(item.outcome || '').toLowerCase())
+            ? 'negative'
+            : String(item.outcome || '').toLowerCase() === 'completed'
+              ? 'positive'
+              : 'neutral',
+          value: item.extracted_rating ? `${item.extracted_rating}/5` : AppShell.formatStatusLabel(item.analysis_status || 'pending')
+        }));
+      }
+
+      if (!items.length) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <strong>No report items found</strong>
+            <div class="supporting-text">Seeded calls and feedback will show up here once available.</div>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = items.map((item) => `
+        <article class="mobile-report-detail-card ${item.tone}">
+          <div>
+            <strong>${AppShell.escapeHtml(item.title)}</strong>
+            <div class="mobile-subtext">${AppShell.escapeHtml(item.subtitle)}</div>
+          </div>
+          <span class="mobile-report-detail-value">${AppShell.escapeHtml(String(item.value || '--'))}</span>
+        </article>
+      `).join('');
+    }
+
+    function renderMobilePulse(completedCalls, recentCalls, preview) {
+      const successRate = recentCalls.length ? Math.round((completedCalls.length / recentCalls.length) * 100) : Math.round(Number(preview.success_rate || 0));
+      const circumference = 2 * Math.PI * 44;
+      const offset = circumference - ((Math.max(0, Math.min(successRate, 100)) / 100) * circumference);
+      const ring = document.getElementById('mobileReportRingValue');
+      ring.style.strokeDasharray = `${circumference}`;
+      ring.style.strokeDashoffset = `${offset}`;
+      document.getElementById('mobileSuccessRateValue').textContent = `${successRate}%`;
+      document.getElementById('mobilePulseHeadline').textContent = successRate >= 70
+        ? 'Strong follow-up performance this week'
+        : successRate >= 40
+          ? 'Steady recovery with room to improve'
+          : 'Low connection rate, retry strategy needed';
+      document.getElementById('mobilePulseSubtext').textContent = `${recentCalls.length || preview.total_calls || 0} calls tracked · ${completedCalls.length} completed · ${preview.hot_leads || 0} hot leads`;
+    }
+
+    function renderMobileOutcomeBars(completedCount, pendingCount, failedCount) {
+      const total = Math.max(1, completedCount + pendingCount + failedCount);
+      document.getElementById('mobileCompletedBar').style.width = `${Math.round((completedCount / total) * 100)}%`;
+      document.getElementById('mobilePendingBar').style.width = `${Math.round((pendingCount / total) * 100)}%`;
+      document.getElementById('mobileFailedBar').style.width = `${Math.round((failedCount / total) * 100)}%`;
     }
 
     function renderReportsActivity({ recentCalls, feedback }) {
@@ -346,6 +546,15 @@
       document.getElementById('mobileFeedbackNeutral').textContent = neutral;
       document.getElementById('mobileFeedbackNegative').textContent = negative;
 
+      renderMobilePulse(completedCalls, recentCalls, preview);
+      renderMobileOutcomeBars(
+        completedCalls.length,
+        Math.max(0, (preview.total_calls || 0) - completedCalls.length - failedCalls.length),
+        failedCalls.length
+      );
+      renderMobileTrendChart(recentCalls);
+      renderMobileReportDetailList({ recentCalls, feedback });
+      updateReportFilterButtons();
       renderReportsActivity({ recentCalls, feedback });
     }
 
@@ -357,6 +566,16 @@
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('exportReportButton').addEventListener('click', exportReport);
       document.getElementById('mobileExportReportButton').addEventListener('click', exportReport);
+      document.querySelectorAll('[data-report-filter]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          activeReportFilter = button.dataset.reportFilter || 'calls';
+          try {
+            await loadReports();
+          } catch (error) {
+            AppShell.showAlert(error.message, 'error');
+          }
+        });
+      });
       try {
         await loadReports();
       } catch (error) {
