@@ -50,6 +50,25 @@
 
       <div id="alertContainer" class="alert-stack"></div>
 
+      <section class="desktop-filter-strip desktop-only" aria-label="Customer filters">
+        <button class="desktop-filter-pill active" type="button" data-customer-filter="scheduled" aria-pressed="true">
+          <span class="desktop-filter-count" id="desktopScheduledMetric">0</span>
+          <span class="desktop-filter-label">Scheduled</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" data-customer-filter="pending" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopPendingMetric">0</span>
+          <span class="desktop-filter-label">Pending</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" data-customer-filter="completed" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopCompletedMetric">0</span>
+          <span class="desktop-filter-label">Completed</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" data-customer-filter="failed" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopFailedMetric">0</span>
+          <span class="desktop-filter-label">Failed</span>
+        </button>
+      </section>
+
       <section class="mobile-stat-strip mobile-only" aria-label="Call stats">
         <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-customer-filter="scheduled" aria-pressed="true">
           <span class="mobile-stat-count" id="mobileScheduledMetric">0</span>
@@ -655,6 +674,10 @@
       document.getElementById('pendingCallsMetric').textContent = pendingCount;
       document.getElementById('completedCallsMetric').textContent = completedCount;
       document.getElementById('failedCallsMetric').textContent = failedCount;
+      document.getElementById('desktopScheduledMetric').textContent = scheduledCount;
+      document.getElementById('desktopPendingMetric').textContent = pendingCount;
+      document.getElementById('desktopCompletedMetric').textContent = completedCount;
+      document.getElementById('desktopFailedMetric').textContent = failedCount;
       document.getElementById('mobileScheduledMetric').textContent = scheduledCount;
       document.getElementById('mobilePendingMetric').textContent = pendingCount;
       document.getElementById('mobileCompletedMetric').textContent = completedCount;

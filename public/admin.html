@@ -53,6 +53,33 @@
 
       <div id="alertContainer" class="alert-stack"></div>
 
+      <section class="desktop-filter-strip desktop-only" aria-label="Overview filters">
+        <button class="desktop-filter-pill active" type="button" data-overview-filter="patients" aria-pressed="true">
+          <span class="desktop-filter-count" id="desktopMetricCustomers">0</span>
+          <span class="desktop-filter-label">Patients</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" data-overview-filter="scheduled" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopMetricScheduled">0</span>
+          <span class="desktop-filter-label">Scheduled</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" data-overview-filter="completed" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopMetricCompleted">0</span>
+          <span class="desktop-filter-label">Completed</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" data-overview-filter="feedback" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopMetricFeedback">0</span>
+          <span class="desktop-filter-label">Feedback</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" data-overview-filter="positive" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopMetricPositiveFeedback">0</span>
+          <span class="desktop-filter-label">Positive</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" data-overview-filter="negative" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopMetricNegativeFeedback">0</span>
+          <span class="desktop-filter-label">Negative</span>
+        </button>
+      </section>
+
       <section class="mobile-stat-strip mobile-only" aria-label="Overview stats">
         <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-overview-filter="patients" aria-pressed="true">
           <span class="mobile-stat-count" id="mobileMetricCustomers">0</span>
@@ -613,6 +640,12 @@
       document.getElementById('metricScheduled').textContent = pendingCalls;
       document.getElementById('metricCompleted').textContent = completedCalls.length;
       document.getElementById('metricFeedback').textContent = feedback.length;
+      document.getElementById('desktopMetricCustomers').textContent = customers.length;
+      document.getElementById('desktopMetricScheduled').textContent = pendingCalls;
+      document.getElementById('desktopMetricCompleted').textContent = completedCalls.length;
+      document.getElementById('desktopMetricFeedback').textContent = feedback.length;
+      document.getElementById('desktopMetricPositiveFeedback').textContent = positiveFeedback;
+      document.getElementById('desktopMetricNegativeFeedback').textContent = negativeFeedback;
       document.getElementById('mobileMetricCustomers').textContent = customers.length;
       document.getElementById('mobileMetricScheduled').textContent = pendingCalls;
       document.getElementById('mobileMetricCompleted').textContent = completedCalls.length;

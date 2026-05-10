@@ -52,6 +52,25 @@
 
       <div id="alertContainer" class="alert-stack"></div>
 
+      <section class="desktop-filter-strip desktop-only" aria-label="Report filters">
+        <button class="desktop-filter-pill active" type="button" data-report-filter="calls" aria-pressed="true">
+          <span class="desktop-filter-count" id="desktopReportTotalCalls">0</span>
+          <span class="desktop-filter-label">Calls</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" data-report-filter="completed" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopReportCompletedCalls">0</span>
+          <span class="desktop-filter-label">Completed</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" data-report-filter="failed" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopReportFailedCalls">0</span>
+          <span class="desktop-filter-label">Failed</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" data-report-filter="rating" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopReportAverageRating">0.0</span>
+          <span class="desktop-filter-label">Rating</span>
+        </button>
+      </section>
+
       <section class="mobile-stat-strip mobile-only" aria-label="Reports stats">
         <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-report-filter="calls" aria-pressed="true">
           <span class="mobile-stat-count" id="mobileReportTotalCalls">0</span>
@@ -720,6 +739,10 @@
       document.getElementById('reportCompletedCalls').textContent = completedCalls.length;
       document.getElementById('reportFailedCalls').textContent = failedCalls.length;
       document.getElementById('reportAverageRating').textContent = averageRating;
+      document.getElementById('desktopReportTotalCalls').textContent = recentCalls.length || preview.total_calls || 0;
+      document.getElementById('desktopReportCompletedCalls').textContent = completedCalls.length;
+      document.getElementById('desktopReportFailedCalls').textContent = failedCalls.length;
+      document.getElementById('desktopReportAverageRating').textContent = averageRating;
       document.getElementById('mobileReportTotalCalls').textContent = recentCalls.length || preview.total_calls || 0;
       document.getElementById('mobileReportCompletedCalls').textContent = completedCalls.length;
       document.getElementById('mobileReportFailedCalls').textContent = failedCalls.length;

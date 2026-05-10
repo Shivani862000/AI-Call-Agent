@@ -1195,6 +1195,90 @@ body.poc-page .header-actions .button-link {
   margin-bottom: 16px;
 }
 
+.desktop-filter-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.desktop-filter-pill {
+  appearance: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(219, 228, 240, 0.9);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.desktop-filter-pill.active {
+  background: #edf4ff;
+  border-color: rgba(147, 197, 253, 0.95);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+}
+
+.desktop-filter-pill:active {
+  transform: scale(0.99);
+}
+
+.desktop-filter-count {
+  display: inline-flex;
+  min-width: 26px;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 800;
+  color: #1d4ed8;
+  line-height: 1;
+}
+
+.desktop-filter-label {
+  font-size: 15px;
+  font-weight: 700;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.desktop-filter-pill.active .desktop-filter-label,
+.desktop-filter-pill.active .desktop-filter-count {
+  color: #1d4ed8;
+}
+
+.desktop-feedback-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.desktop-feedback-filter-bar .table-filter {
+  width: 190px;
+  flex: 0 0 190px;
+}
+
+.desktop-custom-date-range {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.desktop-custom-date-range[hidden] {
+  display: none !important;
+}
+
+.desktop-custom-date-range label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
 .search-input {
   flex: 1;
 }
