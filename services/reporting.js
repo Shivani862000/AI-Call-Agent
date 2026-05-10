@@ -41,6 +41,9 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const callStats = await dbGet(`
     SELECT 
       COUNT(*) as total_calls,
+      SUM(CASE WHEN outcome = 'completed' THEN 1 ELSE 0 END) as completed_calls,
+      SUM(CASE WHEN outcome = 'callback' THEN 1 ELSE 0 END) as callbacks_requested,
+      SUM(CASE WHEN outcome IN ('failed', 'busy', 'no_answer', 'declined') THEN 1 ELSE 0 END) as failed_calls,
       SUM(CASE WHEN outcome IN ('answered', 'completed', 'consent_given', 'interested', 'callback', 'not_interested', 'hot_lead') THEN 1 ELSE 0 END) as answered,
       SUM(CASE WHEN outcome = 'no_answer' THEN 1 ELSE 0 END) as no_answer,
       SUM(CASE WHEN outcome = 'declined' THEN 1 ELSE 0 END) as declined,
@@ -135,10 +138,10 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   `, [range.start, range.end]);
 
   const peakSlots = await dbAll(`
-    SELECT SUBSTR(called_at, 12, 5) AS slot, COUNT(*) AS total_calls
+    SELECT STRFTIME('%H:%M', DATETIME(called_at, 'localtime')) AS slot, COUNT(*) AS total_calls
     FROM calls
     WHERE called_at >= ? AND called_at <= ?
-    GROUP BY SUBSTR(called_at, 12, 5)
+    GROUP BY STRFTIME('%H:%M', DATETIME(called_at, 'localtime'))
     ORDER BY total_calls DESC, slot ASC
     LIMIT 5
   `, [range.start, range.end]);
@@ -157,6 +160,9 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
 
   const safeTotalCalls = Number(callStats?.total_calls) || 0;
   const safeAnswered = Number(callStats?.answered) || 0;
+  const safeCompletedCalls = Number(callStats?.completed_calls) || 0;
+  const safeCallbacksRequested = Number(callStats?.callbacks_requested) || 0;
+  const safeFailedCalls = Number(callStats?.failed_calls) || 0;
   const safeNoAnswer = Number(callStats?.no_answer) || 0;
   const safeDeclined = Number(callStats?.declined) || 0;
   const safeConsent = Number(callStats?.consent_given) || 0;
@@ -169,16 +175,23 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const safeBadCount = Number(feedbackStats?.bad_count) || 0;
   const averageRating = Number(feedbackStats?.average_rating) || 0;
   const successRate = safeTotalCalls > 0 ? Number(((safeAnswered / safeTotalCalls) * 100).toFixed(1)) : 0;
+  const completionRate = safeTotalCalls > 0 ? Number(((safeCompletedCalls / safeTotalCalls) * 100).toFixed(1)) : 0;
 
   const objectionCounts = new Map();
   const competitorCounts = new Map();
+  const sentimentCounts = { positive: 0, neutral: 0, negative: 0 };
 
   analyzedCalls.forEach((call) => {
     const objections = JSON.parse(call.objections_json || '[]');
     const competitors = JSON.parse(call.competitor_mentions_json || '[]');
+    const sentiment = String(call.sentiment_label || '').toLowerCase();
 
     objections.forEach((item) => objectionCounts.set(item, (objectionCounts.get(item) || 0) + 1));
     competitors.forEach((item) => competitorCounts.set(item, (competitorCounts.get(item) || 0) + 1));
+
+    if (sentiment === 'positive') sentimentCounts.positive += 1;
+    else if (sentiment === 'negative') sentimentCounts.negative += 1;
+    else if (sentiment === 'neutral') sentimentCounts.neutral += 1;
   });
 
   const commonObjections = [...objectionCounts.entries()]
@@ -198,6 +211,65 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
     return sum;
   }, 0);
 
+  const hotLeadQueue = analyzedCalls
+    .filter((call) => ['interested', 'hot_lead'].includes(String(call.outcome || '').toLowerCase()) || Number(call.hot_lead_score || 0) >= 85)
+    .slice(0, 6)
+    .map((call) => ({
+      customer_name: call.customer_name,
+      hot_lead_score: Number(call.hot_lead_score || 0),
+      follow_up_task: call.follow_up_task || 'Sales callback recommended',
+      called_at: call.called_at
+    }));
+
+  const serviceRecoveryQueue = analyzedCalls
+    .filter((call) => String(call.sentiment_label || '').toLowerCase() === 'negative' || Number(call.extracted_rating || 0) <= 2)
+    .slice(0, 6)
+    .map((call) => ({
+      customer_name: call.customer_name,
+      issue: call.report_excerpt || call.analysis_summary || 'Service recovery recommended',
+      follow_up_task: call.follow_up_task || 'Manager callback required',
+      called_at: call.called_at
+    }));
+
+  const topWins = analyzedCalls
+    .filter((call) => Number(call.extracted_rating || 0) >= 4 || String(call.sentiment_label || '').toLowerCase() === 'positive')
+    .slice(0, 5)
+    .map((call) => ({
+      customer_name: call.customer_name,
+      summary: call.report_excerpt || call.analysis_summary || 'Positive patient response',
+      rating: Number(call.extracted_rating || 0) || null
+    }));
+
+  const labelTitle = String(label || 'today')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+  const effectiveHotLeadCount = Math.max(safeHotLeads, hotLeadQueue.length);
+  const serviceRecoveryCount = serviceRecoveryQueue.length;
+  const callbackBacklogCount = pendingItems.filter((item) => String(item.outcome || '').toLowerCase() === 'callback').length || safeCallbacksRequested;
+
+  const priorityActions = [
+    effectiveHotLeadCount
+      ? `${effectiveHotLeadCount} commercial lead${effectiveHotLeadCount > 1 ? 's need' : ' needs'} same-day follow-up`
+      : null,
+    callbackBacklogCount
+      ? `${callbackBacklogCount} callback request${callbackBacklogCount > 1 ? 's are' : ' is'} waiting in queue`
+      : null,
+    serviceRecoveryCount
+      ? `${serviceRecoveryCount} patient issue${serviceRecoveryCount > 1 ? 's need' : ' needs'} service recovery attention`
+      : null,
+    commonObjections[0]
+      ? `Top friction point is ${commonObjections[0].label} across ${commonObjections[0].count} calls`
+      : null
+  ].filter(Boolean);
+
+  const reportHeadline = safeTotalCalls
+    ? `${labelTitle} follow-up health: ${safeCompletedCalls}/${safeTotalCalls} calls completed with ${averageRating ? `${averageRating}/5` : 'limited'} patient rating signal.`
+    : `${labelTitle} follow-up health: no call activity captured yet.`;
+
+  const summaryText = safeTotalCalls
+    ? `${labelTitle} POC snapshot: ${safeCompletedCalls} of ${safeTotalCalls} calls were completed (${completionRate}%), ${safeFeedbackCount} patient reviews were captured at an average rating of ${averageRating || 0}/5, ${effectiveHotLeadCount} revenue-ready lead${effectiveHotLeadCount === 1 ? '' : 's'} surfaced, and ${serviceRecoveryCount} service recovery case${serviceRecoveryCount === 1 ? '' : 's'} need follow-up.`
+    : `${labelTitle} POC snapshot: no calls were captured in the selected range.`;
+
   const enrichedCalls = analyzedCalls.map((call) => ({
     ...call,
     recording_link: publicBaseUrl ? `${publicBaseUrl}/api/calls/${call.id}/recording` : null,
@@ -211,19 +283,26 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
     end: range.end,
     date: new Date().toISOString().split('T')[0],
     total_calls: safeTotalCalls,
+    completed_calls: safeCompletedCalls,
+    failed_calls: safeFailedCalls,
+    callbacks_requested: safeCallbacksRequested,
     answered: safeAnswered,
     no_answer: safeNoAnswer,
     declined: safeDeclined,
     consent_given: safeConsent,
     whatsapp_sent: safeWhatsapp,
     fallbacks_triggered: safeFallbacks,
-    hot_leads: safeHotLeads,
+    hot_leads: effectiveHotLeadCount,
     feedback_count: safeFeedbackCount,
     average_rating: averageRating,
     success_rate: successRate,
+    completion_rate: completionRate,
     good_count: safeGoodCount,
     average_count: safeAverageCount,
     bad_count: safeBadCount,
+    positive_sentiment_count: sentimentCounts.positive,
+    neutral_sentiment_count: sentimentCounts.neutral,
+    negative_sentiment_count: sentimentCounts.negative,
     feedback: feedbackList,
     analyzed_calls: enrichedCalls,
     pending_items: pendingItems,
@@ -232,8 +311,15 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
     common_objections: commonObjections,
     competitor_mentions: competitorMentions,
     revenue_pipeline_estimate: Number(revenuePipeline.toFixed(2)),
+    callback_backlog_count: callbackBacklogCount,
+    service_recovery_count: serviceRecoveryCount,
+    report_headline: reportHeadline,
+    priority_actions: priorityActions,
+    hot_lead_queue: hotLeadQueue,
+    service_recovery_queue: serviceRecoveryQueue,
+    top_wins: topWins,
     dashboard_link: publicBaseUrl ? `${publicBaseUrl}/admin.html` : null,
-    summary_text: `For ${label}, total ${safeTotalCalls} calls, ${safeFeedbackCount} feedback entries, ${safeGoodCount} good reviews, ${safeHotLeads} hot leads, and ${successRate}% answer success.`
+    summary_text: summaryText
   };
 }
 
@@ -268,7 +354,8 @@ async function buildWeeklySummary() {
     hot_lead_names: hotLeadNames,
     pending_summary: pending,
     best_scripts: bestScripts,
-    best_slots: bestSlots
+    best_slots: bestSlots,
+    executive_summary: report.summary_text
   };
 }
 

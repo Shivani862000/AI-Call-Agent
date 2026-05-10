@@ -115,6 +115,19 @@
           </div>
         </article>
 
+        <article class="poc-card mobile-reports-card mobile-reports-card--hero">
+          <div class="poc-card-header compact-overview-header">
+            <div>
+              <h3 class="poc-card-title">POC Summary</h3>
+            </div>
+          </div>
+          <div class="mobile-report-hero-copy">
+            <strong id="mobileReportHeadline">Waiting for report data</strong>
+            <p id="mobileReportSummaryText">Once calls are available, this view will highlight performance, recovery items, and revenue opportunities.</p>
+          </div>
+          <div id="mobilePriorityActionList" class="mobile-priority-action-list"></div>
+        </article>
+
         <article class="poc-card mobile-reports-card mobile-reports-card--outcomes">
           <div class="poc-card-header compact-overview-header">
             <div>
@@ -178,10 +191,39 @@
         <article class="poc-card mobile-reports-card">
           <div class="poc-card-header compact-overview-header">
             <div>
+              <h3 class="poc-card-title">Commercial & Recovery</h3>
+            </div>
+          </div>
+          <div class="mobile-report-mini-grid">
+            <article class="mobile-report-mini-card success">
+              <span>Hot leads</span>
+              <strong id="mobileHotLeadCount">0</strong>
+              <small id="mobileRevenuePipeline">Rs 0 pipeline</small>
+            </article>
+            <article class="mobile-report-mini-card risk">
+              <span>Recovery cases</span>
+              <strong id="mobileRecoveryCount">0</strong>
+              <small id="mobileCallbackBacklog">0 callbacks waiting</small>
+            </article>
+          </div>
+        </article>
+
+        <article class="poc-card mobile-reports-card">
+          <div class="poc-card-header compact-overview-header">
+            <div>
               <h3 id="mobileDetailTitle" class="poc-card-title">Recent Calls</h3>
             </div>
           </div>
           <div id="mobileReportDetailList" class="mobile-report-detail-list"></div>
+        </article>
+
+        <article class="poc-card mobile-reports-card">
+          <div class="poc-card-header compact-overview-header">
+            <div>
+              <h3 class="poc-card-title">Priority Queue</h3>
+            </div>
+          </div>
+          <div id="mobilePriorityQueueList" class="mobile-report-detail-list"></div>
         </article>
 
         <article class="poc-card mobile-reports-card">
@@ -198,15 +240,20 @@
         <article class="poc-card">
           <div class="poc-card-header">
             <div>
-              <h3 class="poc-card-title">Call Outcome Summary</h3>
-              <div class="poc-card-subtitle">A quick view of recent calling outcomes.</div>
+              <h3 class="poc-card-title">Executive POC Summary</h3>
+              <div class="poc-card-subtitle">Operational readout focused on conversion, service recovery, and callback execution.</div>
             </div>
           </div>
+          <div class="report-summary-hero">
+            <strong id="reportHeadline">Waiting for report data</strong>
+            <p id="reportSummaryText">Once data is available, this section will explain what happened and what needs action next.</p>
+          </div>
+          <div id="reportPriorityActions" class="report-priority-actions"></div>
           <div class="report-outcome-list">
             <div class="report-outcome-row">
               <div>
                 <strong>Completed</strong>
-                <span>Calls finished successfully</span>
+                <span>Calls closed successfully with clear outcomes</span>
               </div>
               <div class="report-outcome-value">
                 <strong id="outcomeCompleted">0</strong>
@@ -214,8 +261,8 @@
             </div>
             <div class="report-outcome-row">
               <div>
-                <strong>Pending</strong>
-                <span>Still waiting for a call outcome or analysis update</span>
+                <strong>Callback backlog</strong>
+                <span>Patients waiting for a planned callback or confirmation</span>
               </div>
               <div class="report-outcome-value">
                 <strong id="outcomePending">0</strong>
@@ -223,8 +270,8 @@
             </div>
             <div class="report-outcome-row">
               <div>
-                <strong>Failed</strong>
-                <span>Busy, no-answer, or failed attempts</span>
+                <strong>Recovery cases</strong>
+                <span>Negative or complaint-prone conversations needing follow-up</span>
               </div>
               <div class="report-outcome-value">
                 <strong id="outcomeFailed">0</strong>
@@ -253,6 +300,18 @@
               <span>Negative</span>
               <strong id="feedbackNegative">0</strong>
             </div>
+          </div>
+          <div class="report-kpi-grid">
+            <article class="report-kpi-card">
+              <span>Hot leads</span>
+              <strong id="reportHotLeadCount">0</strong>
+              <small id="reportPipelineValue">Rs 0 pipeline</small>
+            </article>
+            <article class="report-kpi-card">
+              <span>Best call slot</span>
+              <strong id="reportBestSlot">--</strong>
+              <small id="reportBestScript">No script insight yet</small>
+            </article>
           </div>
         </article>
       </section>
@@ -348,6 +407,98 @@
           </article>
         `;
       }).join('');
+    }
+
+    function renderPriorityActions(preview, ownerPreview) {
+      const actions = []
+        .concat(preview.priority_actions || [])
+        .concat((ownerPreview.alerts || []).slice(0, 2).map((item) => item.headline))
+        .filter(Boolean)
+        .slice(0, 4);
+
+      const desktopContainer = document.getElementById('reportPriorityActions');
+      const mobileContainer = document.getElementById('mobilePriorityActionList');
+
+      if (!actions.length) {
+        const emptyMarkup = `
+          <div class="empty-state">
+            <strong>No actions right now</strong>
+            <div class="supporting-text">Fresh calling activity will surface operational priorities here.</div>
+          </div>
+        `;
+        desktopContainer.innerHTML = emptyMarkup;
+        mobileContainer.innerHTML = emptyMarkup;
+        return;
+      }
+
+      desktopContainer.innerHTML = actions.map((action) => `
+        <article class="report-priority-chip">
+          <span>${AppShell.escapeHtml(action)}</span>
+        </article>
+      `).join('');
+
+      mobileContainer.innerHTML = actions.map((action) => `
+        <article class="mobile-priority-action-card">
+          <strong>${AppShell.escapeHtml(action)}</strong>
+        </article>
+      `).join('');
+    }
+
+    function renderPriorityQueue(preview, recentCalls) {
+      const container = document.getElementById('mobilePriorityQueueList');
+      const queue = [];
+
+      (preview.hot_lead_queue || []).forEach((item) => {
+        queue.push({
+          title: item.customer_name || 'Lead',
+          subtitle: item.follow_up_task || 'Sales follow-up recommended',
+          tone: 'positive',
+          value: `Score ${item.hot_lead_score || 0}`
+        });
+      });
+
+      (preview.service_recovery_queue || []).forEach((item) => {
+        queue.push({
+          title: item.customer_name || 'Patient',
+          subtitle: item.follow_up_task || item.issue || 'Recovery follow-up recommended',
+          tone: 'negative',
+          value: 'Recover'
+        });
+      });
+
+      if (!queue.length) {
+        const fallback = recentCalls
+          .filter((item) => item.follow_up_task || ['callback', 'failed', 'busy', 'no_answer'].includes(String(item.outcome || '').toLowerCase()))
+          .slice(0, 4)
+          .map((item) => ({
+            title: item.customer_name || 'Patient',
+            subtitle: item.follow_up_task || AppShell.formatStatusLabel(item.outcome || 'pending'),
+            tone: ['failed', 'busy', 'no_answer'].includes(String(item.outcome || '').toLowerCase()) ? 'negative' : 'neutral',
+            value: AppShell.formatStatusLabel(item.outcome || 'pending')
+          }));
+
+        queue.push(...fallback);
+      }
+
+      if (!queue.length) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <strong>No priority queue items</strong>
+            <div class="supporting-text">Commercial leads and recovery cases will appear here.</div>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = queue.slice(0, 6).map((item) => `
+        <article class="mobile-report-detail-card ${item.tone}">
+          <div>
+            <strong>${AppShell.escapeHtml(item.title)}</strong>
+            <div class="mobile-subtext">${AppShell.escapeHtml(item.subtitle)}</div>
+          </div>
+          <span class="mobile-report-detail-value">${AppShell.escapeHtml(item.value)}</span>
+        </article>
+      `).join('');
     }
 
     function renderMobileReportDetailList({ recentCalls, feedback }) {
@@ -549,8 +700,10 @@
     }
 
     async function loadReports() {
-      const [preview, recentCalls, feedback] = await Promise.all([
+      const [preview, weeklyPreview, ownerPreview, recentCalls, feedback] = await Promise.all([
         AppShell.fetchJson(`${AppShell.API_BASE}/reports/preview`),
+        AppShell.fetchJson(`${AppShell.API_BASE}/reports/weekly-preview`),
+        AppShell.fetchJson(`${AppShell.API_BASE}/reports/owner-preview`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`),
         AppShell.fetchJson(`${AppShell.API_BASE}/feedback`)
       ]);
@@ -572,12 +725,18 @@
       document.getElementById('mobileReportFailedCalls').textContent = failedCalls.length;
       document.getElementById('mobileReportAverageRating').textContent = averageRating;
 
+      const effectivePreview = weeklyPreview?.total_calls ? weeklyPreview : preview;
+      document.getElementById('reportHeadline').textContent = effectivePreview.report_headline || 'Weekly operational snapshot';
+      document.getElementById('reportSummaryText').textContent = effectivePreview.summary_text || 'No summary available.';
+      document.getElementById('mobileReportHeadline').textContent = effectivePreview.report_headline || 'Weekly operational snapshot';
+      document.getElementById('mobileReportSummaryText').textContent = effectivePreview.summary_text || 'No summary available.';
+
       document.getElementById('outcomeCompleted').textContent = completedCalls.length;
-      document.getElementById('outcomePending').textContent = Math.max(0, (preview.total_calls || 0) - completedCalls.length - failedCalls.length);
-      document.getElementById('outcomeFailed').textContent = failedCalls.length;
+      document.getElementById('outcomePending').textContent = effectivePreview.callback_backlog_count || 0;
+      document.getElementById('outcomeFailed').textContent = effectivePreview.service_recovery_count || 0;
       document.getElementById('mobileOutcomeCompleted').textContent = completedCalls.length;
-      document.getElementById('mobileOutcomePending').textContent = Math.max(0, (preview.total_calls || 0) - completedCalls.length - failedCalls.length);
-      document.getElementById('mobileOutcomeFailed').textContent = failedCalls.length;
+      document.getElementById('mobileOutcomePending').textContent = effectivePreview.callback_backlog_count || 0;
+      document.getElementById('mobileOutcomeFailed').textContent = effectivePreview.service_recovery_count || 0;
 
       document.getElementById('feedbackPositive').textContent = positive;
       document.getElementById('feedbackNeutral').textContent = neutral;
@@ -585,12 +744,26 @@
       document.getElementById('mobileFeedbackPositive').textContent = positive;
       document.getElementById('mobileFeedbackNeutral').textContent = neutral;
       document.getElementById('mobileFeedbackNegative').textContent = negative;
+      document.getElementById('reportHotLeadCount').textContent = effectivePreview.hot_leads || 0;
+      document.getElementById('reportPipelineValue').textContent = `Rs ${Math.round(Number(effectivePreview.revenue_pipeline_estimate || 0)).toLocaleString('en-IN')} pipeline`;
+      document.getElementById('reportBestSlot').textContent = (weeklyPreview.best_slots && weeklyPreview.best_slots[0])
+        ? weeklyPreview.best_slots[0].split(': ').slice(0, 2).join(': ')
+        : '--';
+      document.getElementById('reportBestScript').textContent = (weeklyPreview.best_scripts && weeklyPreview.best_scripts[0])
+        ? weeklyPreview.best_scripts[0]
+        : 'No script insight yet';
+      document.getElementById('mobileHotLeadCount').textContent = effectivePreview.hot_leads || 0;
+      document.getElementById('mobileRevenuePipeline').textContent = `Rs ${Math.round(Number(effectivePreview.revenue_pipeline_estimate || 0)).toLocaleString('en-IN')} pipeline`;
+      document.getElementById('mobileRecoveryCount').textContent = effectivePreview.service_recovery_count || 0;
+      document.getElementById('mobileCallbackBacklog').textContent = `${effectivePreview.callback_backlog_count || 0} callbacks waiting`;
 
-      renderMobilePulse(completedCalls, recentCalls, preview);
+      renderPriorityActions(effectivePreview, ownerPreview);
+      renderPriorityQueue(effectivePreview, recentCalls);
+      renderMobilePulse(completedCalls, recentCalls, effectivePreview);
       renderMobileOutcomeBars(
         completedCalls.length,
-        Math.max(0, (preview.total_calls || 0) - completedCalls.length - failedCalls.length),
-        failedCalls.length
+        effectivePreview.callback_backlog_count || 0,
+        effectivePreview.service_recovery_count || 0
       );
       renderMobileTrendChart(recentCalls);
       renderMobileReportDetailList({ recentCalls, feedback });
