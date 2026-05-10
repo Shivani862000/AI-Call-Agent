@@ -4,7 +4,7 @@ A simple Node.js + Express proof of concept for outbound AI phone calls using:
 
 - Twilio Programmable Voice
 - Twilio Media Streams
-- OpenAI Realtime API over WebSocket
+- Gemini Live API over WebSocket
 - ngrok for local webhook exposure
 
 The flow is intentionally minimal: trigger one outbound call, let the AI agent run a multi-turn conversation, and print the final transcript to the console.
@@ -14,7 +14,7 @@ The flow is intentionally minimal: trigger one outbound call, let the AI agent r
 - `POST /call/start` places an outbound call to `CUSTOMER_PHONE`
 - `GET /call/twiml` returns TwiML that opens a Twilio Media Stream
 - `POST /call/status` logs Twilio call status changes
-- `WS /call/stream` bridges Twilio audio to OpenAI Realtime and streams AI audio back
+- `WS /call/stream` bridges call audio to Gemini Live and streams AI audio back
 - `GET /health` returns a basic health payload
 
 ## Setup
@@ -34,11 +34,14 @@ cp .env.example .env
 Required fields:
 
 ```env
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_PHONE_NUMBER=+14155550100
-OPENAI_API_KEY=
-OPENAI_REALTIME_MODEL=gpt-realtime
+EXOTEL_SID=
+EXOTEL_API_KEY=
+EXOTEL_API_TOKEN=
+EXOTEL_CALLER_ID=
+EXOTEL_FLOW_URL=
+GEMINI_API_KEY=
+GEMINI_MODEL=models/gemini-2.5-flash-native-audio-preview-12-2025
+DEEPGRAM_API_KEY=
 NGROK_URL=https://abc123.ngrok-free.app
 CUSTOMER_PHONE=+14155550123
 CUSTOMER_NAME=Ramesh
@@ -48,8 +51,7 @@ PORT=3000
 
 Notes:
 
-- `TWILIO_PHONE_NUMBER` must be a Twilio-owned voice-capable number.
-- If your Twilio account is still on trial, `CUSTOMER_PHONE` must be verified in Twilio.
+- Configure your Exotel flow/app ID so the voicebot URL can open `/call/stream`.
 - `NGROK_URL` should not have a trailing slash.
 
 ## Run
@@ -80,7 +82,7 @@ curl -X POST http://localhost:3000/call/start
 [SERVER] Running on http://localhost:3000
 [CALL STARTED] SID: CA...
 [STREAM] Twilio Media Stream connected
-[OPENAI] Realtime session opened
+[GEMINI] Live session opened
 [AGENT]: Hello, am I speaking with Ramesh? My name is Priya...
 [CUSTOMER]: Yes, this is Ramesh.
 ...
@@ -96,7 +98,7 @@ curl -X POST http://localhost:3000/call/start
 - No TwiML request from Twilio: confirm `NGROK_URL` is reachable and the server was restarted after editing `.env`.
 - Twilio `11200`: webhook or stream URL is not reachable.
 - No audio both ways: confirm the stream URL resolves to `wss://.../call/stream`.
-- OpenAI auth errors: verify the API key has access to Realtime.
+- Gemini auth errors: verify `GEMINI_API_KEY` is valid for the configured live model.
 - Twilio trial failure: verify the destination number in Twilio or upgrade the account.
 
 ## Docker Development

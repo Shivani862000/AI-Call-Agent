@@ -41,6 +41,7 @@ const PROTECTED_HTML_PATHS = new Set([
   '/customers.html',
   '/clients.html',
   '/feedback.html',
+  '/feedback-analysis.html',
   '/reports.html'
 ]);
 
@@ -206,9 +207,8 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = Number(process.env.PORT || 3000);
-const CALL_MODE = process.env.CALL_MODE || (process.env.OPENAI_API_KEY ? 'openai' : 'scripted');
-const AI_PROVIDER = CALL_MODE === 'gemini' ? 'gemini' : 'openai';
-const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime';
+const CALL_MODE = 'gemini';
+const AI_PROVIDER = 'gemini';
 const DEFAULT_GEMINI_MODEL = 'models/gemini-2.5-flash-native-audio-preview-12-2025';
 const DEPRECATED_GEMINI_LIVE_MODELS = new Set([
   'models/gemini-3.1-flash-live-preview',
@@ -228,10 +228,7 @@ function normalizeGeminiModelName(modelName) {
 
 function resolveRealtimeModelName(modelName) {
   const candidate = String(modelName || '').trim();
-  if (AI_PROVIDER === 'gemini') {
-    return normalizeGeminiModelName(candidate || REALTIME_MODEL);
-  }
-  return candidate || REALTIME_MODEL;
+  return normalizeGeminiModelName(candidate || REALTIME_MODEL);
 }
 
 const REQUESTED_GEMINI_MODEL = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
@@ -240,8 +237,11 @@ if (GEMINI_MODEL !== String(REQUESTED_GEMINI_MODEL || '').trim()) {
   console.warn(`[CONFIG] Gemini model "${REQUESTED_GEMINI_MODEL}" is deprecated or unsupported here; using "${GEMINI_MODEL}" instead.`);
 }
 const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
-const REALTIME_MODEL = AI_PROVIDER === 'gemini' ? GEMINI_MODEL : OPENAI_REALTIME_MODEL;
+const REALTIME_MODEL = GEMINI_MODEL;
 const GEMINI_OPENING_RETRY_MS = Math.max(Number(process.env.GEMINI_OPENING_RETRY_MS || 1500) || 1500, 800);
+const GEMINI_OPENING_RETRY_ENABLED = String(process.env.GEMINI_OPENING_RETRY_ENABLED || 'false').toLowerCase() === 'true';
+const MAX_PRECONNECT_MEDIA_CHUNKS = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_CHUNKS || 60) || 60, 10);
+const MAX_PRECONNECT_MEDIA_BYTES = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_BYTES || 512000) || 512000, 64000);
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
 const HARDCODED_PUBLIC_BASE_URL = 'https://winter-undeclamatory-unstammeringly.ngrok-free.dev';
 const SERVER_NAME_BASE_URL = process.env.SERVER_NAME ? `https://${String(process.env.SERVER_NAME).replace(/^https?:\/\//i, '').replace(/\/+$/g, '')}` : '';
@@ -256,8 +256,10 @@ const GEMINI_WS_BASE_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai
 const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
 const liveCallState = new Map();
+const pendingCallDiagnostics = new Map();
 const LIVE_CALL_RETENTION_MS = 20 * 60 * 1000;
 const LIVE_CALL_ACTIVE_STALE_MS = 90 * 60 * 1000;
+const CALL_DIAGNOSTIC_WARN_MS = Math.max(Number(process.env.CALL_DIAGNOSTIC_WARN_MS || 20000) || 20000, 5000);
 
 function redactSecret(value, visiblePrefix = 4, visibleSuffix = 4) {
   const text = String(value || '').trim();
@@ -336,6 +338,72 @@ process.on('unhandledRejection', (reason) => {
 process.on('uncaughtExceptionMonitor', (error) => {
   console.error('[UNCAUGHT EXCEPTION]', error.stack || error.message);
 });
+
+function pickRequestValue(req, keys = []) {
+  for (const key of keys) {
+    const bodyValue = req.body?.[key];
+    if (bodyValue !== undefined && bodyValue !== null && bodyValue !== '') {
+      return bodyValue;
+    }
+
+    const queryValue = req.query?.[key];
+    if (queryValue !== undefined && queryValue !== null && queryValue !== '') {
+      return queryValue;
+    }
+  }
+
+  return null;
+}
+
+function schedulePendingCallDiagnostic(callSid, context = {}) {
+  if (!callSid) {
+    return;
+  }
+
+  const previous = pendingCallDiagnostics.get(callSid);
+  if (previous?.timer) {
+    clearTimeout(previous.timer);
+  }
+
+  const record = {
+    ...previous,
+    ...context,
+    callSid,
+    acceptedAt: new Date().toISOString(),
+    voicebotHitAt: previous?.voicebotHitAt || null,
+    statusHitAt: previous?.statusHitAt || null,
+    streamHitAt: previous?.streamHitAt || null
+  };
+
+  record.timer = setTimeout(() => {
+    const latest = pendingCallDiagnostics.get(callSid);
+    if (!latest) {
+      return;
+    }
+
+    console.warn(
+      `[CALL DIAGNOSTIC WARNING] sid=${callSid} customerId=${latest.customerId || ''} ` +
+      `phone=${latest.customerPhone || ''} voicebotHit=${latest.voicebotHitAt ? 'yes' : 'no'} ` +
+      `streamHit=${latest.streamHitAt ? 'yes' : 'no'} statusHit=${latest.statusHitAt ? 'yes' : 'no'} ` +
+      `publicBaseUrl=${PUBLIC_BASE_URL} voicebotUrl=${process.env.EXOTEL_VOICEBOT_URL || ''}`
+    );
+  }, CALL_DIAGNOSTIC_WARN_MS);
+
+  pendingCallDiagnostics.set(callSid, record);
+}
+
+function markPendingCallDiagnostic(callSid, patch = {}) {
+  if (!callSid) {
+    return;
+  }
+
+  const current = pendingCallDiagnostics.get(callSid) || { callSid };
+  pendingCallDiagnostics.set(callSid, {
+    ...current,
+    ...patch,
+    callSid
+  });
+}
 
 function applyAgentTemplate(template, replacements = {}) {
   return String(template || '').replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, key) => {
@@ -425,12 +493,7 @@ function buildAgentSystemPrompt(clientName, customerName, agentConfig = null) {
 }
 
 function buildDefaultOpeningPrompt(clientName, customerName) {
-  return [
-    `Start the call with a short Hindi greeting as Priya from ${clientName}.`,
-    `Say exactly one short line: "Namaste ${customerName} ji, main Priya ${clientName} se bol rahi hoon. Kya abhi 2 minute baat ho sakti hai?"`,
-    'Keep the first turn short, warm, and clearly spoken in Hindi.',
-    'After the greeting, continue the feedback conversation naturally using the system instructions.'
-  ].join(' ');
+  return `Sirf yeh exact line boliye aur is turn me kuch aur mat boliye: "Namaste ${customerName} ji, main Priya ${clientName} se bol rahi hoon. Kya abhi 2 minute baat ho sakti hai?"`;
 }
 
 function buildOpeningPrompt(clientName, customerName, agentConfig = null) {
@@ -467,11 +530,7 @@ function validateConfig() {
     missing.push('EXOTEL_FLOW_URL or EXOTEL_APPLET_URL');
   }
 
-  if (CALL_MODE === 'openai' && !process.env.OPENAI_API_KEY) {
-    missing.push('OPENAI_API_KEY');
-  }
-
-  if (CALL_MODE === 'gemini' && !process.env.GEMINI_API_KEY) {
+  if (!process.env.GEMINI_API_KEY) {
     missing.push('GEMINI_API_KEY');
   }
 
@@ -874,14 +933,14 @@ function buildGeminiWsUrl() {
   return url.toString();
 }
 
-function createDeepgramListenUrl() {
+function createDeepgramListenUrl(transportMode = 'twilio') {
   const url = new URL('wss://api.deepgram.com/v1/listen');
   url.searchParams.set('model', 'nova-2');
   url.searchParams.set('language', 'hi');
   url.searchParams.set('interim_results', 'true');
   url.searchParams.set('endpointing', '300');
   url.searchParams.set('smart_format', 'true');
-  url.searchParams.set('encoding', 'mulaw');
+  url.searchParams.set('encoding', transportMode === 'exotel' ? 'linear16' : 'mulaw');
   url.searchParams.set('sample_rate', '8000');
   url.searchParams.set('channels', '1');
   return url.toString();
@@ -929,7 +988,7 @@ function shouldFlushSpeechSegment(buffer) {
     return false;
   }
 
-  return /[.!?।]\s*$/.test(text) || text.length >= 140;
+  return /[.!?,;:।]\s*$/.test(text) || text.length >= 80;
 }
 
 async function streamGeminiResponse({ systemPrompt, contents, onTextChunk, signal, modelName }) {
@@ -1235,6 +1294,15 @@ function evaluateLiveSentimentLabel(text) {
 function shouldAutoHangupAfterAgentTurn(text) {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
   if (!normalized) {
+    return false;
+  }
+
+  const looksLikeFollowupQuestion = (
+    /[?？]|[?？]\s*$/.test(text)
+    || /\b(kya|kaisa|kaisi|kaise|aur|kab|kyun|kyon|kripya|please|bataiye|batayiye)\b/i.test(normalized)
+  );
+
+  if (looksLikeFollowupQuestion) {
     return false;
   }
 
@@ -1607,6 +1675,24 @@ function isCustomerHangupIntent(text) {
   return patterns.some((pattern) => pattern.test(normalized));
 }
 
+function isAffirmativeAvailabilityResponse(text) {
+  const normalized = String(text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) {
+    return false;
+  }
+
+  return /\b(haan|ha|han|yes|ji|bilkul|available|bolo|continue|sure)\b/.test(normalized)
+    || /ho\s+sakti\s+hai/.test(normalized)
+    || /ho\s+sakta\s+hai/.test(normalized)
+    || /kar\s+sakte\s+hai/.test(normalized)
+    || /kar\s+sakti\s+hoon/.test(normalized);
+}
+
 function pushTranscriptTurn(transcript, role, text) {
   if (!text || !String(text).trim()) {
     return;
@@ -1762,6 +1848,13 @@ app.post('/call/start', async (req, res) => {
     );
     await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
 
+    schedulePendingCallDiagnostic(call.sid, {
+      customerId: customer.id,
+      customerPhone,
+      customerName: customer.name || customerName,
+      agentId: agentConfig?.id || null,
+      trigger: '/call/start'
+    });
     console.log(`[CALL STARTED] SID: ${call.sid}`);
     res.json({ success: true, sid: call.sid, callId: result.lastID, customerId: customer.id, agentId: agentConfig?.id || null });
   } catch (error) {
@@ -1849,6 +1942,15 @@ app.all('/call/exotel/voicebot-url', async (req, res) => {
       || req.query?.call_sid
       || '';
 
+    if (hintedCallSid) {
+      markPendingCallDiagnostic(hintedCallSid, {
+        voicebotHitAt: new Date().toISOString(),
+        voicebotMethod: req.method,
+        voicebotBodyKeys: Object.keys(req.body || {}),
+        voicebotQueryKeys: Object.keys(req.query || {})
+      });
+    }
+
     if (hintedPhone) {
       query.set('from', hintedPhone);
     }
@@ -1889,14 +1991,26 @@ app.all('/call/exotel/voicebot-url', async (req, res) => {
   }
 });
 
-app.post('/call/status', async (req, res) => {
+app.all('/call/status', async (req, res) => {
   try {
-    const providerStatus = req.body.CallStatus || req.body.Status || req.body.status || null;
-    const providerCallSid = req.body.CallSid || req.body.call_sid || req.body.Sid || req.body.sid || null;
-    const providerRecordingUrl = req.body.RecordingUrl || req.body.recording_url || null;
-    const providerRecordingSid = req.body.RecordingSid || req.body.recording_sid || null;
-    const eventType = req.body.EventType || req.body.event_type || null;
-    console.log(`[CALL STATUS] ${providerStatus} | SID: ${providerCallSid}`);
+    const providerStatus = pickRequestValue(req, ['CallStatus', 'Status', 'status']);
+    const providerCallSid = pickRequestValue(req, ['CallSid', 'call_sid', 'Sid', 'sid']);
+    const providerRecordingUrl = pickRequestValue(req, ['RecordingUrl', 'recording_url']);
+    const providerRecordingSid = pickRequestValue(req, ['RecordingSid', 'recording_sid']);
+    const eventType = pickRequestValue(req, ['EventType', 'event_type']);
+    console.log(
+      `[CALL STATUS] method=${req.method} status=${providerStatus || ''} sid=${providerCallSid || ''} ` +
+      `query=${JSON.stringify(req.query || {})} bodyKeys=${JSON.stringify(Object.keys(req.body || {}))}`
+    );
+
+    if (providerCallSid) {
+      markPendingCallDiagnostic(providerCallSid, {
+        statusHitAt: new Date().toISOString(),
+        statusMethod: req.method,
+        providerStatus: providerStatus || null,
+        eventType: eventType || null
+      });
+    }
 
     const callRecord = await dbGet('SELECT * FROM calls WHERE twilio_sid = ?', [providerCallSid]);
     const customerId = req.query.customerId || callRecord?.customer_id;
@@ -2056,6 +2170,13 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
     );
 
     await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+    schedulePendingCallDiagnostic(call.sid, {
+      customerId: customer.id,
+      customerPhone: customer.phone,
+      customerName: customer.name,
+      agentId: agentConfig?.id || null,
+      trigger: '/api/calls/initiate/:customerId'
+    });
     res.json({ message: 'Call initiated', callId: result.lastID, sid: call.sid, agentId: agentConfig?.id || null, agentName: agentConfig?.name || null });
   } catch (error) {
     if (customer?.id) {
@@ -2122,6 +2243,66 @@ app.get('/api/calls/recent', async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error('[RECENT CALLS ERROR]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/calls/:callId(\\d+)', async (req, res) => {
+  try {
+    const row = await dbGet(
+      `SELECT
+         calls.id,
+         calls.customer_id,
+         calls.agent_id,
+         customers.name AS customer_name,
+         customers.phone AS customer_phone,
+         agents.name AS agent_name,
+         agents.slug AS agent_slug,
+         calls.called_at,
+         calls.outcome,
+         calls.twilio_sid,
+         calls.recording_sid,
+         calls.recording_url,
+         calls.recording_status,
+         calls.recording_local_path,
+         calls.transcript_status,
+         calls.transcript_source,
+         calls.analysis_status,
+         calls.analysis_summary,
+         calls.analysis_json,
+         calls.key_points_json,
+         calls.report_excerpt,
+         calls.language,
+         calls.extracted_rating,
+         calls.extracted_review_text,
+         calls.sentiment_label,
+         calls.sentiment_score,
+         calls.hot_lead_score,
+         calls.next_action_at,
+         calls.follow_up_task,
+         calls.crm_sync_status,
+         calls.whatsapp_summary_sent,
+         calls.live_sentiment_score,
+         calls.live_sentiment_label,
+         calls.live_red_flag,
+         calls.supervisor_alert_level,
+         calls.human_escalation_requested,
+         calls.objections_json,
+         calls.competitor_mentions_json
+       FROM calls
+       JOIN customers ON customers.id = calls.customer_id
+       LEFT JOIN agents ON agents.id = calls.agent_id
+      WHERE calls.id = ?`,
+      [req.params.callId]
+    );
+
+    if (!row) {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+
+    res.json(row);
+  } catch (error) {
+    console.error('[CALL DETAIL ERROR]', error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -3081,6 +3262,17 @@ wss.on('connection', (twilioWs, req) => {
   let transcriptPersisted = false;
   let callClosed = false;
   let autoHangupTimer = null;
+  let bufferedInboundMedia = [];
+  let bufferedInboundMediaBytes = 0;
+  let pendingAgentTranscript = '';
+  let pendingAgentTranscriptTimer = null;
+  let deepgramReady = false;
+  let deepgramWs = null;
+  let finalTranscriptBuffer = [];
+  let hasCustomerResponded = false;
+  let openingPromptInFlight = false;
+  let openingQuestionAnswered = false;
+  let suppressAgentAudioUntilMs = 0;
 
   const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName, activeAgentConfig);
   const getActiveOpeningPrompt = () => buildOpeningPrompt(activeClientName, activeCustomerName, activeAgentConfig);
@@ -3178,6 +3370,76 @@ wss.on('connection', (twilioWs, req) => {
     }
   }
 
+  function clearPendingAgentTranscriptTimer() {
+    if (pendingAgentTranscriptTimer) {
+      clearTimeout(pendingAgentTranscriptTimer);
+      pendingAgentTranscriptTimer = null;
+    }
+  }
+
+  function appendTranscriptFragment(existingText, nextFragment) {
+    const current = String(existingText || '').trim();
+    const fragment = String(nextFragment || '').trim();
+
+    if (!fragment) {
+      return current;
+    }
+
+    if (!current) {
+      return fragment;
+    }
+
+    if (current.endsWith(fragment)) {
+      return current;
+    }
+
+    if (/^[,.;:!?)/\]}]/.test(fragment)) {
+      return `${current}${fragment}`;
+    }
+
+    return `${current} ${fragment}`.replace(/\s+/g, ' ').trim();
+  }
+
+  function flushPendingAgentTranscript() {
+    clearPendingAgentTranscriptTimer();
+    const text = pendingAgentTranscript.trim();
+    if (!text) {
+      return;
+    }
+
+    pendingAgentTranscript = '';
+    pushTranscriptTurn(transcript, 'AGENT', text);
+    console.log(`[AGENT]: ${text}`);
+    refreshLiveCallState({}).catch(() => {});
+    scheduleAutoHangupFromAgentText(text);
+  }
+
+  function discardPendingAgentTranscript(reason = 'interrupted') {
+    if (!pendingAgentTranscript && !pendingAgentTranscriptTimer) {
+      return;
+    }
+
+    clearPendingAgentTranscriptTimer();
+    if (pendingAgentTranscript.trim()) {
+      console.log(`[AGENT DISCARD] reason=${reason} text=${pendingAgentTranscript.trim()}`);
+    }
+    pendingAgentTranscript = '';
+  }
+
+  function queuePendingAgentTranscript(fragment) {
+    pendingAgentTranscript = appendTranscriptFragment(pendingAgentTranscript, fragment);
+    clearPendingAgentTranscriptTimer();
+
+    if (/[.!?।]$/.test(pendingAgentTranscript)) {
+      flushPendingAgentTranscript();
+      return;
+    }
+
+    pendingAgentTranscriptTimer = setTimeout(() => {
+      flushPendingAgentTranscript();
+    }, 450);
+  }
+
   function clearGeminiOpeningPromptRetry() {
     if (geminiOpeningPromptRetryTimer) {
       clearTimeout(geminiOpeningPromptRetryTimer);
@@ -3223,6 +3485,7 @@ wss.on('connection', (twilioWs, req) => {
       return;
     }
 
+    openingPromptInFlight = true;
     geminiFirstAudibleResponseLogged = false;
     geminiOpeningPromptSentAt = Date.now();
     console.log(`[GEMINI] Sending ${label} prompt (${safePrompt.length} chars)`);
@@ -3246,7 +3509,7 @@ wss.on('connection', (twilioWs, req) => {
 
   function scheduleAutoHangupFromAgentText(text) {
     clearAutoHangupTimer();
-    if (!shouldAutoHangupAfterAgentTurn(text) || callClosed) {
+    if (!hasCustomerResponded || !shouldAutoHangupAfterAgentTurn(text) || callClosed) {
       return;
     }
 
@@ -3307,124 +3570,73 @@ wss.on('connection', (twilioWs, req) => {
     }));
   }
 
-  function sendTextInputToAi(text) {
+  function clearCallerPlaybackBuffer() {
+    if (!streamSid || twilioWs.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    twilioWs.send(JSON.stringify({
+      event: 'clear',
+      streamSid
+    }));
+  }
+
+  function suppressStaleAgentAudio(durationMs = 1500) {
+    suppressAgentAudioUntilMs = Math.max(suppressAgentAudioUntilMs, Date.now() + durationMs);
+  }
+
+  function bufferInboundMediaChunk(payload) {
+    const estimatedBytes = Math.ceil(String(payload || '').length * 0.75);
+    bufferedInboundMedia.push(payload);
+    bufferedInboundMediaBytes += estimatedBytes;
+
+    while (
+      bufferedInboundMedia.length > MAX_PRECONNECT_MEDIA_CHUNKS
+      || bufferedInboundMediaBytes > MAX_PRECONNECT_MEDIA_BYTES
+    ) {
+      const dropped = bufferedInboundMedia.shift();
+      bufferedInboundMediaBytes -= Math.ceil(String(dropped || '').length * 0.75);
+    }
+  }
+
+  function flushBufferedInboundMediaToDeepgram() {
+    if (!bufferedInboundMedia.length || !deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    console.log(`[DEEPGRAM] Flushing ${bufferedInboundMedia.length} buffered inbound audio chunks`);
+    const pendingChunks = bufferedInboundMedia;
+    bufferedInboundMedia = [];
+    bufferedInboundMediaBytes = 0;
+
+    for (const payload of pendingChunks) {
+      const audioChunk = transportMode === 'exotel'
+        ? Buffer.from(payload, 'base64')
+        : decodeMuLaw(payload);
+      deepgramWs.send(audioChunk);
+    }
+  }
+
+  function sendTextInputToAi(text, options = {}) {
     const safeText = String(text || '').trim();
     if (!safeText || aiWs?.readyState !== WebSocket.OPEN) {
       return;
     }
 
-    if (AI_PROVIDER === 'gemini') {
-      if (!geminiSetupComplete) {
-        return;
-      }
-
-      if (usesGeminiRealtimeTextInput(getActiveModelName())) {
-        aiWs.send(JSON.stringify({
-          realtimeInput: {
-            text: safeText
-          }
-        }));
-      } else {
-        aiWs.send(JSON.stringify({
-          clientContent: {
-            turns: [
-              {
-                role: 'user',
-                parts: [{ text: safeText }]
-              }
-            ],
-            turnComplete: true
-          }
-        }));
-      }
+    if (!geminiSetupComplete) {
       return;
     }
 
-    aiWs.send(JSON.stringify({
-      type: 'conversation.item.create',
-      item: {
-        type: 'message',
-        role: 'user',
-        content: [
-          {
-            type: 'input_text',
-            text: safeText
-          }
-        ]
-      }
-    }));
-
-    aiWs.send(JSON.stringify({
-      type: 'response.create',
-      response: {
-        output_modalities: ['audio']
-      }
-    }));
-  }
-
-  function createOpenAiSession() {
-    aiSessionStarting = true;
-    aiWs = new WebSocket(`wss://api.openai.com/v1/realtime?model=${encodeURIComponent(getActiveModelName())}`, {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        'OpenAI-Beta': 'realtime=v1'
-      }
-    });
-
-    aiWs.on('open', () => {
-      console.log('[OPENAI] Realtime session opened');
-
+    if (usesGeminiRealtimeTextInput(getActiveModelName()) && !options.interrupt) {
       aiWs.send(JSON.stringify({
-        type: 'session.update',
-        session: {
-          type: 'realtime',
-          instructions: getActiveSystemPrompt(),
-          output_modalities: ['audio'],
-          audio: {
-            input: {
-              format: { type: transportMode === 'exotel' ? 'audio/pcm' : 'audio/pcmu' },
-              transcription: {
-                model: 'gpt-4o-mini-transcribe'
-              },
-              turn_detection: {
-                type: 'server_vad',
-                threshold: 0.5,
-                prefix_padding_ms: 300,
-                silence_duration_ms: 500,
-                create_response: true,
-                interrupt_response: true
-              }
-            },
-            output: {
-              format: { type: transportMode === 'exotel' ? 'audio/pcm' : 'audio/pcmu' },
-              voice: 'alloy'
-            }
-          }
+        realtimeInput: {
+          text: safeText
         }
       }));
+      return;
+    }
 
-      aiWs.send(JSON.stringify({
-        type: 'conversation.item.create',
-        item: {
-          type: 'message',
-          role: 'user',
-          content: [
-            {
-              type: 'input_text',
-              text: getActiveOpeningPrompt()
-            }
-          ]
-        }
-      }));
-
-      aiWs.send(JSON.stringify({
-        type: 'response.create',
-        response: {
-          output_modalities: ['audio'],
-          instructions: `${getActiveSystemPrompt()}\n\n${getActiveOpeningPrompt()}`
-        }
-      }));
-    });
+    sendGeminiClientTurn(safeText, { interrupt: options.interrupt });
   }
 
   function createGeminiSession() {
@@ -3485,23 +3697,30 @@ wss.on('connection', (twilioWs, req) => {
         return;
       }
 
-      if (AI_PROVIDER === 'gemini') {
-        if (message.setupComplete) {
-          geminiSetupComplete = true;
-          geminiSetupCompletedAt = Date.now();
-          clearGeminiSetupWatchdog();
-          console.log('[GEMINI] Session configured');
-          console.log(`[GEMINI] Config model=${getActiveModelName()} voice=${GEMINI_VOICE} transport=${transportMode}`);
-          if (geminiSessionOpenedAt) {
-            console.log(`[GEMINI] setupComplete received after ${geminiSetupCompletedAt - geminiSessionOpenedAt}ms`);
-          }
+      if (message.setupComplete) {
+        geminiSetupComplete = true;
+        geminiSetupCompletedAt = Date.now();
+        clearGeminiSetupWatchdog();
+        console.log('[GEMINI] Session configured');
+        console.log(`[GEMINI] Config model=${getActiveModelName()} voice=${GEMINI_VOICE} transport=${transportMode}`);
+        if (geminiSessionOpenedAt) {
+          console.log(`[GEMINI] setupComplete received after ${geminiSetupCompletedAt - geminiSessionOpenedAt}ms`);
+        }
 
-          geminiAudioReceived = false;
-          geminiInboundAudioLogged = false;
-          clearGeminiOpeningPromptRetry();
-          sendGeminiOpeningPrompt(getActiveOpeningPrompt(), 'initial', { forceClientTurn: true });
+        geminiAudioReceived = false;
+        geminiInboundAudioLogged = false;
+        openingPromptInFlight = false;
+        clearGeminiOpeningPromptRetry();
+        sendGeminiOpeningPrompt(getActiveOpeningPrompt(), 'initial', { forceClientTurn: true });
+        if (GEMINI_OPENING_RETRY_ENABLED) {
           geminiOpeningPromptRetryTimer = setTimeout(() => {
-            if (callClosed || geminiAudioReceived || aiWs?.readyState !== WebSocket.OPEN) {
+            if (
+              callClosed
+              || geminiAudioReceived
+              || hasCustomerResponded
+              || pendingAgentTranscript.trim()
+              || aiWs?.readyState !== WebSocket.OPEN
+            ) {
               return;
             }
             console.warn('[GEMINI] No audible response detected after the opening prompt; sending an interrupt-style fallback opener.');
@@ -3511,122 +3730,56 @@ wss.on('connection', (twilioWs, req) => {
               { forceClientTurn: true, interrupt: true }
             );
           }, GEMINI_OPENING_RETRY_MS);
-          return;
-        }
-
-        if (message.serverContent?.inputTranscription?.text) {
-          clearAutoHangupTimer();
-          pushTranscriptTurn(transcript, 'CUSTOMER', message.serverContent.inputTranscription.text);
-          console.log(`[CUSTOMER]: ${message.serverContent.inputTranscription.text}`);
-          if (closeLegacyCallForCustomerRequest(message.serverContent.inputTranscription.text)) {
-            return;
-          }
-          const sentiment = evaluateLiveSentimentLabel(message.serverContent.inputTranscription.text);
-          const redFlag = sentiment.label === 'negative';
-          refreshLiveCallState({
-            live_sentiment_label: sentiment.label,
-            live_sentiment_score: sentiment.score,
-            red_flag: redFlag
-          }).catch(() => {});
-          if (redFlag && activeCallId) {
-            createSupervisorEvent({
-              dbRun,
-              callId: activeCallId,
-              eventType: 'live_negative_signal',
-              severity: 'high',
-              payload: { transcript: message.serverContent.inputTranscription.text }
-            }).catch(() => {});
-          }
-        }
-
-        if (message.serverContent?.outputTranscription?.text) {
-          pushTranscriptTurn(transcript, 'AGENT', message.serverContent.outputTranscription.text);
-          console.log(`[AGENT]: ${message.serverContent.outputTranscription.text}`);
-          refreshLiveCallState({}).catch(() => {});
-          scheduleAutoHangupFromAgentText(message.serverContent.outputTranscription.text);
-        }
-
-        const parts = message.serverContent?.modelTurn?.parts || [];
-        for (const part of parts) {
-          if (!part.inlineData?.data || !String(part.inlineData.mimeType || '').startsWith('audio/pcm')) {
-            continue;
-          }
-
-          geminiAudioReceived = true;
-          clearGeminiOpeningPromptRetry();
-          if (!geminiFirstAudibleResponseLogged && geminiOpeningPromptSentAt) {
-            console.log(`[GEMINI] First audible response after ${Date.now() - geminiOpeningPromptSentAt}ms from the last prompt`);
-          }
-          if (!geminiFirstAudibleResponseLogged && geminiSetupCompletedAt) {
-            console.log(`[GEMINI] First audible response after ${Date.now() - geminiSetupCompletedAt}ms from setupComplete`);
-          }
-          geminiFirstAudibleResponseLogged = true;
-          const pcm16 = Buffer.from(part.inlineData.data, 'base64');
-          const sourceRate = parsePcmRate(part.inlineData.mimeType, 24000);
-          const resampled = resamplePcm16(pcm16, sourceRate, 8000);
-          const outboundAudio = transportMode === 'exotel'
-            ? resampled.toString('base64')
-            : encodeMuLawFromPcm16(resampled).toString('base64');
-          console.log(`[GEMINI] Outbound audio chunk mime=${part.inlineData.mimeType} sourceRate=${sourceRate} bytes=${resampled.length}`);
-          sendAudioToCaller(outboundAudio);
-        }
-
-        if (message.serverContent?.interrupted) {
-          console.log('[GEMINI] Response interrupted');
-        }
-
-        if (message.error) {
-          console.error('[GEMINI ERROR]', JSON.stringify(message, null, 2));
-        }
-
-        if (!message.setupComplete && !message.serverContent && !message.usageMetadata && !message.goAway && !message.sessionResumptionUpdate) {
-          console.log('[GEMINI MESSAGE]', JSON.stringify(message, null, 2));
         }
         return;
       }
 
-      if (message.type === 'session.updated') {
-        console.log('[OPENAI] Session configured');
-        return;
+      if (message.serverContent?.outputTranscription?.text) {
+        queuePendingAgentTranscript(message.serverContent.outputTranscription.text);
       }
 
-      if (message.type === 'response.created') {
-        console.log('[OPENAI] Response created');
-        return;
-      }
-
-      if (message.type === 'response.output_audio.delta' && message.delta) {
-        sendAudioToCaller(message.delta);
-        return;
-      }
-
-      if (message.type === 'response.output_audio_transcript.done') {
-        pushTranscriptTurn(transcript, 'AGENT', message.transcript);
-        console.log(`[AGENT]: ${message.transcript}`);
-        refreshLiveCallState({}).catch(() => {});
-        scheduleAutoHangupFromAgentText(message.transcript);
-        return;
-      }
-
-      if (message.type === 'conversation.item.input_audio_transcription.completed') {
-        clearAutoHangupTimer();
-        pushTranscriptTurn(transcript, 'CUSTOMER', message.transcript);
-        console.log(`[CUSTOMER]: ${message.transcript}`);
-        if (closeLegacyCallForCustomerRequest(message.transcript)) {
-          return;
+      const parts = message.serverContent?.modelTurn?.parts || [];
+      for (const part of parts) {
+        if (!part.inlineData?.data || !String(part.inlineData.mimeType || '').startsWith('audio/pcm')) {
+          continue;
         }
-        const sentiment = evaluateLiveSentimentLabel(message.transcript);
-        const redFlag = sentiment.label === 'negative';
-        refreshLiveCallState({
-          live_sentiment_label: sentiment.label,
-          live_sentiment_score: sentiment.score,
-          red_flag: redFlag
-        }).catch(() => {});
+
+        geminiAudioReceived = true;
+        clearGeminiOpeningPromptRetry();
+        if (!geminiFirstAudibleResponseLogged && geminiOpeningPromptSentAt) {
+          console.log(`[GEMINI] First audible response after ${Date.now() - geminiOpeningPromptSentAt}ms from the last prompt`);
+        }
+        if (!geminiFirstAudibleResponseLogged && geminiSetupCompletedAt) {
+          console.log(`[GEMINI] First audible response after ${Date.now() - geminiSetupCompletedAt}ms from setupComplete`);
+        }
+        geminiFirstAudibleResponseLogged = true;
+        openingPromptInFlight = false;
+        const pcm16 = Buffer.from(part.inlineData.data, 'base64');
+        const sourceRate = parsePcmRate(part.inlineData.mimeType, 24000);
+        const resampled = resamplePcm16(pcm16, sourceRate, 8000);
+        const outboundAudio = transportMode === 'exotel'
+          ? resampled.toString('base64')
+          : encodeMuLawFromPcm16(resampled).toString('base64');
+        if (Date.now() < suppressAgentAudioUntilMs) {
+          continue;
+        }
+        console.log(`[GEMINI] Outbound audio chunk mime=${part.inlineData.mimeType} sourceRate=${sourceRate} bytes=${resampled.length}`);
+        sendAudioToCaller(outboundAudio);
+      }
+
+      if (message.serverContent?.interrupted) {
+        discardPendingAgentTranscript('model_interrupted');
+        console.log('[GEMINI] Response interrupted');
         return;
       }
 
-      if (message.type === 'error') {
-        console.error('[OPENAI ERROR]', JSON.stringify(message, null, 2));
+      if (message.error) {
+        console.error('[GEMINI ERROR]', JSON.stringify(message, null, 2));
+        return;
+      }
+
+      if (!message.setupComplete && !message.serverContent && !message.usageMetadata && !message.goAway && !message.sessionResumptionUpdate) {
+        console.log('[GEMINI MESSAGE]', JSON.stringify(message, null, 2));
       }
     });
 
@@ -3650,13 +3803,141 @@ wss.on('connection', (twilioWs, req) => {
       return;
     }
 
-    if (AI_PROVIDER === 'gemini') {
-      createGeminiSession();
-    } else {
-      createOpenAiSession();
+    createGeminiSession();
+    attachAiEventHandlers();
+  }
+
+  function finalizeLegacyUserTurn(text) {
+    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!normalized || callClosed) {
+      return;
     }
 
-    attachAiEventHandlers();
+    hasCustomerResponded = true;
+    openingPromptInFlight = false;
+    clearAutoHangupTimer();
+    clearGeminiOpeningPromptRetry();
+    pushTranscriptTurn(transcript, 'CUSTOMER', normalized);
+    console.log(`[CUSTOMER]: ${normalized}`);
+
+    const sentiment = evaluateLiveSentimentLabel(normalized);
+    const redFlag = sentiment.label === 'negative';
+    refreshLiveCallState({
+      live_sentiment_label: sentiment.label,
+      live_sentiment_score: sentiment.score,
+      red_flag: redFlag
+    }).catch(() => {});
+
+    if (redFlag && activeCallId) {
+      createSupervisorEvent({
+        dbRun,
+        callId: activeCallId,
+        eventType: 'live_negative_signal',
+        severity: 'high',
+        payload: { transcript: normalized }
+      }).catch(() => {});
+    }
+
+    if (closeLegacyCallForCustomerRequest(normalized)) {
+      return;
+    }
+
+    const shouldInterrupt = Boolean(pendingAgentTranscript || pendingAgentTranscriptTimer);
+    if (shouldInterrupt) {
+      clearCallerPlaybackBuffer();
+      suppressStaleAgentAudio();
+      discardPendingAgentTranscript('customer_barge_in');
+    }
+
+    if (!openingQuestionAnswered) {
+      openingQuestionAnswered = true;
+
+      if (isAffirmativeAvailabilityResponse(normalized)) {
+        sendTextInputToAi(
+          'Customer agreed to continue. Ask exactly one next question in Hindi: "Aapka recent visit ka experience kaisa raha?" Do not greet again. Do not thank the customer yet. Do not repeat the availability question.',
+          { interrupt: shouldInterrupt }
+        );
+        return;
+      }
+    }
+
+    sendTextInputToAi(
+      `Customer said: ${normalized}\nDo not greet again. Do not repeat the previous question unless the answer was unclear.`,
+      { interrupt: shouldInterrupt }
+    );
+  }
+
+  function handleLegacyDeepgramTranscript(event) {
+    const transcriptText = String(event?.channel?.alternatives?.[0]?.transcript || '').trim();
+    const isFinal = Boolean(event?.is_final);
+    const isSpeechFinal = Boolean(event?.speech_final);
+    const wordCount = transcriptText.split(/\s+/).filter(Boolean).length;
+
+    if (!transcriptText) {
+      if (isSpeechFinal && finalTranscriptBuffer.length) {
+        const merged = finalTranscriptBuffer.join(' ').replace(/\s+/g, ' ').trim();
+        finalTranscriptBuffer = [];
+        finalizeLegacyUserTurn(merged);
+      }
+      return;
+    }
+
+    if (wordCount >= 2 && (pendingAgentTranscript || pendingAgentTranscriptTimer)) {
+      clearCallerPlaybackBuffer();
+      suppressStaleAgentAudio();
+      discardPendingAgentTranscript('interim_customer_speech');
+    }
+
+    if (isFinal) {
+      finalTranscriptBuffer.push(transcriptText);
+    }
+
+    if (isSpeechFinal) {
+      const merged = finalTranscriptBuffer.length
+        ? finalTranscriptBuffer.join(' ')
+        : transcriptText;
+      finalTranscriptBuffer = [];
+      finalizeLegacyUserTurn(merged);
+    }
+  }
+
+  function connectLegacyDeepgram() {
+    deepgramWs = new WebSocket(createDeepgramListenUrl(transportMode), {
+      headers: {
+        Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`
+      }
+    });
+
+    deepgramWs.on('open', () => {
+      deepgramReady = true;
+      console.log(`[DEEPGRAM] Live transcription connected transport=${transportMode}`);
+      flushBufferedInboundMediaToDeepgram();
+    });
+
+    deepgramWs.on('message', (raw) => {
+      let event;
+
+      try {
+        event = JSON.parse(raw.toString());
+      } catch (error) {
+        console.error('[DEEPGRAM PARSE ERROR]', error.message);
+        return;
+      }
+
+      if (event.type === 'Results') {
+        handleLegacyDeepgramTranscript(event);
+      }
+    });
+
+    deepgramWs.on('close', () => {
+      deepgramReady = false;
+      console.log('[DEEPGRAM] Live transcription closed');
+    });
+
+    deepgramWs.on('error', (error) => {
+      deepgramReady = false;
+      console.error('[DEEPGRAM ERROR]', error.message);
+    });
   }
 
   twilioWs.on('message', async (raw) => {
@@ -3699,52 +3980,41 @@ wss.on('connection', (twilioWs, req) => {
       if (activeCallSid) {
         const callRow = await dbGet('SELECT id FROM calls WHERE twilio_sid = ?', [activeCallSid]);
         activeCallId = callRow?.id || null;
+        markPendingCallDiagnostic(activeCallSid, {
+          streamHitAt: new Date().toISOString(),
+          streamTransport: transportMode,
+          streamConnectedFrom: req.socket.remoteAddress || ''
+        });
       }
       console.log(`[STREAM] streamSid: ${streamSid}`);
       console.log(`[STREAM] Start payload: ${JSON.stringify(start)}`);
       console.log(`[STREAM] Transport=${transportMode} customer=${activeCustomerName} client=${activeClientName}`);
       console.log(`[STREAM] AI provider=${AI_PROVIDER} model=${getActiveModelName()}`);
       await refreshLiveCallState({ status: 'active', started_at: new Date().toISOString() });
+      connectLegacyDeepgram();
       ensureAiSession();
       return;
     }
 
-    if (message.event === 'media' && aiWs?.readyState === WebSocket.OPEN) {
+    if (message.event === 'media') {
       const payload = getMediaPayload(message);
       if (!payload) {
         return;
       }
 
-      if (AI_PROVIDER === 'gemini') {
-        if (!geminiSetupComplete) {
-          console.log('[STREAM] Dropping media chunk until Gemini setup completes');
-          return;
-        }
-
-        const pcm16 = transportMode === 'exotel'
-          ? Buffer.from(payload, 'base64')
-          : decodeMuLaw(payload);
-        if (!geminiInboundAudioLogged) {
-          console.log(`[GEMINI] First inbound audio chunk received (${pcm16.length} bytes)`);
-          geminiInboundAudioLogged = true;
-        }
-        aiWs.send(JSON.stringify({
-          realtimeInput: {
-            audio: {
-              data: pcm16.toString('base64'),
-              mimeType: 'audio/pcm;rate=8000'
-            }
-          }
-        }));
+      if (!deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
+        bufferInboundMediaChunk(payload);
         return;
       }
 
-      aiWs.send(JSON.stringify({
-        type: 'input_audio_buffer.append',
-        audio: transportMode === 'exotel'
-          ? encodeMuLawFromPcm16(Buffer.from(payload, 'base64')).toString('base64')
-          : payload
-      }));
+      const audioChunk = transportMode === 'exotel'
+        ? Buffer.from(payload, 'base64')
+        : decodeMuLaw(payload);
+      if (!geminiInboundAudioLogged) {
+        console.log(`[DEEPGRAM] First inbound audio chunk received (${audioChunk.length} bytes)`);
+        geminiInboundAudioLogged = true;
+      }
+      deepgramWs.send(audioChunk);
       return;
     }
 
@@ -3757,7 +4027,7 @@ wss.on('connection', (twilioWs, req) => {
       const utterance = inferDtmfUtterance(digit, transcript);
       console.log(`[DTMF] Received digit=${digit} mapped="${utterance}"`);
       pushTranscriptTurn(transcript, 'CUSTOMER', `[DTMF ${digit}] ${utterance}`);
-      sendTextInputToAi(utterance);
+      sendTextInputToAi(utterance, { interrupt: Boolean(pendingAgentTranscript || pendingAgentTranscriptTimer) });
       return;
     }
 
@@ -3766,6 +4036,7 @@ wss.on('connection', (twilioWs, req) => {
       callClosed = true;
       clearAutoHangupTimer();
       clearGeminiOpeningPromptRetry();
+      flushPendingAgentTranscript();
       refreshLiveCallState({ status: 'completed' }).catch(() => {});
       printTranscriptOnce();
       persistTranscriptOnce().catch((error) => {
@@ -3775,6 +4046,10 @@ wss.on('connection', (twilioWs, req) => {
       if (aiWs?.readyState === WebSocket.OPEN) {
         aiWs.close();
       }
+
+      if (deepgramWs?.readyState === WebSocket.OPEN) {
+        deepgramWs.close();
+      }
     }
   });
 
@@ -3783,6 +4058,7 @@ wss.on('connection', (twilioWs, req) => {
     callClosed = true;
     clearAutoHangupTimer();
     clearGeminiOpeningPromptRetry();
+    flushPendingAgentTranscript();
     refreshLiveCallState({ status: 'closed' }).catch(() => {});
     printTranscriptOnce();
     persistTranscriptOnce().catch((error) => {
@@ -3791,6 +4067,10 @@ wss.on('connection', (twilioWs, req) => {
 
     if (aiWs?.readyState === WebSocket.OPEN) {
       aiWs.close();
+    }
+
+    if (deepgramWs?.readyState === WebSocket.OPEN) {
+      deepgramWs.close();
     }
   });
 

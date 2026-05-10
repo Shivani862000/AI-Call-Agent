@@ -36,7 +36,7 @@ router.post('/manual', async (req, res) => {
       return res.status(404).json({ error: 'Customer not found', fieldErrors: { customer_id: 'Selected customer no longer exists' } });
     }
 
-    // Categorize using OpenAI
+    // Categorize feedback using the local heuristic classifier
     const categorization = await categorizeFeedback(review_text, stars);
 
     // Save to feedback table

@@ -134,7 +134,7 @@
     </main>
   </div>
 
-  <button id="mobileFloatingNewCallButton" class="mobile-floating-cta mobile-only" type="button">New Call</button>
+  <button id="mobileFloatingNewCallButton" class="mobile-floating-cta mobile-only" type="button">Add Customer</button>
 
   <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
     <a href="/admin.html" class="mobile-dock-link">Overview</a>
@@ -396,9 +396,10 @@
       return fieldErrors;
     }
 
-    function resetNewCallForm() {
+    function resetNewCallForm(mode = 'call') {
       document.getElementById('editingCustomerId').value = '';
-      document.getElementById('newCallModalTitle').textContent = 'Schedule New Call';
+      document.getElementById('newCallModalTitle').textContent = mode === 'customer' ? 'Add Customer' : 'Schedule New Call';
+      document.getElementById('scheduleCallSubmit').textContent = mode === 'customer' ? 'Add Customer' : 'Schedule Call';
       document.getElementById('callCustomerName').value = '';
       document.getElementById('callCustomerPhone').value = '';
       document.getElementById('callCustomerTime').value = '';
@@ -409,14 +410,16 @@
       clearFormErrors();
     }
 
-    function openNewCallModal(customerId = null) {
-      resetNewCallForm();
+    function openNewCallModal(customerId = null, options = {}) {
+      const mode = options.mode === 'customer' ? 'customer' : 'call';
+      resetNewCallForm(mode);
       if (customerId) {
         const customer = customerCache.find((item) => Number(item.id) === Number(customerId));
         const client = customer ? getClientByPhone(customer.phone) : null;
         if (customer) {
           document.getElementById('editingCustomerId').value = customer.id;
           document.getElementById('newCallModalTitle').textContent = 'Edit Scheduled Call';
+          document.getElementById('scheduleCallSubmit').textContent = 'Save Changes';
           document.getElementById('callCustomerName').value = customer.name || '';
           document.getElementById('callCustomerPhone').value = formatPhoneForInput(customer.phone || '');
           document.getElementById('callCustomerTime').value = customer.preferred_slot || '';
@@ -711,7 +714,7 @@
         container.innerHTML = `
           <div class="empty-state">
             <strong>No scheduled calls found</strong>
-            <div class="supporting-text">Tap New Call to schedule the next patient follow-up.</div>
+            <div class="supporting-text">Tap Add Customer to schedule the next patient follow-up.</div>
           </div>
         `;
         return;
@@ -766,7 +769,7 @@
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('newCallButton').addEventListener('click', () => openNewCallModal());
-      document.getElementById('mobileFloatingNewCallButton').addEventListener('click', () => openNewCallModal());
+      document.getElementById('mobileFloatingNewCallButton').addEventListener('click', () => openNewCallModal(null, { mode: 'customer' }));
       document.getElementById('mobileHeaderMenuButton').addEventListener('click', openMobileMenuSheet);
       document.getElementById('mobileFilterButton').addEventListener('click', openMobileFilterSheet);
       document.getElementById('closeMobileMenuSheet').addEventListener('click', closeMobileMenuSheet);

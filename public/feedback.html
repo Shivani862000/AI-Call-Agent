@@ -54,17 +54,38 @@
       <div id="alertContainer" class="alert-stack"></div>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Feedback stats">
-        <div class="mobile-stat-pill">
+        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-mobile-filter="needs_review" aria-pressed="true">
           <span class="mobile-stat-count" id="mobileMetricNeedsReview">0</span>
           <span class="mobile-stat-label">Needs review</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="pending" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricPendingAnalysis">0</span>
           <span class="mobile-stat-label">Pending</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="positive" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricPositiveFeedback">0</span>
           <span class="mobile-stat-label">Positive</span>
+        </button>
+      </section>
+
+      <section class="mobile-feedback-filter-bar mobile-only" aria-label="Filter feedback by date">
+        <select id="mobileDateFilter" class="table-filter">
+          <option value="all">All dates</option>
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="last_week">Last week</option>
+          <option value="last_month">Last month</option>
+          <option value="custom">Custom</option>
+        </select>
+        <div id="mobileCustomDateRange" class="mobile-custom-date-range" hidden>
+          <label>
+            Start date
+            <input id="mobileStartDate" type="date">
+          </label>
+          <label>
+            End date
+            <input id="mobileEndDate" type="date">
+          </label>
         </div>
       </section>
 
@@ -95,7 +116,7 @@
         <article class="poc-card mobile-feedback-review-card">
           <div class="poc-card-header compact-overview-header">
             <div>
-              <h3 class="poc-card-title">Calls Needing Review</h3>
+              <h3 id="mobileFeedbackSectionTitle" class="poc-card-title">Calls Needing Review</h3>
             </div>
           </div>
           <div id="mobileNeedsReviewList" class="mobile-review-list"></div>
@@ -270,6 +291,7 @@
     let customerCache = [];
     let feedbackCache = [];
     let recentCallsCache = [];
+    let activeMobileFilter = 'needs_review';
 
     function feedbackSentiment(feedback) {
       if (Number(feedback.stars || 0) >= 4) return 'positive';
@@ -287,9 +309,100 @@
       });
     }
 
+    function pendingAnalysisCalls() {
+      return recentCallsCache.filter((call) => String(call.analysis_status || '').toLowerCase() !== 'completed');
+    }
+
+    function positiveFeedbackEntries() {
+      return feedbackCache.filter((item) => Number(item.stars || 0) >= 4);
+    }
+
+    function parseRecordDate(value) {
+      if (!value) return null;
+      const normalized = String(value).replace(' ', 'T');
+      const parsed = new Date(normalized);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function startOfDay(date) {
+      const value = new Date(date);
+      value.setHours(0, 0, 0, 0);
+      return value;
+    }
+
+    function endOfDay(date) {
+      const value = new Date(date);
+      value.setHours(23, 59, 59, 999);
+      return value;
+    }
+
+    function getMobileDateRange() {
+      const filter = document.getElementById('mobileDateFilter')?.value || 'all';
+      const now = new Date();
+      const todayStart = startOfDay(now);
+      const todayEnd = endOfDay(now);
+
+      if (filter === 'today') {
+        return { start: todayStart, end: todayEnd };
+      }
+
+      if (filter === 'yesterday') {
+        const yesterday = new Date(todayStart);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
+      }
+
+      if (filter === 'last_week') {
+        const start = new Date(todayStart);
+        start.setDate(start.getDate() - 6);
+        return { start, end: todayEnd };
+      }
+
+      if (filter === 'last_month') {
+        const start = new Date(todayStart);
+        start.setMonth(start.getMonth() - 1);
+        return { start, end: todayEnd };
+      }
+
+      if (filter === 'custom') {
+        const startInput = document.getElementById('mobileStartDate')?.value;
+        const endInput = document.getElementById('mobileEndDate')?.value;
+        if (!startInput && !endInput) {
+          return null;
+        }
+
+        const start = startInput ? startOfDay(new Date(`${startInput}T00:00:00`)) : null;
+        const end = endInput ? endOfDay(new Date(`${endInput}T00:00:00`)) : null;
+        return { start, end };
+      }
+
+      return null;
+    }
+
+    function matchesMobileDateFilter(value) {
+      const range = getMobileDateRange();
+      if (!range) return true;
+      const parsed = parseRecordDate(value);
+      if (!parsed) return false;
+      if (range.start && parsed < range.start) return false;
+      if (range.end && parsed > range.end) return false;
+      return true;
+    }
+
+    function getMobileFilteredReviewCalls() {
+      return pendingReviewCalls().filter((call) => matchesMobileDateFilter(call.called_at));
+    }
+
+    function getMobileFilteredPendingAnalysisCalls() {
+      return pendingAnalysisCalls().filter((call) => matchesMobileDateFilter(call.called_at));
+    }
+
+    function getMobileFilteredPositiveFeedback() {
+      return positiveFeedbackEntries().filter((item) => matchesMobileDateFilter(item.submitted_at));
+    }
+
     function buildReviewList(calls) {
       const container = document.getElementById('needsReviewList');
-      const mobileContainer = document.getElementById('mobileNeedsReviewList');
       if (!calls.length) {
         const emptyMarkup = `
           <div class="empty-state">
@@ -298,7 +411,6 @@
           </div>
         `;
         container.innerHTML = emptyMarkup;
-        mobileContainer.innerHTML = emptyMarkup;
         return;
       }
 
@@ -311,8 +423,71 @@
           <button class="secondary" type="button" onclick="openAnalysisModal(${call.id})">View Analysis</button>
         </div>
       `).join('');
+    }
 
-      mobileContainer.innerHTML = calls.slice(0, 6).map((call) => `
+    function renderMobileFilteredList() {
+      const container = document.getElementById('mobileNeedsReviewList');
+      const title = document.getElementById('mobileFeedbackSectionTitle');
+      const titleByFilter = {
+        needs_review: 'Calls Needing Review',
+        pending: 'Pending Analysis',
+        positive: 'Positive Feedback'
+      };
+      title.textContent = titleByFilter[activeMobileFilter] || 'Calls Needing Review';
+
+      if (activeMobileFilter === 'positive') {
+        const feedback = getMobileFilteredPositiveFeedback();
+        if (!feedback.length) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <strong>No positive feedback found</strong>
+              <div class="supporting-text">Try another date range to see reviewed patient feedback.</div>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = feedback.map((item) => `
+          <article class="mobile-feedback-card mobile-feedback-card-inline">
+            <div class="mobile-feedback-head">
+              <div>
+                <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
+                <div class="mobile-subtext">${AppShell.formatDateTime(item.submitted_at)}</div>
+              </div>
+              <span class="status-badge positive">Positive</span>
+            </div>
+            <div class="mobile-subtext" style="margin-top:10px;">${AppShell.escapeHtml(item.review_text || '--')}</div>
+            <div class="mobile-subtext" style="margin-top:8px;">Rating: ${Number(item.stars || 0) ? `${item.stars}/5` : '--'}</div>
+          </article>
+        `).join('');
+        return;
+      }
+
+      const calls = activeMobileFilter === 'pending'
+        ? getMobileFilteredPendingAnalysisCalls()
+        : getMobileFilteredReviewCalls();
+
+      if (!calls.length) {
+        const emptyState = activeMobileFilter === 'pending'
+          ? {
+            title: 'No pending calls found',
+            text: 'Calls waiting for transcript or analysis will appear here.'
+          }
+          : {
+            title: 'No calls need review',
+            text: 'Completed calls will appear here when transcripts or ratings still need attention.'
+          };
+
+        container.innerHTML = `
+          <div class="empty-state">
+            <strong>${emptyState.title}</strong>
+            <div class="supporting-text">${emptyState.text}</div>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = calls.map((call) => `
         <article class="mobile-review-card">
           <div class="mobile-review-head">
             <div>
@@ -321,12 +496,9 @@
             </div>
           </div>
           <div class="mobile-review-status-row">
-           
-            <span class="mobile-review-status">Needs review</span>
-            <button class="mobile-review-button" type="button" onclick="openAnalysisModal(${call.id})">View Analysis</button>
-          
-            </div>
-         
+            <span class="mobile-review-status">${activeMobileFilter === 'pending' ? 'Pending' : 'Needs review'}</span>
+            <button class="mobile-review-button" type="button" onclick="openAnalysisPage(${call.id})">View Analysis</button>
+          </div>
         </article>
       `).join('');
     }
@@ -390,19 +562,42 @@
 
     function renderMetrics() {
       const reviewCalls = pendingReviewCalls();
-      const positiveFeedback = feedbackCache.filter((item) => Number(item.stars || 0) >= 4).length;
-      const pendingAnalysis = recentCallsCache.filter((call) => String(call.analysis_status || '').toLowerCase() !== 'completed').length;
+      const positiveFeedback = positiveFeedbackEntries().length;
+      const pendingAnalysis = pendingAnalysisCalls().length;
+      const mobileReviewCalls = getMobileFilteredReviewCalls();
+      const mobilePendingAnalysis = getMobileFilteredPendingAnalysisCalls();
+      const mobilePositiveFeedback = getMobileFilteredPositiveFeedback();
 
       document.getElementById('metricFeedbackTotal').textContent = feedbackCache.length;
       document.getElementById('metricPositiveFeedback').textContent = positiveFeedback;
       document.getElementById('metricNeedsReview').textContent = reviewCalls.length;
       document.getElementById('metricPendingAnalysis').textContent = pendingAnalysis;
-      document.getElementById('mobileMetricNeedsReview').textContent = reviewCalls.length;
-      document.getElementById('mobileMetricPendingAnalysis').textContent = pendingAnalysis;
-      document.getElementById('mobileMetricPositiveFeedback').textContent = positiveFeedback;
+      document.getElementById('mobileMetricNeedsReview').textContent = mobileReviewCalls.length;
+      document.getElementById('mobileMetricPendingAnalysis').textContent = mobilePendingAnalysis.length;
+      document.getElementById('mobileMetricPositiveFeedback').textContent = mobilePositiveFeedback.length;
 
       buildReviewList(reviewCalls);
       renderFeedbackBoard(feedbackCache);
+      renderMobileFilteredList();
+      updateMobileFilterButtons();
+    }
+
+    function updateMobileFilterButtons() {
+      document.querySelectorAll('[data-mobile-filter]').forEach((button) => {
+        const isActive = button.dataset.mobileFilter === activeMobileFilter;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      });
+    }
+
+    function toggleMobileCustomDateRange() {
+      const isCustom = (document.getElementById('mobileDateFilter')?.value || 'all') === 'custom';
+      document.getElementById('mobileCustomDateRange').hidden = !isCustom;
+    }
+
+    function applyMobileFilter(filterName) {
+      activeMobileFilter = filterName || 'needs_review';
+      renderMetrics();
     }
 
     function openManualFeedbackModal() {
@@ -498,6 +693,10 @@
       element.setAttribute('aria-hidden', 'false');
     }
 
+    function openAnalysisPage(callId) {
+      window.location.href = `/feedback-analysis.html?callId=${encodeURIComponent(callId)}`;
+    }
+
     function closeFeedbackSheet(id) {
       const element = document.getElementById(id);
       if (!element) return;
@@ -524,6 +723,15 @@
       document.getElementById('openManualFeedbackButton').addEventListener('click', openManualFeedbackModal);
       document.getElementById('mobileManualFeedbackFab').addEventListener('click', openManualFeedbackModal);
       document.getElementById('mobileFeedbackMenuButton').addEventListener('click', () => openFeedbackSheet('feedbackMobileMenuSheet'));
+      document.querySelectorAll('[data-mobile-filter]').forEach((button) => {
+        button.addEventListener('click', () => applyMobileFilter(button.dataset.mobileFilter));
+      });
+      document.getElementById('mobileDateFilter').addEventListener('change', () => {
+        toggleMobileCustomDateRange();
+        renderMetrics();
+      });
+      document.getElementById('mobileStartDate').addEventListener('change', renderMetrics);
+      document.getElementById('mobileEndDate').addEventListener('change', renderMetrics);
       document.getElementById('closeFeedbackMobileMenuSheet').addEventListener('click', () => closeFeedbackSheet('feedbackMobileMenuSheet'));
       document.getElementById('feedbackMobileMenuLogout').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('closeManualFeedbackModal').addEventListener('click', closeManualFeedbackModal);
@@ -546,6 +754,7 @@
       });
 
       try {
+        toggleMobileCustomDateRange();
         await loadPageData();
       } catch (error) {
         AppShell.showAlert(error.message, 'error');
@@ -553,6 +762,7 @@
     });
 
     window.openAnalysisModal = openAnalysisModal;
+    window.openAnalysisPage = openAnalysisPage;
   </script>
 </body>
 </html>
