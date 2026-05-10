@@ -1994,11 +1994,19 @@ body.poc-page .search-row .table-filter.desktop-only {
     min-height: 28px;
     padding: 0 10px;
     border-radius: 999px;
-    background: #eef4ff;
-    color: #1d4ed8;
     font-size: 11px;
     font-weight: 700;
     white-space: nowrap;
+  }
+
+  .mobile-review-status.needs-review {
+    background: #fef3c7;
+    color: #b45309;
+  }
+
+  .mobile-review-status.pending {
+    background: #dbeafe;
+    color: #1d4ed8;
   }
 
   .mobile-feedback-card-inline {

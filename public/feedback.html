@@ -66,6 +66,10 @@
           <span class="mobile-stat-count" id="mobileMetricPositiveFeedback">0</span>
           <span class="mobile-stat-label">Positive</span>
         </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="negative" aria-pressed="false">
+          <span class="mobile-stat-count" id="mobileMetricNegativeFeedback">0</span>
+          <span class="mobile-stat-label">Negative</span>
+        </button>
       </section>
 
       <section class="mobile-feedback-filter-bar mobile-only" aria-label="Filter feedback by date">
@@ -319,6 +323,10 @@
       return feedbackCache.filter((item) => Number(item.stars || 0) >= 4);
     }
 
+    function negativeFeedbackEntries() {
+      return feedbackCache.filter((item) => Number(item.stars || 0) > 0 && Number(item.stars || 0) <= 2);
+    }
+
     function parseRecordDate(value) {
       if (!value) return null;
       const normalized = String(value).replace(' ', 'T');
@@ -403,6 +411,10 @@
       return positiveFeedbackEntries().filter((item) => matchesMobileDateFilter(item.submitted_at));
     }
 
+    function getMobileFilteredNegativeFeedback() {
+      return negativeFeedbackEntries().filter((item) => matchesMobileDateFilter(item.submitted_at));
+    }
+
     function buildReviewList(calls) {
       const container = document.getElementById('needsReviewList');
       if (!calls.length) {
@@ -433,16 +445,19 @@
       const titleByFilter = {
         needs_review: 'Calls Needing Review',
         pending: 'Pending Analysis',
-        positive: 'Positive Feedback'
+        positive: 'Positive Feedback',
+        negative: 'Negative Feedback'
       };
       title.textContent = titleByFilter[activeMobileFilter] || 'Calls Needing Review';
 
-      if (activeMobileFilter === 'positive') {
-        const feedback = getMobileFilteredPositiveFeedback();
+      if (activeMobileFilter === 'positive' || activeMobileFilter === 'negative') {
+        const feedback = activeMobileFilter === 'positive'
+          ? getMobileFilteredPositiveFeedback()
+          : getMobileFilteredNegativeFeedback();
         if (!feedback.length) {
           container.innerHTML = `
             <div class="empty-state">
-              <strong>No positive feedback found</strong>
+              <strong>No ${activeMobileFilter} feedback found</strong>
               <div class="supporting-text">Try another date range to see reviewed patient feedback.</div>
             </div>
           `;
@@ -456,7 +471,7 @@
                 <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
                 <div class="mobile-subtext">${AppShell.formatDateTime(item.submitted_at)}</div>
               </div>
-              <span class="status-badge positive">Positive</span>
+              <span class="status-badge ${activeMobileFilter}">${AppShell.formatStatusLabel(activeMobileFilter)}</span>
             </div>
             <div class="mobile-subtext" style="margin-top:10px;">${AppShell.escapeHtml(item.review_text || '--')}</div>
             <div class="mobile-subtext" style="margin-top:8px;">Rating: ${Number(item.stars || 0) ? `${item.stars}/5` : '--'}</div>
@@ -498,7 +513,7 @@
             </div>
           </div>
           <div class="mobile-review-status-row">
-            <span class="mobile-review-status">${activeMobileFilter === 'pending' ? 'Pending' : 'Needs review'}</span>
+            <span class="mobile-review-status ${activeMobileFilter === 'pending' ? 'pending' : 'needs-review'}">${activeMobileFilter === 'pending' ? 'Pending' : 'Needs review'}</span>
             <button class="mobile-review-button" type="button" onclick="openAnalysisPage(${call.id})">View Analysis</button>
           </div>
         </article>
@@ -565,10 +580,12 @@
     function renderMetrics() {
       const reviewCalls = pendingReviewCalls();
       const positiveFeedback = positiveFeedbackEntries().length;
+      const negativeFeedback = negativeFeedbackEntries().length;
       const pendingAnalysis = pendingAnalysisCalls().length;
       const mobileReviewCalls = getMobileFilteredReviewCalls();
       const mobilePendingAnalysis = getMobileFilteredPendingAnalysisCalls();
       const mobilePositiveFeedback = getMobileFilteredPositiveFeedback();
+      const mobileNegativeFeedback = getMobileFilteredNegativeFeedback();
 
       document.getElementById('metricFeedbackTotal').textContent = feedbackCache.length;
       document.getElementById('metricPositiveFeedback').textContent = positiveFeedback;
@@ -577,6 +594,7 @@
       document.getElementById('mobileMetricNeedsReview').textContent = mobileReviewCalls.length;
       document.getElementById('mobileMetricPendingAnalysis').textContent = mobilePendingAnalysis.length;
       document.getElementById('mobileMetricPositiveFeedback').textContent = mobilePositiveFeedback.length;
+      document.getElementById('mobileMetricNegativeFeedback').textContent = mobileNegativeFeedback.length;
 
       buildReviewList(reviewCalls);
       renderFeedbackBoard(feedbackCache);

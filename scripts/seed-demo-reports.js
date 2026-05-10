@@ -71,13 +71,13 @@ async function seed() {
       `INSERT INTO customers (
         name, phone, preferred_slot, status, created_at, customer_value, urgency_level,
         priority_score, ai_score, preferred_language, service_interest, campaign_name,
-        revenue_stage, revenue_estimate, last_called_at, last_contact_outcome
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        revenue_stage, revenue_estimate, last_called_at, last_contact_outcome, do_not_call, next_retry_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         customer[0],
         customer[1],
         customer[2],
-        customer[3],
+        'completed',
         isoAt(20, 10, 0),
         customer[4],
         customer[5],
@@ -89,7 +89,9 @@ async function seed() {
         customer[6] > 80 ? 'qualified' : 'follow_up',
         customer[6] * 120,
         isoAt(1, 16, 0),
-        customer[3]
+        customer[3],
+        1,
+        null
       ]
     );
     customerIds.push(result.lastID);

@@ -70,6 +70,14 @@
           <span class="mobile-stat-count" id="mobileMetricFeedback">0</span>
           <span class="mobile-stat-label">Feedback</span>
         </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileMetricPositiveFeedback">0</span>
+          <span class="mobile-stat-label">Positive</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileMetricNegativeFeedback">0</span>
+          <span class="mobile-stat-label">Negative</span>
+        </div>
       </section>
 
       <section class="poc-metrics-grid">
@@ -402,12 +410,14 @@
       element.setAttribute('aria-hidden', 'true');
     }
 
-    function renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls }) {
+    function renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls, positiveFeedback, negativeFeedback }) {
       document.getElementById('todayActivityList').innerHTML = `
         <div class="compact-row"><div><strong>Calls scheduled today</strong><div class="muted">Patients added today or queued again for follow-up.</div></div><strong>${scheduledToday}</strong></div>
         <div class="compact-row"><div><strong>Calls completed</strong><div class="muted">Calls that ended with a recorded outcome.</div></div><strong>${completedToday}</strong></div>
         <div class="compact-row"><div><strong>Pending calls</strong><div class="muted">Patients still waiting for the first call or a retry.</div></div><strong>${pendingCalls}</strong></div>
         <div class="compact-row"><div><strong>Failed calls</strong><div class="muted">Busy, no-answer, or failed calls that may need follow-up.</div></div><strong>${failedCalls}</strong></div>
+        <div class="compact-row"><div><strong>Positive feedback</strong><div class="muted">High-satisfaction reviews captured from recent calls.</div></div><strong>${positiveFeedback}</strong></div>
+        <div class="compact-row"><div><strong>Negative feedback</strong><div class="muted">Patients who may need recovery or quick follow-up.</div></div><strong>${negativeFeedback}</strong></div>
       `;
 
       document.getElementById('mobileTodayActivityList').innerHTML = `
@@ -415,6 +425,8 @@
         <div class="mobile-activity-row"><span>Completed</span><strong>${completedToday}</strong></div>
         <div class="mobile-activity-row"><span>Pending</span><strong>${pendingCalls}</strong></div>
         <div class="mobile-activity-row"><span>Failed</span><strong>${failedCalls}</strong></div>
+        <div class="mobile-activity-row"><span>Positive</span><strong>${positiveFeedback}</strong></div>
+        <div class="mobile-activity-row"><span>Negative</span><strong>${negativeFeedback}</strong></div>
       `;
     }
 
@@ -471,6 +483,8 @@
       const completedToday = completedCalls.filter((call) => isToday(call.called_at)).length;
       const pendingCalls = customers.filter((customer) => scheduledStatuses.has(String(customer.status || '').toLowerCase())).length;
       const failedCalls = recentCalls.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
+      const positiveFeedback = feedback.filter((item) => Number(item.stars || 0) >= 4).length;
+      const negativeFeedback = feedback.filter((item) => Number(item.stars || 0) > 0 && Number(item.stars || 0) <= 2).length;
 
       document.getElementById('metricCustomers').textContent = customers.length;
       document.getElementById('metricScheduled').textContent = pendingCalls;
@@ -480,8 +494,10 @@
       document.getElementById('mobileMetricScheduled').textContent = pendingCalls;
       document.getElementById('mobileMetricCompleted').textContent = completedCalls.length;
       document.getElementById('mobileMetricFeedback').textContent = feedback.length;
+      document.getElementById('mobileMetricPositiveFeedback').textContent = positiveFeedback;
+      document.getElementById('mobileMetricNegativeFeedback').textContent = negativeFeedback;
 
-      renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls });
+      renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls, positiveFeedback, negativeFeedback });
       renderRecentCalls(recentCalls);
     }
 

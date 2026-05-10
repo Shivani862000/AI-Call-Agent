@@ -425,19 +425,42 @@
     }
 
     function renderMobilePulse(completedCalls, recentCalls, preview) {
+      const failedCalls = recentCalls.filter((call) => ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase()));
+      const ratedCalls = recentCalls.filter((call) => Number(call.extracted_rating || 0) > 0);
       const successRate = recentCalls.length ? Math.round((completedCalls.length / recentCalls.length) * 100) : Math.round(Number(preview.success_rate || 0));
+      const averageRating = ratedCalls.length
+        ? Number((ratedCalls.reduce((sum, call) => sum + Number(call.extracted_rating || 0), 0) / ratedCalls.length).toFixed(1))
+        : 0;
+      let focusValue = successRate;
+      let headline = 'Strong follow-up performance this week';
+      let subtext = `${recentCalls.length || preview.total_calls || 0} calls tracked · ${completedCalls.length} completed · ${preview.hot_leads || 0} hot leads`;
+
+      if (activeReportFilter === 'failed') {
+        focusValue = recentCalls.length ? Math.round((failedCalls.length / recentCalls.length) * 100) : 0;
+        headline = failedCalls.length ? 'Failures need attention this week' : 'No failed calls in this range';
+        subtext = `${failedCalls.length} failed/busy/no-answer calls need retry planning`;
+      } else if (activeReportFilter === 'rating') {
+        focusValue = Math.round((averageRating / 5) * 100);
+        headline = averageRating >= 4 ? 'Patients are rating service highly' : averageRating >= 3 ? 'Mixed rating trend this week' : 'Ratings need recovery attention';
+        subtext = `${ratedCalls.length} rated calls · average rating ${averageRating.toFixed(1)}/5`;
+      } else if (activeReportFilter === 'completed') {
+        focusValue = successRate;
+        headline = completedCalls.length ? 'Completed calls are driving the week' : 'No completed calls in this range yet';
+        subtext = `${completedCalls.length} completed calls from ${recentCalls.length || preview.total_calls || 0} total attempts`;
+      } else if (successRate < 70 && successRate >= 40) {
+        headline = 'Steady recovery with room to improve';
+      } else if (successRate < 40) {
+        headline = 'Low connection rate, retry strategy needed';
+      }
+
       const circumference = 2 * Math.PI * 44;
-      const offset = circumference - ((Math.max(0, Math.min(successRate, 100)) / 100) * circumference);
+      const offset = circumference - ((Math.max(0, Math.min(focusValue, 100)) / 100) * circumference);
       const ring = document.getElementById('mobileReportRingValue');
       ring.style.strokeDasharray = `${circumference}`;
       ring.style.strokeDashoffset = `${offset}`;
-      document.getElementById('mobileSuccessRateValue').textContent = `${successRate}%`;
-      document.getElementById('mobilePulseHeadline').textContent = successRate >= 70
-        ? 'Strong follow-up performance this week'
-        : successRate >= 40
-          ? 'Steady recovery with room to improve'
-          : 'Low connection rate, retry strategy needed';
-      document.getElementById('mobilePulseSubtext').textContent = `${recentCalls.length || preview.total_calls || 0} calls tracked · ${completedCalls.length} completed · ${preview.hot_leads || 0} hot leads`;
+      document.getElementById('mobileSuccessRateValue').textContent = `${focusValue}%`;
+      document.getElementById('mobilePulseHeadline').textContent = headline;
+      document.getElementById('mobilePulseSubtext').textContent = subtext;
     }
 
     function renderMobileOutcomeBars(completedCount, pendingCount, failedCount) {
@@ -471,12 +494,21 @@
 
       const desktopMarkup = rows.map((row) => {
         const completed = row.calls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed').length;
+        const failed = row.calls.filter((call) => ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase())).length;
+        const avgRating = row.feedback.length
+          ? (row.feedback.reduce((sum, item) => sum + Number(item.stars || 0), 0) / row.feedback.length).toFixed(1)
+          : '0.0';
         const successRate = row.calls.length ? `${Math.round((completed / row.calls.length) * 100)}%` : '0%';
+        const secondaryLine = activeReportFilter === 'failed'
+          ? `${failed} failed · ${row.calls.length} total calls`
+          : activeReportFilter === 'rating'
+            ? `${row.feedback.length} reviews · avg ${avgRating}/5`
+            : `${row.calls.length} calls · ${row.feedback.length} feedback`;
         return `
           <article class="report-activity-row">
             <div class="report-activity-main">
               <strong>${row.label}</strong>
-              <span>${row.calls.length} calls · ${row.feedback.length} feedback</span>
+              <span>${secondaryLine}</span>
             </div>
             <div class="report-activity-side">
               <strong>${successRate}</strong>
@@ -488,14 +520,23 @@
 
       const mobileMarkup = rows.map((row) => {
         const completed = row.calls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed').length;
+        const failed = row.calls.filter((call) => ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase())).length;
+        const avgRating = row.feedback.length
+          ? (row.feedback.reduce((sum, item) => sum + Number(item.stars || 0), 0) / row.feedback.length).toFixed(1)
+          : '0.0';
         const successRate = row.calls.length ? `${Math.round((completed / row.calls.length) * 100)}%` : '0%';
         const statusTone = successRate === '0%' ? 'negative' : Number.parseInt(successRate, 10) >= 60 ? 'positive' : 'neutral';
+        const secondaryLine = activeReportFilter === 'failed'
+          ? `${failed} failed · ${row.calls.length} total`
+          : activeReportFilter === 'rating'
+            ? `${row.feedback.length} reviews · avg ${avgRating}/5`
+            : `${row.calls.length} calls · ${completed} completed`;
         return `
           <article class="mobile-report-activity-card">
             <div class="mobile-review-head">
               <div>
                 <strong>${row.label}</strong>
-                <div class="mobile-subtext">${row.calls.length} calls · ${completed} completed</div>
+                <div class="mobile-subtext">${secondaryLine}</div>
               </div>
               <span class="status-badge ${statusTone}">${successRate}</span>
             </div>
@@ -522,7 +563,6 @@
       const averageRating = feedback.length
         ? (feedback.reduce((sum, item) => sum + Number(item.stars || 0), 0) / feedback.length).toFixed(1)
         : '0.0';
-
       document.getElementById('reportTotalCalls').textContent = recentCalls.length || preview.total_calls || 0;
       document.getElementById('reportCompletedCalls').textContent = completedCalls.length;
       document.getElementById('reportFailedCalls').textContent = failedCalls.length;

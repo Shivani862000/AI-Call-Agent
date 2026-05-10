@@ -45,8 +45,8 @@ const PROTECTED_HTML_PATHS = new Set([
   '/reports.html'
 ]);
 
-const ADMIN_USERNAME = 'Path Lab';
-const ADMIN_PASSWORD = 'Pathlab123#@!';
+const ADMIN_USERNAME = 'admin';
+const ADMIN_PASSWORD = '1234';
 const AUTH_COOKIE_NAME = 'feedback_admin_session';
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const AUTH_SIGNING_SECRET = process.env.AUTH_SIGNING_SECRET || process.env.SESSION_SECRET || process.env.EXOTEL_API_TOKEN || 'feedback-admin-auth-secret';
