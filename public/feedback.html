@@ -54,7 +54,7 @@
       <div id="alertContainer" class="alert-stack"></div>
 
       <section class="desktop-filter-strip desktop-only" aria-label="Feedback filters">
-        <button class="desktop-filter-pill" type="button" data-feedback-filter="positive" aria-pressed="false">
+        <button class="desktop-filter-pill active" type="button" data-feedback-filter="positive" aria-pressed="true">
           <span class="desktop-filter-count" id="desktopMetricPositiveFeedback">0</span>
           <span class="desktop-filter-label">Positive</span>
         </button>
@@ -66,14 +66,14 @@
           <span class="desktop-filter-count" id="desktopMetricPendingAnalysis">0</span>
           <span class="desktop-filter-label">Pending</span>
         </button>
-        <button class="desktop-filter-pill active" type="button" data-feedback-filter="needs_review" aria-pressed="true">
+        <button class="desktop-filter-pill" type="button" data-feedback-filter="needs_review" aria-pressed="false">
           <span class="desktop-filter-count" id="desktopMetricNeedsReview">0</span>
           <span class="desktop-filter-label">Needs review</span>
         </button>
       </section>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Feedback stats">
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="positive" aria-pressed="false">
+        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-mobile-filter="positive" aria-pressed="true">
           <span class="mobile-stat-count" id="mobileMetricPositiveFeedback">0</span>
           <span class="mobile-stat-label">Positive</span>
         </button>
@@ -85,7 +85,7 @@
           <span class="mobile-stat-count" id="mobileMetricPendingAnalysis">0</span>
           <span class="mobile-stat-label">Pending</span>
         </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-mobile-filter="needs_review" aria-pressed="true">
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="needs_review" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricNeedsReview">0</span>
           <span class="mobile-stat-label">Needs review</span>
         </button>
@@ -340,7 +340,7 @@
     let customerCache = [];
     let feedbackCache = [];
     let recentCallsCache = [];
-    let activeFeedbackFilter = 'needs_review';
+    let activeFeedbackFilter = 'positive';
     let currentFeedbackListPage = 1;
     let currentFeedbackBoardPage = 1;
     const PAGE_SIZE = 10;
