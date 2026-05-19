@@ -885,11 +885,14 @@
     }
 
     async function loadPageData() {
-      const [customers, feedback, recentCalls] = await Promise.all([
+      let [customers, feedback, recentCalls] = await Promise.all([
         AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
         AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
       ]);
+      customers = customers.length ? customers : AppShell.DEMO_DATA.customers;
+      feedback = feedback.length ? feedback : AppShell.DEMO_DATA.feedback;
+      recentCalls = recentCalls.length ? recentCalls : AppShell.DEMO_DATA.recentCalls;
       customerCache = customers;
       feedbackCache = feedback;
       recentCallsCache = recentCalls;

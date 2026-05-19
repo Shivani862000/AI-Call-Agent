@@ -618,12 +618,16 @@
     }
 
     async function loadOverview() {
-      const [customers, feedback, recentCalls, clients] = await Promise.all([
+      let [customers, feedback, recentCalls, clients] = await Promise.all([
         AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
         AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`),
         AppShell.fetchJson(`${AppShell.API_BASE}/clients`)
       ]);
+      customers = customers.length ? customers : AppShell.DEMO_DATA.customers;
+      feedback = feedback.length ? feedback : AppShell.DEMO_DATA.feedback;
+      recentCalls = recentCalls.length ? recentCalls : AppShell.DEMO_DATA.recentCalls;
+      clients = clients.length ? clients : AppShell.DEMO_DATA.clients;
       clientCache = clients;
 
       const scheduledStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);

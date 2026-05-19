@@ -1974,6 +1974,10 @@ body.poc-page .search-row .table-filter.desktop-only {
     display: none;
   }
 
+  body.poc-page .mobile-tabbar {
+    display: none;
+  }
+
   .overview-page .poc-grid-2 {
     display: none;
   }
