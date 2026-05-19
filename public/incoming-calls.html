@@ -56,25 +56,33 @@
       <div id="alertContainer" class="alert-stack"></div>
 
       <section class="desktop-filter-strip desktop-only" aria-label="Incoming call summary">
-        <button class="desktop-filter-pill active" type="button" aria-pressed="true">
+        <button class="desktop-filter-pill active" type="button" data-incoming-filter="all" aria-pressed="true">
+          <span class="desktop-filter-count" id="desktopAllMetric">0</span>
+          <span class="desktop-filter-label">All</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" data-incoming-filter="active" aria-pressed="false">
           <span class="desktop-filter-count" id="desktopActiveMetric">0</span>
           <span class="desktop-filter-label">Active</span>
         </button>
-        <button class="desktop-filter-pill" type="button" aria-pressed="false">
+        <button class="desktop-filter-pill" type="button" data-incoming-filter="missed" aria-pressed="false">
           <span class="desktop-filter-count" id="desktopMissedMetric">0</span>
           <span class="desktop-filter-label">Missed</span>
         </button>
       </section>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Incoming call summary">
-        <div class="mobile-stat-pill active">
+        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-incoming-filter="all" aria-pressed="true">
+          <span class="mobile-stat-count" id="mobileAllMetric">0</span>
+          <span class="mobile-stat-label">All</span>
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-incoming-filter="active" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileActiveMetric">0</span>
           <span class="mobile-stat-label">Active</span>
-        </div>
-        <div class="mobile-stat-pill">
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-incoming-filter="missed" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMissedMetric">0</span>
           <span class="mobile-stat-label">Missed</span>
-        </div>
+        </button>
       </section>
 
       <section class="poc-metrics-grid">
@@ -147,6 +155,8 @@
   <script src="/app-shell.js"></script>
   <script>
     let refreshTimer = null;
+    let activeIncomingFilter = 'all';
+    let incomingCallsCache = [];
     const now = new Date();
     const DEMO_INCOMING_CALLS = [
       {
@@ -189,17 +199,31 @@
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
 
+    function updateIncomingFilterButtons() {
+      document.querySelectorAll('[data-incoming-filter]').forEach((button) => {
+        const isActive = button.dataset.incomingFilter === activeIncomingFilter;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      });
+    }
+
+    function getFilteredIncomingCalls() {
+      if (activeIncomingFilter === 'all') return incomingCallsCache;
+      return incomingCallsCache.filter((call) => String(call.status || '').toLowerCase() === activeIncomingFilter);
+    }
+
     function renderIncomingCalls(calls) {
       const tableBody = document.getElementById('incomingTableBody');
       const mobileList = document.getElementById('mobileIncomingList');
 
       if (!calls.length) {
+        const filterLabel = activeIncomingFilter === 'all' ? '' : `${AppShell.formatStatusLabel(activeIncomingFilter).toLowerCase()} `;
         const emptyMarkup = `
           <tr>
             <td colspan="5">
               <div class="empty-state">
-                <strong>No incoming calls right now</strong>
-                <span>The inbound call queue is ready for live calls.</span>
+                <strong>No ${filterLabel}incoming calls</strong>
+                <span>Select another status or refresh to check new calls.</span>
               </div>
             </td>
           </tr>
@@ -207,8 +231,8 @@
         tableBody.innerHTML = emptyMarkup;
         mobileList.innerHTML = `
           <div class="empty-state">
-            <strong>No incoming calls right now</strong>
-            <span>The inbound call queue is ready for live calls.</span>
+            <strong>No ${filterLabel}incoming calls</strong>
+            <span>Select another status or refresh to check new calls.</span>
           </div>
         `;
         return;
@@ -238,14 +262,24 @@
 
     function renderMetrics(payload) {
       const calls = Array.isArray(payload.calls) ? payload.calls : [];
+      const all = calls.length;
       const active = Number(payload.active_count || calls.filter((call) => String(call.status || '').toLowerCase() === 'active').length);
       const missed = Number(payload.missed_count || calls.filter((call) => String(call.status || '').toLowerCase() === 'missed').length);
       const updatedAt = payload.updated_at || new Date().toISOString();
+      incomingCallsCache = calls;
 
+      ['desktopAllMetric', 'mobileAllMetric'].forEach((id) => setText(id, all));
       ['activeMetric', 'desktopActiveMetric', 'mobileActiveMetric'].forEach((id) => setText(id, active));
       ['missedMetric', 'desktopMissedMetric', 'mobileMissedMetric'].forEach((id) => setText(id, missed));
       setText('updatedMetric', formatClock(updatedAt));
-      renderIncomingCalls(calls);
+      updateIncomingFilterButtons();
+      renderIncomingCalls(getFilteredIncomingCalls());
+    }
+
+    function applyIncomingFilter(filterName) {
+      activeIncomingFilter = ['all', 'active', 'missed'].includes(filterName) ? filterName : 'all';
+      updateIncomingFilterButtons();
+      renderIncomingCalls(getFilteredIncomingCalls());
     }
 
     function openIncomingSheet(id) {
@@ -303,6 +337,9 @@
       document.getElementById('logoutButton')?.addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('refreshButton')?.addEventListener('click', () => loadIncomingCalls());
       document.getElementById('mobileIncomingRefreshButton')?.addEventListener('click', () => openIncomingSheet('incomingMobileMenuSheet'));
+      document.querySelectorAll('[data-incoming-filter]').forEach((button) => {
+        button.addEventListener('click', () => applyIncomingFilter(button.dataset.incomingFilter));
+      });
       document.getElementById('closeIncomingMobileMenuSheet')?.addEventListener('click', () => closeIncomingSheet('incomingMobileMenuSheet'));
       document.getElementById('incomingMobileMenuLogout')?.addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('incomingMobileMenuSheet')?.addEventListener('click', (event) => {
