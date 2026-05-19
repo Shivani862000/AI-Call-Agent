@@ -1109,12 +1109,15 @@ body.poc-page .header-actions .button-link {
 .status-badge.pending,
 .status-badge.called,
 .status-badge.retry_scheduled,
-.status-badge.initiated {
+.status-badge.initiated,
+.status-badge.waiting,
+.status-badge.ringing {
   background: #dbeafe;
   color: #1d4ed8;
 }
 
-.status-badge.completed {
+.status-badge.completed,
+.status-badge.active {
   background: #dcfce7;
   color: #15803d;
 }
@@ -1700,6 +1703,7 @@ body.poc-page .search-row .table-filter.desktop-only {
   }
 
   .mobile-call-head,
+  .mobile-call-topline,
   .mobile-feedback-head {
     display: flex;
     align-items: flex-start;
@@ -1942,7 +1946,7 @@ body.poc-page .search-row .table-filter.desktop-only {
     right: 12px;
     bottom: calc(12px + env(safe-area-inset-bottom));
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 6px;
     padding: 8px;
     border-radius: 20px;

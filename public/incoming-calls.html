@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Incoming Calls</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/app-shell.css">
+</head>
+<body class="poc-page incoming-calls-page">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-mark">PL</div>
+          <div class="brand-copy">
+            <h1>Path Lab Console</h1>
+            <p>Patient follow-up operations</p>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <a href="/admin.html" class="nav-link">Overview</a>
+          <a href="/incoming-calls.html" class="nav-link active">Incoming Calls</a>
+          <a href="/customers.html" class="nav-link">Outbound Calls</a>
+          <a href="/feedback.html" class="nav-link">Feedback</a>
+          <a href="/reports.html" class="nav-link">Reports</a>
+        </nav>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <section class="mobile-ops-header mobile-only">
+        <div class="mobile-ops-bar">
+          <div>
+            <div class="mobile-ops-title">Incoming Calls</div>
+            <div class="mobile-ops-subtitle">Customers calling the lab.</div>
+          </div>
+          <div class="mobile-ops-actions">
+            <button id="mobileIncomingRefreshButton" class="mobile-icon-button" type="button" aria-label="Open menu">...</button>
+          </div>
+        </div>
+      </section>
+
+      <header class="page-header desktop-page-header">
+        <div class="page-title-wrap">
+          <h2>Incoming Calls</h2>
+          <div class="page-subtitle">Calls coming from customers into the lab for reports, appointments, or support.</div>
+        </div>
+        <div class="header-actions">
+          <button id="refreshButton" class="secondary" type="button">Refresh</button>
+          <button id="logoutButton" class="secondary" type="button">Logout</button>
+        </div>
+      </header>
+
+      <div id="alertContainer" class="alert-stack"></div>
+
+      <section class="desktop-filter-strip desktop-only" aria-label="Incoming call summary">
+        <button class="desktop-filter-pill active" type="button" aria-pressed="true">
+          <span class="desktop-filter-count" id="desktopActiveMetric">0</span>
+          <span class="desktop-filter-label">Active</span>
+        </button>
+        <button class="desktop-filter-pill" type="button" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopMissedMetric">0</span>
+          <span class="desktop-filter-label">Missed</span>
+        </button>
+      </section>
+
+      <section class="mobile-stat-strip mobile-only" aria-label="Incoming call summary">
+        <div class="mobile-stat-pill active">
+          <span class="mobile-stat-count" id="mobileActiveMetric">0</span>
+          <span class="mobile-stat-label">Active</span>
+        </div>
+        <div class="mobile-stat-pill">
+          <span class="mobile-stat-count" id="mobileMissedMetric">0</span>
+          <span class="mobile-stat-label">Missed</span>
+        </div>
+      </section>
+
+      <section class="poc-metrics-grid">
+        <article class="metric-card">
+          <div class="metric-label">Active Calls</div>
+          <div class="metric-value" id="activeMetric">0</div>
+          <div class="metric-note">Calls connected with the team or assistant.</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Missed Calls</div>
+          <div class="metric-value" id="missedMetric">0</div>
+          <div class="metric-note">Inbound calls missed during the current window.</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Last Updated</div>
+          <div class="metric-value" id="updatedMetric">--</div>
+          <div class="metric-note">The screen refreshes automatically every few seconds.</div>
+        </article>
+      </section>
+
+      <section class="table-card">
+        <div class="poc-card-header">
+          <div>
+            <h3 class="poc-card-title">Incoming Call Queue</h3>
+            <div class="poc-card-subtitle">Customer-to-lab calls appear here as inbound activity is available.</div>
+          </div>
+        </div>
+
+        <div class="table-wrap desktop-only">
+          <table>
+            <thead>
+              <tr>
+                <th>Caller</th>
+                <th>Phone</th>
+                <th>Received</th>
+                <th>Status</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="incomingTableBody"></tbody>
+          </table>
+        </div>
+
+        <div id="mobileIncomingList" class="mobile-call-stack mobile-only"></div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
+    <a href="/admin.html" class="mobile-dock-link">Overview</a>
+    <a href="/incoming-calls.html" class="mobile-dock-link active">Calls</a>
+    <a href="/customers.html" class="mobile-dock-link">Outbound</a>
+    <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
+    <a href="/reports.html" class="mobile-dock-link">Reports</a>
+  </nav>
+
+  <div id="incomingMobileMenuSheet" class="modal-backdrop mobile-sheet-backdrop" aria-hidden="true">
+    <div class="modal-panel mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="incomingMobileMenuTitle">
+      <div class="mobile-sheet-handle"></div>
+      <div class="mobile-sheet-title-row">
+        <h3 id="incomingMobileMenuTitle" class="poc-card-title">Menu</h3>
+        <button id="closeIncomingMobileMenuSheet" class="secondary modal-close modal-close-icon" type="button" aria-label="Close menu">&times;</button>
+      </div>
+      <div class="mobile-sheet-actions">
+        <button id="incomingMobileMenuLogout" class="mobile-sheet-action" type="button">Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app-shell.js"></script>
+  <script>
+    let refreshTimer = null;
+    const now = new Date();
+    const DEMO_INCOMING_CALLS = [
+      {
+        caller_name: 'Rajiv Mehta',
+        phone: '+91 98123 45670',
+        received_at: new Date(now.getTime() - 7 * 60000).toISOString(),
+        status: 'active',
+        notes: 'Connected for appointment reschedule'
+      },
+      {
+        caller_name: 'Neha Kapoor',
+        phone: '+91 97654 32109',
+        received_at: new Date(now.getTime() - 18 * 60000).toISOString(),
+        status: 'missed',
+        notes: 'Missed call, callback pending'
+      }
+    ];
+
+    function withDemoIncomingCalls(payload = {}) {
+      const apiCalls = Array.isArray(payload.calls) ? payload.calls : [];
+      if (apiCalls.length) return payload;
+
+      return {
+        calls: DEMO_INCOMING_CALLS,
+        active_count: DEMO_INCOMING_CALLS.filter((call) => call.status === 'active').length,
+        missed_count: DEMO_INCOMING_CALLS.filter((call) => call.status === 'missed').length,
+        updated_at: new Date().toISOString()
+      };
+    }
+
+    function setText(id, value) {
+      const element = document.getElementById(id);
+      if (element) element.textContent = value;
+    }
+
+    function formatClock(value) {
+      if (!value) return '--';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '--';
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function renderIncomingCalls(calls) {
+      const tableBody = document.getElementById('incomingTableBody');
+      const mobileList = document.getElementById('mobileIncomingList');
+
+      if (!calls.length) {
+        const emptyMarkup = `
+          <tr>
+            <td colspan="5">
+              <div class="empty-state">
+                <strong>No incoming calls right now</strong>
+                <span>The inbound call queue is ready for live calls.</span>
+              </div>
+            </td>
+          </tr>
+        `;
+        tableBody.innerHTML = emptyMarkup;
+        mobileList.innerHTML = `
+          <div class="empty-state">
+            <strong>No incoming calls right now</strong>
+            <span>The inbound call queue is ready for live calls.</span>
+          </div>
+        `;
+        return;
+      }
+
+      tableBody.innerHTML = calls.map((call) => `
+        <tr>
+          <td>${AppShell.escapeHtml(call.caller_name || 'Unknown caller')}</td>
+          <td>${AppShell.escapeHtml(call.phone || '--')}</td>
+          <td>${AppShell.formatDateTime(call.received_at)}</td>
+          <td><span class="status-badge ${AppShell.escapeHtml(String(call.status || 'active').toLowerCase())}">${AppShell.formatStatusLabel(call.status || 'active')}</span></td>
+          <td>${AppShell.escapeHtml(call.notes || '--')}</td>
+        </tr>
+      `).join('');
+
+      mobileList.innerHTML = calls.map((call) => `
+        <article class="mobile-call-card">
+          <div class="mobile-call-topline">
+            <strong>${AppShell.escapeHtml(call.caller_name || 'Unknown caller')}</strong>
+            <span class="status-badge ${AppShell.escapeHtml(String(call.status || 'active').toLowerCase())}">${AppShell.formatStatusLabel(call.status || 'active')}</span>
+          </div>
+          <div class="mobile-subtext">${AppShell.escapeHtml(call.phone || '--')} · ${AppShell.formatDateTime(call.received_at)}</div>
+          <div class="mobile-subtext">${AppShell.escapeHtml(call.notes || 'No notes yet')}</div>
+        </article>
+      `).join('');
+    }
+
+    function renderMetrics(payload) {
+      const calls = Array.isArray(payload.calls) ? payload.calls : [];
+      const active = Number(payload.active_count || calls.filter((call) => String(call.status || '').toLowerCase() === 'active').length);
+      const missed = Number(payload.missed_count || calls.filter((call) => String(call.status || '').toLowerCase() === 'missed').length);
+      const updatedAt = payload.updated_at || new Date().toISOString();
+
+      ['activeMetric', 'desktopActiveMetric', 'mobileActiveMetric'].forEach((id) => setText(id, active));
+      ['missedMetric', 'desktopMissedMetric', 'mobileMissedMetric'].forEach((id) => setText(id, missed));
+      setText('updatedMetric', formatClock(updatedAt));
+      renderIncomingCalls(calls);
+    }
+
+    function openIncomingSheet(id) {
+      const element = document.getElementById(id);
+      if (!element) return;
+      element.classList.add('open');
+      element.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeIncomingSheet(id) {
+      const element = document.getElementById(id);
+      if (!element) return;
+      element.classList.remove('open');
+      element.setAttribute('aria-hidden', 'true');
+    }
+
+    async function loadIncomingCalls({ silent = false } = {}) {
+      try {
+        const response = await fetch(`${AppShell.API_BASE}/calls/incoming`, { cache: 'no-store' });
+
+        if (response.status === 401) {
+          AppShell.redirectToLogin();
+          return;
+        }
+
+        if (response.status === 404) {
+          renderMetrics(withDemoIncomingCalls({
+            calls: [],
+            active_count: 0,
+            missed_count: 0,
+            updated_at: new Date().toISOString()
+          }));
+          return;
+        }
+
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch (error) {
+          payload = null;
+        }
+
+        if (!response.ok) {
+          throw new Error(payload?.error || `Request failed (${response.status})`);
+        }
+
+        renderMetrics(withDemoIncomingCalls(payload));
+      } catch (error) {
+        if (!silent) AppShell.showAlert(error.message, 'error');
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await AppShell.ensureAuthenticatedSession();
+      document.getElementById('logoutButton')?.addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
+      document.getElementById('refreshButton')?.addEventListener('click', () => loadIncomingCalls());
+      document.getElementById('mobileIncomingRefreshButton')?.addEventListener('click', () => openIncomingSheet('incomingMobileMenuSheet'));
+      document.getElementById('closeIncomingMobileMenuSheet')?.addEventListener('click', () => closeIncomingSheet('incomingMobileMenuSheet'));
+      document.getElementById('incomingMobileMenuLogout')?.addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
+      document.getElementById('incomingMobileMenuSheet')?.addEventListener('click', (event) => {
+        if (event.target.id === 'incomingMobileMenuSheet') closeIncomingSheet('incomingMobileMenuSheet');
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        if (document.getElementById('incomingMobileMenuSheet')?.classList.contains('open')) {
+          closeIncomingSheet('incomingMobileMenuSheet');
+        }
+      });
+      await loadIncomingCalls();
+      refreshTimer = window.setInterval(() => loadIncomingCalls({ silent: true }), 5000);
+    });
+
+    window.addEventListener('beforeunload', () => {
+      if (refreshTimer) window.clearInterval(refreshTimer);
+    });
+  </script>
+</body>
+</html>

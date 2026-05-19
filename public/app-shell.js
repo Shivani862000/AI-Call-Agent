@@ -2,7 +2,8 @@
   const API_BASE = `${window.location.origin}/api`;
   const NAV_ITEMS = [
     { href: '/admin.html', label: 'Overview', shortLabel: 'Home' },
-    { href: '/customers.html', label: 'Customers', shortLabel: 'Customers' },
+    { href: '/incoming-calls.html', label: 'Incoming Calls', shortLabel: 'Calls' },
+    { href: '/customers.html', label: 'Outbound Calls', shortLabel: 'Outbound' },
     { href: '/feedback.html', label: 'Feedback', shortLabel: 'Feedback' },
     { href: '/reports.html', label: 'Reports', shortLabel: 'Reports' }
   ];

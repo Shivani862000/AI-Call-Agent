@@ -38,6 +38,7 @@ app.use(express.json());
 
 const PROTECTED_HTML_PATHS = new Set([
   '/admin.html',
+  '/incoming-calls.html',
   '/customers.html',
   '/clients.html',
   '/feedback.html',
@@ -2189,6 +2190,16 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
     console.error('[API CALL INITIATE ERROR]', error.message);
     res.status(500).json({ error: error.message });
   }
+});
+
+app.get('/api/calls/incoming', async (req, res) => {
+  res.json({
+    calls: [],
+    waiting_count: 0,
+    active_count: 0,
+    missed_count: 0,
+    updated_at: new Date().toISOString()
+  });
 });
 
 app.get('/api/calls/recent', async (req, res) => {

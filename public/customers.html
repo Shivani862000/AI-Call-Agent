@@ -20,7 +20,8 @@
 
         <nav class="nav-list">
           <a href="/admin.html" class="nav-link">Overview</a>
-          <a href="/customers.html" class="nav-link active">Customers</a>
+          <a href="/incoming-calls.html" class="nav-link">Incoming Calls</a>
+          <a href="/customers.html" class="nav-link active">Outbound Calls</a>
           <a href="/feedback.html" class="nav-link">Feedback</a>
           <a href="/reports.html" class="nav-link">Reports</a>
         </nav>
@@ -40,7 +41,7 @@
       <header class="page-header desktop-page-header">
         <div class="page-title-wrap">
           <h2>Outbound Calls</h2>
-          <div class="page-subtitle">Schedule and manage patient follow-up calls.</div>
+          <div class="page-subtitle">Calls placed from the lab or AI assistant to customers for feedback and follow-up.</div>
         </div>
         <div class="header-actions">
           <button id="newCallButton" class="primary" type="button">New Call</button>
@@ -50,7 +51,7 @@
 
       <div id="alertContainer" class="alert-stack"></div>
 
-      <section class="desktop-filter-strip desktop-only" aria-label="Customer filters">
+      <section class="desktop-filter-strip desktop-only" aria-label="Outbound call filters">
         <button class="desktop-filter-pill active" type="button" data-customer-filter="scheduled" aria-pressed="true">
           <span class="desktop-filter-count" id="desktopScheduledMetric">0</span>
           <span class="desktop-filter-label">Scheduled</span>
@@ -114,8 +115,8 @@
       <section id="queueSection" class="table-card">
         <div class="poc-card-header">
           <div>
-            <h3 class="poc-card-title">Scheduled Calls</h3>
-            <div class="poc-card-subtitle" id="queueMeta">Manage the current patient calling queue.</div>
+              <h3 class="poc-card-title">Outbound Call Queue</h3>
+              <div class="poc-card-subtitle" id="queueMeta">Manage calls going from the lab to customers.</div>
           </div>
         </div>
 
@@ -160,7 +161,8 @@
 
   <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
     <a href="/admin.html" class="mobile-dock-link">Overview</a>
-    <a href="/customers.html" class="mobile-dock-link active">Customers</a>
+    <a href="/incoming-calls.html" class="mobile-dock-link">Calls</a>
+    <a href="/customers.html" class="mobile-dock-link active">Outbound</a>
     <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
     <a href="/reports.html" class="mobile-dock-link">Reports</a>
   </nav>
