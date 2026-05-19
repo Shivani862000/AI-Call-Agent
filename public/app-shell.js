@@ -83,7 +83,7 @@
       service_recovery_count: 1,
       hot_leads: 1,
       revenue_pipeline_estimate: 18000,
-      report_headline: 'Demo day snapshot: strong follow-up with one recovery case',
+      report_headline: 'Daily operations snapshot: strong follow-up with one recovery case',
       summary_text: 'The AI team completed high-value follow-ups, captured patient sentiment, and highlighted one callback that needs attention before end of day.',
       priority_actions: ['Call Ananya for report-delay recovery', 'Send Rajiv the preventive package offer', 'Retry Neha after 4 PM'],
       hot_lead_queue: [{ customer_name: 'Rajiv Mehta', hot_lead_score: 88, follow_up_task: 'Share full body checkup renewal package' }],
@@ -92,7 +92,7 @@
     ownerPreview: {
       alerts: [
         { headline: 'One recovery callback should be closed today' },
-        { headline: 'Best demo segment: show outbound queue plus feedback trends' }
+        { headline: 'Review outbound queue with feedback trends' }
       ]
     }
   };
