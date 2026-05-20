@@ -194,7 +194,7 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res, next) => {
-  if (req.path === '/login.html' || req.path.startsWith('/api/auth/')) {
+  if (req.path === '/login.html' || req.path.startsWith('/api/auth/') || req.path === '/api/icallmate/callback') {
     return next();
   }
 
@@ -257,9 +257,11 @@ const GEMINI_WS_BASE_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai
 const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
 const liveCallState = new Map();
+const incomingCallState = new Map();
 const pendingCallDiagnostics = new Map();
 const LIVE_CALL_RETENTION_MS = 20 * 60 * 1000;
 const LIVE_CALL_ACTIVE_STALE_MS = 90 * 60 * 1000;
+const INCOMING_CALL_RETENTION_MS = 60 * 60 * 1000;
 const CALL_DIAGNOSTIC_WARN_MS = Math.max(Number(process.env.CALL_DIAGNOSTIC_WARN_MS || 20000) || 20000, 5000);
 
 function redactSecret(value, visiblePrefix = 4, visibleSuffix = 4) {
@@ -1375,6 +1377,69 @@ function pruneLiveCallState(now = Date.now()) {
   }
 }
 
+function normalizeIcallTimestamp(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return new Date().toISOString();
+  }
+
+  const normalized = text.includes('T') ? text : text.replace(' ', 'T');
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString();
+  }
+
+  return date.toISOString();
+}
+
+function getIncomingCallKey(message = {}) {
+  return String(message.streamId || message.ChKey || message.callerId || `${Date.now()}`).trim();
+}
+
+function upsertIncomingCallFromIcall(message = {}, patch = {}) {
+  const key = getIncomingCallKey(message);
+  const existing = incomingCallState.get(key) || {};
+  const eventName = String(message.event || patch.event || '').toLowerCase();
+  const nowIso = new Date().toISOString();
+  const status = patch.status || (
+    eventName === 'hangup-call' ? 'missed' : 'active'
+  );
+
+  const row = {
+    id: key,
+    stream_id: message.streamId || existing.stream_id || key,
+    caller_name: patch.caller_name || existing.caller_name || 'Incoming caller',
+    phone: message.callerId || existing.phone || '--',
+    did: message.did || existing.did || '',
+    call_direction: message.callDirection || existing.call_direction || 'incoming',
+    status,
+    received_at: existing.received_at || normalizeIcallTimestamp(message.timestamp),
+    updated_at: nowIso,
+    notes: patch.notes || existing.notes || 'iCallMate incoming call',
+    last_event: eventName || existing.last_event || '',
+    answered_at: patch.answered_at || existing.answered_at || null,
+    ended_at: patch.ended_at || existing.ended_at || null,
+    media_packets: Number(existing.media_packets || 0) + Number(patch.media_packets || 0),
+    reverse_media_queue: Number(message.RevMediaQ || existing.reverse_media_queue || 0),
+    botid: message.botid || existing.botid || '',
+    userrefno: message.userrefno || existing.userrefno || '',
+    sysrefno: message.sysrefno || existing.sysrefno || '',
+    extra_params: message.extraParams || existing.extra_params || ''
+  };
+
+  incomingCallState.set(key, row);
+  return row;
+}
+
+function pruneIncomingCallState(now = Date.now()) {
+  for (const [key, row] of incomingCallState.entries()) {
+    const updatedAt = new Date(row?.updated_at || row?.received_at || 0).getTime();
+    if (!updatedAt || Number.isNaN(updatedAt) || (now - updatedAt) > INCOMING_CALL_RETENTION_MS) {
+      incomingCallState.delete(key);
+    }
+  }
+}
+
 async function triggerScheduledCalls() {
   const now = new Date();
   const currentSlot = getCurrentSlotLabel(now);
@@ -2193,13 +2258,161 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
 });
 
 app.get('/api/calls/incoming', async (req, res) => {
+  pruneIncomingCallState();
+  const calls = [...incomingCallState.values()]
+    .sort((a, b) => new Date(b.updated_at || b.received_at || 0) - new Date(a.updated_at || a.received_at || 0));
+
   res.json({
-    calls: [],
-    waiting_count: 0,
-    active_count: 0,
-    missed_count: 0,
+    calls,
+    active_count: calls.filter((call) => call.status === 'active').length,
+    missed_count: calls.filter((call) => call.status === 'missed').length,
     updated_at: new Date().toISOString()
   });
+});
+
+app.get('/api/icallmate/config', async (req, res) => {
+  res.json({
+    websocket_url: `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`,
+    did: process.env.ICALLMATE_DID || '',
+    incoming_api_endpoint: process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in',
+    outbound_api_endpoint: process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in',
+    callback_url: `${PUBLIC_BASE_URL}/api/icallmate/callback`,
+    audio_format: {
+      sampleRate: 8000,
+      encoding: 'LINEAR16',
+      channels: 1,
+      bitsPerSample: 16
+    }
+  });
+});
+
+app.post('/api/icallmate/callback', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const key = String(payload.ref_no || payload.leadid || payload.phoneno || `${Date.now()}`);
+    const callType = String(payload.call_type || '').toLowerCase();
+    const status = String(payload.call_status || '') === '1' ? 'completed' : 'missed';
+
+    if (callType === 'inbound' || callType === 'inbou' || !callType) {
+      incomingCallState.set(key, {
+        id: key,
+        stream_id: key,
+        caller_name: payload.customer_name || 'Incoming caller',
+        phone: payload.phoneno || '--',
+        did: payload.serviceno || '',
+        call_direction: 'incoming',
+        status,
+        received_at: normalizeIcallTimestamp(payload.call_start_time),
+        updated_at: new Date().toISOString(),
+        notes: payload.recording_filename ? 'Callback received with recording' : 'Callback received',
+        last_event: 'callback',
+        answered_at: payload.call_ansd_time ? normalizeIcallTimestamp(payload.call_ansd_time) : null,
+        ended_at: payload.call_end_time ? normalizeIcallTimestamp(payload.call_end_time) : null,
+        recording_url: payload.recording_filename || '',
+        talktime: payload.talktime || ''
+      });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[ICALLMATE CALLBACK ERROR]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/icallmate/incoming-config', async (req, res) => {
+  try {
+    const dnisNo = String(req.body.dnisNo || req.body.virtualNumber || process.env.ICALLMATE_DID || '').trim();
+    if (!dnisNo) {
+      return res.status(400).json({ error: 'dnisNo or virtualNumber is required' });
+    }
+
+    const endpoint = `${String(process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in').replace(/\/+$/, '')}/Test_WSS/setMacroDnis`;
+    const websocketUrl = req.body.wsurl || req.body.websocket_url || `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`;
+    const callbackUrl = req.body.callbackapi || req.body.callback_url || `${PUBLIC_BASE_URL}/api/icallmate/callback`;
+    const macros = [
+      { dnisNo, macroName: 'llm_wssurl', macroValue: websocketUrl },
+      { dnisNo, macroName: 'llm_botid', macroValue: String(req.body.botid || process.env.ICALLMATE_BOT_ID || '') },
+      { dnisNo, macroName: 'llm_agentid', macroValue: String(req.body.agentid || process.env.ICALLMATE_AGENT_ID || '') },
+      { dnisNo, macroName: 'llm_extraparam', macroValue: String(req.body.extraParams || req.body.extra_param || 'path-lab') },
+      { dnisNo, macroName: 'llm_iscallbackapi', macroValue: String(req.body.iscallbackapi ?? '0') },
+      { dnisNo, macroName: 'llm_callbackapi', macroValue: callbackUrl }
+    ];
+
+    if (String(req.body.dryRun || '').toLowerCase() === 'true') {
+      return res.json({ endpoint, macros, dryRun: true });
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(macros)
+    });
+    const text = await response.text();
+
+    res.status(response.ok ? 200 : response.status).json({
+      success: response.ok,
+      endpoint,
+      macros,
+      response: text
+    });
+  } catch (error) {
+    console.error('[ICALLMATE INCOMING CONFIG ERROR]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/icallmate/outbound-campaign', async (req, res) => {
+  try {
+    const endpoint = `${String(process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in').replace(/\/+$/, '')}/OBDAPI/webresources/CreateOBDCampaignPost`;
+    const msisdnlist = Array.isArray(req.body.msisdnlist) ? req.body.msisdnlist : [];
+    if (!msisdnlist.length) {
+      return res.status(400).json({ error: 'msisdnlist is required' });
+    }
+
+    const payload = {
+      sourcetype: String(req.body.sourcetype || '0'),
+      customivr: req.body.customivr ?? true,
+      campaigntype: String(req.body.campaigntype || '4'),
+      filetype: String(req.body.filetype || '2'),
+      ukey: req.body.ukey || process.env.ICALLMATE_UKEY || '',
+      serviceno: req.body.serviceno || process.env.ICALLMATE_SERVICE_NO || '',
+      ivrtemplateid: req.body.ivrtemplateid || process.env.ICALLMATE_IVR_TEMPLATE_ID || '',
+      maxTalkTimeInSec: Number(req.body.maxTalkTimeInSec || 0),
+      retryatmpt: String(req.body.retryatmpt || '2'),
+      sendnow: String(req.body.sendnow || '0'),
+      schddate: req.body.schddate || '',
+      retryduration: String(req.body.retryduration || '5'),
+      s_unique: req.body.s_unique || '',
+      msisdnlist: msisdnlist.map((item) => ({
+        ...item,
+        wsurl: item.wsurl || `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`,
+        agentid: String(item.agentid || process.env.ICALLMATE_AGENT_ID || '0'),
+        iscallbackapi: String(item.iscallbackapi ?? '0'),
+        callbackapi: item.callbackapi || `${PUBLIC_BASE_URL}/api/icallmate/callback`
+      }))
+    };
+
+    if (String(req.body.dryRun || '').toLowerCase() === 'true') {
+      return res.json({ endpoint, payload, dryRun: true });
+    }
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const text = await response.text();
+
+    res.status(response.ok ? 200 : response.status).json({
+      success: response.ok,
+      endpoint,
+      response: text
+    });
+  } catch (error) {
+    console.error('[ICALLMATE OUTBOUND CAMPAIGN ERROR]', error.message);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.get('/api/calls/recent', async (req, res) => {
@@ -3238,6 +3451,154 @@ function setupOrchestratedStream(twilioWs, req) {
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: '/call/stream' });
+const icallMateWss = new WebSocket.Server({ server, path: '/icallmate/media' });
+
+function sendIcallMateJson(ws, payload) {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify(payload));
+}
+
+function sendIcallMateMark(ws, message, name) {
+  sendIcallMateJson(ws, {
+    event: 'mark',
+    sequenceNumber: String(Date.now()),
+    ChKey: message.ChKey,
+    streamId: message.streamId,
+    mark: { name }
+  });
+}
+
+function sendIcallMateReverseMedia(ws, session, pcmBuffer) {
+  const buffer = Buffer.isBuffer(pcmBuffer) ? pcmBuffer : Buffer.from(pcmBuffer || []);
+  if (!buffer.length) return;
+
+  for (let offset = 0; offset < buffer.length; offset += 3200) {
+    const chunk = buffer.subarray(offset, Math.min(offset + 3200, buffer.length));
+    sendIcallMateJson(ws, {
+      event: 'reverse-media',
+      encoding: 'LINEAR',
+      streamId: session.streamId,
+      callerId: session.callerId,
+      did: session.did,
+      source: 'ai',
+      payload: chunk.toString('base64')
+    });
+  }
+}
+
+icallMateWss.on('connection', (ws, req) => {
+  console.log('[ICALLMATE] Media stream connected');
+  console.log(`[ICALLMATE] Upgrade request from ${req.socket.remoteAddress || 'unknown'}`);
+
+  const session = {
+    streamId: '',
+    callerId: '',
+    did: '',
+    answered: false,
+    connectedAt: new Date().toISOString()
+  };
+
+  ws.on('message', (raw) => {
+    let message;
+    try {
+      message = JSON.parse(raw.toString());
+    } catch (error) {
+      console.error('[ICALLMATE] Invalid JSON payload:', error.message);
+      return;
+    }
+
+    const eventName = String(message.event || '').toLowerCase();
+    if (message.streamId) session.streamId = message.streamId;
+    if (message.callerId) session.callerId = message.callerId;
+    if (message.did) session.did = message.did;
+
+    if (eventName === 'connected') {
+      upsertIncomingCallFromIcall(message, { status: 'active', notes: 'iCallMate connected' });
+      sendIcallMateMark(ws, message, 'connected-received');
+      return;
+    }
+
+    if (eventName === 'start') {
+      const mediaFormat = message.mediaFormat || {};
+      const isExpectedAudio = (
+        Number(mediaFormat.sampleRate) === 8000
+        && String(mediaFormat.encoding || '').toUpperCase() === 'LINEAR16'
+        && Number(mediaFormat.channels) === 1
+        && Number(mediaFormat.bitsPerSample) === 16
+      );
+
+      upsertIncomingCallFromIcall(message, {
+        status: 'active',
+        notes: isExpectedAudio ? 'iCallMate media stream started' : 'iCallMate media stream started with unexpected audio format'
+      });
+      sendIcallMateMark(ws, message, 'start-received');
+      return;
+    }
+
+    if (eventName === 'answer') {
+      session.answered = true;
+      upsertIncomingCallFromIcall(message, {
+        status: 'active',
+        answered_at: normalizeIcallTimestamp(message.timestamp),
+        notes: 'Incoming call answered'
+      });
+      sendIcallMateMark(ws, message, 'answer-received');
+      return;
+    }
+
+    if (eventName === 'media') {
+      upsertIncomingCallFromIcall(message, {
+        status: 'active',
+        media_packets: 1,
+        notes: session.answered ? 'Incoming audio streaming' : 'Incoming media before answer'
+      });
+      return;
+    }
+
+    if (eventName === 'hangup-call') {
+      upsertIncomingCallFromIcall(message, {
+        status: session.answered ? 'completed' : 'missed',
+        ended_at: normalizeIcallTimestamp(message.timestamp),
+        notes: session.answered ? 'Incoming call disconnected' : 'Incoming call missed'
+      });
+      sendIcallMateJson(ws, {
+        event: 'reverse-media-stop',
+        callerId: message.callerId || session.callerId,
+        streamId: message.streamId || session.streamId
+      });
+      ws.close();
+      return;
+    }
+
+    if (eventName === 'mark') {
+      console.log(`[ICALLMATE] Mark received: ${message?.mark?.name || message.sequenceNumber || 'mark'}`);
+      return;
+    }
+
+    console.log(`[ICALLMATE] Unhandled event: ${eventName || 'unknown'}`);
+  });
+
+  ws.on('close', () => {
+    console.log('[ICALLMATE] Media stream closed');
+    if (session.streamId) {
+      upsertIncomingCallFromIcall({
+        streamId: session.streamId,
+        callerId: session.callerId,
+        did: session.did,
+        event: 'hangup-call',
+        timestamp: new Date().toISOString()
+      }, {
+        status: session.answered ? 'completed' : 'missed',
+        ended_at: new Date().toISOString(),
+        notes: session.answered ? 'Incoming call disconnected' : 'Incoming call closed'
+      });
+    }
+  });
+
+  ws.on('error', (error) => {
+    console.error('[ICALLMATE WS ERROR]', error.message);
+  });
+});
 
 wss.on('connection', (twilioWs, req) => {
   if (USE_ORCHESTRATED_PIPELINE) {
