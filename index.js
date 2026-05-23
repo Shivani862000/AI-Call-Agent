@@ -3571,6 +3571,251 @@ function sendIcallMateReverseMedia(ws, session, pcmBuffer) {
   }
 }
 
+function createIcallMateAiBridge(ws, session) {
+  let aiWs = null;
+  let deepgramWs = null;
+  let geminiSetupComplete = false;
+  let openingPromptSent = false;
+  let deepgramReady = false;
+  let finalTranscriptBuffer = [];
+
+  const getSessionLabel = () => session.streamId || session.callerId || 'unknown';
+  const getSystemPrompt = () => buildAgentSystemPrompt(CLIENT_NAME, process.env.CUSTOMER_NAME || 'sir/maam');
+  const getOpeningPrompt = () => (
+    'Sirf yeh exact line boliye aur is turn me kuch aur mat boliye: '
+    + '"Good morning sir/maam, main Apna Blood Centre, Palwal se Priya baat kar rahi hoon. Kya abhi 2 minute baat ho sakti hai?"'
+  );
+
+  function sendGeminiClientTurn(text, options = {}) {
+    const safeText = String(text || '').trim();
+    if (!safeText || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
+      return;
+    }
+
+    aiWs.send(JSON.stringify({
+      clientContent: {
+        turns: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: options.interrupt
+                  ? `Ignore any unfinished previous reply and respond to this message now. ${safeText}`
+                  : safeText
+              }
+            ]
+          }
+        ],
+        turnComplete: true
+      }
+    }));
+  }
+
+  function sendOpeningPrompt() {
+    if (openingPromptSent || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
+      return;
+    }
+
+    openingPromptSent = true;
+    console.log(`[ICALLMATE][GEMINI] Sending opening prompt streamId=${getSessionLabel()}`);
+    sendGeminiClientTurn(getOpeningPrompt(), { interrupt: true });
+  }
+
+  function connectGemini() {
+    if (aiWs && aiWs.readyState !== WebSocket.CLOSED) {
+      sendOpeningPrompt();
+      return;
+    }
+
+    geminiSetupComplete = false;
+    openingPromptSent = false;
+    aiWs = new WebSocket(buildGeminiWsUrl());
+
+    aiWs.on('open', () => {
+      console.log(`[ICALLMATE][GEMINI] Live session opened streamId=${getSessionLabel()} model=${REALTIME_MODEL} voice=${GEMINI_VOICE}`);
+      aiWs.send(JSON.stringify({
+        setup: {
+          model: resolveRealtimeModelName(REALTIME_MODEL),
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName: GEMINI_VOICE
+                }
+              }
+            }
+          },
+          systemInstruction: {
+            parts: [
+              {
+                text: getSystemPrompt()
+              }
+            ]
+          },
+          realtimeInputConfig: {},
+          inputAudioTranscription: {},
+          outputAudioTranscription: {}
+        }
+      }));
+    });
+
+    aiWs.on('message', (raw) => {
+      let message;
+
+      try {
+        message = JSON.parse(raw.toString());
+      } catch (error) {
+        console.error('[ICALLMATE][GEMINI] Failed to parse message:', error.message);
+        return;
+      }
+
+      if (message.setupComplete) {
+        geminiSetupComplete = true;
+        console.log(`[ICALLMATE][GEMINI] Session configured streamId=${getSessionLabel()}`);
+        sendOpeningPrompt();
+        return;
+      }
+
+      if (message.serverContent?.outputTranscription?.text) {
+        console.log(`[ICALLMATE][AGENT]: ${message.serverContent.outputTranscription.text}`);
+      }
+
+      const parts = message.serverContent?.modelTurn?.parts || [];
+      for (const part of parts) {
+        if (!part.inlineData?.data || !String(part.inlineData.mimeType || '').startsWith('audio/pcm')) {
+          continue;
+        }
+
+        const pcm16 = Buffer.from(part.inlineData.data, 'base64');
+        const sourceRate = parsePcmRate(part.inlineData.mimeType, 24000);
+        const resampled = resamplePcm16(pcm16, sourceRate, 8000);
+        console.log(`[ICALLMATE][GEMINI] Sending reverse-media bytes=${resampled.length} sourceRate=${sourceRate} streamId=${getSessionLabel()}`);
+        sendIcallMateReverseMedia(ws, session, resampled);
+      }
+
+      if (message.serverContent?.interrupted) {
+        console.log(`[ICALLMATE][GEMINI] Response interrupted streamId=${getSessionLabel()}`);
+      }
+
+      if (message.error) {
+        console.error('[ICALLMATE][GEMINI ERROR]', JSON.stringify(message, null, 2));
+      }
+    });
+
+    aiWs.on('close', (code, reasonBuffer) => {
+      const reason = Buffer.isBuffer(reasonBuffer) ? reasonBuffer.toString() : String(reasonBuffer || '');
+      console.log(`[ICALLMATE][GEMINI] Live session closed code=${code ?? 'unknown'} reason=${reason || 'n/a'} streamId=${getSessionLabel()}`);
+    });
+
+    aiWs.on('error', (error) => {
+      console.error('[ICALLMATE][GEMINI WS ERROR]', error.message);
+    });
+  }
+
+  function handleDeepgramTranscript(event) {
+    const transcriptText = String(event?.channel?.alternatives?.[0]?.transcript || '').trim();
+    const isFinal = Boolean(event?.is_final);
+    const isSpeechFinal = Boolean(event?.speech_final);
+
+    if (!transcriptText) {
+      if (isSpeechFinal && finalTranscriptBuffer.length) {
+        const merged = finalTranscriptBuffer.join(' ').replace(/\s+/g, ' ').trim();
+        finalTranscriptBuffer = [];
+        if (merged) {
+          console.log(`[ICALLMATE][CALLER]: ${merged}`);
+          sendGeminiClientTurn(`Customer said: ${merged}\nDo not greet again. Continue the blood donation follow-up naturally in Hindi/Hinglish.`, { interrupt: true });
+        }
+      }
+      return;
+    }
+
+    if (isFinal) {
+      finalTranscriptBuffer.push(transcriptText);
+    }
+
+    if (isSpeechFinal) {
+      const merged = (finalTranscriptBuffer.length ? finalTranscriptBuffer.join(' ') : transcriptText)
+        .replace(/\s+/g, ' ')
+        .trim();
+      finalTranscriptBuffer = [];
+      if (merged) {
+        console.log(`[ICALLMATE][CALLER]: ${merged}`);
+        sendGeminiClientTurn(`Customer said: ${merged}\nDo not greet again. Continue the blood donation follow-up naturally in Hindi/Hinglish.`, { interrupt: true });
+      }
+    }
+  }
+
+  function connectDeepgram() {
+    if (!process.env.DEEPGRAM_API_KEY) {
+      console.warn('[ICALLMATE][DEEPGRAM] Missing DEEPGRAM_API_KEY; bot can speak opening but caller speech will not be transcribed.');
+      return;
+    }
+
+    if (deepgramWs && deepgramWs.readyState !== WebSocket.CLOSED) {
+      return;
+    }
+
+    deepgramWs = new WebSocket(createDeepgramListenUrl('exotel'), {
+      headers: {
+        Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`
+      }
+    });
+
+    deepgramWs.on('open', () => {
+      deepgramReady = true;
+      console.log(`[ICALLMATE][DEEPGRAM] Live transcription connected streamId=${getSessionLabel()}`);
+    });
+
+    deepgramWs.on('message', (raw) => {
+      let event;
+
+      try {
+        event = JSON.parse(raw.toString());
+      } catch (error) {
+        console.error('[ICALLMATE][DEEPGRAM] Parse error:', error.message);
+        return;
+      }
+
+      if (event.type === 'Results') {
+        handleDeepgramTranscript(event);
+      }
+    });
+
+    deepgramWs.on('close', () => {
+      deepgramReady = false;
+      console.log(`[ICALLMATE][DEEPGRAM] Live transcription closed streamId=${getSessionLabel()}`);
+    });
+
+    deepgramWs.on('error', (error) => {
+      deepgramReady = false;
+      console.error('[ICALLMATE][DEEPGRAM ERROR]', error.message);
+    });
+  }
+
+  return {
+    start() {
+      connectGemini();
+      connectDeepgram();
+    },
+    sendCallerAudio(payload) {
+      if (!payload || !deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      deepgramWs.send(Buffer.from(payload, 'base64'));
+    },
+    close() {
+      if (deepgramWs?.readyState === WebSocket.OPEN) {
+        deepgramWs.close();
+      }
+      if (aiWs?.readyState === WebSocket.OPEN) {
+        aiWs.close();
+      }
+    }
+  };
+}
+
 icallMateWss.on('connection', (ws, req) => {
   console.log('[ICALLMATE] Media stream connected');
   console.log(`[ICALLMATE] Upgrade request from ${req.socket.remoteAddress || 'unknown'}`);
@@ -3583,6 +3828,7 @@ icallMateWss.on('connection', (ws, req) => {
     answered: false,
     connectedAt: new Date().toISOString()
   };
+  const aiBridge = createIcallMateAiBridge(ws, session);
 
   ws.on('message', (raw) => {
     let message;
@@ -3629,6 +3875,7 @@ icallMateWss.on('connection', (ws, req) => {
         answered_at: normalizeIcallTimestamp(message.timestamp),
         notes: 'Incoming call answered'
       });
+      aiBridge.start();
       sendIcallMateMark(ws, message, 'answer-received');
       return;
     }
@@ -3639,6 +3886,7 @@ icallMateWss.on('connection', (ws, req) => {
         media_packets: 1,
         notes: session.answered ? 'Incoming audio streaming' : 'Incoming media before answer'
       });
+      aiBridge.sendCallerAudio(message.payload);
       return;
     }
 
@@ -3653,6 +3901,7 @@ icallMateWss.on('connection', (ws, req) => {
         callerId: message.callerId || session.callerId,
         streamId: message.streamId || session.streamId
       });
+      aiBridge.close();
       ws.close();
       return;
     }
@@ -3667,6 +3916,7 @@ icallMateWss.on('connection', (ws, req) => {
 
   ws.on('close', () => {
     console.log('[ICALLMATE] Media stream closed');
+    aiBridge.close();
     if (session.streamId) {
       upsertIncomingCallFromIcall({
         streamId: session.streamId,
