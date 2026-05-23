@@ -6,9 +6,12 @@ This project exposes the iCallMate telephony WebSocket from the existing Node/Ex
 
 - WebSocket media URL: `wss://<APP_BASE_URL>/icallmate/media`
 - Callback URL: `https://<APP_BASE_URL>/api/icallmate/callback`
+- Health/probe URL: `https://<APP_BASE_URL>/icallmate/health`
 - Local config helper: `GET /api/icallmate/config`
 
 The app expects iCallMate media payloads as `8000 Hz`, `LINEAR16`, `1 channel`, `16 bits`.
+
+If a browser or normal HTTP client opens `/icallmate/media`, it returns `426 WebSocket upgrade required`. That is expected. iCallMate must connect using `wss://`.
 
 ## Incoming Calls
 

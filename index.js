@@ -194,7 +194,14 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res, next) => {
-  if (req.path === '/login.html' || req.path.startsWith('/api/auth/') || req.path === '/api/icallmate/callback') {
+  if (
+    req.path === '/login.html'
+    || req.path.startsWith('/api/auth/')
+    || req.path === '/api/icallmate/callback'
+    || req.path === '/api/icallmate/config'
+    || req.path === '/icallmate/health'
+    || req.path === '/icallmate/media'
+  ) {
     return next();
   }
 
@@ -2274,6 +2281,7 @@ app.get('/api/icallmate/config', async (req, res) => {
   res.json({
     websocket_url: `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`,
     did: process.env.ICALLMATE_DID || '',
+    test_number: process.env.ICALLMATE_TEST_NUMBER || '',
     incoming_api_endpoint: process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in',
     outbound_api_endpoint: process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in',
     callback_url: `${PUBLIC_BASE_URL}/api/icallmate/callback`,
@@ -2413,6 +2421,26 @@ app.post('/api/icallmate/outbound-campaign', async (req, res) => {
     console.error('[ICALLMATE OUTBOUND CAMPAIGN ERROR]', error.message);
     res.status(500).json({ error: error.message });
   }
+});
+
+app.get('/icallmate/health', (req, res) => {
+  res.json({
+    ok: true,
+    websocket_path: '/icallmate/media',
+    websocket_url: `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`,
+    did: process.env.ICALLMATE_DID || '',
+    test_number: process.env.ICALLMATE_TEST_NUMBER || '',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/icallmate/media', (req, res) => {
+  res.status(426).json({
+    error: 'WebSocket upgrade required',
+    websocket_url: `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`,
+    expected_protocol: 'wss',
+    did: process.env.ICALLMATE_DID || ''
+  });
 });
 
 app.get('/api/calls/recent', async (req, res) => {
@@ -3450,8 +3478,30 @@ function setupOrchestratedStream(twilioWs, req) {
 }
 
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server, path: '/call/stream' });
-const icallMateWss = new WebSocket.Server({ server, path: '/icallmate/media' });
+const wss = new WebSocket.Server({ noServer: true });
+const icallMateWss = new WebSocket.Server({ noServer: true });
+
+server.on('upgrade', (req, socket, head) => {
+  const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  console.log(`[WS UPGRADE] path=${pathname} host=${req.headers.host || ''} origin=${req.headers.origin || ''} upgrade=${req.headers.upgrade || ''} remote=${req.socket.remoteAddress || 'unknown'}`);
+
+  if (pathname === '/call/stream') {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req);
+    });
+    return;
+  }
+
+  if (pathname === '/icallmate/media') {
+    icallMateWss.handleUpgrade(req, socket, head, (ws) => {
+      icallMateWss.emit('connection', ws, req);
+    });
+    return;
+  }
+
+  console.warn(`[WS UPGRADE] Rejected unknown path=${pathname}`);
+  socket.destroy();
+});
 
 function sendIcallMateJson(ws, payload) {
   if (ws.readyState !== WebSocket.OPEN) return;
@@ -3489,6 +3539,7 @@ function sendIcallMateReverseMedia(ws, session, pcmBuffer) {
 icallMateWss.on('connection', (ws, req) => {
   console.log('[ICALLMATE] Media stream connected');
   console.log(`[ICALLMATE] Upgrade request from ${req.socket.remoteAddress || 'unknown'}`);
+  console.log(`[ICALLMATE] Request headers host=${req.headers.host || ''} ua=${req.headers['user-agent'] || ''} x-forwarded-for=${req.headers['x-forwarded-for'] || ''}`);
 
   const session = {
     streamId: '',
@@ -3508,6 +3559,7 @@ icallMateWss.on('connection', (ws, req) => {
     }
 
     const eventName = String(message.event || '').toLowerCase();
+    console.log(`[ICALLMATE] event=${eventName || 'unknown'} streamId=${message.streamId || session.streamId || ''} callerId=${message.callerId || session.callerId || ''} did=${message.did || session.did || ''}`);
     if (message.streamId) session.streamId = message.streamId;
     if (message.callerId) session.callerId = message.callerId;
     if (message.did) session.did = message.did;
