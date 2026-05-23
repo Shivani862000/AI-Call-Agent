@@ -1704,6 +1704,23 @@ function toWssUrl(baseUrl, pathName) {
   return url.toString();
 }
 
+function getRequestPublicBaseUrl(req) {
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '')
+    .split(',')[0]
+    .trim();
+  const host = forwardedHost || String(req.headers.host || '').trim();
+  if (!host) {
+    return PUBLIC_BASE_URL;
+  }
+
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+  const proto = forwardedProto || (req.secure ? 'https' : 'http');
+  return `${proto}://${host}`.replace(/\/$/, '');
+}
+
 function xmlEscape(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -2280,13 +2297,14 @@ app.get('/api/calls/incoming', async (req, res) => {
 });
 
 app.get('/api/icallmate/config', async (req, res) => {
+  const requestBaseUrl = getRequestPublicBaseUrl(req);
   res.json({
-    websocket_url: `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`,
+    websocket_url: `${toWssUrl(requestBaseUrl, '/icallmate/media')}`,
     did: process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID,
     test_number: process.env.ICALLMATE_TEST_NUMBER || ICALLMATE_DEFAULT_TEST_NUMBER,
     incoming_api_endpoint: process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in',
     outbound_api_endpoint: process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in',
-    callback_url: `${PUBLIC_BASE_URL}/api/icallmate/callback`,
+    callback_url: `${requestBaseUrl}/api/icallmate/callback`,
     audio_format: {
       sampleRate: 8000,
       encoding: 'LINEAR16',
@@ -2332,14 +2350,15 @@ app.post('/api/icallmate/callback', async (req, res) => {
 
 app.post('/api/icallmate/incoming-config', async (req, res) => {
   try {
+    const requestBaseUrl = getRequestPublicBaseUrl(req);
     const dnisNo = String(req.body.dnisNo || req.body.virtualNumber || process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID).trim();
     if (!dnisNo) {
       return res.status(400).json({ error: 'dnisNo or virtualNumber is required' });
     }
 
     const endpoint = `${String(process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in').replace(/\/+$/, '')}/Test_WSS/setMacroDnis`;
-    const websocketUrl = req.body.wsurl || req.body.websocket_url || `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`;
-    const callbackUrl = req.body.callbackapi || req.body.callback_url || `${PUBLIC_BASE_URL}/api/icallmate/callback`;
+    const websocketUrl = req.body.wsurl || req.body.websocket_url || `${toWssUrl(requestBaseUrl, '/icallmate/media')}`;
+    const callbackUrl = req.body.callbackapi || req.body.callback_url || `${requestBaseUrl}/api/icallmate/callback`;
     const macros = [
       { dnisNo, macroName: 'llm_wssurl', macroValue: websocketUrl },
       { dnisNo, macroName: 'llm_botid', macroValue: String(req.body.botid || process.env.ICALLMATE_BOT_ID || '') },
@@ -2374,6 +2393,7 @@ app.post('/api/icallmate/incoming-config', async (req, res) => {
 
 app.post('/api/icallmate/outbound-campaign', async (req, res) => {
   try {
+    const requestBaseUrl = getRequestPublicBaseUrl(req);
     const endpoint = `${String(process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in').replace(/\/+$/, '')}/OBDAPI/webresources/CreateOBDCampaignPost`;
     const msisdnlist = Array.isArray(req.body.msisdnlist) ? req.body.msisdnlist : [];
     if (!msisdnlist.length) {
@@ -2396,10 +2416,10 @@ app.post('/api/icallmate/outbound-campaign', async (req, res) => {
       s_unique: req.body.s_unique || '',
       msisdnlist: msisdnlist.map((item) => ({
         ...item,
-        wsurl: item.wsurl || `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`,
+        wsurl: item.wsurl || `${toWssUrl(requestBaseUrl, '/icallmate/media')}`,
         agentid: String(item.agentid || process.env.ICALLMATE_AGENT_ID || '0'),
         iscallbackapi: String(item.iscallbackapi ?? '0'),
-        callbackapi: item.callbackapi || `${PUBLIC_BASE_URL}/api/icallmate/callback`
+        callbackapi: item.callbackapi || `${requestBaseUrl}/api/icallmate/callback`
       }))
     };
 
@@ -2426,10 +2446,11 @@ app.post('/api/icallmate/outbound-campaign', async (req, res) => {
 });
 
 app.get('/icallmate/health', (req, res) => {
+  const requestBaseUrl = getRequestPublicBaseUrl(req);
   res.json({
     ok: true,
     websocket_path: '/icallmate/media',
-    websocket_url: `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`,
+    websocket_url: `${toWssUrl(requestBaseUrl, '/icallmate/media')}`,
     did: process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID,
     test_number: process.env.ICALLMATE_TEST_NUMBER || ICALLMATE_DEFAULT_TEST_NUMBER,
     timestamp: new Date().toISOString()
@@ -2437,9 +2458,10 @@ app.get('/icallmate/health', (req, res) => {
 });
 
 app.get('/icallmate/media', (req, res) => {
+  const requestBaseUrl = getRequestPublicBaseUrl(req);
   res.status(426).json({
     error: 'WebSocket upgrade required',
-    websocket_url: `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`,
+    websocket_url: `${toWssUrl(requestBaseUrl, '/icallmate/media')}`,
     expected_protocol: 'wss',
     did: process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID
   });
