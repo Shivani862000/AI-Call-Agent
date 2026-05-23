@@ -263,6 +263,8 @@ const PUBLIC_BASE_URL = (
 const GEMINI_WS_BASE_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
+const DISABLE_SCHEDULER = String(process.env.DISABLE_SCHEDULER || '').toLowerCase() === 'true';
+const DISABLE_OWNER_DIGEST = String(process.env.DISABLE_OWNER_DIGEST || '').toLowerCase() === 'true';
 const liveCallState = new Map();
 const incomingCallState = new Map();
 const pendingCallDiagnostics = new Map();
@@ -303,6 +305,8 @@ function logConfigSnapshot(scope = 'CONFIG') {
     REQUESTED_GEMINI_MODEL,
     GEMINI_MODEL,
     GEMINI_VOICE,
+    DISABLE_SCHEDULER,
+    DISABLE_OWNER_DIGEST,
     APP_BASE_URL: describeEnvValue(process.env.APP_BASE_URL || ''),
     NGROK_URL: describeEnvValue(process.env.NGROK_URL || ''),
     WEBHOOK_URL: describeEnvValue(process.env.WEBHOOK_URL || ''),
@@ -4794,29 +4798,37 @@ wss.on('connection', (twilioWs, req) => {
     await initializeDatabase();
     logConfigSnapshot('SERVER');
 
-    setInterval(() => {
-      runSchedulerTick().catch((error) => {
-        console.error('[SCHEDULER ERROR]', error.message);
-      });
-    }, 15000);
+    if (!DISABLE_SCHEDULER) {
+      setInterval(() => {
+        runSchedulerTick().catch((error) => {
+          console.error('[SCHEDULER ERROR]', error.message);
+        });
+      }, 15000);
+    }
 
-    setInterval(() => {
-      runOwnerDigestTick().catch((error) => {
-        console.error('[OWNER DIGEST ERROR]', error.message);
-      });
-    }, 60000);
+    if (!DISABLE_OWNER_DIGEST) {
+      setInterval(() => {
+        runOwnerDigestTick().catch((error) => {
+          console.error('[OWNER DIGEST ERROR]', error.message);
+        });
+      }, 60000);
+    }
 
     setInterval(() => {
       pruneLiveCallState();
     }, 60000);
 
-    runSchedulerTick().catch((error) => {
-      console.error('[SCHEDULER ERROR]', error.message);
-    });
+    if (!DISABLE_SCHEDULER) {
+      runSchedulerTick().catch((error) => {
+        console.error('[SCHEDULER ERROR]', error.message);
+      });
+    }
 
-    runOwnerDigestTick().catch((error) => {
-      console.error('[OWNER DIGEST ERROR]', error.message);
-    });
+    if (!DISABLE_OWNER_DIGEST) {
+      runOwnerDigestTick().catch((error) => {
+        console.error('[OWNER DIGEST ERROR]', error.message);
+      });
+    }
 
     server.listen(PORT, () => {
       console.log(`[SERVER] Running on http://localhost:${PORT}`);
@@ -4824,8 +4836,12 @@ wss.on('connection', (twilioWs, req) => {
       console.log(`[SERVER] Call mode: ${CALL_MODE}`);
       console.log(`[SERVER] Voice pipeline: ${VOICE_PIPELINE}`);
       console.log(`[SERVER] Realtime model: ${REALTIME_MODEL}`);
-      console.log('[SERVER] Scheduler active: checks pending customers every 15 seconds');
-      console.log('[SERVER] Owner digest active: checks 8 AM morning delivery every 60 seconds');
+      console.log(DISABLE_SCHEDULER
+        ? '[SERVER] Scheduler disabled by DISABLE_SCHEDULER=true'
+        : '[SERVER] Scheduler active: checks pending customers every 15 seconds');
+      console.log(DISABLE_OWNER_DIGEST
+        ? '[SERVER] Owner digest disabled by DISABLE_OWNER_DIGEST=true'
+        : '[SERVER] Owner digest active: checks 8 AM morning delivery every 60 seconds');
       console.log('[SERVER] Admin UI: http://localhost:3000/admin.html');
       console.log('[SERVER] Ready. Trigger a call with: curl -X POST http://localhost:3000/call/start');
     });
