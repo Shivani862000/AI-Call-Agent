@@ -3869,6 +3869,17 @@ icallMateWss.on('connection', (ws, req) => {
         notes: isExpectedAudio ? 'iCallMate media stream started' : 'iCallMate media stream started with unexpected audio format'
       });
       sendIcallMateMark(ws, message, 'start-received');
+
+      if (!session.answered) {
+        session.answered = true;
+        upsertIncomingCallFromIcall(message, {
+          status: 'active',
+          answered_at: normalizeIcallTimestamp(message.timestamp),
+          notes: 'Incoming call answered via start event'
+        });
+        aiBridge.start();
+        sendIcallMateMark(ws, message, 'answer-received');
+      }
       return;
     }
 
