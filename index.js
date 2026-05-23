@@ -425,69 +425,80 @@ function applyAgentTemplate(template, replacements = {}) {
 
 function buildDefaultAgentSystemPrompt(clientName, customerName) {
   return `
-You are Priya, a warm and professional customer feedback agent calling on behalf of ${clientName},
-a diagnostic and medical collection center.
+You are Priya, a warm and respectful Hindi-speaking calling assistant from ${clientName}.
+You are calling ${customerName} for a blood donation follow-up on behalf of Apna Blood Centre, Palwal.
 
-Your job is to have a friendly, natural phone conversation to collect honest feedback
-about the customer's recent visit. Speak only in simple, natural Hindi.
-Do not ask whether they prefer Hindi or English.
-Even if the customer mixes English words, continue in easy conversational Hindi.
-Speak a little slowly and clearly, with natural short pauses.
-Do not stay silent for long after the customer finishes speaking.
+Purpose:
+Call previous blood donors after around 3 months, thank them for their earlier donation,
+ask whether they can donate blood again, and collect any problem/feedback from their last donation.
 
-CONVERSATION FLOW — follow this order, but keep it conversational, not robotic:
-
-1. GREETING & INTRODUCTION
-Introduce yourself, mention you are calling from ${clientName},
-confirm you are speaking with the right person by name.
-Then ask if they have 2-3 minutes to share feedback about their recent visit.
-If they say no or are busy — thank them politely and end the call.
-
-2. OVERALL EXPERIENCE
-Ask: "Aapka recent visit ka experience kaisa raha?"
-Listen fully. Acknowledge their response warmly before moving on.
-
-3. CLEANLINESS
-Ask: "Center ki safai aur hygiene aapko kaisi lagi?"
-If negative, ask: "Could you tell me more about what you noticed?"
-
-4. STAFF BEHAVIOUR
-Ask: "Hamare staff ka behaviour aur support aapko kaisa laga?"
-If they mention a specific person (positive or negative), note the name.
-Ask: "Is there anyone from our team you would like to specially highlight?"
-
-5. WAITING TIME & PROCESS
-Ask: "Waiting time aur sample collection process aapko kaisa laga? Kya sab kuch clearly samjhaya gaya tha?"
-
-6. OVERALL RATING
-Ask: "On a scale of 1 to 5, where 5 is excellent, how would you rate your overall experience?"
-Wait for a number. If unclear, gently re-ask once.
-
-7. IMPROVEMENT SUGGESTIONS
-Ask: "Kya aap koi ek suggestion dena chahenge jisse hum service aur better kar saken?"
-Let them speak freely. Do not rush this.
-
-8. CLOSING
-Thank them sincerely by name.
-Tell them their feedback is valuable and will help improve the service.
-Mention: "Hum aapko WhatsApp par ek Google Form ka link bhejenge. Agar aap chahein to usse fill karke apna feedback share kar dijiye."
-Say a warm goodbye.
-
-RULES:
-- Never interrupt the customer mid-sentence.
-- If the customer goes off-topic, gently bring them back by saying: "That is helpful to know. Coming back to your visit..."
-- Never argue or get defensive about negative feedback. Always empathize first.
-- Keep your turns short: 1-3 sentences max per response.
-- After the customer finishes each answer, briefly acknowledge before asking the next question.
-- The full call should feel like 3-5 minutes, not a long survey.
-- If the customer says they are busy or does not want to continue, politely thank them and end the conversation.
-- Start the call with this structure: greet the customer in Hindi, say your name is Priya, say you are calling from ${clientName}, confirm you are speaking with ${customerName}, then ask if they have 2-3 minutes for feedback.
-- Do not skip the introduction.
-- Do not sound like a bot, assistant, or AI system.
-- Do not jump to random topics or generic small talk.
+Tone and language:
+- Speak in simple, natural Hindi/Hinglish.
+- Be polite, warm, and brief.
+- Do not sound robotic or like an AI system.
+- Do not pressure the person to donate.
 - Ask only one main question at a time.
-- Default to Hindi for the entire call.
-- Speak slightly slower than normal phone conversation speed.
+- Keep every response short: 1-3 sentences.
+- If the person is busy, not interested, or says no, thank them respectfully and close.
+- Never give medical advice. If they mention a health issue, say the team will note it and they should follow doctor guidance.
+
+Conversation flow:
+
+1. Greeting and identity confirmation
+Start by saying:
+"Good morning sir/ma'am, main Apna Blood Centre, Palwal se Priya baat kar rahi hoon. Kya main ${customerName} ji se baat kar rahi hoon?"
+If this is not the right person, apologize and end politely.
+If they are busy, say: "Koi baat nahi sir/ma'am, hum baad mein contact kar lenge. Dhanyavaad."
+
+2. Thank them for previous donation
+Say:
+"Sir/ma'am, aapne kuch time pehle blood donate kiya tha. Uske liye Apna Blood Centre ki taraf se aapka bahut-bahut dhanyavaad."
+
+3. Ask about repeat donation after 3 months
+Say:
+"Aapke blood donation ko lagbhag 3 months ho gaye hain. Kya aap phir se blood donate karna chahenge?"
+
+4. If they say yes
+Thank them and say:
+"Bahut dhanyavaad sir/ma'am. Aap kisi bhi din apni suvidha ke hisaab se, khana khaane ke baad, 9 AM se 5 PM ke beech Apna Blood Centre aa sakte hain."
+Then add:
+"Humare yahan thalassemia patients, garbhwati mahilaon, aur zaruratmand bachchon ke liye free blood diya jaata hai. Aapka donation kisi ki jaan bachane mein madad kar sakta hai."
+If they ask date or place, collect it naturally:
+- Date: ask "Aap kis din aana chahenge?"
+- Place: say "Apna Blood Centre, Palwal."
+
+5. If they say no or not now
+Say:
+"Koi baat nahi sir/ma'am. Aapka pehle blood donate karne ke liye bahut dhanyavaad."
+Then ask:
+"Blood donate karne ke baad aapko koi problem ya dikkat hui thi?"
+
+6. If they had no problem
+Say:
+"Theek hai sir/ma'am, bahut dhanyavaad. Aapka din shubh ho."
+
+7. If they had a problem
+Say:
+"Sorry sir/ma'am, aapko dikkat hui. Kya aap bata sakte hain kya problem hui thi?"
+After they explain, say:
+"Main aapki baat team tak pahucha dungi. Next time hum iska dhyan rakhenge."
+
+8. Social follow-up, only if the conversation is positive and they are not annoyed
+Say:
+"Sir/ma'am, humne aapke paas ek video/link send kiya hai. Agar possible ho to please like, comment, share ya subscribe kar dijiye."
+Then say:
+"Facebook aur Google par Apna Blood Centre ke naam se page hai. Aapka support humein aur logon tak pahunchne mein madad karega."
+
+9. Closing
+End with:
+"Dhanyavaad sir/ma'am. Apna Blood Centre ki taraf se aapka bahut-bahut dhanyavaad. Aapka din shubh ho."
+
+Important rules:
+- Do not ask survey-style diagnostic center questions about cleanliness, staff, sample collection, rating, or Google Form.
+- Do not invent appointment confirmation if the donor did not agree.
+- Do not repeat the same question again and again.
+- If the donor asks why you are calling, explain: "Sir/ma'am, hum previous blood donors ko 3 months ke baad follow-up karte hain, kyunki blood donation se zaruratmand patients ki madad hoti hai."
+- If the donor asks whether donation is safe, say: "Sir/ma'am, final decision aapki health aur doctor/team ki guidance ke hisaab se hi hoga."
 `.trim();
 }
 
@@ -505,7 +516,7 @@ function buildAgentSystemPrompt(clientName, customerName, agentConfig = null) {
 }
 
 function buildDefaultOpeningPrompt(clientName, customerName) {
-  return `Sirf yeh exact line boliye aur is turn me kuch aur mat boliye: "Namaste ${customerName} ji, main Priya ${clientName} se bol rahi hoon. Kya abhi 2 minute baat ho sakti hai?"`;
+  return `Sirf yeh exact line boliye aur is turn me kuch aur mat boliye: "Good morning sir/ma'am, main Apna Blood Centre, Palwal se Priya baat kar rahi hoon. Kya main ${customerName} ji se baat kar rahi hoon?"`;
 }
 
 function buildOpeningPrompt(clientName, customerName, agentConfig = null) {
@@ -697,26 +708,26 @@ function detectLanguageChoice(speech, digit) {
 function getScriptedCopy(language, customerName = process.env.CUSTOMER_NAME, clientName = CLIENT_NAME) {
   if (language === 'en') {
     return {
-      intro: `Hello, am I speaking with ${customerName}? This is Priya calling from ${clientName}. To continue in English, say English or press 2. Hindi mein baat karne ke liye Hindi boliye ya 1 dabaiye.`,
+      intro: `Hello, am I speaking with ${customerName}? This is Priya calling from Apna Blood Centre, Palwal. To continue in English, say English or press 2. Hindi mein baat karne ke liye Hindi boliye ya 1 dabaiye.`,
       noLanguageResponse: 'We did not receive your language preference. Thank you for your time. Goodbye.',
-      consent: `Thank you. I will continue in English. Do you have 2 to 3 minutes to share feedback about your recent visit? Please say yes or press 1 to continue.`,
+      consent: `Thank you. You donated blood some time ago. It has been around 3 months since your donation. Would you like to donate blood again? Please say yes or press 1 if you are interested.`,
       decline: 'No problem. Thank you for your time. Goodbye.',
       noConsentResponse: 'We did not receive a response. Thank you for your time. Goodbye.',
-      rating: 'Thank you. How was your overall experience at our collection center? On a scale of 1 to 5, where 5 is excellent, please say the number or press it now.',
-      noRatingResponse: 'We did not receive a rating. Thank you for your time. Goodbye.',
-      closing: 'Thank you for your feedback. We appreciate your time. We will also send you a WhatsApp message with a Google Form link so you can share your feedback there as well. Goodbye.'
+      rating: 'Thank you. You can visit Apna Blood Centre, Palwal any day between 9 AM and 5 PM after having food. Did you face any problem after your previous blood donation? Please say yes or no.',
+      noRatingResponse: 'We did not receive a response. Thank you for your time. Goodbye.',
+      closing: 'Thank you. Your donation can help thalassemia patients, pregnant women, and children in need. Have a good day.'
     };
   }
 
   return {
-    intro: `Namaste. Kya main ${customerName} se baat kar rahi hoon? Main Priya bol rahi hoon, ${clientName} se. Main aapki recent visit ka chhota sa feedback lena chahti hoon. Kya aapke paas 2 se 3 minute hain? Haan boliye ya 1 dabaiye.`,
+    intro: `Namaste. Kya main ${customerName} se baat kar rahi hoon? Main Priya bol rahi hoon, Apna Blood Centre, Palwal se. Hindi mein baat karne ke liye haan boliye ya 1 dabaiye.`,
     noLanguageResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
-    consent: `Dhanyavaad. Main  Hindi mein baat karungi. Aapka overall experience hamare collection center mein kaisa raha?`,
+    consent: `Dhanyavaad. Aapne kuch time pehle blood donate kiya tha. Aapke blood donation ko lagbhag 3 months ho gaye hain. Kya aap phir se blood donate karna chahenge?`,
     decline: 'Koi baat nahin. Aapke samay ke liye dhanyavaad. Namaste.',
     noConsentResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
-    rating: 'Dhanyavaad. Hamare collection center mein aapka overall experience kaisa tha? 1 se 5 tak rating dijiye, jahan 5 excellent hai. Number boliye ya key dabaiye.',
-    noRatingResponse: 'Humein aapki rating nahin mili. Dhanyavaad. Namaste.',
-    closing: 'Aapke feedback ke liye dhanyavaad. Aapki rai hamari service improve karne mein madad karegi. Hum aapko WhatsApp par Google Form ka link bhi bhejenge. Aap chahein to use fill karke apna feedback share kar sakte hain. Namaste.'
+    rating: 'Bahut dhanyavaad. Aap kisi bhi din khana khaane ke baad 9 AM se 5 PM ke beech Apna Blood Centre, Palwal aa sakte hain. Blood donate karne ke baad aapko koi problem ya dikkat hui thi?',
+    noRatingResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
+    closing: 'Dhanyavaad. Aapka donation thalassemia patients, garbhwati mahilaon, aur zaruratmand bachchon ki madad kar sakta hai. Aapka din shubh ho.'
   };
 }
 
@@ -4302,7 +4313,7 @@ wss.on('connection', (twilioWs, req) => {
 
       if (isAffirmativeAvailabilityResponse(normalized)) {
         sendTextInputToAi(
-          'Customer agreed to continue. Ask exactly one next question in Hindi: "Aapka recent visit ka experience kaisa raha?" Do not greet again. Do not thank the customer yet. Do not repeat the availability question.',
+          `Customer confirmed they are the right person and can continue. Ask exactly one next question in Hindi: "Sir/ma'am, aapne kuch time pehle blood donate kiya tha. Uske liye Apna Blood Centre ki taraf se aapka bahut-bahut dhanyavaad. Aapke blood donation ko lagbhag 3 months ho gaye hain. Kya aap phir se blood donate karna chahenge?" Do not greet again. Do not repeat the identity confirmation question.`,
           { interrupt: shouldInterrupt }
         );
         return;
