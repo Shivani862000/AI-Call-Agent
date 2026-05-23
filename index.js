@@ -254,10 +254,10 @@ const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical coll
 const HARDCODED_PUBLIC_BASE_URL = 'https://winter-undeclamatory-unstammeringly.ngrok-free.dev';
 const SERVER_NAME_BASE_URL = process.env.SERVER_NAME ? `https://${String(process.env.SERVER_NAME).replace(/^https?:\/\//i, '').replace(/\/+$/g, '')}` : '';
 const PUBLIC_BASE_URL = (
-  process.env.APP_BASE_URL
+  SERVER_NAME_BASE_URL
+  || process.env.APP_BASE_URL
   || process.env.NGROK_URL
   || process.env.WEBHOOK_URL
-  || SERVER_NAME_BASE_URL
   || HARDCODED_PUBLIC_BASE_URL
 ).replace(/\/$/, '');
 const GEMINI_WS_BASE_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
