@@ -269,6 +269,8 @@ const pendingCallDiagnostics = new Map();
 const LIVE_CALL_RETENTION_MS = 20 * 60 * 1000;
 const LIVE_CALL_ACTIVE_STALE_MS = 90 * 60 * 1000;
 const INCOMING_CALL_RETENTION_MS = 60 * 60 * 1000;
+const ICALLMATE_DEFAULT_DID = '07971644996';
+const ICALLMATE_DEFAULT_TEST_NUMBER = '+918037259753';
 const CALL_DIAGNOSTIC_WARN_MS = Math.max(Number(process.env.CALL_DIAGNOSTIC_WARN_MS || 20000) || 20000, 5000);
 
 function redactSecret(value, visiblePrefix = 4, visibleSuffix = 4) {
@@ -2280,8 +2282,8 @@ app.get('/api/calls/incoming', async (req, res) => {
 app.get('/api/icallmate/config', async (req, res) => {
   res.json({
     websocket_url: `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`,
-    did: process.env.ICALLMATE_DID || '',
-    test_number: process.env.ICALLMATE_TEST_NUMBER || '',
+    did: process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID,
+    test_number: process.env.ICALLMATE_TEST_NUMBER || ICALLMATE_DEFAULT_TEST_NUMBER,
     incoming_api_endpoint: process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in',
     outbound_api_endpoint: process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in',
     callback_url: `${PUBLIC_BASE_URL}/api/icallmate/callback`,
@@ -2330,7 +2332,7 @@ app.post('/api/icallmate/callback', async (req, res) => {
 
 app.post('/api/icallmate/incoming-config', async (req, res) => {
   try {
-    const dnisNo = String(req.body.dnisNo || req.body.virtualNumber || process.env.ICALLMATE_DID || '').trim();
+    const dnisNo = String(req.body.dnisNo || req.body.virtualNumber || process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID).trim();
     if (!dnisNo) {
       return res.status(400).json({ error: 'dnisNo or virtualNumber is required' });
     }
@@ -2428,8 +2430,8 @@ app.get('/icallmate/health', (req, res) => {
     ok: true,
     websocket_path: '/icallmate/media',
     websocket_url: `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`,
-    did: process.env.ICALLMATE_DID || '',
-    test_number: process.env.ICALLMATE_TEST_NUMBER || '',
+    did: process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID,
+    test_number: process.env.ICALLMATE_TEST_NUMBER || ICALLMATE_DEFAULT_TEST_NUMBER,
     timestamp: new Date().toISOString()
   });
 });
@@ -2439,7 +2441,7 @@ app.get('/icallmate/media', (req, res) => {
     error: 'WebSocket upgrade required',
     websocket_url: `${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`,
     expected_protocol: 'wss',
-    did: process.env.ICALLMATE_DID || ''
+    did: process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID
   });
 });
 
