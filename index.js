@@ -3565,7 +3565,7 @@ function sendIcallMateReverseMedia(ws, session, pcmBuffer) {
     const chunk = buffer.subarray(offset, Math.min(offset + 3200, buffer.length));
     sendIcallMateJson(ws, {
       event: 'reverse-media',
-      encoding: 'LINEAR',
+      encoding: 'LINEAR16',
       streamId: session.streamId,
       callerId: session.callerId,
       did: session.did,
