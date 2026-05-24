@@ -2099,6 +2099,14 @@ app.post('/api/icallmate/callback', async (req, res) => {
     const key = String(payload.ref_no || payload.leadid || payload.phoneno || `${Date.now()}`);
     const callType = String(payload.call_type || '').toLowerCase();
     const status = String(payload.call_status || '') === '1' ? 'completed' : 'missed';
+    const eventName = payload.event || payload.call_event || payload.call_status || 'callback';
+    const callerId = payload.callerId || payload.phoneno || payload.customer_number || '';
+    const did = payload.did || payload.serviceno || payload.dnis || '';
+
+    console.log(
+      `[ICALLMATE CALLBACK] event=${eventName} key=${key} callerId=${callerId} did=${did} ` +
+      `callType=${callType || 'unknown'} status=${status}`
+    );
 
     if (callType === 'inbound' || callType === 'inbou' || !callType) {
       incomingCallState.set(key, {
