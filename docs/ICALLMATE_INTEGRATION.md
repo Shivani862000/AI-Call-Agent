@@ -20,32 +20,32 @@ iCallMate should set these DNIS macros for the virtual number:
 ```json
 [
   {
-    "dnisNo": "07971644996",
+    "dnisNo": "8037259753",
     "macroName": "llm_wssurl",
     "macroValue": "wss://<APP_BASE_URL>/icallmate/media"
   },
   {
-    "dnisNo": "07971644996",
+    "dnisNo": "8037259753",
     "macroName": "llm_botid",
     "macroValue": "0"
   },
   {
-    "dnisNo": "07971644996",
+    "dnisNo": "8037259753",
     "macroName": "llm_agentid",
     "macroValue": "0"
   },
   {
-    "dnisNo": "07971644996",
+    "dnisNo": "8037259753",
     "macroName": "llm_extraparam",
     "macroValue": "path-lab"
   },
   {
-    "dnisNo": "07971644996",
+    "dnisNo": "8037259753",
     "macroName": "llm_iscallbackapi",
     "macroValue": "0"
   },
   {
-    "dnisNo": "07971644996",
+    "dnisNo": "8037259753",
     "macroName": "llm_callbackapi",
     "macroValue": "https://<APP_BASE_URL>/api/icallmate/callback"
   }
@@ -57,7 +57,7 @@ The app also has a helper endpoint to post these macros:
 ```bash
 curl -X POST http://localhost:3000/api/icallmate/incoming-config \
   -H "Content-Type: application/json" \
-  -d '{"dnisNo":"07971644996","dryRun":"true"}'
+  -d '{"dnisNo":"8037259753","dryRun":"true"}'
 ```
 
 Remove `dryRun` after confirming credentials/network access.
@@ -81,7 +81,7 @@ App to telephony:
 
 ## What We Need From iCallMate
 
-- Confirm virtual number/DID: `07971644996`
+- Confirm virtual number/DID: `8037259753`
 - Confirm public deployed domain for `APP_BASE_URL`
 - Test `ukey`, `serviceno`, `ivrtemplateid`, `agentid`, and `botid`
 - Whether callback API should be enabled with `llm_iscallbackapi=1` or left as `0`
