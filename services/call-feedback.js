@@ -376,7 +376,7 @@ async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, customerI
     return { saved: false, reason: 'missing_call_or_transcript' };
   }
 
-  const callRecord = await dbGet('SELECT * FROM calls WHERE twilio_sid = ?', [callSid]);
+  const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [callSid]);
   const resolvedCustomerId = customerId || callRecord?.customer_id;
 
   if (!callRecord || !resolvedCustomerId) {

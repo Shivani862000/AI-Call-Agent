@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const { analyzeCallTranscript, transcribeAudioFile, categorizeFeedback } = require('./openai');
 const { extractCallFeedback } = require('./call-feedback');
-const { buildExotelAuthHeader } = require('./exotel');
 const {
   detectConversationOutcome,
   detectObjectionsAndCompetitors,
@@ -25,11 +24,7 @@ async function downloadRecording(recordingUrl, callSid) {
   }
 
   await ensureRecordingsDir();
-  const response = await fetch(recordingUrl, {
-    headers: {
-      Authorization: buildExotelAuthHeader()
-    }
-  });
+  const response = await fetch(recordingUrl);
 
   if (!response.ok) {
     throw new Error(`Recording download failed with status ${response.status}`);
@@ -116,7 +111,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone
      FROM calls
      LEFT JOIN customers ON customers.id = calls.customer_id
-     WHERE calls.twilio_sid = ?`,
+     WHERE calls.provider_call_id = ?`,
     [callSid]
   );
 
@@ -129,7 +124,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
   let recordingLocalPath = callRecord.recording_local_path || null;
   if (!recordingLocalPath && callRecord.recording_url) {
     try {
-      recordingLocalPath = await downloadRecording(callRecord.recording_url, callRecord.twilio_sid);
+      recordingLocalPath = await downloadRecording(callRecord.recording_url, callRecord.provider_call_id);
       await dbRun('UPDATE calls SET recording_local_path = ? WHERE id = ?', [recordingLocalPath, callRecord.id]);
     } catch (error) {
       await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['download_failed', 'blocked', callRecord.id]);

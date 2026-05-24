@@ -595,7 +595,7 @@ async function seed() {
 
     const result = await run(
       `INSERT INTO calls (
-        customer_id, called_at, outcome, twilio_sid, transcript_text, consent_detected, language,
+        customer_id, called_at, outcome, provider_call_id, transcript_text, consent_detected, language,
         extracted_rating, extracted_review_text, recording_status, transcript_status, transcript_source,
         analysis_status, analysis_summary, report_excerpt, outcome_detail, fallback_triggered,
         sentiment_label, sentiment_score, hot_lead_score, next_action_at, follow_up_task,

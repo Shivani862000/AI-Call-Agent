@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { generateReportPDF } = require('../services/pdf');
 const { sendEmailWithAttachment, sendSimpleEmail } = require('../services/email');
-const { sendWhatsAppMessage } = require('../services/exotel');
+const { sendWhatsAppMessage } = require('../services/icallmate');
 const { buildReportData, buildWeeklySummary, buildOwnerDashboardData, getCurrentWeekDateRange } = require('../services/reporting');
 
 function weeklyTimestampFilename(prefix = 'Weekly-Report') {
@@ -183,7 +183,7 @@ router.post('/owner-digest/send', async (req, res) => {
       );
     }
 
-    if (process.env.OWNER_PHONE && process.env.EXOTEL_WHATSAPP_FROM) {
+    if (process.env.OWNER_PHONE && process.env.ICALLMATE_WHATSAPP_ENABLED === 'true') {
       await sendWhatsAppMessage(process.env.OWNER_PHONE, digest.digest_text);
       whatsappSent = true;
     }

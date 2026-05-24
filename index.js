@@ -17,12 +17,9 @@ const { processCompletedCallPipeline } = require('./services/post-call-pipeline'
 const { buildOwnerDashboardData } = require('./services/reporting');
 const { sendSimpleEmail } = require('./services/email');
 const {
-  buildExotelAuthHeader,
-  fetchCallDetails,
-  getRecordingUrlFromCallDetails,
   initiateCall,
   sendWhatsAppMessage
-} = require('./services/exotel');
+} = require('./services/icallmate');
 const {
   buildPreCallIntelligence,
   computePriorityScore,
@@ -50,7 +47,7 @@ const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD = '1234';
 const AUTH_COOKIE_NAME = 'feedback_admin_session';
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const AUTH_SIGNING_SECRET = process.env.AUTH_SIGNING_SECRET || process.env.SESSION_SECRET || process.env.EXOTEL_API_TOKEN || 'feedback-admin-auth-secret';
+const AUTH_SIGNING_SECRET = process.env.AUTH_SIGNING_SECRET || process.env.SESSION_SECRET || process.env.ICALLMATE_UKEY || 'feedback-admin-auth-secret';
 
 function parseCookies(req) {
   const header = String(req.headers.cookie || '');
@@ -311,16 +308,13 @@ function logConfigSnapshot(scope = 'CONFIG') {
     NGROK_URL: describeEnvValue(process.env.NGROK_URL || ''),
     WEBHOOK_URL: describeEnvValue(process.env.WEBHOOK_URL || ''),
     SERVER_NAME: describeEnvValue(process.env.SERVER_NAME || ''),
-    EXOTEL_API_HOST: process.env.EXOTEL_API_HOST || '',
-    EXOTEL_SID: redactSecret(process.env.EXOTEL_SID),
-    EXOTEL_APP_ID: process.env.EXOTEL_APP_ID || '',
-    EXOTEL_FLOW_URL: process.env.EXOTEL_FLOW_URL || process.env.EXOTEL_APPLET_URL || '',
-    EXOTEL_VOICEBOT_URL: process.env.EXOTEL_VOICEBOT_URL || '',
-    EXOTEL_APPLET_URL: process.env.EXOTEL_APPLET_URL || '',
-    EXOTEL_CALLER_ID: process.env.EXOTEL_CALLER_ID || '',
-    EXOTEL_WHATSAPP_FROM: process.env.EXOTEL_WHATSAPP_FROM || '',
-    EXOTEL_API_KEY_PRESENT: Boolean(process.env.EXOTEL_API_KEY),
-    EXOTEL_API_TOKEN_PRESENT: Boolean(process.env.EXOTEL_API_TOKEN),
+    ICALLMATE_IBD_API_ENDPOINT: process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in',
+    ICALLMATE_OBD_API_ENDPOINT: process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in',
+    ICALLMATE_DID: process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID,
+    ICALLMATE_SERVICE_NO: process.env.ICALLMATE_SERVICE_NO || '',
+    ICALLMATE_IVR_TEMPLATE_ID: process.env.ICALLMATE_IVR_TEMPLATE_ID || '',
+    ICALLMATE_AGENT_ID: process.env.ICALLMATE_AGENT_ID || '',
+    ICALLMATE_UKEY_PRESENT: Boolean(process.env.ICALLMATE_UKEY),
     GEMINI_API_KEY_PRESENT: Boolean(process.env.GEMINI_API_KEY),
     DEEPGRAM_API_KEY_PRESENT: Boolean(process.env.DEEPGRAM_API_KEY),
     DATABASE_URL: process.env.DATABASE_URL || ''
@@ -401,7 +395,7 @@ function schedulePendingCallDiagnostic(callSid, context = {}) {
       `[CALL DIAGNOSTIC WARNING] sid=${callSid} customerId=${latest.customerId || ''} ` +
       `phone=${latest.customerPhone || ''} voicebotHit=${latest.voicebotHitAt ? 'yes' : 'no'} ` +
       `streamHit=${latest.streamHitAt ? 'yes' : 'no'} statusHit=${latest.statusHitAt ? 'yes' : 'no'} ` +
-      `publicBaseUrl=${PUBLIC_BASE_URL} voicebotUrl=${process.env.EXOTEL_VOICEBOT_URL || ''}`
+      `publicBaseUrl=${PUBLIC_BASE_URL} icallmateMediaUrl=${toWssUrl(PUBLIC_BASE_URL, '/icallmate/media')}`
     );
   }, CALL_DIAGNOSTIC_WARN_MS);
 
@@ -546,23 +540,14 @@ async function getDefaultAgentConfig() {
 }
 
 function validateConfig() {
-  const missing = [
-    'EXOTEL_SID',
-    'EXOTEL_API_KEY',
-    'EXOTEL_API_TOKEN',
-    'EXOTEL_CALLER_ID'
-  ].filter((key) => !process.env[key]);
-
-  if (!process.env.EXOTEL_FLOW_URL && !process.env.EXOTEL_APPLET_URL) {
-    missing.push('EXOTEL_FLOW_URL or EXOTEL_APPLET_URL');
-  }
+  const missing = [];
 
   if (!process.env.GEMINI_API_KEY) {
     missing.push('GEMINI_API_KEY');
   }
 
   if (USE_ORCHESTRATED_PIPELINE) {
-    throw new Error('VOICE_PIPELINE=orchestrated is no longer supported after removing third-party TTS. Use VOICE_PIPELINE=legacy.');
+    throw new Error('VOICE_PIPELINE=orchestrated is no longer supported. iCallMate media is the only voice stream path.');
   }
 
   if (!PUBLIC_BASE_URL) {
@@ -620,7 +605,7 @@ async function runOwnerDigestTick() {
       await sendSimpleEmail(process.env.OWNER_EMAIL, `CEO Morning Digest — ${todayKey}`, lines);
     }
 
-    if (process.env.OWNER_PHONE && process.env.EXOTEL_WHATSAPP_FROM) {
+    if (process.env.OWNER_PHONE && process.env.ICALLMATE_WHATSAPP_ENABLED === 'true') {
       await sendWhatsAppMessage(process.env.OWNER_PHONE, digest.digest_text);
     }
 
@@ -799,61 +784,6 @@ function buildScriptedRatingResponse(req) {
   <Hangup />`);
 }
 
-function mulawToLinearSample(value) {
-  const MULAW_BIAS = 0x84;
-  let sample = ~value & 0xff;
-  const sign = sample & 0x80;
-  const exponent = (sample >> 4) & 0x07;
-  const mantissa = sample & 0x0f;
-  sample = ((mantissa << 3) + MULAW_BIAS) << exponent;
-  return sign ? (MULAW_BIAS - sample) : (sample - MULAW_BIAS);
-}
-
-function decodeMuLaw(base64Payload) {
-  const input = Buffer.from(base64Payload, 'base64');
-  const output = Buffer.alloc(input.length * 2);
-
-  for (let i = 0; i < input.length; i += 1) {
-    output.writeInt16LE(mulawToLinearSample(input[i]), i * 2);
-  }
-
-  return output;
-}
-
-function linearToMuLawSample(sample) {
-  const MULAW_MAX = 0x1fff;
-  const MULAW_BIAS = 33;
-  let pcm = Math.max(-32768, Math.min(32767, sample));
-  let sign = 0;
-
-  if (pcm < 0) {
-    sign = 0x80;
-    pcm = -pcm;
-  }
-
-  pcm = Math.min(pcm, MULAW_MAX);
-  pcm += MULAW_BIAS;
-
-  let exponent = 7;
-  for (let expMask = 0x4000; (pcm & expMask) === 0 && exponent > 0; expMask >>= 1) {
-    exponent -= 1;
-  }
-
-  const mantissa = (pcm >> (exponent + 3)) & 0x0f;
-  return ~(sign | (exponent << 4) | mantissa) & 0xff;
-}
-
-function encodeMuLawFromPcm16(buffer) {
-  const sampleCount = Math.floor(buffer.length / 2);
-  const output = Buffer.alloc(sampleCount);
-
-  for (let i = 0; i < sampleCount; i += 1) {
-    output[i] = linearToMuLawSample(buffer.readInt16LE(i * 2));
-  }
-
-  return output;
-}
-
 function resamplePcm16(buffer, fromRate, toRate) {
   if (!buffer.length || fromRate === toRate) {
     return buffer;
@@ -890,64 +820,6 @@ function normalizePhoneLookupValue(value) {
   return digits;
 }
 
-function getTransportModeFromStartPayload(start = {}, req = null) {
-  const hintedProvider = req ? new URL(req.url, 'http://localhost').searchParams.get('provider') : '';
-  if (hintedProvider === 'exotel') {
-    return 'exotel';
-  }
-
-  const customParameters = getCustomParametersFromStart(start);
-  const customProvider = String(
-    customParameters.provider
-    || customParameters.Provider
-    || start.provider
-    || start.Provider
-    || ''
-  ).toLowerCase();
-  if (customProvider === 'exotel') {
-    return 'exotel';
-  }
-
-  if (start.account_sid || start.accountSid) {
-    return 'exotel';
-  }
-
-  const mediaFormat = start.mediaFormat || start.media_format || {};
-  const encoding = String(mediaFormat.encoding || '').toLowerCase();
-  if (encoding.includes('raw') || encoding.includes('slin') || encoding.includes('pcm')) {
-    return 'exotel';
-  }
-
-  return 'twilio';
-}
-
-function extractStartPayload(message = {}) {
-  return message.start || {};
-}
-
-function getStreamSidFromMessage(message = {}) {
-  const start = extractStartPayload(message);
-  return (
-    start.streamSid
-    || start.stream_sid
-    || message.streamSid
-    || message.stream_sid
-    || null
-  );
-}
-
-function getCallSidFromStart(start = {}) {
-  return start.callSid || start.call_sid || null;
-}
-
-function getCustomParametersFromStart(start = {}) {
-  return start.customParameters || start.custom_parameters || {};
-}
-
-function getMediaPayload(message = {}) {
-  return message?.media?.payload || null;
-}
-
 function usesGeminiRealtimeTextInput(modelName) {
   return /gemini-3\.1/i.test(String(modelName || ''));
 }
@@ -960,14 +832,14 @@ function buildGeminiWsUrl() {
   return url.toString();
 }
 
-function createDeepgramListenUrl(transportMode = 'twilio') {
+function createDeepgramListenUrl() {
   const url = new URL('wss://api.deepgram.com/v1/listen');
   url.searchParams.set('model', 'nova-2');
   url.searchParams.set('language', 'hi');
   url.searchParams.set('interim_results', 'true');
   url.searchParams.set('endpointing', '300');
   url.searchParams.set('smart_format', 'true');
-  url.searchParams.set('encoding', transportMode === 'exotel' ? 'linear16' : 'mulaw');
+  url.searchParams.set('encoding', 'linear16');
   url.searchParams.set('sample_rate', '8000');
   url.searchParams.set('channels', '1');
   return url.toString();
@@ -1086,11 +958,13 @@ async function streamSynthesizedAudio() {
 }
 
 async function placeRealtimeCall({ customerPhone, customerName, customerId, clientName, agentId }) {
-  const statusUrl = `${PUBLIC_BASE_URL}/call/status${customerId ? `?customerId=${encodeURIComponent(String(customerId))}` : ''}`;
-  return initiateCall(customerPhone, customerId, statusUrl, {
+  return initiateCall(customerPhone, customerId, {
+    baseUrl: PUBLIC_BASE_URL,
     customerName,
     clientName,
-    agentId
+    agentId,
+    wsurl: toWssUrl(PUBLIC_BASE_URL, '/icallmate/media'),
+    callbackapi: `${PUBLIC_BASE_URL}/api/icallmate/callback`
   });
 }
 
@@ -1554,7 +1428,7 @@ async function triggerScheduledCalls() {
 
       await dbRun(
         `INSERT INTO calls (
-          customer_id, agent_id, outcome, twilio_sid, called_at, hot_lead_score,
+          customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
           consent_message_played, call_script_version, supervisor_alert_level
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
@@ -1654,7 +1528,7 @@ async function triggerAnnualClientReminderCalls() {
 
       await dbRun(
         `INSERT INTO calls (
-          customer_id, agent_id, outcome, twilio_sid, called_at, hot_lead_score,
+          customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
           consent_message_played, call_script_version, supervisor_alert_level
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
@@ -1909,8 +1783,7 @@ app.post('/call/start', async (req, res) => {
     }
 
     console.log(
-      `[CALL REQUEST] to=${customerPhone} callerId=${process.env.EXOTEL_CALLER_ID} ` +
-      `applet=${process.env.EXOTEL_APPLET_URL} baseUrl=${PUBLIC_BASE_URL} ` +
+      `[CALL REQUEST] to=${customerPhone} serviceNo=${process.env.ICALLMATE_SERVICE_NO || ''} baseUrl=${PUBLIC_BASE_URL} ` +
       `mode=${CALL_MODE} pipeline=${VOICE_PIPELINE} model=${REALTIME_MODEL}`
     );
     console.log(
@@ -1919,11 +1792,9 @@ app.post('/call/start', async (req, res) => {
       `NGROK_URL=${describeEnvValue(process.env.NGROK_URL || '')} ` +
       `WEBHOOK_URL=${describeEnvValue(process.env.WEBHOOK_URL || '')} ` +
       `SERVER_NAME=${describeEnvValue(process.env.SERVER_NAME || '')} ` +
-      `EXOTEL_API_HOST=${process.env.EXOTEL_API_HOST || ''} ` +
-      `EXOTEL_SID=${redactSecret(process.env.EXOTEL_SID)} ` +
-      `EXOTEL_APP_ID=${process.env.EXOTEL_APP_ID || ''} ` +
-      `EXOTEL_FLOW_URL=${process.env.EXOTEL_FLOW_URL || process.env.EXOTEL_APPLET_URL || ''} ` +
-      `EXOTEL_VOICEBOT_URL=${process.env.EXOTEL_VOICEBOT_URL || ''} ` +
+      `ICALLMATE_OBD_API_ENDPOINT=${process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in'} ` +
+      `ICALLMATE_SERVICE_NO=${process.env.ICALLMATE_SERVICE_NO || ''} ` +
+      `ICALLMATE_IVR_TEMPLATE_ID=${process.env.ICALLMATE_IVR_TEMPLATE_ID || ''} ` +
       `GEMINI_MODEL=${GEMINI_MODEL} ` +
       `GEMINI_VOICE=${GEMINI_VOICE} ` +
       `TZ=${process.env.TZ || ''}`
@@ -1938,7 +1809,7 @@ app.post('/call/start', async (req, res) => {
 
     const result = await dbRun(
       `INSERT INTO calls (
-        customer_id, agent_id, outcome, twilio_sid, called_at, hot_lead_score,
+        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
         consent_message_played, call_script_version, supervisor_alert_level
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -1977,45 +1848,6 @@ app.post('/call/start', async (req, res) => {
   }
 });
 
-app.get('/call/twiml', (req, res) => {
-  const customerName = req.query.customerName || process.env.CUSTOMER_NAME;
-  const clientName = req.query.clientName || CLIENT_NAME;
-  const agentId = req.query.agentId || '';
-
-  if (CALL_MODE === 'scripted') {
-    console.log('[CALL FLOW] Serving scripted XML flow');
-    res.type('text/xml').send(buildScriptedTwiml(customerName, clientName));
-    return;
-  }
-
-  const streamUrl = toWssUrl(PUBLIC_BASE_URL, '/call/stream');
-  console.log(`[CALL FLOW] Serving stream XML with URL: ${streamUrl}`);
-  console.log(`[CALL FLOW] customer=${customerName} client=${clientName} agentId=${agentId || 'none'}`);
-  console.log(
-    `[CALL FLOW CONFIG] ` +
-    `APP_BASE_URL=${describeEnvValue(process.env.APP_BASE_URL || '')} ` +
-    `NGROK_URL=${describeEnvValue(process.env.NGROK_URL || '')} ` +
-    `WEBHOOK_URL=${describeEnvValue(process.env.WEBHOOK_URL || '')} ` +
-    `PUBLIC_BASE_URL=${describeEnvValue(PUBLIC_BASE_URL)} ` +
-    `CALL_MODE=${CALL_MODE} ` +
-    `VOICE_PIPELINE=${VOICE_PIPELINE} ` +
-    `REALTIME_MODEL=${REALTIME_MODEL}`
-  );
-  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Connect>
-    <Stream url="${xmlEscape(streamUrl)}" track="inbound_track">
-      <Parameter name="customerName" value="${xmlEscape(customerName)}" />
-      <Parameter name="clientName" value="${xmlEscape(clientName)}" />
-      <Parameter name="customerId" value="${xmlEscape(req.query.customerId || '')}" />
-      <Parameter name="agentId" value="${xmlEscape(agentId)}" />
-    </Stream>
-  </Connect>
-</Response>`;
-
-  res.type('text/xml').send(twiml);
-});
-
 app.post('/call/scripted/consent', (req, res) => {
   console.log(`[SCRIPTED] Consent lang=${req.query.lang || 'hi'} digits=${req.body.Digits || ''} speech=${req.body.SpeechResult || ''}`);
   res.type('text/xml').send(buildScriptedConsentResponse(req));
@@ -2028,74 +1860,6 @@ app.post('/call/scripted/language', (req, res) => {
 
 app.post('/call/scripted/rating', (req, res) => {
   res.type('text/xml').send(buildScriptedRatingResponse(req));
-});
-
-app.all('/call/exotel/voicebot-url', async (req, res) => {
-  try {
-    const provider = 'exotel';
-    const query = new URLSearchParams({ provider });
-
-    const hintedPhone =
-      req.body?.From
-      || req.query?.From
-      || req.body?.from
-      || req.query?.from
-      || '';
-
-    const hintedCallSid =
-      req.body?.CallSid
-      || req.query?.CallSid
-      || req.body?.call_sid
-      || req.query?.call_sid
-      || '';
-
-    if (hintedCallSid) {
-      markPendingCallDiagnostic(hintedCallSid, {
-        voicebotHitAt: new Date().toISOString(),
-        voicebotMethod: req.method,
-        voicebotBodyKeys: Object.keys(req.body || {}),
-        voicebotQueryKeys: Object.keys(req.query || {})
-      });
-    }
-
-    if (hintedPhone) {
-      query.set('from', hintedPhone);
-    }
-
-    if (hintedCallSid) {
-      query.set('callSid', hintedCallSid);
-    }
-
-    const streamUrl = `${toWssUrl(PUBLIC_BASE_URL, '/call/stream')}?${query.toString()}`;
-    const traceMarker = {
-      method: req.method,
-      path: req.originalUrl,
-      ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '',
-      userAgent: req.headers['user-agent'] || '',
-      host: req.headers.host || '',
-      from: hintedPhone || '',
-      callSid: hintedCallSid || '',
-      query: req.query || {},
-      bodyKeys: Object.keys(req.body || {}),
-      timestamp: new Date().toISOString()
-    };
-    console.log(
-      `[EXOTEL VOICEBOT HIT] provider=${provider} streamUrl=${streamUrl} ` +
-      `marker=${JSON.stringify(traceMarker)} ` +
-      `APP_BASE_URL=${describeEnvValue(process.env.APP_BASE_URL || '')} ` +
-      `NGROK_URL=${describeEnvValue(process.env.NGROK_URL || '')} ` +
-      `WEBHOOK_URL=${describeEnvValue(process.env.WEBHOOK_URL || '')} ` +
-      `PUBLIC_BASE_URL=${describeEnvValue(PUBLIC_BASE_URL)} ` +
-      `EXOTEL_FLOW_URL=${process.env.EXOTEL_FLOW_URL || process.env.EXOTEL_APPLET_URL || ''} ` +
-      `EXOTEL_VOICEBOT_URL=${process.env.EXOTEL_VOICEBOT_URL || ''}`
-    );
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('X-Exotel-Voicebot-Hit', 'true');
-    res.json({ url: streamUrl });
-  } catch (error) {
-    console.error('[EXOTEL VOICEBOT URL ERROR]', error.message);
-    res.status(500).json({ error: 'Unable to generate Exotel voicebot URL' });
-  }
 });
 
 app.all('/call/status', async (req, res) => {
@@ -2119,7 +1883,7 @@ app.all('/call/status', async (req, res) => {
       });
     }
 
-    const callRecord = await dbGet('SELECT * FROM calls WHERE twilio_sid = ?', [providerCallSid]);
+    const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [providerCallSid]);
     const customerId = req.query.customerId || callRecord?.customer_id;
 
     if (callRecord) {
@@ -2197,7 +1961,7 @@ app.post('/call/recording-status', async (req, res) => {
 
     console.log(`[RECORDING STATUS] ${recordingStatus} | Call SID: ${callSid} | Recording SID: ${recordingSid}`);
 
-    const callRecord = await dbGet('SELECT * FROM calls WHERE twilio_sid = ?', [callSid]);
+    const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [callSid]);
     if (callRecord) {
       await dbRun(
         `UPDATE calls
@@ -2260,7 +2024,7 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
 
     const result = await dbRun(
       `INSERT INTO calls (
-        customer_id, agent_id, outcome, twilio_sid, called_at, hot_lead_score,
+        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
         consent_message_played, call_script_version, supervisor_alert_level
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -2495,7 +2259,7 @@ app.get('/api/calls/recent', async (req, res) => {
          agents.slug AS agent_slug,
          calls.called_at,
          calls.outcome,
-         calls.twilio_sid,
+         calls.provider_call_id,
          calls.recording_sid,
          calls.recording_url,
          calls.recording_status,
@@ -2551,7 +2315,7 @@ app.get('/api/calls/:callId(\\d+)', async (req, res) => {
          agents.slug AS agent_slug,
          calls.called_at,
          calls.outcome,
-         calls.twilio_sid,
+         calls.provider_call_id,
          calls.recording_sid,
          calls.recording_url,
          calls.recording_status,
@@ -2611,7 +2375,7 @@ app.get('/api/calls/live', async (req, res) => {
          calls.agent_id,
          calls.called_at,
          calls.outcome,
-         calls.twilio_sid,
+         calls.provider_call_id,
          calls.transcript_text,
          calls.live_sentiment_score,
          calls.live_sentiment_label,
@@ -2631,7 +2395,7 @@ app.get('/api/calls/live', async (req, res) => {
     const mergedRows = [
       ...inMemoryRows,
       ...recentDbRows
-        .filter((row) => row.twilio_sid && !seenCallSids.has(row.twilio_sid))
+        .filter((row) => row.provider_call_id && !seenCallSids.has(row.provider_call_id))
         .map((row) => {
           const calledAtMs = new Date(row.called_at || 0).getTime();
           const isFreshPending = (
@@ -2642,7 +2406,7 @@ app.get('/api/calls/live', async (req, res) => {
           );
 
           return {
-            call_sid: row.twilio_sid,
+            call_sid: row.provider_call_id,
             customer_name: row.customer_name,
             customer_id: row.customer_id,
             call_id: row.id,
@@ -2702,41 +2466,16 @@ app.post('/api/calls/:callId/escalate', async (req, res) => {
 
 app.get('/api/calls/:callId/recording', async (req, res) => {
   try {
-    const call = await dbGet('SELECT id, twilio_sid, recording_url, recording_status FROM calls WHERE id = ?', [req.params.callId]);
+    const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status FROM calls WHERE id = ?', [req.params.callId]);
 
-    if (!call?.recording_url && !call?.twilio_sid) {
+    if (!call?.recording_url && !call?.provider_call_id) {
       return res.status(404).json({ error: 'Recording not available yet' });
     }
 
     let playbackUrl = call.recording_url || null;
     let response = playbackUrl
-      ? await fetch(playbackUrl, {
-          headers: {
-            Authorization: buildExotelAuthHeader()
-          }
-        })
+      ? await fetch(playbackUrl)
       : null;
-
-    if ((!response || !response.ok) && call?.twilio_sid) {
-      try {
-        const details = await fetchCallDetails(call.twilio_sid, { recordingUrlValidity: 15 });
-        const refreshedUrl = getRecordingUrlFromCallDetails(details);
-        if (refreshedUrl) {
-          playbackUrl = refreshedUrl;
-          await dbRun(
-            'UPDATE calls SET recording_url = ?, recording_status = COALESCE(recording_status, ?) WHERE id = ?',
-            [refreshedUrl, 'completed', call.id]
-          );
-          response = await fetch(refreshedUrl, {
-            headers: {
-              Authorization: buildExotelAuthHeader()
-            }
-          });
-        }
-      } catch (error) {
-        console.error('[RECORDING REFRESH ERROR]', error.message);
-      }
-    }
 
     if (!response || !response.ok) {
       const statusCode = response?.status || 404;
@@ -2758,7 +2497,7 @@ app.get('/api/calls/:callId/transcript', async (req, res) => {
     const call = await dbGet(
       `SELECT
          calls.id,
-         calls.twilio_sid,
+         calls.provider_call_id,
          calls.called_at,
          calls.outcome,
          calls.language,
@@ -2906,7 +2645,7 @@ app.get('/api/calls/:callId/transcript', async (req, res) => {
       <div class="muted">Readable transcript view for review, QA, and reporting.</div>
       <div class="meta">
         <div class="meta-card"><strong>Customer</strong>${call.customer_name || 'Customer'}</div>
-        <div class="meta-card"><strong>Call SID</strong>${call.twilio_sid || '--'}</div>
+        <div class="meta-card"><strong>Call SID</strong>${call.provider_call_id || '--'}</div>
         <div class="meta-card"><strong>Outcome</strong>${call.outcome || '--'}</div>
         <div class="meta-card"><strong>Called At</strong>${call.called_at ? new Date(call.called_at).toLocaleString() : '--'}</div>
       </div>
@@ -2934,602 +2673,12 @@ app.get('/api/calls/:callId/transcript', async (req, res) => {
   }
 });
 
-function setupOrchestratedStream(twilioWs, req) {
-  console.log('[STREAM] Media stream connected');
-  console.log(`[STREAM] Upgrade request from ${req.socket.remoteAddress || 'unknown'}`);
-  console.log('[STREAM] Voice pipeline: orchestrated');
-
-  let streamSid;
-  let transcriptPrinted = false;
-  const transcript = [];
-  let activeCustomerName = process.env.CUSTOMER_NAME || 'Customer';
-  let activeClientName = CLIENT_NAME;
-  let activeAgentId = null;
-  let activeAgentConfig = null;
-  let activeCustomerId = null;
-  let activeCallSid = null;
-  let activeCallId = null;
-  let transcriptPersisted = false;
-  let state = 'LISTENING';
-  let callClosed = false;
-  let greetingStarted = false;
-  let deepgramReady = false;
-  let currentGeminiController = null;
-  let currentTtsController = null;
-  let speechDrainRunning = false;
-  let assistantSequence = Promise.resolve();
-  let pendingSpeechSegments = [];
-  let finalTranscriptBuffer = [];
-  let interruptedGeneration = false;
-  let deepgramWs = null;
-  let autoHangupTimer = null;
-
-  const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName, activeAgentConfig);
-  const getActiveOpeningPrompt = () => buildOpeningPrompt(activeClientName, activeCustomerName, activeAgentConfig);
-  const getActiveModelName = () => resolveRealtimeModelName(activeAgentConfig?.llm_model || REALTIME_MODEL);
-
-  const printTranscriptOnce = () => {
-    if (!transcriptPrinted) {
-      transcriptPrinted = true;
-      printTranscript(transcript);
-    }
-  };
-
-  async function persistTranscriptOnce() {
-    if (transcriptPersisted) {
-      return;
-    }
-
-    transcriptPersisted = true;
-
-    try {
-      const result = await saveCallFeedbackFromTranscript({
-        dbGet,
-        dbRun,
-        callSid: activeCallSid,
-        customerId: activeCustomerId,
-        transcript
-      });
-
-      if (result.saved) {
-        console.log(`[FEEDBACK] Auto-saved call feedback as record ${result.feedbackId} (${result.category})`);
-      } else {
-        console.log(`[FEEDBACK] Skipped auto-save: ${result.reason}`);
-      }
-    } catch (error) {
-      console.error('[FEEDBACK SAVE ERROR]', error.message);
-    }
-  }
-
-  async function refreshLiveCallState(partial = {}) {
-    if (!activeCallSid) return;
-
-    const current = liveCallState.get(activeCallSid) || {
-      call_sid: activeCallSid,
-      customer_name: activeCustomerName,
-      customer_id: activeCustomerId,
-      call_id: activeCallId,
-      started_at: new Date().toISOString(),
-      transcript_preview: '',
-      live_sentiment_label: 'neutral',
-      live_sentiment_score: 0,
-      red_flag: false,
-      escalation_requested: false,
-      status: 'active',
-      pipeline: 'orchestrated',
-      voice_state: state,
-      agent_id: activeAgentId,
-      agent_name: activeAgentConfig?.name || null
-    };
-
-    liveCallState.set(activeCallSid, {
-      ...current,
-      ...partial,
-      customer_name: activeCustomerName,
-      customer_id: activeCustomerId,
-      agent_id: activeAgentId,
-      agent_name: activeAgentConfig?.name || null,
-      call_id: activeCallId,
-      pipeline: 'orchestrated',
-      voice_state: state,
-      transcript_preview: transcript.slice(-4).map((turn) => `[${turn.role}] ${turn.text}`).join('\n')
-    });
-
-    if (activeCallId) {
-      const nextState = liveCallState.get(activeCallSid);
-      await dbRun(
-        `UPDATE calls
-            SET live_sentiment_score = ?,
-                live_sentiment_label = ?,
-                live_red_flag = ?,
-                supervisor_alert_level = ?,
-                human_escalation_requested = ?
-          WHERE id = ?`,
-        [
-          nextState.live_sentiment_score || 0,
-          nextState.live_sentiment_label || 'neutral',
-          nextState.red_flag ? 1 : 0,
-          nextState.red_flag ? 'high' : 'normal',
-          nextState.escalation_requested ? 1 : 0,
-          activeCallId
-        ]
-      );
-    }
-  }
-
-  function clearAutoHangupTimer() {
-    if (autoHangupTimer) {
-      clearTimeout(autoHangupTimer);
-      autoHangupTimer = null;
-    }
-  }
-
-  function scheduleAutoHangupFromAgentText(text) {
-    clearAutoHangupTimer();
-    if (!shouldAutoHangupAfterAgentTurn(text) || callClosed) {
-      return;
-    }
-
-    const delayMs = estimateHangupDelayMs(text);
-    autoHangupTimer = setTimeout(() => {
-      if (callClosed) {
-        return;
-      }
-      console.log(`[AUTO HANGUP] Closing orchestrated call after farewell (${delayMs}ms)`);
-      closeCallSession('completed').catch((error) => {
-        console.error('[AUTO HANGUP ERROR]', error.message);
-      }).finally(() => {
-        if (twilioWs.readyState === WebSocket.OPEN) {
-          twilioWs.close();
-        }
-      });
-    }, delayMs);
-  }
-
-  function closeLegacyCallForCustomerRequest(text) {
-    if (!isCustomerHangupIntent(text) || callClosed) {
-      return false;
-    }
-
-    callClosed = true;
-    clearAutoHangupTimer();
-    clearGeminiOpeningPromptRetry();
-    console.log(`[HANGUP REQUEST] Customer asked to end the legacy call: "${text}"`);
-    refreshLiveCallState({ status: 'completed' }).catch(() => {});
-    printTranscriptOnce();
-    persistTranscriptOnce().catch((error) => {
-      console.error('[FEEDBACK SAVE ERROR]', error.message);
-    });
-    if (aiWs?.readyState === WebSocket.OPEN) {
-      aiWs.close();
-    }
-    if (twilioWs.readyState === WebSocket.OPEN) {
-      twilioWs.close();
-    }
-    return true;
-  }
-
-  function sendAudioToCaller(base64Payload) {
-    if (!streamSid || !base64Payload || callClosed || twilioWs.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    twilioWs.send(JSON.stringify({
-      event: 'media',
-      streamSid,
-      media: { payload: base64Payload }
-    }));
-  }
-
-  function clearCallerPlaybackBuffer() {
-    if (!streamSid || callClosed || twilioWs.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    twilioWs.send(JSON.stringify({
-      event: 'clear',
-      streamSid
-    }));
-  }
-
-  async function evaluateAndStoreSentiment(text) {
-    const sentiment = evaluateLiveSentimentLabel(text);
-    const redFlag = sentiment.label === 'negative';
-
-    await refreshLiveCallState({
-      live_sentiment_label: sentiment.label,
-      live_sentiment_score: sentiment.score,
-      red_flag: redFlag
-    });
-
-    if (redFlag && activeCallId) {
-      await createSupervisorEvent({
-        dbRun,
-        callId: activeCallId,
-        eventType: 'live_negative_signal',
-        severity: 'high',
-        payload: { transcript: text }
-      });
-    }
-  }
-
-  function enqueueSpeechSegment(text) {
-    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
-    if (!normalized || interruptedGeneration || callClosed) {
-      return;
-    }
-
-    pendingSpeechSegments.push(normalized);
-    if (!speechDrainRunning) {
-      drainSpeechQueue().catch((error) => {
-        console.error('[TTS DRAIN ERROR]', error.message);
-      });
-    }
-  }
-
-  async function drainSpeechQueue() {
-    if (speechDrainRunning) {
-      return;
-    }
-
-    speechDrainRunning = true;
-
-    try {
-      while (pendingSpeechSegments.length && !callClosed && !interruptedGeneration) {
-        const segment = pendingSpeechSegments.shift();
-        currentTtsController = new AbortController();
-        state = 'SPEAKING';
-        await refreshLiveCallState({ status: 'active' });
-
-        try {
-          await streamSynthesizedAudio({
-            text: segment,
-            signal: currentTtsController.signal,
-            onAudioChunk: async (chunk) => {
-              sendAudioToCaller(chunk.toString('base64'));
-            }
-          });
-        } catch (error) {
-          if (error.name === 'AbortError') {
-            console.log('[TTS] Audio stream interrupted');
-            break;
-          }
-
-          throw error;
-        }
-      }
-    } finally {
-      currentTtsController = null;
-      speechDrainRunning = false;
-      if (!callClosed && state !== 'BARGE_IN') {
-        state = 'LISTENING';
-        refreshLiveCallState({ status: 'active' }).catch(() => {});
-      }
-    }
-  }
-
-  function interruptAssistant(reason) {
-    if (!['SPEAKING', 'PROCESSING'].includes(state)) {
-      return;
-    }
-
-    console.log(`[BARGE-IN] ${reason}`);
-    interruptedGeneration = true;
-    state = 'BARGE_IN';
-    pendingSpeechSegments = [];
-    clearCallerPlaybackBuffer();
-
-    if (currentGeminiController) {
-      currentGeminiController.abort();
-      currentGeminiController = null;
-    }
-
-    if (currentTtsController) {
-      currentTtsController.abort();
-      currentTtsController = null;
-    }
-
-    refreshLiveCallState({ status: 'active' }).catch(() => {});
-  }
-
-  async function generateAssistantTurn(userTurnText) {
-    if (callClosed) {
-      return;
-    }
-
-    interruptedGeneration = false;
-    pendingSpeechSegments = [];
-    currentGeminiController = new AbortController();
-    state = 'PROCESSING';
-    await refreshLiveCallState({ status: 'active' });
-
-    let fullResponse = '';
-    let speechBuffer = '';
-
-    try {
-      await streamGeminiResponse({
-        systemPrompt: getActiveSystemPrompt(),
-        contents: buildGeminiContentsFromTranscript(transcript, userTurnText),
-        signal: currentGeminiController.signal,
-        modelName: getActiveModelName(),
-        onTextChunk: async (textChunk) => {
-          if (interruptedGeneration || callClosed) {
-            return;
-          }
-
-          fullResponse += textChunk;
-          speechBuffer += textChunk;
-
-          if (shouldFlushSpeechSegment(speechBuffer)) {
-            enqueueSpeechSegment(speechBuffer);
-            speechBuffer = '';
-          }
-        }
-      });
-
-      if (speechBuffer.trim()) {
-        enqueueSpeechSegment(speechBuffer);
-      }
-
-      if (fullResponse.trim()) {
-        pushTranscriptTurn(transcript, 'AGENT', fullResponse.trim());
-        console.log(`[AGENT]: ${fullResponse.trim()}`);
-        await refreshLiveCallState({ status: 'active' });
-        scheduleAutoHangupFromAgentText(fullResponse.trim());
-      }
-    } catch (error) {
-      if (error.name === 'AbortError') {
-        console.log('[GEMINI] Response interrupted');
-        return;
-      }
-
-      console.error('[GEMINI ERROR]', error.message);
-      const fallbackResponse = 'Maaf kijiye, ek chhoti technical dikkat aa gayi. Kya aap apni baat ek baar phir se bata sakte hain?';
-      pushTranscriptTurn(transcript, 'AGENT', fallbackResponse);
-      enqueueSpeechSegment(fallbackResponse);
-    } finally {
-      currentGeminiController = null;
-    }
-  }
-
-  function queueAssistantTurn(userTurnText) {
-    assistantSequence = assistantSequence
-      .catch(() => {})
-      .then(() => generateAssistantTurn(userTurnText));
-    return assistantSequence;
-  }
-
-  function finalizeUserTurn(text) {
-    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
-    if (!normalized || callClosed) {
-      return;
-    }
-
-    clearAutoHangupTimer();
-    pushTranscriptTurn(transcript, 'CUSTOMER', normalized);
-    console.log(`[CUSTOMER]: ${normalized}`);
-    evaluateAndStoreSentiment(normalized).catch(() => {});
-    if (isCustomerHangupIntent(normalized)) {
-      console.log(`[HANGUP REQUEST] Customer asked to end the orchestrated call: "${normalized}"`);
-      clearCallerPlaybackBuffer();
-      closeCallSession('completed').catch((error) => {
-        console.error('[HANGUP REQUEST ERROR]', error.message);
-      }).finally(() => {
-        if (twilioWs.readyState === WebSocket.OPEN) {
-          twilioWs.close();
-        }
-      });
-      return;
-    }
-    queueAssistantTurn(normalized).catch((error) => {
-      console.error('[ASSISTANT TURN ERROR]', error.message);
-    });
-  }
-
-  function handleDeepgramTranscript(event) {
-    const transcriptText = String(event?.channel?.alternatives?.[0]?.transcript || '').trim();
-    const isFinal = Boolean(event?.is_final);
-    const isSpeechFinal = Boolean(event?.speech_final);
-
-    if (!transcriptText) {
-      if (isSpeechFinal && finalTranscriptBuffer.length) {
-        const merged = finalTranscriptBuffer.join(' ').replace(/\s+/g, ' ').trim();
-        finalTranscriptBuffer = [];
-        finalizeUserTurn(merged);
-      }
-      return;
-    }
-
-    if ((state === 'SPEAKING' || state === 'PROCESSING') && transcriptText.split(/\s+/).filter(Boolean).length >= 2) {
-      interruptAssistant(`caller interruption detected: "${transcriptText}"`);
-    }
-
-    if (isFinal) {
-      finalTranscriptBuffer.push(transcriptText);
-    }
-
-    if (isSpeechFinal) {
-      const merged = finalTranscriptBuffer.length
-        ? finalTranscriptBuffer.join(' ')
-        : transcriptText;
-      finalTranscriptBuffer = [];
-      finalizeUserTurn(merged);
-    }
-  }
-
-  function connectDeepgram() {
-    deepgramWs = new WebSocket(createDeepgramListenUrl(), {
-      headers: {
-        Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`
-      }
-    });
-
-    deepgramWs.on('open', () => {
-      deepgramReady = true;
-      console.log('[DEEPGRAM] Live transcription connected');
-      refreshLiveCallState({ status: 'active' }).catch(() => {});
-
-      if (!greetingStarted) {
-        greetingStarted = true;
-        queueAssistantTurn(getActiveOpeningPrompt()).catch((error) => {
-          console.error('[GREETING ERROR]', error.message);
-        });
-      }
-    });
-
-    deepgramWs.on('message', (raw) => {
-      let event;
-
-      try {
-        event = JSON.parse(raw.toString());
-      } catch (error) {
-        console.error('[DEEPGRAM PARSE ERROR]', error.message);
-        return;
-      }
-
-      if (event.type === 'Results') {
-        handleDeepgramTranscript(event);
-        return;
-      }
-
-      if (event.type === 'Metadata') {
-        console.log('[DEEPGRAM] Metadata received');
-      }
-    });
-
-    deepgramWs.on('close', () => {
-      deepgramReady = false;
-      console.log('[DEEPGRAM] Live transcription closed');
-    });
-
-    deepgramWs.on('error', (error) => {
-      deepgramReady = false;
-      console.error('[DEEPGRAM ERROR]', error.message);
-    });
-  }
-
-  async function closeCallSession(status) {
-    if (callClosed) {
-      return;
-    }
-
-    callClosed = true;
-    clearAutoHangupTimer();
-    pendingSpeechSegments = [];
-    interruptedGeneration = true;
-
-    if (currentGeminiController) {
-      currentGeminiController.abort();
-      currentGeminiController = null;
-    }
-
-    if (currentTtsController) {
-      currentTtsController.abort();
-      currentTtsController = null;
-    }
-
-    if (deepgramWs?.readyState === WebSocket.OPEN) {
-      deepgramWs.close();
-    }
-
-    await refreshLiveCallState({ status }).catch(() => {});
-    printTranscriptOnce();
-    await persistTranscriptOnce().catch((error) => {
-      console.error('[FEEDBACK SAVE ERROR]', error.message);
-    });
-  }
-
-  twilioWs.on('message', async (raw) => {
-    let message;
-
-    try {
-      message = JSON.parse(raw.toString());
-    } catch (error) {
-      console.error('[STREAM] Failed to parse media stream message:', error.message);
-      return;
-    }
-
-    if (message.event === 'start') {
-      streamSid = message.start.streamSid;
-      const customParameters = message.start.customParameters || {};
-      activeCustomerName = customParameters.customerName || activeCustomerName;
-      activeClientName = customParameters.clientName || activeClientName;
-      activeCustomerId = customParameters.customerId ? Number(customParameters.customerId) : null;
-      activeAgentId = customParameters.agentId ? Number(customParameters.agentId) : null;
-      activeAgentConfig = activeAgentId ? await getAgentConfigById(activeAgentId) : await getDefaultAgentConfig();
-      activeClientName = activeAgentConfig?.client_name || activeClientName;
-      activeCallSid = message.start.callSid || activeCallSid;
-      if (activeCallSid) {
-        const callRow = await dbGet('SELECT id FROM calls WHERE twilio_sid = ?', [activeCallSid]);
-        activeCallId = callRow?.id || null;
-      }
-
-      console.log(`[STREAM] streamSid: ${streamSid}`);
-      console.log(`[STREAM] Start payload: ${JSON.stringify(message.start)}`);
-      console.log(`[STREAM] Active customer=${activeCustomerName} client=${activeClientName}`);
-      await refreshLiveCallState({ status: 'active', started_at: new Date().toISOString() });
-      connectDeepgram();
-      return;
-    }
-
-    if (message.event === 'media') {
-      if (!deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
-        return;
-      }
-
-      const audioChunk = Buffer.from(message.media.payload, 'base64');
-      deepgramWs.send(audioChunk);
-      return;
-    }
-
-    if (message.event === 'dtmf') {
-      const digit = String(message.dtmf?.digit || '').trim();
-      if (!digit) {
-        return;
-      }
-
-      interruptAssistant(`dtmf ${digit}`);
-      const utterance = inferDtmfUtterance(digit, transcript);
-      console.log(`[DTMF] Received digit=${digit} mapped="${utterance}"`);
-      pushTranscriptTurn(transcript, 'CUSTOMER', `[DTMF ${digit}] ${utterance}`);
-      queueAssistantTurn(utterance).catch((error) => {
-        console.error('[ASSISTANT TURN ERROR]', error.message);
-      });
-      return;
-    }
-
-    if (message.event === 'stop') {
-      console.log('[STREAM] Call ended');
-      await closeCallSession('completed');
-    }
-  });
-
-  twilioWs.on('close', () => {
-    console.log('[STREAM] Media stream closed');
-    closeCallSession('closed').catch((error) => {
-      console.error('[STREAM CLOSE ERROR]', error.message);
-    });
-  });
-
-  twilioWs.on('error', (error) => {
-    console.error('[STREAM WS ERROR]', error.message);
-  });
-}
-
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ noServer: true });
 const icallMateWss = new WebSocket.Server({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
   const pathname = new URL(req.url || '/', 'http://localhost').pathname;
   console.log(`[WS UPGRADE] path=${pathname} host=${req.headers.host || ''} origin=${req.headers.origin || ''} upgrade=${req.headers.upgrade || ''} remote=${req.socket.remoteAddress || 'unknown'}`);
-
-  if (pathname === '/call/stream') {
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit('connection', ws, req);
-    });
-    return;
-  }
 
   if (pathname === '/icallmate/media') {
     icallMateWss.handleUpgrade(req, socket, head, (ws) => {
@@ -3578,6 +2727,7 @@ function sendIcallMateReverseMedia(ws, session, pcmBuffer) {
 function createIcallMateAiBridge(ws, session) {
   let aiWs = null;
   let deepgramWs = null;
+  let bridgeClosed = false;
   let geminiSetupComplete = false;
   let openingPromptSent = false;
   let deepgramReady = false;
@@ -3592,7 +2742,7 @@ function createIcallMateAiBridge(ws, session) {
 
   function sendGeminiClientTurn(text, options = {}) {
     const safeText = String(text || '').trim();
-    if (!safeText || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
+    if (bridgeClosed || !safeText || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
       return;
     }
 
@@ -3616,7 +2766,7 @@ function createIcallMateAiBridge(ws, session) {
   }
 
   function sendOpeningPrompt() {
-    if (openingPromptSent || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
+    if (bridgeClosed || openingPromptSent || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
       return;
     }
 
@@ -3626,6 +2776,10 @@ function createIcallMateAiBridge(ws, session) {
   }
 
   function connectGemini() {
+    if (bridgeClosed) {
+      return;
+    }
+
     if (aiWs && aiWs.readyState !== WebSocket.CLOSED) {
       sendOpeningPrompt();
       return;
@@ -3636,6 +2790,11 @@ function createIcallMateAiBridge(ws, session) {
     aiWs = new WebSocket(buildGeminiWsUrl());
 
     aiWs.on('open', () => {
+      if (bridgeClosed) {
+        aiWs.close();
+        return;
+      }
+
       console.log(`[ICALLMATE][GEMINI] Live session opened streamId=${getSessionLabel()} model=${REALTIME_MODEL} voice=${GEMINI_VOICE}`);
       aiWs.send(JSON.stringify({
         setup: {
@@ -3665,6 +2824,10 @@ function createIcallMateAiBridge(ws, session) {
     });
 
     aiWs.on('message', (raw) => {
+      if (bridgeClosed) {
+        return;
+      }
+
       let message;
 
       try {
@@ -3713,6 +2876,10 @@ function createIcallMateAiBridge(ws, session) {
     });
 
     aiWs.on('error', (error) => {
+      if (bridgeClosed) {
+        return;
+      }
+
       console.error('[ICALLMATE][GEMINI WS ERROR]', error.message);
     });
   }
@@ -3751,6 +2918,10 @@ function createIcallMateAiBridge(ws, session) {
   }
 
   function connectDeepgram() {
+    if (bridgeClosed) {
+      return;
+    }
+
     if (!process.env.DEEPGRAM_API_KEY) {
       console.warn('[ICALLMATE][DEEPGRAM] Missing DEEPGRAM_API_KEY; bot can speak opening but caller speech will not be transcribed.');
       return;
@@ -3760,13 +2931,18 @@ function createIcallMateAiBridge(ws, session) {
       return;
     }
 
-    deepgramWs = new WebSocket(createDeepgramListenUrl('exotel'), {
+    deepgramWs = new WebSocket(createDeepgramListenUrl(), {
       headers: {
         Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`
       }
     });
 
     deepgramWs.on('open', () => {
+      if (bridgeClosed) {
+        deepgramWs.close();
+        return;
+      }
+
       deepgramReady = true;
       console.log(`[ICALLMATE][DEEPGRAM] Live transcription connected streamId=${getSessionLabel()}`);
     });
@@ -3793,27 +2969,36 @@ function createIcallMateAiBridge(ws, session) {
 
     deepgramWs.on('error', (error) => {
       deepgramReady = false;
+      if (bridgeClosed) {
+        return;
+      }
+
       console.error('[ICALLMATE][DEEPGRAM ERROR]', error.message);
     });
   }
 
   return {
     start() {
+      if (bridgeClosed) {
+        return;
+      }
+
       connectGemini();
       connectDeepgram();
     },
     sendCallerAudio(payload) {
-      if (!payload || !deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
+      if (bridgeClosed || !payload || !deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
         return;
       }
 
       deepgramWs.send(Buffer.from(payload, 'base64'));
     },
     close() {
-      if (deepgramWs?.readyState === WebSocket.OPEN) {
+      bridgeClosed = true;
+      if (deepgramWs && deepgramWs.readyState < WebSocket.CLOSING) {
         deepgramWs.close();
       }
-      if (aiWs?.readyState === WebSocket.OPEN) {
+      if (aiWs && aiWs.readyState < WebSocket.CLOSING) {
         aiWs.close();
       }
     }
@@ -3952,856 +3137,6 @@ icallMateWss.on('connection', (ws, req) => {
   });
 });
 
-wss.on('connection', (twilioWs, req) => {
-  if (USE_ORCHESTRATED_PIPELINE) {
-    setupOrchestratedStream(twilioWs, req);
-    return;
-  }
-
-  console.log('[STREAM] Media stream connected');
-  console.log(`[STREAM] Upgrade request from ${req.socket.remoteAddress || 'unknown'}`);
-
-  let aiWs;
-  let streamSid;
-  let transcriptPrinted = false;
-  const transcript = [];
-  let geminiSetupComplete = false;
-  let geminiSetupWatchdogTimer = null;
-  let geminiOpeningPromptRetryTimer = null;
-  let geminiAudioReceived = false;
-  let geminiInboundAudioLogged = false;
-  let geminiFirstAudibleResponseLogged = false;
-  let geminiSessionOpenedAt = 0;
-  let geminiSetupCompletedAt = 0;
-  let geminiOpeningPromptSentAt = 0;
-  let aiSessionStarting = false;
-  let activeCustomerName = process.env.CUSTOMER_NAME || 'Customer';
-  let activeClientName = CLIENT_NAME;
-  let activeAgentId = null;
-  let activeAgentConfig = null;
-  let activeCustomerId = null;
-  let activeCallSid = null;
-  let activeCallId = null;
-  let transportMode = 'twilio';
-  let transcriptPersisted = false;
-  let callClosed = false;
-  let autoHangupTimer = null;
-  let bufferedInboundMedia = [];
-  let bufferedInboundMediaBytes = 0;
-  let pendingAgentTranscript = '';
-  let pendingAgentTranscriptTimer = null;
-  let deepgramReady = false;
-  let deepgramWs = null;
-  let finalTranscriptBuffer = [];
-  let hasCustomerResponded = false;
-  let openingPromptInFlight = false;
-  let openingQuestionAnswered = false;
-  let suppressAgentAudioUntilMs = 0;
-
-  const getActiveSystemPrompt = () => buildAgentSystemPrompt(activeClientName, activeCustomerName, activeAgentConfig);
-  const getActiveOpeningPrompt = () => buildOpeningPrompt(activeClientName, activeCustomerName, activeAgentConfig);
-  const getActiveModelName = () => resolveRealtimeModelName(activeAgentConfig?.llm_model || REALTIME_MODEL);
-
-  const printTranscriptOnce = () => {
-    if (!transcriptPrinted) {
-      transcriptPrinted = true;
-      printTranscript(transcript);
-    }
-  };
-
-  async function persistTranscriptOnce() {
-    if (transcriptPersisted) {
-      return;
-    }
-
-    transcriptPersisted = true;
-
-    try {
-      const result = await saveCallFeedbackFromTranscript({
-        dbGet,
-        dbRun,
-        callSid: activeCallSid,
-        customerId: activeCustomerId,
-        transcript
-      });
-
-      if (result.saved) {
-        console.log(`[FEEDBACK] Auto-saved call feedback as record ${result.feedbackId} (${result.category})`);
-      } else {
-        console.log(`[FEEDBACK] Skipped auto-save: ${result.reason}`);
-      }
-    } catch (error) {
-      console.error('[FEEDBACK SAVE ERROR]', error.message);
-    }
-  }
-
-  async function refreshLiveCallState(partial = {}) {
-    if (!activeCallSid) return;
-
-    const current = liveCallState.get(activeCallSid) || {
-      call_sid: activeCallSid,
-      customer_name: activeCustomerName,
-      customer_id: activeCustomerId,
-      call_id: activeCallId,
-      started_at: new Date().toISOString(),
-      transcript_preview: '',
-      live_sentiment_label: 'neutral',
-      live_sentiment_score: 0,
-      red_flag: false,
-      escalation_requested: false,
-      status: 'active',
-      agent_id: activeAgentId,
-      agent_name: activeAgentConfig?.name || null
-    };
-
-    liveCallState.set(activeCallSid, {
-      ...current,
-      ...partial,
-      customer_name: activeCustomerName,
-      customer_id: activeCustomerId,
-      agent_id: activeAgentId,
-      agent_name: activeAgentConfig?.name || null,
-      call_id: activeCallId,
-      transcript_preview: transcript.slice(-4).map((turn) => `[${turn.role}] ${turn.text}`).join('\n')
-    });
-
-    if (activeCallId) {
-      const nextState = liveCallState.get(activeCallSid);
-      await dbRun(
-        `UPDATE calls
-            SET live_sentiment_score = ?,
-                live_sentiment_label = ?,
-                live_red_flag = ?,
-                supervisor_alert_level = ?,
-                human_escalation_requested = ?
-          WHERE id = ?`,
-        [
-          nextState.live_sentiment_score || 0,
-          nextState.live_sentiment_label || 'neutral',
-          nextState.red_flag ? 1 : 0,
-          nextState.red_flag ? 'high' : 'normal',
-          nextState.escalation_requested ? 1 : 0,
-          activeCallId
-        ]
-      );
-    }
-  }
-
-  function clearAutoHangupTimer() {
-    if (autoHangupTimer) {
-      clearTimeout(autoHangupTimer);
-      autoHangupTimer = null;
-    }
-  }
-
-  function clearPendingAgentTranscriptTimer() {
-    if (pendingAgentTranscriptTimer) {
-      clearTimeout(pendingAgentTranscriptTimer);
-      pendingAgentTranscriptTimer = null;
-    }
-  }
-
-  function appendTranscriptFragment(existingText, nextFragment) {
-    const current = String(existingText || '').trim();
-    const fragment = String(nextFragment || '').trim();
-
-    if (!fragment) {
-      return current;
-    }
-
-    if (!current) {
-      return fragment;
-    }
-
-    if (current.endsWith(fragment)) {
-      return current;
-    }
-
-    if (/^[,.;:!?)/\]}]/.test(fragment)) {
-      return `${current}${fragment}`;
-    }
-
-    return `${current} ${fragment}`.replace(/\s+/g, ' ').trim();
-  }
-
-  function flushPendingAgentTranscript() {
-    clearPendingAgentTranscriptTimer();
-    const text = pendingAgentTranscript.trim();
-    if (!text) {
-      return;
-    }
-
-    pendingAgentTranscript = '';
-    pushTranscriptTurn(transcript, 'AGENT', text);
-    console.log(`[AGENT]: ${text}`);
-    refreshLiveCallState({}).catch(() => {});
-    scheduleAutoHangupFromAgentText(text);
-  }
-
-  function discardPendingAgentTranscript(reason = 'interrupted') {
-    if (!pendingAgentTranscript && !pendingAgentTranscriptTimer) {
-      return;
-    }
-
-    clearPendingAgentTranscriptTimer();
-    if (pendingAgentTranscript.trim()) {
-      console.log(`[AGENT DISCARD] reason=${reason} text=${pendingAgentTranscript.trim()}`);
-    }
-    pendingAgentTranscript = '';
-  }
-
-  function queuePendingAgentTranscript(fragment) {
-    pendingAgentTranscript = appendTranscriptFragment(pendingAgentTranscript, fragment);
-    clearPendingAgentTranscriptTimer();
-
-    if (/[.!?।]$/.test(pendingAgentTranscript)) {
-      flushPendingAgentTranscript();
-      return;
-    }
-
-    pendingAgentTranscriptTimer = setTimeout(() => {
-      flushPendingAgentTranscript();
-    }, 450);
-  }
-
-  function clearGeminiOpeningPromptRetry() {
-    if (geminiOpeningPromptRetryTimer) {
-      clearTimeout(geminiOpeningPromptRetryTimer);
-      geminiOpeningPromptRetryTimer = null;
-    }
-  }
-
-  function clearGeminiSetupWatchdog() {
-    if (geminiSetupWatchdogTimer) {
-      clearTimeout(geminiSetupWatchdogTimer);
-      geminiSetupWatchdogTimer = null;
-    }
-  }
-
-  function sendGeminiClientTurn(text, options = {}) {
-    const safeText = String(text || '').trim();
-    if (!safeText || aiWs?.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    const userTurnText = options.interrupt
-      ? `Ignore any unfinished previous reply and respond to this message now. ${safeText}`
-      : safeText;
-
-    const payload = {
-      clientContent: {
-        turns: [
-          {
-            role: 'user',
-            parts: [{ text: userTurnText }]
-          }
-        ],
-        turnComplete: true
-      }
-    };
-
-    aiWs.send(JSON.stringify(payload));
-  }
-
-  function sendGeminiOpeningPrompt(promptText, label = 'opening', options = {}) {
-    const safePrompt = String(promptText || '').trim();
-    if (!safePrompt || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
-      return;
-    }
-
-    openingPromptInFlight = true;
-    geminiFirstAudibleResponseLogged = false;
-    geminiOpeningPromptSentAt = Date.now();
-    console.log(`[GEMINI] Sending ${label} prompt (${safePrompt.length} chars)`);
-
-    if (options.forceClientTurn) {
-      sendGeminiClientTurn(safePrompt, { interrupt: options.interrupt });
-      return;
-    }
-
-    if (usesGeminiRealtimeTextInput(getActiveModelName())) {
-      aiWs.send(JSON.stringify({
-        realtimeInput: {
-          text: safePrompt
-        }
-      }));
-      return;
-    }
-
-    sendGeminiClientTurn(safePrompt, { interrupt: options.interrupt });
-  }
-
-  function scheduleAutoHangupFromAgentText(text) {
-    clearAutoHangupTimer();
-    if (!hasCustomerResponded || !shouldAutoHangupAfterAgentTurn(text) || callClosed) {
-      return;
-    }
-
-    const delayMs = estimateHangupDelayMs(text);
-    autoHangupTimer = setTimeout(() => {
-      if (callClosed) {
-        return;
-      }
-      callClosed = true;
-      console.log(`[AUTO HANGUP] Closing legacy call after farewell (${delayMs}ms)`);
-      refreshLiveCallState({ status: 'completed' }).catch(() => {});
-      printTranscriptOnce();
-      persistTranscriptOnce().catch((error) => {
-        console.error('[FEEDBACK SAVE ERROR]', error.message);
-      });
-      if (aiWs?.readyState === WebSocket.OPEN) {
-        aiWs.close();
-      }
-      clearGeminiOpeningPromptRetry();
-      if (twilioWs.readyState === WebSocket.OPEN) {
-        twilioWs.close();
-      }
-    }, delayMs);
-  }
-
-  function closeLegacyCallForCustomerRequest(text) {
-    if (!isCustomerHangupIntent(text) || callClosed) {
-      return false;
-    }
-
-    callClosed = true;
-    clearAutoHangupTimer();
-    clearGeminiOpeningPromptRetry();
-    console.log(`[HANGUP REQUEST] Customer asked to end the legacy call: "${text}"`);
-    refreshLiveCallState({ status: 'completed' }).catch(() => {});
-    printTranscriptOnce();
-    persistTranscriptOnce().catch((error) => {
-      console.error('[FEEDBACK SAVE ERROR]', error.message);
-    });
-    if (aiWs?.readyState === WebSocket.OPEN) {
-      aiWs.close();
-    }
-    if (twilioWs.readyState === WebSocket.OPEN) {
-      twilioWs.close();
-    }
-    return true;
-  }
-
-  function sendAudioToCaller(base64Payload) {
-    if (!streamSid || !base64Payload) {
-      return;
-    }
-
-    twilioWs.send(JSON.stringify({
-      event: 'media',
-      streamSid,
-      media: { payload: base64Payload }
-    }));
-  }
-
-  function clearCallerPlaybackBuffer() {
-    if (!streamSid || twilioWs.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    twilioWs.send(JSON.stringify({
-      event: 'clear',
-      streamSid
-    }));
-  }
-
-  function suppressStaleAgentAudio(durationMs = 1500) {
-    suppressAgentAudioUntilMs = Math.max(suppressAgentAudioUntilMs, Date.now() + durationMs);
-  }
-
-  function bufferInboundMediaChunk(payload) {
-    const estimatedBytes = Math.ceil(String(payload || '').length * 0.75);
-    bufferedInboundMedia.push(payload);
-    bufferedInboundMediaBytes += estimatedBytes;
-
-    while (
-      bufferedInboundMedia.length > MAX_PRECONNECT_MEDIA_CHUNKS
-      || bufferedInboundMediaBytes > MAX_PRECONNECT_MEDIA_BYTES
-    ) {
-      const dropped = bufferedInboundMedia.shift();
-      bufferedInboundMediaBytes -= Math.ceil(String(dropped || '').length * 0.75);
-    }
-  }
-
-  function flushBufferedInboundMediaToDeepgram() {
-    if (!bufferedInboundMedia.length || !deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    console.log(`[DEEPGRAM] Flushing ${bufferedInboundMedia.length} buffered inbound audio chunks`);
-    const pendingChunks = bufferedInboundMedia;
-    bufferedInboundMedia = [];
-    bufferedInboundMediaBytes = 0;
-
-    for (const payload of pendingChunks) {
-      const audioChunk = transportMode === 'exotel'
-        ? Buffer.from(payload, 'base64')
-        : decodeMuLaw(payload);
-      deepgramWs.send(audioChunk);
-    }
-  }
-
-  function sendTextInputToAi(text, options = {}) {
-    const safeText = String(text || '').trim();
-    if (!safeText || aiWs?.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    if (!geminiSetupComplete) {
-      return;
-    }
-
-    if (usesGeminiRealtimeTextInput(getActiveModelName()) && !options.interrupt) {
-      aiWs.send(JSON.stringify({
-        realtimeInput: {
-          text: safeText
-        }
-      }));
-      return;
-    }
-
-    sendGeminiClientTurn(safeText, { interrupt: options.interrupt });
-  }
-
-  function createGeminiSession() {
-    aiSessionStarting = true;
-    geminiSetupComplete = false;
-    geminiAudioReceived = false;
-    clearGeminiOpeningPromptRetry();
-    clearGeminiSetupWatchdog();
-    aiWs = new WebSocket(buildGeminiWsUrl());
-
-    aiWs.on('open', () => {
-      geminiSessionOpenedAt = Date.now();
-      console.log('[GEMINI] Live session opened');
-      const configMessage = {
-        setup: {
-          model: getActiveModelName(),
-          generationConfig: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: GEMINI_VOICE
-                }
-              }
-            }
-          },
-          systemInstruction: {
-            parts: [
-              {
-                text: getActiveSystemPrompt()
-              }
-            ]
-          },
-          realtimeInputConfig: {},
-          inputAudioTranscription: {},
-          outputAudioTranscription: {}
-        }
-      };
-      console.log(`[GEMINI] Sending config model=${getActiveModelName()} voice=${GEMINI_VOICE} transport=${transportMode}`);
-      aiWs.send(JSON.stringify(configMessage));
-      geminiSetupWatchdogTimer = setTimeout(() => {
-        if (callClosed || geminiSetupComplete || aiWs?.readyState !== WebSocket.OPEN) {
-          return;
-        }
-        console.warn('[GEMINI] Config acknowledged connection, but setupComplete is still missing after 3000ms.');
-      }, 3000);
-    });
-  }
-
-  function attachAiEventHandlers() {
-    aiWs.on('message', (raw) => {
-      let message;
-
-      try {
-        message = JSON.parse(raw.toString());
-      } catch (error) {
-        console.error(`[${AI_PROVIDER.toUpperCase()}] Failed to parse message:`, error.message, 'raw=', raw.toString());
-        return;
-      }
-
-      if (message.setupComplete) {
-        geminiSetupComplete = true;
-        geminiSetupCompletedAt = Date.now();
-        clearGeminiSetupWatchdog();
-        console.log('[GEMINI] Session configured');
-        console.log(`[GEMINI] Config model=${getActiveModelName()} voice=${GEMINI_VOICE} transport=${transportMode}`);
-        if (geminiSessionOpenedAt) {
-          console.log(`[GEMINI] setupComplete received after ${geminiSetupCompletedAt - geminiSessionOpenedAt}ms`);
-        }
-
-        geminiAudioReceived = false;
-        geminiInboundAudioLogged = false;
-        openingPromptInFlight = false;
-        clearGeminiOpeningPromptRetry();
-        sendGeminiOpeningPrompt(getActiveOpeningPrompt(), 'initial', { forceClientTurn: true });
-        if (GEMINI_OPENING_RETRY_ENABLED) {
-          geminiOpeningPromptRetryTimer = setTimeout(() => {
-            if (
-              callClosed
-              || geminiAudioReceived
-              || hasCustomerResponded
-              || pendingAgentTranscript.trim()
-              || aiWs?.readyState !== WebSocket.OPEN
-            ) {
-              return;
-            }
-            console.warn('[GEMINI] No audible response detected after the opening prompt; sending an interrupt-style fallback opener.');
-            sendGeminiOpeningPrompt(
-              `Abhi ek line me bolo: "Namaste ${activeCustomerName} ji, kya abhi 2 minute baat ho sakti hai?"`,
-              'retry',
-              { forceClientTurn: true, interrupt: true }
-            );
-          }, GEMINI_OPENING_RETRY_MS);
-        }
-        return;
-      }
-
-      if (message.serverContent?.outputTranscription?.text) {
-        queuePendingAgentTranscript(message.serverContent.outputTranscription.text);
-      }
-
-      const parts = message.serverContent?.modelTurn?.parts || [];
-      for (const part of parts) {
-        if (!part.inlineData?.data || !String(part.inlineData.mimeType || '').startsWith('audio/pcm')) {
-          continue;
-        }
-
-        geminiAudioReceived = true;
-        clearGeminiOpeningPromptRetry();
-        if (!geminiFirstAudibleResponseLogged && geminiOpeningPromptSentAt) {
-          console.log(`[GEMINI] First audible response after ${Date.now() - geminiOpeningPromptSentAt}ms from the last prompt`);
-        }
-        if (!geminiFirstAudibleResponseLogged && geminiSetupCompletedAt) {
-          console.log(`[GEMINI] First audible response after ${Date.now() - geminiSetupCompletedAt}ms from setupComplete`);
-        }
-        geminiFirstAudibleResponseLogged = true;
-        openingPromptInFlight = false;
-        const pcm16 = Buffer.from(part.inlineData.data, 'base64');
-        const sourceRate = parsePcmRate(part.inlineData.mimeType, 24000);
-        const resampled = resamplePcm16(pcm16, sourceRate, 8000);
-        const outboundAudio = transportMode === 'exotel'
-          ? resampled.toString('base64')
-          : encodeMuLawFromPcm16(resampled).toString('base64');
-        if (Date.now() < suppressAgentAudioUntilMs) {
-          continue;
-        }
-        console.log(`[GEMINI] Outbound audio chunk mime=${part.inlineData.mimeType} sourceRate=${sourceRate} bytes=${resampled.length}`);
-        sendAudioToCaller(outboundAudio);
-      }
-
-      if (message.serverContent?.interrupted) {
-        discardPendingAgentTranscript('model_interrupted');
-        console.log('[GEMINI] Response interrupted');
-        return;
-      }
-
-      if (message.error) {
-        console.error('[GEMINI ERROR]', JSON.stringify(message, null, 2));
-        return;
-      }
-
-      if (!message.setupComplete && !message.serverContent && !message.usageMetadata && !message.goAway && !message.sessionResumptionUpdate) {
-        console.log('[GEMINI MESSAGE]', JSON.stringify(message, null, 2));
-      }
-    });
-
-    aiWs.on('close', (code, reasonBuffer) => {
-      aiSessionStarting = false;
-      clearGeminiSetupWatchdog();
-      clearGeminiOpeningPromptRetry();
-      const reason = Buffer.isBuffer(reasonBuffer) ? reasonBuffer.toString() : String(reasonBuffer || '');
-      console.log(`[${AI_PROVIDER.toUpperCase()}] Realtime session closed code=${code ?? 'unknown'} reason=${reason || 'n/a'}`);
-    });
-
-    aiWs.on('error', (error) => {
-      aiSessionStarting = false;
-      clearGeminiSetupWatchdog();
-      console.error(`[${AI_PROVIDER.toUpperCase()} WS ERROR]`, error.message);
-    });
-  }
-
-  function ensureAiSession() {
-    if (aiWs || aiSessionStarting) {
-      return;
-    }
-
-    createGeminiSession();
-    attachAiEventHandlers();
-  }
-
-  function finalizeLegacyUserTurn(text) {
-    const normalized = String(text || '').replace(/\s+/g, ' ').trim();
-    if (!normalized || callClosed) {
-      return;
-    }
-
-    hasCustomerResponded = true;
-    openingPromptInFlight = false;
-    clearAutoHangupTimer();
-    clearGeminiOpeningPromptRetry();
-    pushTranscriptTurn(transcript, 'CUSTOMER', normalized);
-    console.log(`[CUSTOMER]: ${normalized}`);
-
-    const sentiment = evaluateLiveSentimentLabel(normalized);
-    const redFlag = sentiment.label === 'negative';
-    refreshLiveCallState({
-      live_sentiment_label: sentiment.label,
-      live_sentiment_score: sentiment.score,
-      red_flag: redFlag
-    }).catch(() => {});
-
-    if (redFlag && activeCallId) {
-      createSupervisorEvent({
-        dbRun,
-        callId: activeCallId,
-        eventType: 'live_negative_signal',
-        severity: 'high',
-        payload: { transcript: normalized }
-      }).catch(() => {});
-    }
-
-    if (closeLegacyCallForCustomerRequest(normalized)) {
-      return;
-    }
-
-    const shouldInterrupt = Boolean(pendingAgentTranscript || pendingAgentTranscriptTimer);
-    if (shouldInterrupt) {
-      clearCallerPlaybackBuffer();
-      suppressStaleAgentAudio();
-      discardPendingAgentTranscript('customer_barge_in');
-    }
-
-    if (!openingQuestionAnswered) {
-      openingQuestionAnswered = true;
-
-      if (isAffirmativeAvailabilityResponse(normalized)) {
-        sendTextInputToAi(
-          `Customer confirmed they are the right person and can continue. Ask exactly one next question in Hindi: "Sir/ma'am, aapne kuch time pehle blood donate kiya tha. Uske liye Apna Blood Centre ki taraf se aapka bahut-bahut dhanyavaad. Aapke blood donation ko lagbhag 3 months ho gaye hain. Kya aap phir se blood donate karna chahenge?" Do not greet again. Do not repeat the identity confirmation question.`,
-          { interrupt: shouldInterrupt }
-        );
-        return;
-      }
-    }
-
-    sendTextInputToAi(
-      `Customer said: ${normalized}\nDo not greet again. Do not repeat the previous question unless the answer was unclear.`,
-      { interrupt: shouldInterrupt }
-    );
-  }
-
-  function handleLegacyDeepgramTranscript(event) {
-    const transcriptText = String(event?.channel?.alternatives?.[0]?.transcript || '').trim();
-    const isFinal = Boolean(event?.is_final);
-    const isSpeechFinal = Boolean(event?.speech_final);
-    const wordCount = transcriptText.split(/\s+/).filter(Boolean).length;
-
-    if (!transcriptText) {
-      if (isSpeechFinal && finalTranscriptBuffer.length) {
-        const merged = finalTranscriptBuffer.join(' ').replace(/\s+/g, ' ').trim();
-        finalTranscriptBuffer = [];
-        finalizeLegacyUserTurn(merged);
-      }
-      return;
-    }
-
-    if (wordCount >= 2 && (pendingAgentTranscript || pendingAgentTranscriptTimer)) {
-      clearCallerPlaybackBuffer();
-      suppressStaleAgentAudio();
-      discardPendingAgentTranscript('interim_customer_speech');
-    }
-
-    if (isFinal) {
-      finalTranscriptBuffer.push(transcriptText);
-    }
-
-    if (isSpeechFinal) {
-      const merged = finalTranscriptBuffer.length
-        ? finalTranscriptBuffer.join(' ')
-        : transcriptText;
-      finalTranscriptBuffer = [];
-      finalizeLegacyUserTurn(merged);
-    }
-  }
-
-  function connectLegacyDeepgram() {
-    deepgramWs = new WebSocket(createDeepgramListenUrl(transportMode), {
-      headers: {
-        Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`
-      }
-    });
-
-    deepgramWs.on('open', () => {
-      deepgramReady = true;
-      console.log(`[DEEPGRAM] Live transcription connected transport=${transportMode}`);
-      flushBufferedInboundMediaToDeepgram();
-    });
-
-    deepgramWs.on('message', (raw) => {
-      let event;
-
-      try {
-        event = JSON.parse(raw.toString());
-      } catch (error) {
-        console.error('[DEEPGRAM PARSE ERROR]', error.message);
-        return;
-      }
-
-      if (event.type === 'Results') {
-        handleLegacyDeepgramTranscript(event);
-      }
-    });
-
-    deepgramWs.on('close', () => {
-      deepgramReady = false;
-      console.log('[DEEPGRAM] Live transcription closed');
-    });
-
-    deepgramWs.on('error', (error) => {
-      deepgramReady = false;
-      console.error('[DEEPGRAM ERROR]', error.message);
-    });
-  }
-
-  twilioWs.on('message', async (raw) => {
-    let message;
-
-    try {
-      message = JSON.parse(raw.toString());
-    } catch (error) {
-      console.error('[STREAM] Failed to parse media stream message:', error.message);
-      return;
-    }
-
-    if (message.event === 'start') {
-      const start = extractStartPayload(message);
-      streamSid = getStreamSidFromMessage(message);
-      transportMode = getTransportModeFromStartPayload(start, req);
-      const customParameters = getCustomParametersFromStart(start);
-      activeCustomerName = customParameters.customerName || activeCustomerName;
-      activeClientName = customParameters.clientName || activeClientName;
-      activeCustomerId = customParameters.customerId ? Number(customParameters.customerId) : null;
-      activeAgentId = customParameters.agentId ? Number(customParameters.agentId) : null;
-      activeAgentConfig = activeAgentId ? await getAgentConfigById(activeAgentId) : await getDefaultAgentConfig();
-      activeClientName = activeAgentConfig?.client_name || activeClientName;
-      activeCallSid = getCallSidFromStart(start) || new URL(req.url, 'http://localhost').searchParams.get('callSid') || activeCallSid;
-
-      if (!activeCustomerId) {
-        const hintedPhone = start.from || new URL(req.url, 'http://localhost').searchParams.get('from') || '';
-        const customer = await findCustomerByPhone(hintedPhone);
-        if (customer) {
-          activeCustomerId = customer.id;
-          activeCustomerName = customer.name || activeCustomerName;
-          if (!activeAgentId && customer.default_agent_id) {
-            activeAgentId = Number(customer.default_agent_id) || null;
-            activeAgentConfig = activeAgentId ? await getAgentConfigById(activeAgentId) : activeAgentConfig;
-            activeClientName = activeAgentConfig?.client_name || activeClientName;
-          }
-        }
-      }
-
-      if (activeCallSid) {
-        const callRow = await dbGet('SELECT id FROM calls WHERE twilio_sid = ?', [activeCallSid]);
-        activeCallId = callRow?.id || null;
-        markPendingCallDiagnostic(activeCallSid, {
-          streamHitAt: new Date().toISOString(),
-          streamTransport: transportMode,
-          streamConnectedFrom: req.socket.remoteAddress || ''
-        });
-      }
-      console.log(`[STREAM] streamSid: ${streamSid}`);
-      console.log(`[STREAM] Start payload: ${JSON.stringify(start)}`);
-      console.log(`[STREAM] Transport=${transportMode} customer=${activeCustomerName} client=${activeClientName}`);
-      console.log(`[STREAM] AI provider=${AI_PROVIDER} model=${getActiveModelName()}`);
-      await refreshLiveCallState({ status: 'active', started_at: new Date().toISOString() });
-      connectLegacyDeepgram();
-      ensureAiSession();
-      return;
-    }
-
-    if (message.event === 'media') {
-      const payload = getMediaPayload(message);
-      if (!payload) {
-        return;
-      }
-
-      if (!deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
-        bufferInboundMediaChunk(payload);
-        return;
-      }
-
-      const audioChunk = transportMode === 'exotel'
-        ? Buffer.from(payload, 'base64')
-        : decodeMuLaw(payload);
-      if (!geminiInboundAudioLogged) {
-        console.log(`[DEEPGRAM] First inbound audio chunk received (${audioChunk.length} bytes)`);
-        geminiInboundAudioLogged = true;
-      }
-      deepgramWs.send(audioChunk);
-      return;
-    }
-
-    if (message.event === 'dtmf') {
-      const digit = String(message.dtmf?.digit || '').trim();
-      if (!digit) {
-        return;
-      }
-
-      const utterance = inferDtmfUtterance(digit, transcript);
-      console.log(`[DTMF] Received digit=${digit} mapped="${utterance}"`);
-      pushTranscriptTurn(transcript, 'CUSTOMER', `[DTMF ${digit}] ${utterance}`);
-      sendTextInputToAi(utterance, { interrupt: Boolean(pendingAgentTranscript || pendingAgentTranscriptTimer) });
-      return;
-    }
-
-    if (message.event === 'stop') {
-      console.log('[STREAM] Call ended');
-      callClosed = true;
-      clearAutoHangupTimer();
-      clearGeminiOpeningPromptRetry();
-      flushPendingAgentTranscript();
-      refreshLiveCallState({ status: 'completed' }).catch(() => {});
-      printTranscriptOnce();
-      persistTranscriptOnce().catch((error) => {
-        console.error('[FEEDBACK SAVE ERROR]', error.message);
-      });
-
-      if (aiWs?.readyState === WebSocket.OPEN) {
-        aiWs.close();
-      }
-
-      if (deepgramWs?.readyState === WebSocket.OPEN) {
-        deepgramWs.close();
-      }
-    }
-  });
-
-  twilioWs.on('close', () => {
-    console.log('[STREAM] Media stream closed');
-    callClosed = true;
-    clearAutoHangupTimer();
-    clearGeminiOpeningPromptRetry();
-    flushPendingAgentTranscript();
-    refreshLiveCallState({ status: 'closed' }).catch(() => {});
-    printTranscriptOnce();
-    persistTranscriptOnce().catch((error) => {
-      console.error('[FEEDBACK SAVE ERROR]', error.message);
-    });
-
-    if (aiWs?.readyState === WebSocket.OPEN) {
-      aiWs.close();
-    }
-
-    if (deepgramWs?.readyState === WebSocket.OPEN) {
-      deepgramWs.close();
-    }
-  });
-
-  twilioWs.on('error', (error) => {
-    console.error('[STREAM WS ERROR]', error.message);
-  });
-});
 
 (async () => {
   try {

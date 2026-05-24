@@ -32,7 +32,7 @@ function buildCrmPayload({ customer, call, feedback }) {
     },
     call: {
       id: call?.id,
-      twilio_sid: call?.twilio_sid,
+      provider_call_id: call?.provider_call_id,
       outcome: call?.outcome,
       outcome_detail: call?.outcome_detail,
       recording_status: call?.recording_status,

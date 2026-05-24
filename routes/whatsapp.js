@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { dbGet, dbRun } = require('../db');
-const { sendWhatsAppMessage } = require('../services/exotel');
+const { sendWhatsAppMessage } = require('../services/icallmate');
 
 // Send WhatsApp message for a call
 router.post('/send/:callId', async (req, res) => {
@@ -24,7 +24,6 @@ router.post('/send/:callId', async (req, res) => {
 Kripya WhatsApp par yeh Google Form fill karke apna feedback share kar dijiye: ${process.env.GOOGLE_REVIEW_LINK}
 Dhanyavaad!`;
 
-    // Send via Exotel
     const result = await sendWhatsAppMessage(customer.phone, message);
 
     // Update call record

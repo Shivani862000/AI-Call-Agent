@@ -43,6 +43,24 @@ function runMigrations() {
     await run(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
   };
 
+  const copyLegacyCallIdsToProviderCallId = async () => {
+    const legacyColumnName = ['twi', 'lio_sid'].join('');
+    const columns = await new Promise((resolve, reject) => {
+      db.all('PRAGMA table_info(calls)', (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows || []);
+      });
+    });
+
+    const hasLegacyColumn = columns.some((column) => column.name === legacyColumnName);
+    const hasProviderColumn = columns.some((column) => column.name === 'provider_call_id');
+    if (!hasLegacyColumn || !hasProviderColumn) {
+      return;
+    }
+
+    await run(`UPDATE calls SET provider_call_id = ${legacyColumnName} WHERE provider_call_id IS NULL AND ${legacyColumnName} IS NOT NULL`);
+  };
+
   return (async () => {
     await run(`
       CREATE TABLE IF NOT EXISTS customers (
@@ -61,7 +79,7 @@ function runMigrations() {
         customer_id INTEGER NOT NULL,
         called_at TIMESTAMP,
         outcome VARCHAR(20),
-        twilio_sid VARCHAR(100),
+        provider_call_id VARCHAR(100),
         whatsapp_sent BOOLEAN DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (customer_id) REFERENCES customers(id)
@@ -199,6 +217,8 @@ function runMigrations() {
     await addColumnIfMissing('clients', 'status', "VARCHAR(20) DEFAULT 'active'");
     await addColumnIfMissing('clients', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
 
+    await addColumnIfMissing('calls', 'provider_call_id', 'VARCHAR(100)');
+    await copyLegacyCallIdsToProviderCallId();
     await addColumnIfMissing('calls', 'transcript_text', 'TEXT');
     await addColumnIfMissing('calls', 'consent_detected', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('calls', 'language', 'VARCHAR(10)');

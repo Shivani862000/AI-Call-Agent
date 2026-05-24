@@ -1,4 +1,4 @@
-const { sendWhatsAppMessage } = require('./exotel');
+const { sendWhatsAppMessage } = require('./icallmate');
 
 const VALUE_SCORES = {
   vip: 95,
@@ -243,7 +243,7 @@ async function maybeSendBusyFallback({ customer, callId }) {
 }
 
 async function sendCustomerWhatsAppSummary({ customer, callSummary }) {
-  if (!customer?.phone || !process.env.GOOGLE_REVIEW_LINK || !process.env.EXOTEL_WHATSAPP_FROM) {
+  if (!customer?.phone || !process.env.GOOGLE_REVIEW_LINK || process.env.ICALLMATE_WHATSAPP_ENABLED !== 'true') {
     return false;
   }
 

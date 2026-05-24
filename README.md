@@ -1,131 +1,66 @@
-# Conversational Voice Agent POC
-ngrok http 3000
-A simple Node.js + Express proof of concept for outbound AI phone calls using:
+# Conversational Voice Agent
 
-- Twilio Programmable Voice
-- Twilio Media Streams
-- Gemini Live API over WebSocket
-- ngrok for local webhook exposure
-
-The flow is intentionally minimal: trigger one outbound call, let the AI agent run a multi-turn conversation, and print the final transcript to the console.
+Node.js + Express voice agent for iCallMate inbound and outbound calls, with Gemini Live audio and Deepgram transcription.
 
 ## Endpoints
 
-- `POST /call/start` places an outbound call to `CUSTOMER_PHONE`
-- `GET /call/twiml` returns TwiML that opens a Twilio Media Stream
-- `POST /call/status` logs Twilio call status changes
-- `WS /call/stream` bridges call audio to Gemini Live and streams AI audio back
-- `GET /health` returns a basic health payload
+- `POST /call/start` places an outbound iCallMate call.
+- `POST /api/calls/initiate/:customerId` places an outbound iCallMate call for a saved customer.
+- `GET /api/icallmate/config` returns the current iCallMate media and callback URLs.
+- `POST /api/icallmate/incoming-config` configures iCallMate DNIS macros.
+- `POST /api/icallmate/outbound-campaign` creates an iCallMate outbound campaign.
+- `POST /api/icallmate/callback` receives iCallMate call callbacks.
+- `WS /icallmate/media` handles iCallMate bidirectional media.
+- `GET /icallmate/health` returns iCallMate media health details.
 
 ## Setup
 
-1. Install dependencies:
-
 ```bash
 npm install
-```
-
-2. Copy the env template and fill in real values:
-
-```bash
 cp .env.example .env
 ```
 
-Required fields:
+Required voice fields:
 
 ```env
-EXOTEL_SID=
-EXOTEL_API_KEY=
-EXOTEL_API_TOKEN=
-EXOTEL_CALLER_ID=
-EXOTEL_FLOW_URL=
+ICALLMATE_UKEY=
+ICALLMATE_SERVICE_NO=
+ICALLMATE_IVR_TEMPLATE_ID=
+ICALLMATE_AGENT_ID=0
+ICALLMATE_BOT_ID=0
+ICALLMATE_DID=07971644996
+ICALLMATE_IBD_API_ENDPOINT=https://crm.icallmate.in
+ICALLMATE_OBD_API_ENDPOINT=https://ecp1.icallmate.in
 GEMINI_API_KEY=
-GEMINI_MODEL=models/gemini-2.5-flash-native-audio-preview-12-2025
 DEEPGRAM_API_KEY=
-NGROK_URL=https://abc123.ngrok-free.app
-CUSTOMER_PHONE=+14155550123
-CUSTOMER_NAME=Ramesh
-CLIENT_NAME=My Diagnostic Center
+APP_BASE_URL=https://your-public-domain.example
 PORT=3000
 ```
 
-Notes:
-
-- Configure your Exotel flow/app ID so the voicebot URL can open `/call/stream`.
-- `NGROK_URL` should not have a trailing slash.
-
 ## Run
-
-Start the server:
 
 ```bash
 node index.js
 ```
 
-Start ngrok in another terminal:
+For local public testing:
 
 ```bash
 ngrok http 3000
 ```
 
-Copy the HTTPS forwarding URL from ngrok into `.env` as `NGROK_URL`, then restart the server.
-
-Trigger the outbound call:
+Set the HTTPS forwarding URL as `APP_BASE_URL` or `NGROK_URL`, restart the server, then trigger:
 
 ```bash
 curl -X POST http://localhost:3000/call/start
 ```
 
-## Expected console flow
+## iCallMate Media
+
+iCallMate should connect to:
 
 ```text
-[SERVER] Running on http://localhost:3000
-[CALL STARTED] SID: CA...
-[STREAM] Twilio Media Stream connected
-[GEMINI] Live session opened
-[AGENT]: Hello, am I speaking with Ramesh? My name is Priya...
-[CUSTOMER]: Yes, this is Ramesh.
-...
-════════════════════════════════════
-         CALL TRANSCRIPT
-════════════════════════════════════
-[AGENT] (2026-04-29T16:30:01.000Z)
-  Hello, am I speaking with Ramesh?...
+wss://<APP_BASE_URL>/icallmate/media
 ```
 
-## Troubleshooting
-
-- No TwiML request from Twilio: confirm `NGROK_URL` is reachable and the server was restarted after editing `.env`.
-- Twilio `11200`: webhook or stream URL is not reachable.
-- No audio both ways: confirm the stream URL resolves to `wss://.../call/stream`.
-- Gemini auth errors: verify `GEMINI_API_KEY` is valid for the configured live model.
-- Twilio trial failure: verify the destination number in Twilio or upgrade the account.
-
-## Docker Development
-
-Build and start locally with Docker Compose:
-
-```bash
-docker compose up --build
-```
-
-The app listens on:
-
-```text
-http://localhost:3000
-```
-
-The Compose setup persists SQLite data in a Docker volume and is ready to accept a production image through the `IMAGE_NAME` variable during deployment.
-
-## CI/CD
-
-The repository includes a GitHub Actions deployment workflow:
-
-- workflow file: `.github/workflows/deploy.yml`
-- release branch: `deploy`
-- Artifact Registry: `asia-south2-docker.pkg.dev/lively-math-495604-b5/feedback-agent`
-- runtime target: `GKE + Kubernetes Ingress`
-
-Google Cloud deployment notes live in:
-
-- `GKE_NEXT_STEPS.md`
+The app expects `8000 Hz`, `LINEAR16`, `1 channel`, `16 bits` media payloads.

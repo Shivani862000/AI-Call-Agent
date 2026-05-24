@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { dbRun, dbGet, dbAll } = require('../db');
-const { initiateCall } = require('../services/exotel');
+const { initiateCall } = require('../services/icallmate');
 
 // Initiate call to a customer
 router.post('/initiate/:customerId', async (req, res) => {
@@ -17,17 +17,19 @@ router.post('/initiate/:customerId', async (req, res) => {
     // Get the base URL for callbacks (for production, use ngrok or actual domain)
     const baseUrl = process.env.WEBHOOK_URL || `http://localhost:${process.env.PORT || 3000}`;
 
-    // Initiate Exotel call
     const call = await initiateCall(
       customer.phone,
       customerId,
-      `${baseUrl}/api/calls/status`,
-      `${baseUrl}/api/twiml/intro?customerId=${customerId}`
+      {
+        baseUrl,
+        wsurl: `${baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:')}/icallmate/media`,
+        callbackapi: `${baseUrl}/api/icallmate/callback`
+      }
     );
 
     // Save call record
     const result = await dbRun(
-      'INSERT INTO calls (customer_id, outcome, twilio_sid, called_at) VALUES (?, ?, ?, ?)',
+      'INSERT INTO calls (customer_id, outcome, provider_call_id, called_at) VALUES (?, ?, ?, ?)',
       [customerId, 'initiated', call.sid, new Date().toISOString()]
     );
 
@@ -46,7 +48,7 @@ router.post('/initiate/:customerId', async (req, res) => {
   }
 });
 
-// Status callback from Exotel
+// Status callback from iCallMate
 router.post('/status', async (req, res) => {
   try {
     const callSid = req.body.CallSid;
@@ -54,7 +56,7 @@ router.post('/status', async (req, res) => {
 
     console.log(`Call status update: ${callSid} -> ${callStatus}`);
 
-    const call = await dbGet('SELECT * FROM calls WHERE twilio_sid = ?', [callSid]);
+    const call = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [callSid]);
 
     if (call) {
       if (callStatus === 'no-answer' || callStatus === 'failed') {
