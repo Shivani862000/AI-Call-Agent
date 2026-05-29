@@ -29,8 +29,8 @@ router.post('/initiate/:customerId', async (req, res) => {
 
     // Save call record
     const result = await dbRun(
-      'INSERT INTO calls (customer_id, outcome, provider_call_id, called_at) VALUES (?, ?, ?, ?)',
-      [customerId, 'initiated', call.sid, new Date().toISOString()]
+      'INSERT INTO calls (customer_id, outcome, provider_call_id, called_at, call_direction, call_source) VALUES (?, ?, ?, ?, ?, ?)',
+      [customerId, 'initiated', call.sid, new Date().toISOString(), 'outbound', 'icallmate']
     );
 
     // Update customer status

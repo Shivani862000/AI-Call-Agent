@@ -34,6 +34,7 @@ function buildOutboundCampaignPayload(customerPhone, customerId, options = {}) {
         agentid: String(options.agentId || process.env.ICALLMATE_AGENT_ID || '0'),
         botid: String(options.botId || process.env.ICALLMATE_BOT_ID || '0'),
         extraparam: JSON.stringify({
+          callDirection: 'outbound',
           customerId: customerId || null,
           customerName: options.customerName || '',
           clientName: options.clientName || ''
@@ -60,6 +61,12 @@ function extractCallSid(payload, fallback) {
   );
 
   return parsedSid || fallback || `icallmate-${Date.now()}`;
+}
+
+function isFailurePayload(payload) {
+  const status = String(payload?.status || payload?.Status || '').toLowerCase();
+  const statusCode = Number(payload?.statuscode || payload?.statusCode || payload?.code || 0);
+  return status === 'failure' || (statusCode >= 400 && statusCode !== 0);
 }
 
 async function initiateCall(customerPhone, customerId, options = {}) {
@@ -90,6 +97,10 @@ async function initiateCall(customerPhone, customerId, options = {}) {
 
   if (!response.ok) {
     throw new Error(`iCallMate outbound call failed (${response.status}): ${rawText || response.statusText}`);
+  }
+
+  if (isFailurePayload(parsed)) {
+    throw new Error(`iCallMate outbound call rejected: ${parsed.message || rawText || 'unknown failure'}`);
   }
 
   const sid = extractCallSid(parsed, payload.s_unique);

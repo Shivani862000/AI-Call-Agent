@@ -219,6 +219,15 @@ function runMigrations() {
 
     await addColumnIfMissing('calls', 'provider_call_id', 'VARCHAR(100)');
     await copyLegacyCallIdsToProviderCallId();
+    await addColumnIfMissing('calls', 'call_direction', "VARCHAR(20) DEFAULT 'outbound'");
+    await addColumnIfMissing('calls', 'call_source', "VARCHAR(40) DEFAULT 'icallmate'");
+    await addColumnIfMissing('calls', 'did', 'VARCHAR(40)');
+    await addColumnIfMissing('calls', 'answered_at', 'TIMESTAMP');
+    await addColumnIfMissing('calls', 'ended_at', 'TIMESTAMP');
+    await addColumnIfMissing('calls', 'media_packets', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'last_event', 'VARCHAR(40)');
+    await addColumnIfMissing('calls', 'notes', 'TEXT');
+    await addColumnIfMissing('calls', 'provider_payload_json', 'TEXT');
     await addColumnIfMissing('calls', 'transcript_text', 'TEXT');
     await addColumnIfMissing('calls', 'consent_detected', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('calls', 'language', 'VARCHAR(10)');

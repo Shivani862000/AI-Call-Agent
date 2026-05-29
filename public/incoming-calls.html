@@ -68,6 +68,10 @@
           <span class="desktop-filter-count" id="desktopMissedMetric">0</span>
           <span class="desktop-filter-label">Missed</span>
         </button>
+        <button class="desktop-filter-pill" type="button" data-incoming-filter="completed" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopCompletedMetric">0</span>
+          <span class="desktop-filter-label">Completed</span>
+        </button>
       </section>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Incoming call summary">
@@ -83,6 +87,10 @@
           <span class="mobile-stat-count" id="mobileMissedMetric">0</span>
           <span class="mobile-stat-label">Missed</span>
         </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-incoming-filter="completed" aria-pressed="false">
+          <span class="mobile-stat-count" id="mobileCompletedMetric">0</span>
+          <span class="mobile-stat-label">Completed</span>
+        </button>
       </section>
 
       <section class="poc-metrics-grid">
@@ -95,6 +103,16 @@
           <div class="metric-label">Missed Calls</div>
           <div class="metric-value" id="missedMetric">0</div>
           <div class="metric-note">Inbound calls missed during the current window.</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Completed Calls</div>
+          <div class="metric-value" id="completedMetric">0</div>
+          <div class="metric-note">Inbound conversations that reached hangup after answer.</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Media Packets</div>
+          <div class="metric-value" id="mediaPacketsMetric">0</div>
+          <div class="metric-note">Inbound audio packets received from iCallMate.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Last Updated</div>
@@ -117,8 +135,10 @@
               <tr>
                 <th>Caller</th>
                 <th>Phone</th>
+                <th>DID</th>
                 <th>Received</th>
                 <th>Status</th>
+                <th>Packets</th>
                 <th>Notes</th>
               </tr>
             </thead>
@@ -157,36 +177,6 @@
     let refreshTimer = null;
     let activeIncomingFilter = 'all';
     let incomingCallsCache = [];
-    const now = new Date();
-    const DEMO_INCOMING_CALLS = [
-      {
-        caller_name: 'Rajiv Mehta',
-        phone: '+91 98123 45670',
-        received_at: new Date(now.getTime() - 7 * 60000).toISOString(),
-        status: 'active',
-        notes: 'Connected for appointment reschedule'
-      },
-      {
-        caller_name: 'Neha Kapoor',
-        phone: '+91 97654 32109',
-        received_at: new Date(now.getTime() - 18 * 60000).toISOString(),
-        status: 'missed',
-        notes: 'Missed call, callback pending'
-      }
-    ];
-
-    function withDemoIncomingCalls(payload = {}) {
-      const apiCalls = Array.isArray(payload.calls) ? payload.calls : [];
-      if (apiCalls.length) return payload;
-
-      return {
-        calls: DEMO_INCOMING_CALLS,
-        active_count: DEMO_INCOMING_CALLS.filter((call) => call.status === 'active').length,
-        missed_count: DEMO_INCOMING_CALLS.filter((call) => call.status === 'missed').length,
-        updated_at: new Date().toISOString()
-      };
-    }
-
     function setText(id, value) {
       const element = document.getElementById(id);
       if (element) element.textContent = value;
@@ -220,7 +210,7 @@
         const filterLabel = activeIncomingFilter === 'all' ? '' : `${AppShell.formatStatusLabel(activeIncomingFilter).toLowerCase()} `;
         const emptyMarkup = `
           <tr>
-            <td colspan="5">
+            <td colspan="7">
               <div class="empty-state">
                 <strong>No ${filterLabel}incoming calls</strong>
                 <span>Select another status or refresh to check new calls.</span>
@@ -242,8 +232,10 @@
         <tr>
           <td>${AppShell.escapeHtml(call.caller_name || 'Unknown caller')}</td>
           <td>${AppShell.escapeHtml(call.phone || '--')}</td>
+          <td>${AppShell.escapeHtml(call.did || '--')}</td>
           <td>${AppShell.formatDateTime(call.received_at)}</td>
           <td><span class="status-badge ${AppShell.escapeHtml(String(call.status || 'active').toLowerCase())}">${AppShell.formatStatusLabel(call.status || 'active')}</span></td>
+          <td>${Number(call.media_packets || 0)}</td>
           <td>${AppShell.escapeHtml(call.notes || '--')}</td>
         </tr>
       `).join('');
@@ -254,7 +246,8 @@
             <strong>${AppShell.escapeHtml(call.caller_name || 'Unknown caller')}</strong>
             <span class="status-badge ${AppShell.escapeHtml(String(call.status || 'active').toLowerCase())}">${AppShell.formatStatusLabel(call.status || 'active')}</span>
           </div>
-          <div class="mobile-subtext">${AppShell.escapeHtml(call.phone || '--')} · ${AppShell.formatDateTime(call.received_at)}</div>
+          <div class="mobile-subtext">${AppShell.escapeHtml(call.phone || '--')} · DID ${AppShell.escapeHtml(call.did || '--')} · ${AppShell.formatDateTime(call.received_at)}</div>
+          <div class="mobile-subtext">${Number(call.media_packets || 0)} media packets</div>
           <div class="mobile-subtext">${AppShell.escapeHtml(call.notes || 'No notes yet')}</div>
         </article>
       `).join('');
@@ -265,19 +258,23 @@
       const all = calls.length;
       const active = Number(payload.active_count || calls.filter((call) => String(call.status || '').toLowerCase() === 'active').length);
       const missed = Number(payload.missed_count || calls.filter((call) => String(call.status || '').toLowerCase() === 'missed').length);
+      const completed = Number(payload.completed_count || calls.filter((call) => String(call.status || '').toLowerCase() === 'completed').length);
+      const mediaPackets = Number(payload.total_media_packets || calls.reduce((sum, call) => sum + Number(call.media_packets || 0), 0));
       const updatedAt = payload.updated_at || new Date().toISOString();
       incomingCallsCache = calls;
 
       ['desktopAllMetric', 'mobileAllMetric'].forEach((id) => setText(id, all));
       ['activeMetric', 'desktopActiveMetric', 'mobileActiveMetric'].forEach((id) => setText(id, active));
       ['missedMetric', 'desktopMissedMetric', 'mobileMissedMetric'].forEach((id) => setText(id, missed));
+      ['completedMetric', 'desktopCompletedMetric', 'mobileCompletedMetric'].forEach((id) => setText(id, completed));
+      setText('mediaPacketsMetric', mediaPackets);
       setText('updatedMetric', formatClock(updatedAt));
       updateIncomingFilterButtons();
       renderIncomingCalls(getFilteredIncomingCalls());
     }
 
     function applyIncomingFilter(filterName) {
-      activeIncomingFilter = ['all', 'active', 'missed'].includes(filterName) ? filterName : 'all';
+      activeIncomingFilter = ['all', 'active', 'missed', 'completed'].includes(filterName) ? filterName : 'all';
       updateIncomingFilterButtons();
       renderIncomingCalls(getFilteredIncomingCalls());
     }
@@ -306,12 +303,13 @@
         }
 
         if (response.status === 404) {
-          renderMetrics(withDemoIncomingCalls({
+          renderMetrics({
             calls: [],
             active_count: 0,
             missed_count: 0,
+            completed_count: 0,
             updated_at: new Date().toISOString()
-          }));
+          });
           return;
         }
 
@@ -326,7 +324,7 @@
           throw new Error(payload?.error || `Request failed (${response.status})`);
         }
 
-        renderMetrics(withDemoIncomingCalls(payload));
+        renderMetrics(payload || { calls: [] });
       } catch (error) {
         if (!silent) AppShell.showAlert(error.message, 'error');
       }

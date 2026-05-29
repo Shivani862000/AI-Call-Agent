@@ -530,6 +530,32 @@ function buildOpeningPrompt(clientName, customerName, agentConfig = null) {
   return buildDefaultOpeningPrompt(clientName, customerName);
 }
 
+function buildIncomingAgentSystemPrompt(clientName) {
+  return `
+You are Priya, a calm Hindi/Hinglish receptionist for ${clientName}.
+The caller has called the business first. This is an inbound support call, not an outbound follow-up.
+
+Goal:
+- Greet briefly and ask how you can help.
+- Help with common patient/customer needs: report status, appointment timing, address, service availability, callback request, or complaint.
+- If details are needed, collect name, phone number, and the issue in a natural way.
+- If the caller asks for something you cannot verify, say the team will check and call back.
+- Keep responses short, polite, and human.
+
+Rules:
+- Do not say you are calling them.
+- Do not talk about previous blood donation follow-up unless the caller asks about blood donation.
+- Do not ask outbound survey questions.
+- Do not invent report results, appointment confirmations, prices, or medical advice.
+- If the caller is angry or reports a problem, apologize once, collect the issue, and say the team will follow up.
+- If the caller wants to end, thank them and close.
+`.trim();
+}
+
+function buildIncomingOpeningPrompt(clientName) {
+  return `Sirf yeh exact line boliye aur is turn me kuch aur mat boliye: "Namaste, ${clientName} se Priya bol rahi hoon. Main aapki kis tarah madad kar sakti hoon?"`;
+}
+
 async function getAgentConfigById(agentId) {
   if (!agentId) return null;
   return dbGet('SELECT * FROM agents WHERE id = ? AND is_active = 1', [agentId]);
@@ -1107,6 +1133,41 @@ async function findCustomerByPhone(phoneValue) {
   return customers.find((customer) => normalizePhoneLookupValue(customer.phone) === normalized) || null;
 }
 
+async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incoming caller') {
+  const normalizedPhone = String(phoneValue || '').trim() || `incoming-${Date.now()}`;
+  const existing = await findCustomerByPhone(normalizedPhone);
+  if (existing) {
+    return existing;
+  }
+
+  const result = await dbRun(
+    'INSERT INTO customers (name, phone, preferred_slot, status, created_at) VALUES (?, ?, ?, ?, ?)',
+    [
+      fallbackName || 'Incoming caller',
+      normalizedPhone,
+      getCurrentSlotLabel(new Date()),
+      'incoming',
+      new Date().toISOString()
+    ]
+  );
+
+  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+}
+
+function parseIcallMateExtraParams(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+}
+
 async function getCustomerCallHistory(customerId, limit = 20) {
   if (!customerId) return [];
   return dbAll(
@@ -1294,7 +1355,7 @@ function getIncomingCallKey(message = {}) {
   return String(message.streamId || message.ChKey || message.callerId || `${Date.now()}`).trim();
 }
 
-function upsertIncomingCallFromIcall(message = {}, patch = {}) {
+async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
   const key = getIncomingCallKey(message);
   const existing = incomingCallState.get(key) || {};
   const eventName = String(message.event || patch.event || '').toLowerCase();
@@ -1309,7 +1370,7 @@ function upsertIncomingCallFromIcall(message = {}, patch = {}) {
     caller_name: patch.caller_name || existing.caller_name || 'Incoming caller',
     phone: message.callerId || existing.phone || '--',
     did: message.did || existing.did || '',
-    call_direction: message.callDirection || existing.call_direction || 'incoming',
+    call_direction: patch.call_direction || message.callDirection || existing.call_direction || 'incoming',
     status,
     received_at: existing.received_at || normalizeIcallTimestamp(message.timestamp),
     updated_at: nowIso,
@@ -1326,6 +1387,85 @@ function upsertIncomingCallFromIcall(message = {}, patch = {}) {
   };
 
   incomingCallState.set(key, row);
+
+  try {
+    const customer = await ensureIncomingCustomerForCall(row.phone, row.caller_name);
+    const existingCall = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [row.stream_id]);
+    const outcome = row.status === 'active' ? 'active' : row.status;
+    const providerPayload = JSON.stringify({
+      event: eventName,
+      streamId: row.stream_id,
+      callerId: row.phone,
+      did: row.did,
+      ChKey: message.ChKey || null,
+      botid: row.botid || null,
+      userrefno: row.userrefno || null,
+      sysrefno: row.sysrefno || null,
+      extraParams: row.extra_params || null
+    });
+
+    if (existingCall) {
+      await dbRun(
+        `UPDATE calls
+            SET customer_id = ?,
+                outcome = ?,
+                did = ?,
+                answered_at = COALESCE(?, answered_at),
+                ended_at = COALESCE(?, ended_at),
+                media_packets = COALESCE(media_packets, 0) + ?,
+                last_event = ?,
+                notes = ?,
+                provider_payload_json = ?,
+                call_direction = ?,
+                call_source = ?,
+                called_at = COALESCE(called_at, ?)
+          WHERE id = ?`,
+        [
+          customer.id,
+          outcome,
+          row.did || null,
+          row.answered_at,
+          row.ended_at,
+          Number(patch.media_packets || 0),
+          row.last_event || null,
+          row.notes || null,
+          providerPayload,
+          row.call_direction || 'incoming',
+          'icallmate',
+          row.received_at,
+          existingCall.id
+        ]
+      );
+    } else {
+      await dbRun(
+        `INSERT INTO calls (
+          customer_id, outcome, provider_call_id, called_at, call_direction, call_source,
+          did, answered_at, ended_at, media_packets, last_event, notes,
+          transcript_status, analysis_status, provider_payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          customer.id,
+          outcome,
+          row.stream_id,
+          row.received_at,
+          row.call_direction || 'incoming',
+          'icallmate',
+          row.did || null,
+          row.answered_at,
+          row.ended_at,
+          Number(row.media_packets || 0),
+          row.last_event || null,
+          row.notes || null,
+          'live_stream',
+          'pending',
+          providerPayload
+        ]
+      );
+    }
+  } catch (error) {
+    console.error('[ICALLMATE INCOMING DB ERROR]', error.message);
+  }
+
   return row;
 }
 
@@ -1429,8 +1569,8 @@ async function triggerScheduledCalls() {
       await dbRun(
         `INSERT INTO calls (
           customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           agentConfig?.id || null,
@@ -1440,7 +1580,9 @@ async function triggerScheduledCalls() {
           customer.priority_score || computePriorityScore(customer),
           1,
           agentConfig?.slug || 'hindi-feedback-v1',
-          'normal'
+          'normal',
+          'outbound',
+          'icallmate'
         ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
@@ -1529,8 +1671,8 @@ async function triggerAnnualClientReminderCalls() {
       await dbRun(
         `INSERT INTO calls (
           customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           hydratedCustomer.id,
           agentConfig?.id || null,
@@ -1540,7 +1682,9 @@ async function triggerAnnualClientReminderCalls() {
           hydratedCustomer.priority_score || computePriorityScore(hydratedCustomer),
           1,
           `annual-reminder:${client.treatment_type || 'client-care'}`,
-          'normal'
+          'normal',
+          'outbound',
+          'icallmate'
         ]
       );
 
@@ -1810,8 +1954,8 @@ app.post('/call/start', async (req, res) => {
     const result = await dbRun(
       `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         customer.id,
         agentConfig?.id || null,
@@ -1821,7 +1965,9 @@ app.post('/call/start', async (req, res) => {
         customer.priority_score || computePriorityScore(customer),
         1,
         agentConfig?.slug || 'hindi-feedback-v1',
-        'normal'
+        'normal',
+        'outbound',
+        'icallmate'
       ]
     );
     await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
@@ -2025,8 +2171,8 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
     const result = await dbRun(
       `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         customer.id,
         agentConfig?.id || null,
@@ -2036,7 +2182,9 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
         customer.priority_score || computePriorityScore(customer),
         1,
         agentConfig?.slug || 'hindi-feedback-v1',
-        'normal'
+        'normal',
+        'outbound',
+        'icallmate'
       ]
     );
 
@@ -2064,15 +2212,105 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
 
 app.get('/api/calls/incoming', async (req, res) => {
   pruneIncomingCallState();
-  const calls = [...incomingCallState.values()]
-    .sort((a, b) => new Date(b.updated_at || b.received_at || 0) - new Date(a.updated_at || a.received_at || 0));
+  const dbRows = await dbAll(
+    `SELECT
+       calls.id,
+       calls.provider_call_id AS stream_id,
+       customers.name AS caller_name,
+       customers.phone AS phone,
+       calls.did,
+       calls.call_direction,
+       calls.outcome AS status,
+       calls.called_at AS received_at,
+       calls.answered_at,
+       calls.ended_at,
+       calls.media_packets,
+       calls.last_event,
+       calls.notes,
+       calls.created_at,
+       calls.provider_payload_json
+     FROM calls
+     JOIN customers ON customers.id = calls.customer_id
+     WHERE calls.call_direction = 'incoming'
+     ORDER BY COALESCE(calls.ended_at, calls.answered_at, calls.called_at, calls.created_at) DESC
+     LIMIT 100`
+  );
+
+  const seen = new Set(dbRows.map((row) => row.stream_id).filter(Boolean));
+  const liveOnlyRows = [...incomingCallState.values()].filter((row) => row.stream_id && !seen.has(row.stream_id));
+  const calls = [
+    ...dbRows.map((row) => ({
+      ...row,
+      status: row.status || 'active',
+      updated_at: row.ended_at || row.answered_at || row.received_at || row.created_at
+    })),
+    ...liveOnlyRows
+  ].sort((a, b) => new Date(b.updated_at || b.received_at || 0) - new Date(a.updated_at || a.received_at || 0));
 
   res.json({
     calls,
     active_count: calls.filter((call) => call.status === 'active').length,
     missed_count: calls.filter((call) => call.status === 'missed').length,
+    completed_count: calls.filter((call) => call.status === 'completed').length,
+    total_media_packets: calls.reduce((sum, call) => sum + Number(call.media_packets || 0), 0),
     updated_at: new Date().toISOString()
   });
+});
+
+app.get('/api/calls/metrics', async (req, res) => {
+  try {
+    const rows = await dbAll(
+      `SELECT
+         COALESCE(call_direction, 'outbound') AS direction,
+         COALESCE(outcome, 'unknown') AS outcome,
+         COUNT(*) AS count,
+         SUM(CASE WHEN DATE(called_at) = DATE('now') THEN 1 ELSE 0 END) AS today_count,
+         SUM(COALESCE(media_packets, 0)) AS media_packets
+       FROM calls
+       GROUP BY COALESCE(call_direction, 'outbound'), COALESCE(outcome, 'unknown')`
+    );
+
+    const summary = {
+      inbound: { total: 0, today: 0, active: 0, completed: 0, missed: 0, media_packets: 0 },
+      outbound: { total: 0, today: 0, initiated: 0, completed: 0, failed: 0, scheduled: 0, media_packets: 0 },
+      all: { total: 0, today: 0, media_packets: 0 }
+    };
+
+    for (const row of rows) {
+      const direction = row.direction === 'incoming' ? 'inbound' : 'outbound';
+      const outcome = String(row.outcome || 'unknown').toLowerCase();
+      const count = Number(row.count || 0);
+      const todayCount = Number(row.today_count || 0);
+      const mediaPackets = Number(row.media_packets || 0);
+      const target = summary[direction];
+
+      target.total += count;
+      target.today += todayCount;
+      target.media_packets += mediaPackets;
+      summary.all.total += count;
+      summary.all.today += todayCount;
+      summary.all.media_packets += mediaPackets;
+
+      if (direction === 'inbound') {
+        if (outcome === 'active') target.active += count;
+        if (outcome === 'completed') target.completed += count;
+        if (outcome === 'missed') target.missed += count;
+      } else {
+        if (['initiated', 'scheduled_initiated', 'active'].includes(outcome)) target.initiated += count;
+        if (outcome === 'completed') target.completed += count;
+        if (['failed', 'busy', 'no_answer'].includes(outcome)) target.failed += count;
+        if (outcome === 'scheduled_initiated') target.scheduled += count;
+      }
+    }
+
+    res.json({
+      ...summary,
+      updated_at: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('[CALL METRICS ERROR]', error.message);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 app.get('/api/icallmate/config', async (req, res) => {
@@ -2126,6 +2364,22 @@ app.post('/api/icallmate/callback', async (req, res) => {
         recording_url: payload.recording_filename || '',
         talktime: payload.talktime || ''
       });
+
+      await upsertIncomingCallFromIcall({
+        streamId: key,
+        callerId: callerId || payload.phoneno || '',
+        did,
+        event: 'callback',
+        timestamp: payload.call_start_time || payload.timestamp,
+        extraParams: JSON.stringify({ callbackPayload: true })
+      }, {
+        status,
+        call_direction: 'incoming',
+        caller_name: payload.customer_name || 'Incoming caller',
+        answered_at: payload.call_ansd_time ? normalizeIcallTimestamp(payload.call_ansd_time) : null,
+        ended_at: payload.call_end_time ? normalizeIcallTimestamp(payload.call_end_time) : null,
+        notes: payload.recording_filename ? 'Callback received with recording' : 'Callback received'
+      });
     }
 
     res.json({ success: true });
@@ -2165,9 +2419,16 @@ app.post('/api/icallmate/incoming-config', async (req, res) => {
       body: JSON.stringify(macros)
     });
     const text = await response.text();
+    let parsed = {};
+    try {
+      parsed = text ? JSON.parse(text) : {};
+    } catch (error) {
+      parsed = { rawText: text };
+    }
+    const providerSuccess = response.ok && String(parsed.status || '').toLowerCase() !== 'failure';
 
-    res.status(response.ok ? 200 : response.status).json({
-      success: response.ok,
+    res.status(providerSuccess ? 200 : (response.ok ? 502 : response.status)).json({
+      success: providerSuccess,
       endpoint,
       macros,
       response: text
@@ -2220,9 +2481,16 @@ app.post('/api/icallmate/outbound-campaign', async (req, res) => {
       body: JSON.stringify(payload)
     });
     const text = await response.text();
+    let parsed = {};
+    try {
+      parsed = text ? JSON.parse(text) : {};
+    } catch (error) {
+      parsed = { rawText: text };
+    }
+    const providerSuccess = response.ok && String(parsed.status || '').toLowerCase() !== 'failure';
 
-    res.status(response.ok ? 200 : response.status).json({
-      success: response.ok,
+    res.status(providerSuccess ? 200 : (response.ok ? 502 : response.status)).json({
+      success: providerSuccess,
       endpoint,
       response: text
     });
@@ -2267,6 +2535,13 @@ app.get('/api/calls/recent', async (req, res) => {
          agents.slug AS agent_slug,
          calls.called_at,
          calls.outcome,
+         calls.call_direction,
+         calls.call_source,
+         calls.did,
+         calls.media_packets,
+         calls.answered_at,
+         calls.ended_at,
+         calls.notes,
          calls.provider_call_id,
          calls.recording_sid,
          calls.recording_url,
@@ -2323,6 +2598,13 @@ app.get('/api/calls/:callId(\\d+)', async (req, res) => {
          agents.slug AS agent_slug,
          calls.called_at,
          calls.outcome,
+         calls.call_direction,
+         calls.call_source,
+         calls.did,
+         calls.media_packets,
+         calls.answered_at,
+         calls.ended_at,
+         calls.notes,
          calls.provider_call_id,
          calls.recording_sid,
          calls.recording_url,
@@ -2742,10 +3024,18 @@ function createIcallMateAiBridge(ws, session) {
   let finalTranscriptBuffer = [];
 
   const getSessionLabel = () => session.streamId || session.callerId || 'unknown';
-  const getSystemPrompt = () => buildAgentSystemPrompt(CLIENT_NAME, process.env.CUSTOMER_NAME || 'sir/maam');
+  const isOutboundSession = () => String(session.callDirection || '').toLowerCase() === 'outbound';
+  const getSessionClientName = () => session.clientName || CLIENT_NAME;
+  const getSessionCustomerName = () => session.customerName || process.env.CUSTOMER_NAME || 'sir/maam';
+  const getSystemPrompt = () => (
+    isOutboundSession()
+      ? buildAgentSystemPrompt(getSessionClientName(), getSessionCustomerName())
+      : buildIncomingAgentSystemPrompt(getSessionClientName())
+  );
   const getOpeningPrompt = () => (
-    'Sirf yeh exact line boliye aur is turn me kuch aur mat boliye: '
-    + '"Good morning sir/maam, main Apna Blood Centre, Palwal se Priya baat kar rahi hoon. Kya abhi 2 minute baat ho sakti hai?"'
+    isOutboundSession()
+      ? buildOpeningPrompt(getSessionClientName(), getSessionCustomerName())
+      : buildIncomingOpeningPrompt(getSessionClientName())
   );
 
   function sendGeminiClientTurn(text, options = {}) {
@@ -2902,8 +3192,13 @@ function createIcallMateAiBridge(ws, session) {
         const merged = finalTranscriptBuffer.join(' ').replace(/\s+/g, ' ').trim();
         finalTranscriptBuffer = [];
         if (merged) {
-          console.log(`[ICALLMATE][CALLER]: ${merged}`);
-          sendGeminiClientTurn(`Customer said: ${merged}\nDo not greet again. Continue the blood donation follow-up naturally in Hindi/Hinglish.`, { interrupt: true });
+        console.log(`[ICALLMATE][CALLER]: ${merged}`);
+          sendGeminiClientTurn(
+            isOutboundSession()
+              ? `Customer said: ${merged}\nDo not greet again. Continue the blood donation follow-up naturally in Hindi/Hinglish.`
+              : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`,
+            { interrupt: true }
+          );
         }
       }
       return;
@@ -2920,7 +3215,12 @@ function createIcallMateAiBridge(ws, session) {
       finalTranscriptBuffer = [];
       if (merged) {
         console.log(`[ICALLMATE][CALLER]: ${merged}`);
-        sendGeminiClientTurn(`Customer said: ${merged}\nDo not greet again. Continue the blood donation follow-up naturally in Hindi/Hinglish.`, { interrupt: true });
+        sendGeminiClientTurn(
+          isOutboundSession()
+            ? `Customer said: ${merged}\nDo not greet again. Continue the blood donation follow-up naturally in Hindi/Hinglish.`
+            : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`,
+          { interrupt: true }
+        );
       }
     }
   }
@@ -3022,12 +3322,15 @@ icallMateWss.on('connection', (ws, req) => {
     streamId: '',
     callerId: '',
     did: '',
+    callDirection: 'incoming',
+    customerName: '',
+    clientName: CLIENT_NAME,
     answered: false,
     connectedAt: new Date().toISOString()
   };
   const aiBridge = createIcallMateAiBridge(ws, session);
 
-  ws.on('message', (raw) => {
+  ws.on('message', async (raw) => {
     let message;
     try {
       message = JSON.parse(raw.toString());
@@ -3041,9 +3344,13 @@ icallMateWss.on('connection', (ws, req) => {
     if (message.streamId) session.streamId = message.streamId;
     if (message.callerId) session.callerId = message.callerId;
     if (message.did) session.did = message.did;
+    const extraParams = parseIcallMateExtraParams(message.extraParams || message.extraparam || message.extra_param);
+    if (extraParams.callDirection) session.callDirection = String(extraParams.callDirection).toLowerCase();
+    if (extraParams.customerName) session.customerName = extraParams.customerName;
+    if (extraParams.clientName) session.clientName = extraParams.clientName;
 
     if (eventName === 'connected') {
-      upsertIncomingCallFromIcall(message, { status: 'active', notes: 'iCallMate connected' });
+      await upsertIncomingCallFromIcall(message, { status: 'active', notes: 'iCallMate connected' });
       sendIcallMateMark(ws, message, 'connected-received');
       return;
     }
@@ -3057,7 +3364,7 @@ icallMateWss.on('connection', (ws, req) => {
         && Number(mediaFormat.bitsPerSample) === 16
       );
 
-      upsertIncomingCallFromIcall(message, {
+      await upsertIncomingCallFromIcall(message, {
         status: 'active',
         notes: isExpectedAudio ? 'iCallMate media stream started' : 'iCallMate media stream started with unexpected audio format'
       });
@@ -3065,7 +3372,7 @@ icallMateWss.on('connection', (ws, req) => {
 
       if (!session.answered) {
         session.answered = true;
-        upsertIncomingCallFromIcall(message, {
+        await upsertIncomingCallFromIcall(message, {
           status: 'active',
           answered_at: normalizeIcallTimestamp(message.timestamp),
           notes: 'Incoming call answered via start event'
@@ -3078,7 +3385,7 @@ icallMateWss.on('connection', (ws, req) => {
 
     if (eventName === 'answer') {
       session.answered = true;
-      upsertIncomingCallFromIcall(message, {
+      await upsertIncomingCallFromIcall(message, {
         status: 'active',
         answered_at: normalizeIcallTimestamp(message.timestamp),
         notes: 'Incoming call answered'
@@ -3089,7 +3396,7 @@ icallMateWss.on('connection', (ws, req) => {
     }
 
     if (eventName === 'media') {
-      upsertIncomingCallFromIcall(message, {
+      await upsertIncomingCallFromIcall(message, {
         status: 'active',
         media_packets: 1,
         notes: session.answered ? 'Incoming audio streaming' : 'Incoming media before answer'
@@ -3099,7 +3406,7 @@ icallMateWss.on('connection', (ws, req) => {
     }
 
     if (eventName === 'hangup-call') {
-      upsertIncomingCallFromIcall(message, {
+      await upsertIncomingCallFromIcall(message, {
         status: session.answered ? 'completed' : 'missed',
         ended_at: normalizeIcallTimestamp(message.timestamp),
         notes: session.answered ? 'Incoming call disconnected' : 'Incoming call missed'
