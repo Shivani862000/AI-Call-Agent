@@ -247,9 +247,28 @@
 
   function initializeShellChrome() {
     buildMobileTabbar();
+    if (window.TestCallWidget && !window.__testCallWidgetInstance) {
+      window.__testCallWidgetInstance = new window.TestCallWidget();
+      window.__testCallWidgetInstance.mount();
+    }
   }
 
-  document.addEventListener('DOMContentLoaded', initializeShellChrome);
+  function loadTestCallWidgetScript() {
+    if (window.TestCallWidget || document.querySelector('script[data-test-call-widget-script]')) {
+      initializeShellChrome();
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = '/test-call-widget.js';
+    script.defer = true;
+    script.dataset.testCallWidgetScript = 'true';
+    script.onload = initializeShellChrome;
+    script.onerror = initializeShellChrome;
+    document.head.appendChild(script);
+  }
+
+  document.addEventListener('DOMContentLoaded', loadTestCallWidgetScript);
 
   window.AppShell = {
     API_BASE,

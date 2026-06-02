@@ -123,11 +123,11 @@ function detectPromptType(promptText) {
     return 'rating';
   }
 
-  if (/(overall experience|experience kaisa|experience kaisa raha)/.test(normalized)) {
+  if (/(overall experience|visit experience|aapka visit|experience kaisa|experience kaisa raha)/.test(normalized)) {
     return 'overall';
   }
 
-  if (/(safai|cleanliness|hygiene)/.test(normalized)) {
+  if (/(safai|cleanliness|hygiene|lab clean|lab cleanliness|clean and comfortable)/.test(normalized)) {
     return 'cleanliness';
   }
 
@@ -139,7 +139,7 @@ function detectPromptType(promptText) {
     return 'process';
   }
 
-  if (/(behtar|improve|could do better|aur.*kar sakte|improve your experience)/.test(normalized)) {
+  if (/(behtar|improve|suggestion|sujhav|could do better|aur.*kar sakte|improve your experience)/.test(normalized)) {
     return 'improvement';
   }
 

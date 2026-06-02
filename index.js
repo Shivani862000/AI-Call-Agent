@@ -12,6 +12,8 @@ const campaignsRouter = require('./routes/campaigns');
 const feedbackRouter = require('./routes/feedback');
 const reportsRouter = require('./routes/reports');
 const agentsRouter = require('./routes/agents');
+const testCallRouter = require('./routes/test-call');
+const testAiCallRouter = require('./routes/test-ai-call');
 const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
 const { processCompletedCallPipeline } = require('./services/post-call-pipeline');
 const { buildOwnerDashboardData } = require('./services/reporting');
@@ -1899,6 +1901,8 @@ app.use('/api/campaigns', campaignsRouter);
 app.use('/api/feedback', feedbackRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/agents', agentsRouter);
+app.use('/api/test-call', testCallRouter);
+app.use('/api/test-ai-call', testAiCallRouter);
 
 app.post('/call/start', async (req, res) => {
   let customer = null;
