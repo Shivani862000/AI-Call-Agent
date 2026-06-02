@@ -299,7 +299,7 @@ function runMigrations() {
             'legacy',
             'deepgram',
             'gemini',
-            process.env.GEMINI_MODEL || 'models/gemini-3.1-flash-live-preview',
+            process.env.GEMINI_MODEL || 'models/gemini-2.5-flash-native-audio-preview-12-2025',
             'native',
             process.env.GEMINI_VOICE || null,
             null,
