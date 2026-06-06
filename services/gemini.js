@@ -85,8 +85,8 @@ async function generateGeminiReply({
       },
       contents: buildGeminiConversationContents(transcript, userText),
       generationConfig: {
-        temperature: Number(process.env.GEMINI_TEMPERATURE || 0.35),
-        maxOutputTokens: Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || 120),
+        temperature: Number(process.env.GEMINI_TEMPERATURE || process.env.LIVE_TEMPERATURE || 0.3),
+        maxOutputTokens: Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || process.env.LIVE_MAX_RESPONSE_TOKENS || 60),
         thinkingConfig: {
           thinkingBudget: Number(process.env.GEMINI_THINKING_BUDGET || 0)
         }

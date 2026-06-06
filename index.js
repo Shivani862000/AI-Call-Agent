@@ -235,6 +235,11 @@ const GEMINI_LIVE_THINKING_LEVEL = process.env.GEMINI_LIVE_THINKING_LEVEL || 'mi
 const GEMINI_LIVE_SILENCE_DURATION_MS = Math.max(Number(process.env.GEMINI_LIVE_SILENCE_DURATION_MS || 120) || 120, 80);
 const GEMINI_LIVE_PREFIX_PADDING_MS = Math.max(Number(process.env.GEMINI_LIVE_PREFIX_PADDING_MS || 20) || 20, 0);
 const GEMINI_LIVE_DIRECT_AUDIO = String(process.env.GEMINI_LIVE_DIRECT_AUDIO || 'false').toLowerCase() === 'true';
+const DEEPGRAM_ENDPOINTING_MS = Math.max(Number(process.env.DEEPGRAM_ENDPOINTING_MS || 180) || 180, 80);
+const LIVE_MAX_RESPONSE_TOKENS = Math.max(Number(process.env.LIVE_MAX_RESPONSE_TOKENS || 60) || 60, 24);
+const GEMINI_LIVE_MAX_OUTPUT_TOKENS = Math.max(Number(process.env.GEMINI_LIVE_MAX_OUTPUT_TOKENS || 256) || 256, 120);
+const LIVE_TEMPERATURE = Number(process.env.LIVE_TEMPERATURE || 0.3);
+const FINAL_AUDIO_GRACE_MS = Math.max(Number(process.env.FINAL_AUDIO_GRACE_MS || 1100) || 1100, 600);
 const DEEPGRAM_TTS_MODEL = process.env.DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
 const REALTIME_MODEL = AI_PROVIDER.startsWith('gemini') ? GEMINI_MODEL : OPENAI_REALTIME_MODEL;
 const OPENAI_REALTIME_WS_BASE_URL = 'wss://api.openai.com/v1/realtime';
@@ -295,6 +300,10 @@ function logConfigSnapshot(scope = 'CONFIG') {
     GEMINI_VOICE,
     GEMINI_LIVE_THINKING_LEVEL,
     GEMINI_LIVE_SILENCE_DURATION_MS,
+    DEEPGRAM_ENDPOINTING_MS,
+    LIVE_MAX_RESPONSE_TOKENS,
+    GEMINI_LIVE_MAX_OUTPUT_TOKENS,
+    LIVE_TEMPERATURE,
     GEMINI_LIVE_DIRECT_AUDIO,
     DEEPGRAM_TTS_MODEL,
     OPENAI_REALTIME_MODEL,
@@ -948,7 +957,8 @@ function createDeepgramListenUrl() {
   url.searchParams.set('model', 'nova-2');
   url.searchParams.set('language', 'hi');
   url.searchParams.set('interim_results', 'true');
-  url.searchParams.set('endpointing', '300');
+  url.searchParams.set('endpointing', String(DEEPGRAM_ENDPOINTING_MS));
+  url.searchParams.set('utterance_end_ms', String(Math.max(DEEPGRAM_ENDPOINTING_MS + 820, 1000)));
   url.searchParams.set('smart_format', 'true');
   url.searchParams.set('encoding', 'linear16');
   url.searchParams.set('sample_rate', '8000');
@@ -1463,14 +1473,22 @@ function buildReviewCallTurnInstruction(customerReply, state) {
     state.step = 'problem_check';
   }
 
+  const markCompletedAfterReply = () => {
+    state.step = 'completed';
+    state.conversationState = 'COMPLETED';
+    state.conversationCompleted = true;
+    state.endCall = true;
+    state.endCallAfterNextReply = true;
+  };
+
   if (state.step === 'problem_check') {
     if (isNegativeOrBusyReply(customerReply)) {
-      state.step = 'closing';
+      markCompletedAfterReply();
       return 'Donor wants to stop or is busy. Say exactly: "Koi baat nahi sir. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then end the call.';
     }
 
     if (isNoReply(customerReply)) {
-      state.step = 'closing';
+      markCompletedAfterReply();
       return 'Donor had no problem. Say exactly: "Bahut achhi baat hai sir. Dhanyavaad. Hamne aapko ek video bheja hai. Kripya use like, comment aur subscribe karein. Hamara Facebook aur Google page bhi hai. Kripya like, share aur review zarur karein. Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
     }
 
@@ -1483,17 +1501,26 @@ function buildReviewCallTurnInstruction(customerReply, state) {
   }
 
   if (state.step === 'issue_detail') {
-    state.step = 'closing';
+    markCompletedAfterReply();
     return 'Capture the issue from the donor response. Say exactly: "Dhanyavaad sir. Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge. Hamne aapko ek video bheja hai. Kripya use like, comment aur subscribe karein. Hamara Facebook aur Google page bhi hai. Kripya like, share aur review zarur karein. Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
   }
 
+  markCompletedAfterReply();
   return 'Say exactly: "Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
 }
 
 function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
+  const markCompletedAfterReply = () => {
+    state.step = 'completed';
+    state.conversationState = 'COMPLETED';
+    state.conversationCompleted = true;
+    state.endCall = true;
+    state.endCallAfterNextReply = true;
+  };
+
   if (state.step === 'intro') {
     if (isNegativeOrBusyReply(customerReply) || isNoReply(customerReply)) {
-      state.step = 'closing';
+      markCompletedAfterReply();
       return 'Wrong person or donor declined. Say exactly: "Koi baat nahi sir. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then end the call.';
     }
 
@@ -1508,7 +1535,7 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
     }
 
     if (isNoReply(customerReply)) {
-      state.step = 'closing';
+      markCompletedAfterReply();
       return 'Donor has not donated again. Say exactly: "Hamare yahan garbhvati mahilaon aur thalassemia se grast bachchon ko free blood diya jata hai. Yadi sambhav ho to kisi bhi din nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain. Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
     }
 
@@ -1521,10 +1548,11 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
   }
 
   if (state.step === 'donation_place') {
-    state.step = 'closing';
+    markCompletedAfterReply();
     return 'Capture the donation place. Say exactly: "Bahut achha kaam kiya sir. Dhanyavaad. Aapka din shubh ho." Then end the call.';
   }
 
+  markCompletedAfterReply();
   return 'Say exactly: "Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
 }
 
@@ -1537,7 +1565,9 @@ function buildOutboundDemoTurnInstruction(callerText, state, clientName, custome
     'Keep it concise unless closing.',
     'Ask only one question.',
     'Do not repeat the full greeting or restart the call.',
-    'Never say "end_call" aloud.'
+    `Max response tokens: ${LIVE_MAX_RESPONSE_TOKENS}.`,
+    'When all required answers are captured, say the final thank-you only once and internally set END_CALL=true.',
+    'Never say "end_call" or "END_CALL=true" aloud.'
   ];
 
   const instruction = normalizeOutboundCallType(callType) === CALL_TYPES.THREE_MONTH_FOLLOWUP
@@ -3394,9 +3424,18 @@ function createIcallMateAiBridge(ws, session) {
   let pendingTtsTexts = [];
   let finalTranscriptBuffer = [];
   let pendingHangup = false;
+  let hangupFinalizeTimer = null;
+  let completionPersisted = false;
+  let finalResponseInProgress = false;
   let activeResponseId = null;
   const transcript = [];
-  const outboundDemoState = { step: 'intro' };
+  const outboundDemoState = {
+    step: 'intro',
+    conversationState: 'IN_PROGRESS',
+    conversationCompleted: false,
+    endCall: false,
+    endCallAfterNextReply: false
+  };
 
   const getSessionLabel = () => session.streamId || session.callerId || 'unknown';
   const isOutboundSession = () => normalizeCallDirection(session.callDirection) === 'outbound';
@@ -3485,6 +3524,86 @@ function createIcallMateAiBridge(ws, session) {
     connectDeepgramTts();
   }
 
+  function toPlainTranscript() {
+    return transcript
+      .filter((turn) => turn?.role && String(turn?.text || '').trim())
+      .map((turn) => `${turn.role}: ${String(turn.text).trim()}`)
+      .join('\n');
+  }
+
+  async function persistConversationCompletion(reason = 'conversation_completed') {
+    if (completionPersisted || !isOutboundSession()) {
+      return;
+    }
+
+    completionPersisted = true;
+    const nowIso = new Date().toISOString();
+    const transcriptText = toPlainTranscript();
+
+    try {
+      if (session.callId) {
+        await dbRun(
+          `UPDATE calls
+              SET outcome = ?,
+                  outcome_detail = ?,
+                  transcript_text = COALESCE(NULLIF(?, ''), transcript_text),
+                  transcript_status = ?,
+                  transcript_source = COALESCE(transcript_source, ?),
+                  analysis_status = CASE
+                    WHEN COALESCE(analysis_status, '') = 'completed' THEN analysis_status
+                    ELSE 'processing'
+                  END,
+                  ended_at = COALESCE(ended_at, ?),
+                  last_event = ?,
+                  notes = ?
+            WHERE id = ?`,
+          [
+            'completed',
+            reason,
+            transcriptText,
+            transcriptText ? 'completed' : 'missing',
+            transcriptText ? 'live_stream' : null,
+            nowIso,
+            'ai-completed',
+            'AI conversation completed and auto hangup requested',
+            session.callId
+          ]
+        );
+      }
+
+      if (session.providerCallId && transcript.length) {
+        await saveCallFeedbackFromTranscript({
+          dbGet,
+          dbRun,
+          callSid: session.providerCallId,
+          customerId: session.customerId,
+          transcript,
+          overwriteExisting: true
+        });
+
+        runInBackground('POST CALL PIPELINE ERROR', async () => {
+          const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: session.providerCallId });
+          if (result.ok) {
+            console.log(`[POST CALL PIPELINE] Processed auto-completed call ${session.providerCallId} with feedback ${result.feedbackId}`);
+          } else {
+            console.log(`[POST CALL PIPELINE] Skipped auto-completed call ${session.providerCallId}: ${result.reason}`);
+          }
+        });
+      }
+    } catch (error) {
+      completionPersisted = false;
+      console.error(`[ICALLMATE][COMPLETION SAVE ERROR] streamId=${getSessionLabel()} reason=${reason} error=${error.message}`);
+    }
+  }
+
+  function stopListeningForCallerAudio() {
+    finalTranscriptBuffer = [];
+    deepgramReady = false;
+    if (deepgramWs && deepgramWs.readyState < WebSocket.CLOSING) {
+      deepgramWs.close();
+    }
+  }
+
   async function sendGeminiClientTurn(text, options = {}) {
     const safeText = String(text || '').trim();
     if (bridgeClosed || !safeText) {
@@ -3520,9 +3639,9 @@ function createIcallMateAiBridge(ws, session) {
       console.log(`[ICALLMATE][AGENT][GEMINI]: ${aiText}`);
       sendDeepgramTtsText(aiText);
 
-      if (shouldAutoHangupAfterAgentTurn(aiText)) {
+      if (outboundDemoState.endCallAfterNextReply || shouldAutoHangupAfterAgentTurn(aiText)) {
         requestCallHangup('gemini_closing_detected');
-        setTimeout(finalizeCallHangup, estimateHangupDelayMs(aiText));
+        scheduleFinalizeCallHangup('gemini_closing_detected', aiText);
       }
     } catch (error) {
       console.error('[ICALLMATE][GEMINI ERROR]', error.message);
@@ -3532,7 +3651,7 @@ function createIcallMateAiBridge(ws, session) {
       transcript.push({ role: 'AGENT', text: fallback, time: new Date().toISOString() });
       sendDeepgramTtsText(fallback);
       requestCallHangup('gemini_error_fallback');
-      setTimeout(finalizeCallHangup, estimateHangupDelayMs(fallback));
+      scheduleFinalizeCallHangup('gemini_error_fallback', fallback);
     }
   }
 
@@ -3585,6 +3704,8 @@ function createIcallMateAiBridge(ws, session) {
             }
           }
         },
+        temperature: LIVE_TEMPERATURE,
+        maxOutputTokens: GEMINI_LIVE_MAX_OUTPUT_TOKENS,
         thinkingConfig: {
           thinkingLevel: GEMINI_LIVE_THINKING_LEVEL
         },
@@ -3639,18 +3760,36 @@ function createIcallMateAiBridge(ws, session) {
               sendIcallMateReverseMedia(ws, session, resamplePcm16(pcm16, sampleRate, 8000));
             });
 
-            const transcript = message?.serverContent?.outputTranscription?.text
+            const outputTranscript = message?.serverContent?.outputTranscription?.text
               || message?.serverContent?.output_transcription?.text
               || '';
-            if (transcript) {
-              const cleanTranscript = String(transcript).replace(/\bend_call\b/gi, '').trim();
+            if (outputTranscript) {
+              const cleanTranscript = String(outputTranscript)
+                .replace(/\bEND_CALL\s*=\s*true\b/gi, '')
+                .replace(/\bend_call\b/gi, '')
+                .trim();
               if (cleanTranscript) {
                 console.log(`[ICALLMATE][AGENT][GEMINI LIVE]: ${cleanTranscript}`);
+                pushTranscriptTurn(transcript, 'AGENT', cleanTranscript);
               }
-              if (/\bend_call\b/i.test(String(transcript))) {
+              if (/\bend_call\b|END_CALL\s*=\s*true/i.test(String(outputTranscript))) {
                 requestCallHangup('gemini_live_end_call_marker');
-                setTimeout(finalizeCallHangup, estimateHangupDelayMs(cleanTranscript));
+                finalResponseInProgress = true;
+                scheduleFinalizeCallHangup('gemini_live_end_call_marker', cleanTranscript);
               }
+              if (outboundDemoState.endCallAfterNextReply && shouldAutoHangupAfterAgentTurn(cleanTranscript)) {
+                requestCallHangup('gemini_live_state_completed');
+                finalResponseInProgress = true;
+                scheduleFinalizeCallHangup('gemini_live_state_completed', cleanTranscript);
+              }
+            }
+
+            if (message?.serverContent?.turnComplete || message?.serverContent?.generationComplete) {
+              if (pendingHangup || finalResponseInProgress || outboundDemoState.endCallAfterNextReply) {
+                requestCallHangup('gemini_live_turn_complete');
+                scheduleFinalizeCallHangup('gemini_live_turn_complete', transcript[transcript.length - 1]?.text || '');
+              }
+              finalResponseInProgress = false;
             }
 
             if (message?.serverContent?.interrupted) {
@@ -3713,18 +3852,66 @@ function createIcallMateAiBridge(ws, session) {
     }
 
     pendingHangup = true;
-    console.log(`[ICALLMATE][OPENAI] Hangup requested reason=${reason} streamId=${getSessionLabel()}`);
+    outboundDemoState.conversationState = 'COMPLETED';
+    outboundDemoState.conversationCompleted = true;
+    outboundDemoState.endCall = true;
+    stopListeningForCallerAudio();
+    console.log(`[ICALLMATE][VOICE] Hangup requested reason=${reason} streamId=${getSessionLabel()}`);
   }
 
-  function finalizeCallHangup() {
+  function scheduleFinalizeCallHangup(reason = 'model_requested_end_call', spokenText = '') {
     if (bridgeClosed || !pendingHangup) {
       return;
     }
+
+    if (hangupFinalizeTimer) {
+      clearTimeout(hangupFinalizeTimer);
+    }
+
+    const delayMs = Math.max(estimateHangupDelayMs(spokenText), FINAL_AUDIO_GRACE_MS);
+    console.log(
+      `[ICALLMATE][VOICE] Auto hangup scheduled streamId=${getSessionLabel()} ` +
+      `reason=${reason} delayMs=${delayMs}`
+    );
+    hangupFinalizeTimer = setTimeout(() => {
+      finalizeCallHangup(reason);
+    }, delayMs);
+  }
+
+  async function finalizeCallHangup(reason = 'model_requested_end_call') {
+    if (bridgeClosed || !pendingHangup) {
+      return;
+    }
+
+    if (hangupFinalizeTimer) {
+      clearTimeout(hangupFinalizeTimer);
+      hangupFinalizeTimer = null;
+    }
+
+    await persistConversationCompletion(reason);
+
+    await upsertIcallMateCallFromMedia({
+      streamId: session.streamId,
+      callerId: session.callerId,
+      did: session.did,
+      event: 'hangup-call',
+      timestamp: new Date().toISOString()
+    }, session, {
+      status: 'completed',
+      ended_at: new Date().toISOString(),
+      notes: 'AI conversation completed; auto hangup'
+    });
 
     sendIcallMateJson(ws, {
       event: 'reverse-media-stop',
       callerId: session.callerId,
       streamId: session.streamId
+    });
+    sendIcallMateJson(ws, {
+      event: 'hangup-call',
+      callerId: session.callerId,
+      streamId: session.streamId,
+      reason
     });
     bridgeClosed = true;
     setTimeout(() => {
@@ -3858,7 +4045,7 @@ function createIcallMateAiBridge(ws, session) {
 
       if (message.type === 'response.done') {
         activeResponseId = null;
-        finalizeCallHangup();
+        finalizeCallHangup('openai_response_done');
       }
 
       if (message.type === 'error' || message.error) {
@@ -3881,6 +4068,10 @@ function createIcallMateAiBridge(ws, session) {
   }
 
   function handleDeepgramTranscript(event) {
+    if (pendingHangup || outboundDemoState.conversationState === 'COMPLETED') {
+      return;
+    }
+
     const transcriptText = String(event?.channel?.alternatives?.[0]?.transcript || '').trim();
     const isFinal = Boolean(event?.is_final);
     const isSpeechFinal = Boolean(event?.speech_final);
@@ -3891,6 +4082,7 @@ function createIcallMateAiBridge(ws, session) {
         finalTranscriptBuffer = [];
         if (merged) {
         console.log(`[ICALLMATE][CALLER]: ${merged}`);
+          pushTranscriptTurn(transcript, 'CUSTOMER', merged);
           const turnText = isOutboundSession()
             ? buildOutboundDemoTurnInstruction(merged, outboundDemoState, getSessionClientName(), getSessionCustomerName(), getSessionCallType())
             : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`;
@@ -3917,6 +4109,7 @@ function createIcallMateAiBridge(ws, session) {
       finalTranscriptBuffer = [];
       if (merged) {
         console.log(`[ICALLMATE][CALLER]: ${merged}`);
+        pushTranscriptTurn(transcript, 'CUSTOMER', merged);
         const turnText = isOutboundSession()
           ? buildOutboundDemoTurnInstruction(merged, outboundDemoState, getSessionClientName(), getSessionCustomerName(), getSessionCallType())
           : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`;
@@ -4082,7 +4275,7 @@ function createIcallMateAiBridge(ws, session) {
       connectDeepgram();
     },
     sendCallerAudio(payload) {
-      if (bridgeClosed || !payload) {
+      if (bridgeClosed || pendingHangup || !payload) {
         return;
       }
 
@@ -4107,6 +4300,10 @@ function createIcallMateAiBridge(ws, session) {
     },
     close() {
       bridgeClosed = true;
+      if (hangupFinalizeTimer) {
+        clearTimeout(hangupFinalizeTimer);
+        hangupFinalizeTimer = null;
+      }
       if (ttsWs && ttsWs.readyState === WebSocket.OPEN) {
         ttsWs.send(JSON.stringify({ type: 'Close' }));
       }
