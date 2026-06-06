@@ -1,11 +1,12 @@
 # Conversational Voice Agent
 
-Node.js + Express voice agent for iCallMate inbound and outbound calls, with OpenAI Realtime voice and Deepgram transcription.
+Node.js + Express voice agent for iCallMate inbound and outbound calls, with selectable OpenAI Realtime or Gemini Live voice, plus Deepgram transcription. Gemini Live mode streams native Gemini audio directly back to the call.
 
 ## Endpoints
 
 - `POST /call/start` places an outbound iCallMate call.
 - `POST /api/calls/initiate/:customerId` places an outbound iCallMate call for a saved customer.
+- `POST /api/icallmate/outgoing-call` places an iCallMate master-post outgoing call.
 - `GET /api/icallmate/config` returns the current iCallMate media and callback URLs.
 - `POST /api/icallmate/incoming-config` configures iCallMate DNIS macros.
 - `POST /api/icallmate/outbound-campaign` creates an iCallMate outbound campaign.
@@ -34,7 +35,15 @@ ICALLMATE_OBD_API_ENDPOINT=https://ecp1.icallmate.in
 OPENAI_API_KEY=
 OPENAI_REALTIME_MODEL=gpt-realtime-2
 OPENAI_REALTIME_VOICE=marin
+AI_PROVIDER=gemini-live
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.1-flash-live-preview
+GEMINI_VOICE=Kore
+GEMINI_LIVE_THINKING_LEVEL=minimal
+GEMINI_LIVE_SILENCE_DURATION_MS=120
+GEMINI_LIVE_PREFIX_PADDING_MS=20
 DEEPGRAM_API_KEY=
+DEEPGRAM_TTS_MODEL=aura-2-thalia-en
 APP_BASE_URL=https://your-public-domain.example
 PORT=3000
 ```
@@ -55,6 +64,23 @@ Set the HTTPS forwarding URL as `APP_BASE_URL` or `NGROK_URL`, restart the serve
 
 ```bash
 curl -X POST http://localhost:3000/call/start
+```
+
+Master-post outgoing test:
+
+```bash
+curl -X POST http://localhost:3000/api/icallmate/outgoing-call \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "campid": "54",
+    "leadid": "1031",
+    "fieldpairs": [
+      {
+        "Phone_No": "8800453310",
+        "wsurl": "wss://kcpathlab.vikitechsolution.in/icallmate/media"
+      }
+    ]
+  }'
 ```
 
 ## iCallMate Media

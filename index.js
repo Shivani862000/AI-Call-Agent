@@ -20,8 +20,10 @@ const { buildOwnerDashboardData } = require('./services/reporting');
 const { sendSimpleEmail } = require('./services/email');
 const {
   initiateCall,
+  buildMasterPostPayload,
   sendWhatsAppMessage
 } = require('./services/icallmate');
+const { generateGeminiReply } = require('./services/gemini');
 const {
   buildPreCallIntelligence,
   computePriorityScore,
@@ -214,12 +216,18 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = Number(process.env.PORT || 3000);
-const CALL_MODE = 'openai';
-const AI_PROVIDER = 'openai';
+const AI_PROVIDER = String(process.env.AI_PROVIDER || process.env.LLM_PROVIDER || 'openai').trim().toLowerCase();
+const CALL_MODE = AI_PROVIDER;
 const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2';
 const OPENAI_REALTIME_VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin';
 const OPENAI_REALTIME_OUTPUT_SAMPLE_RATE = Number(process.env.OPENAI_REALTIME_OUTPUT_SAMPLE_RATE || 24000) || 24000;
-const REALTIME_MODEL = OPENAI_REALTIME_MODEL;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || (AI_PROVIDER === 'gemini-live' ? 'gemini-3.1-flash-live-preview' : 'gemini-2.5-flash');
+const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
+const GEMINI_LIVE_THINKING_LEVEL = process.env.GEMINI_LIVE_THINKING_LEVEL || 'minimal';
+const GEMINI_LIVE_SILENCE_DURATION_MS = Math.max(Number(process.env.GEMINI_LIVE_SILENCE_DURATION_MS || 120) || 120, 80);
+const GEMINI_LIVE_PREFIX_PADDING_MS = Math.max(Number(process.env.GEMINI_LIVE_PREFIX_PADDING_MS || 20) || 20, 0);
+const DEEPGRAM_TTS_MODEL = process.env.DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
+const REALTIME_MODEL = AI_PROVIDER.startsWith('gemini') ? GEMINI_MODEL : OPENAI_REALTIME_MODEL;
 const OPENAI_REALTIME_WS_BASE_URL = 'wss://api.openai.com/v1/realtime';
 const MAX_PRECONNECT_MEDIA_CHUNKS = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_CHUNKS || 60) || 60, 10);
 const MAX_PRECONNECT_MEDIA_BYTES = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_BYTES || 512000) || 512000, 64000);
@@ -274,6 +282,11 @@ function logConfigSnapshot(scope = 'CONFIG') {
     VOICE_PIPELINE,
     AI_PROVIDER,
     REALTIME_MODEL,
+    GEMINI_MODEL,
+    GEMINI_VOICE,
+    GEMINI_LIVE_THINKING_LEVEL,
+    GEMINI_LIVE_SILENCE_DURATION_MS,
+    DEEPGRAM_TTS_MODEL,
     OPENAI_REALTIME_MODEL,
     OPENAI_REALTIME_VOICE,
     DISABLE_SCHEDULER,
@@ -290,6 +303,7 @@ function logConfigSnapshot(scope = 'CONFIG') {
     ICALLMATE_AGENT_ID: process.env.ICALLMATE_AGENT_ID || '',
     ICALLMATE_UKEY_PRESENT: Boolean(process.env.ICALLMATE_UKEY),
     OPENAI_API_KEY_PRESENT: Boolean(process.env.OPENAI_API_KEY),
+    GEMINI_API_KEY_PRESENT: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
     DEEPGRAM_API_KEY_PRESENT: Boolean(process.env.DEEPGRAM_API_KEY),
     DATABASE_URL: process.env.DATABASE_URL || ''
   };
@@ -564,8 +578,16 @@ async function getDefaultAgentConfig() {
 function validateConfig() {
   const missing = [];
 
-  if (!process.env.OPENAI_API_KEY) {
+  if (AI_PROVIDER === 'openai' && !process.env.OPENAI_API_KEY) {
     missing.push('OPENAI_API_KEY');
+  }
+
+  if (AI_PROVIDER.startsWith('gemini') && !process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
+    missing.push('GEMINI_API_KEY or GOOGLE_API_KEY');
+  }
+
+  if (!['openai', 'gemini', 'gemini-live'].includes(AI_PROVIDER)) {
+    missing.push('AI_PROVIDER must be openai, gemini, or gemini-live');
   }
 
   if (!process.env.DEEPGRAM_API_KEY) {
@@ -859,6 +881,14 @@ function createDeepgramListenUrl() {
   return url.toString();
 }
 
+function createDeepgramSpeakUrl() {
+  const url = new URL('wss://api.deepgram.com/v1/speak');
+  url.searchParams.set('model', DEEPGRAM_TTS_MODEL);
+  url.searchParams.set('encoding', 'linear16');
+  url.searchParams.set('sample_rate', '8000');
+  return url.toString();
+}
+
 function shouldFlushSpeechSegment(buffer) {
   const text = String(buffer || '').trim();
   if (!text) {
@@ -1055,6 +1085,126 @@ function parseIcallMateExtraParams(value) {
   } catch (error) {
     return {};
   }
+}
+
+function normalizeCallDirection(value, fallback = 'incoming') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['outbound', 'outgoing', 'obd'].includes(normalized)) {
+    return 'outbound';
+  }
+  if (['inbound', 'incoming', 'ibd'].includes(normalized)) {
+    return 'incoming';
+  }
+  return fallback;
+}
+
+async function findRecentOutboundCallContextByPhone(phoneValue) {
+  const customer = await findCustomerByPhone(phoneValue);
+  if (!customer) {
+    return null;
+  }
+
+  const call = await dbGet(
+    `SELECT calls.*, agents.client_name AS agent_client_name
+       FROM calls
+       LEFT JOIN agents ON agents.id = calls.agent_id
+      WHERE calls.customer_id = ?
+        AND COALESCE(calls.call_direction, 'outbound') = 'outbound'
+        AND DATETIME(calls.called_at) >= DATETIME('now', '-30 minutes')
+      ORDER BY calls.id DESC
+      LIMIT 1`,
+    [customer.id]
+  );
+
+  if (!call) {
+    return null;
+  }
+
+  return { customer, call };
+}
+
+async function hydrateIcallMateSessionContext(session, message = {}, extraParams = {}) {
+  if (session.contextHydrated || session.contextHydrating) {
+    return;
+  }
+
+  if (extraParams.callDirection) {
+    session.callDirection = normalizeCallDirection(extraParams.callDirection, session.callDirection);
+    session.contextHydrated = true;
+    return;
+  }
+
+  session.contextHydrating = true;
+  try {
+    const context = await findRecentOutboundCallContextByPhone(message.callerId || session.callerId);
+    if (!context) {
+      return;
+    }
+
+    session.contextHydrated = true;
+    session.callDirection = 'outbound';
+    session.customerName = context.customer.name || session.customerName || process.env.CUSTOMER_NAME || 'Customer';
+    session.clientName = context.call.agent_client_name || session.clientName || CLIENT_NAME;
+    session.customerId = context.customer.id;
+    session.callId = context.call.id;
+    session.providerCallId = context.call.provider_call_id || '';
+
+    console.log(
+      `[ICALLMATE] Hydrated outbound context streamId=${message.streamId || session.streamId || ''} ` +
+      `phone=${message.callerId || session.callerId || ''} customerId=${session.customerId} callId=${session.callId}`
+    );
+  } finally {
+    session.contextHydrating = false;
+  }
+}
+
+async function upsertIcallMateCallFromMedia(message = {}, session = {}, patch = {}) {
+  if (normalizeCallDirection(session.callDirection) !== 'outbound') {
+    return upsertIncomingCallFromIcall(message, patch);
+  }
+
+  if (!session.callId) {
+    return null;
+  }
+
+  const eventName = String(message.event || patch.event || '').toLowerCase();
+  const providerPayload = JSON.stringify({
+    streamId: message.streamId || session.streamId || null,
+    callerId: message.callerId || session.callerId || null,
+    did: message.did || session.did || null,
+    event: eventName || null,
+    ChKey: message.ChKey || null
+  });
+
+  await dbRun(
+    `UPDATE calls
+        SET outcome = CASE
+              WHEN ? = 'completed' THEN 'completed'
+              WHEN outcome IN ('initiated', 'scheduled_initiated') THEN 'active'
+              ELSE outcome
+            END,
+            did = COALESCE(?, did),
+            answered_at = COALESCE(?, answered_at),
+            ended_at = COALESCE(?, ended_at),
+            media_packets = COALESCE(media_packets, 0) + ?,
+            last_event = ?,
+            notes = ?,
+            provider_payload_json = ?
+      WHERE id = ?`,
+    [
+      patch.status || null,
+      message.did || session.did || null,
+      patch.answered_at || null,
+      patch.ended_at || null,
+      Number(patch.media_packets || 0),
+      eventName || null,
+      patch.notes || null,
+      providerPayload,
+      session.callId
+    ]
+  );
+
+  return null;
 }
 
 async function getCustomerCallHistory(customerId, limit = 20) {
@@ -2391,6 +2541,113 @@ app.post('/api/icallmate/outbound-campaign', async (req, res) => {
   }
 });
 
+app.post('/api/icallmate/outgoing-call', async (req, res) => {
+  let customer = null;
+  try {
+    const fieldpairs = Array.isArray(req.body.fieldpairs) ? req.body.fieldpairs : [];
+    const firstFieldPair = fieldpairs[0] || {};
+    const phone = req.body.Phone_No || req.body.phone || req.body.customerPhone || firstFieldPair.Phone_No;
+    const leadId = req.body.leadid || req.body.leadId || '1031';
+    const campid = req.body.campid || '54';
+    const wsurl = firstFieldPair.wsurl || req.body.wsurl || toWssUrl(getRequestPublicBaseUrl(req), '/icallmate/media');
+    const customerName = req.body.customerName || firstFieldPair.Name || 'Outgoing Customer';
+    const requestedAgentId = Number(req.body.agentId || req.query.agentId || 0) || null;
+
+    if (!phone) {
+      return res.status(400).json({ error: 'Phone_No, phone, customerPhone, or fieldpairs[0].Phone_No is required' });
+    }
+
+    const payload = buildMasterPostPayload(phone, leadId, { campid, wsurl });
+    if (String(req.body.dryRun || '').toLowerCase() === 'true') {
+      return res.json({
+        success: true,
+        dryRun: true,
+        endpoint: process.env.ICALLMATE_MASTER_POST_API_ENDPOINT || 'https://crm.icallmate.in/WebSVC111/setMasterPostAPI',
+        payload
+      });
+    }
+
+    customer = await ensureCustomerForCall({
+      customerId: req.body.customerId,
+      customerName,
+      customerPhone: phone
+    });
+    customer = await hydratePreCallIntelligence(customer);
+    const agentConfig = requestedAgentId ? await getAgentConfigById(requestedAgentId) : await getDefaultAgentConfig();
+    const blockedReason = shouldBlockCustomerCall(customer);
+    if (blockedReason) {
+      return res.status(409).json({ error: blockedReason });
+    }
+
+    const claimed = await claimCustomerForOutboundCall(customer.id);
+    if (!claimed) {
+      return res.status(409).json({ error: 'A call for this customer is already in progress' });
+    }
+
+    const call = await initiateCall(phone, customer.id, {
+      provider: 'masterpost',
+      campid,
+      leadid: leadId,
+      wsurl,
+      customerName: customer.name || customerName,
+      clientName: agentConfig?.client_name || CLIENT_NAME,
+      agentId: agentConfig?.id || null
+    });
+
+    const result = await dbRun(
+      `INSERT INTO calls (
+        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source,
+        provider_payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        customer.id,
+        agentConfig?.id || null,
+        'initiated',
+        call.sid,
+        new Date().toISOString(),
+        customer.priority_score || computePriorityScore(customer),
+        1,
+        agentConfig?.slug || 'gemini-deepgram-outgoing-v1',
+        'normal',
+        'outbound',
+        'icallmate-masterpost',
+        JSON.stringify(payload)
+      ]
+    );
+
+    await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+    schedulePendingCallDiagnostic(call.sid, {
+      customerId: customer.id,
+      customerPhone: phone,
+      customerName: customer.name || customerName,
+      agentId: agentConfig?.id || null,
+      trigger: '/api/icallmate/outgoing-call'
+    });
+
+    res.json({
+      success: true,
+      message: 'Outgoing call initiated',
+      sid: call.sid,
+      callId: result.lastID,
+      customerId: customer.id,
+      agentId: agentConfig?.id || null,
+      provider: 'icallmate-masterpost',
+      payload
+    });
+  } catch (error) {
+    if (customer?.id) {
+      try {
+        await releaseCustomerOutboundClaim(customer.id, customer.status || 'pending');
+      } catch (releaseError) {
+        console.error('[OUTGOING CALL CLAIM RELEASE ERROR]', releaseError.message);
+      }
+    }
+    console.error('[ICALLMATE OUTGOING CALL ERROR]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/icallmate/health', (req, res) => {
   const requestBaseUrl = getRequestPublicBaseUrl(req);
   res.json({
@@ -2908,16 +3165,25 @@ function sendIcallMateReverseMedia(ws, session, pcmBuffer) {
 function createIcallMateAiBridge(ws, session) {
   let aiWs = null;
   let deepgramWs = null;
+  let ttsWs = null;
+  let geminiLiveSession = null;
+  let geminiLiveConnecting = false;
+  let geminiLiveReady = false;
+  let geminiLivePromptSentAt = null;
+  let geminiLiveFirstAudioAt = null;
   let bridgeClosed = false;
   let openAiSetupComplete = false;
   let openingPromptSent = false;
   let deepgramReady = false;
+  let deepgramTtsReady = false;
+  let pendingTtsTexts = [];
   let finalTranscriptBuffer = [];
   let pendingHangup = false;
   let activeResponseId = null;
+  const transcript = [];
 
   const getSessionLabel = () => session.streamId || session.callerId || 'unknown';
-  const isOutboundSession = () => String(session.callDirection || '').toLowerCase() === 'outbound';
+  const isOutboundSession = () => normalizeCallDirection(session.callDirection) === 'outbound';
   const getSessionClientName = () => session.clientName || CLIENT_NAME;
   const getSessionCustomerName = () => session.customerName || process.env.CUSTOMER_NAME || 'sir/maam';
   const getSystemPrompt = () => (
@@ -2930,6 +3196,9 @@ function createIcallMateAiBridge(ws, session) {
       ? buildOpeningPrompt(getSessionClientName(), getSessionCustomerName())
       : buildIncomingOpeningPrompt(getSessionClientName())
   );
+  const useGemini = () => AI_PROVIDER === 'gemini';
+  const useGeminiLive = () => AI_PROVIDER === 'gemini-live';
+  const useGeminiFamily = () => useGemini() || useGeminiLive();
 
   function buildOpenAIRealtimeWsUrl() {
     const url = new URL(OPENAI_REALTIME_WS_BASE_URL);
@@ -2983,15 +3252,235 @@ function createIcallMateAiBridge(ws, session) {
     });
   }
 
+  function sendDeepgramTtsText(text) {
+    const safeText = String(text || '').replace(/\s+/g, ' ').trim();
+    if (bridgeClosed || !safeText) {
+      return;
+    }
+
+    if (ttsWs?.readyState === WebSocket.OPEN && deepgramTtsReady) {
+      ttsWs.send(JSON.stringify({ type: 'Speak', text: safeText }));
+      ttsWs.send(JSON.stringify({ type: 'Flush' }));
+      return;
+    }
+
+    pendingTtsTexts.push(safeText);
+    connectDeepgramTts();
+  }
+
+  async function sendGeminiClientTurn(text, options = {}) {
+    const safeText = String(text || '').trim();
+    if (bridgeClosed || !safeText) {
+      return;
+    }
+
+    if (options.interrupt) {
+      sendIcallMateJson(ws, {
+        event: 'reverse-media-stop',
+        callerId: session.callerId,
+        streamId: session.streamId
+      });
+      if (ttsWs?.readyState === WebSocket.OPEN) {
+        ttsWs.send(JSON.stringify({ type: 'Clear' }));
+      }
+    }
+
+    try {
+      console.log(`[ICALLMATE][GEMINI] Generating reply streamId=${getSessionLabel()} model=${GEMINI_MODEL}`);
+      const aiText = await generateGeminiReply({
+        systemPrompt: getSystemPrompt(),
+        transcript,
+        userText: safeText,
+        model: GEMINI_MODEL
+      });
+
+      if (bridgeClosed) {
+        return;
+      }
+
+      transcript.push({ role: 'CUSTOMER', text: safeText, time: new Date().toISOString() });
+      transcript.push({ role: 'AGENT', text: aiText, time: new Date().toISOString() });
+      console.log(`[ICALLMATE][AGENT][GEMINI]: ${aiText}`);
+      sendDeepgramTtsText(aiText);
+
+      if (shouldAutoHangupAfterAgentTurn(aiText)) {
+        requestCallHangup('gemini_closing_detected');
+        setTimeout(finalizeCallHangup, estimateHangupDelayMs(aiText));
+      }
+    } catch (error) {
+      console.error('[ICALLMATE][GEMINI ERROR]', error.message);
+      const fallback = isOutboundSession()
+        ? 'Maaf kijiye, thodi technical dikkat aa rahi hai. Hum aapse baad mein sampark karenge. Dhanyavaad.'
+        : 'Maaf kijiye, thodi technical dikkat aa rahi hai. Hamari team aapse sampark karegi. Dhanyavaad.';
+      transcript.push({ role: 'AGENT', text: fallback, time: new Date().toISOString() });
+      sendDeepgramTtsText(fallback);
+      requestCallHangup('gemini_error_fallback');
+      setTimeout(finalizeCallHangup, estimateHangupDelayMs(fallback));
+    }
+  }
+
+  function sendGeminiLiveText(text, options = {}) {
+    const safeText = String(text || '').trim();
+    if (bridgeClosed || !safeText || !geminiLiveSession || !geminiLiveReady) {
+      return;
+    }
+
+    if (options.interrupt) {
+      sendIcallMateJson(ws, {
+        event: 'reverse-media-stop',
+        callerId: session.callerId,
+        streamId: session.streamId
+      });
+    }
+
+    geminiLivePromptSentAt = Date.now();
+    geminiLiveFirstAudioAt = null;
+    geminiLiveSession.sendClientContent({
+      turns: [
+        {
+          role: 'user',
+          parts: [{ text: safeText }]
+        }
+      ],
+      turnComplete: true
+    });
+  }
+
+  async function connectGeminiLive() {
+    if (bridgeClosed || geminiLiveConnecting || geminiLiveSession) {
+      return;
+    }
+
+    geminiLiveConnecting = true;
+    try {
+      const { GoogleGenAI, Modality } = await import('@google/genai');
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+      });
+
+      const config = {
+        responseModalities: [Modality.AUDIO],
+        systemInstruction: getSystemPrompt(),
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: GEMINI_VOICE
+            }
+          }
+        },
+        thinkingConfig: {
+          thinkingLevel: GEMINI_LIVE_THINKING_LEVEL
+        },
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            disabled: false,
+            prefixPaddingMs: GEMINI_LIVE_PREFIX_PADDING_MS,
+            silenceDurationMs: GEMINI_LIVE_SILENCE_DURATION_MS
+          }
+        },
+        outputAudioTranscription: {}
+      };
+
+      console.log(
+        `[ICALLMATE][GEMINI LIVE] Connecting streamId=${getSessionLabel()} ` +
+        `model=${GEMINI_MODEL} voice=${GEMINI_VOICE} thinking=${GEMINI_LIVE_THINKING_LEVEL} ` +
+        `silenceMs=${GEMINI_LIVE_SILENCE_DURATION_MS}`
+      );
+
+      geminiLiveSession = await ai.live.connect({
+        model: GEMINI_MODEL,
+        config,
+        callbacks: {
+          onopen: () => {
+            geminiLiveReady = true;
+            console.log(`[ICALLMATE][GEMINI LIVE] Connected streamId=${getSessionLabel()}`);
+          },
+          onmessage: (message) => {
+            if (bridgeClosed) {
+              return;
+            }
+
+            const modelTurnParts = message?.serverContent?.modelTurn?.parts || [];
+            modelTurnParts.forEach((part) => {
+              const inlineData = part.inlineData || part.inline_data;
+              const base64Audio = inlineData?.data;
+              if (!base64Audio) {
+                return;
+              }
+
+              const mimeType = inlineData.mimeType || inlineData.mime_type || 'audio/pcm;rate=24000';
+              const sampleRate = parsePcmRate(mimeType, 24000);
+              const pcm16 = Buffer.from(base64Audio, 'base64');
+              if (!geminiLiveFirstAudioAt) {
+                geminiLiveFirstAudioAt = Date.now();
+                const responseMs = geminiLivePromptSentAt ? geminiLiveFirstAudioAt - geminiLivePromptSentAt : null;
+                console.log(
+                  `[ICALLMATE][GEMINI LIVE] First audio chunk streamId=${getSessionLabel()} ` +
+                  `responseMs=${responseMs ?? 'unknown'} sampleRate=${sampleRate} bytes=${pcm16.length}`
+                );
+              }
+              sendIcallMateReverseMedia(ws, session, resamplePcm16(pcm16, sampleRate, 8000));
+            });
+
+            const transcript = message?.serverContent?.outputTranscription?.text
+              || message?.serverContent?.output_transcription?.text
+              || '';
+            if (transcript) {
+              console.log(`[ICALLMATE][AGENT][GEMINI LIVE]: ${String(transcript).trim()}`);
+            }
+
+            if (message?.serverContent?.interrupted) {
+              sendIcallMateJson(ws, {
+                event: 'reverse-media-stop',
+                callerId: session.callerId,
+                streamId: session.streamId
+              });
+            }
+          },
+          onerror: (error) => {
+            if (bridgeClosed) {
+              return;
+            }
+            console.error('[ICALLMATE][GEMINI LIVE ERROR]', error.message || error);
+          },
+          onclose: (event) => {
+            geminiLiveReady = false;
+            console.log(`[ICALLMATE][GEMINI LIVE] Closed streamId=${getSessionLabel()} reason=${event?.reason || 'n/a'}`);
+          }
+        }
+      });
+      sendOpeningPrompt();
+    } catch (error) {
+      console.error('[ICALLMATE][GEMINI LIVE CONNECT ERROR]', error.message);
+    } finally {
+      geminiLiveConnecting = false;
+    }
+  }
+
   function sendOpeningPrompt() {
-    if (bridgeClosed || openingPromptSent || aiWs?.readyState !== WebSocket.OPEN || !openAiSetupComplete) {
+    if (bridgeClosed || openingPromptSent) {
       return;
     }
 
     openingPromptSent = true;
-    console.log(`[ICALLMATE][OPENAI] Sending opening prompt streamId=${getSessionLabel()}`);
-    console.log(`[ICALLMATE][PROMPT] provider=openai direction=${isOutboundSession() ? 'outbound' : 'incoming'} client="${getSessionClientName()}" customer="${getSessionCustomerName()}" system="${getSystemPrompt().slice(0, 180)}" opening="${getOpeningPrompt()}"`);
-    sendOpenAIClientTurn(getOpeningPrompt(), { interrupt: true });
+    console.log(`[ICALLMATE][${useGeminiLive() ? 'GEMINI LIVE' : useGemini() ? 'GEMINI' : 'OPENAI'}] Sending opening prompt streamId=${getSessionLabel()}`);
+    console.log(`[ICALLMATE][PROMPT] provider=${AI_PROVIDER} direction=${isOutboundSession() ? 'outbound' : 'incoming'} client="${getSessionClientName()}" customer="${getSessionCustomerName()}" system="${getSystemPrompt().slice(0, 180)}" opening="${getOpeningPrompt()}"`);
+
+    if (useGeminiLive()) {
+      sendGeminiLiveText(getOpeningPrompt(), { interrupt: true });
+      return;
+    }
+
+    if (useGemini()) {
+      sendGeminiClientTurn(getOpeningPrompt(), { interrupt: true });
+      return;
+    }
+
+    if (aiWs?.readyState === WebSocket.OPEN && openAiSetupComplete) {
+      sendOpenAIClientTurn(getOpeningPrompt(), { interrupt: true });
+    } else {
+      openingPromptSent = false;
+    }
   }
 
   function requestCallHangup(reason = 'model_requested_end_call') {
@@ -3022,6 +3511,10 @@ function createIcallMateAiBridge(ws, session) {
   }
 
   function connectOpenAI() {
+    if (useGemini()) {
+      return;
+    }
+
     if (bridgeClosed) {
       return;
     }
@@ -3174,12 +3667,16 @@ function createIcallMateAiBridge(ws, session) {
         finalTranscriptBuffer = [];
         if (merged) {
         console.log(`[ICALLMATE][CALLER]: ${merged}`);
-          sendOpenAIClientTurn(
-            isOutboundSession()
-              ? `Customer said: ${merged}\nDo not greet again. Continue the diagnostic center feedback survey naturally in simple Hindi. If termination rules apply, speak the required closing and call end_call.`
-              : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`,
-            { interrupt: true }
-          );
+          const turnText = isOutboundSession()
+            ? `Customer said: ${merged}\nDo not greet again. Continue the diagnostic center feedback survey naturally in simple Hindi. If termination rules apply, speak the required closing and end the call.`
+            : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`;
+          if (useGeminiLive()) {
+            sendGeminiLiveText(turnText, { interrupt: true });
+          } else if (useGemini()) {
+            sendGeminiClientTurn(turnText, { interrupt: true });
+          } else {
+            sendOpenAIClientTurn(turnText, { interrupt: true });
+          }
         }
       }
       return;
@@ -3196,12 +3693,16 @@ function createIcallMateAiBridge(ws, session) {
       finalTranscriptBuffer = [];
       if (merged) {
         console.log(`[ICALLMATE][CALLER]: ${merged}`);
-        sendOpenAIClientTurn(
-          isOutboundSession()
-            ? `Customer said: ${merged}\nDo not greet again. Continue the diagnostic center feedback survey naturally in simple Hindi. If termination rules apply, speak the required closing and call end_call.`
-            : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`,
-          { interrupt: true }
-        );
+        const turnText = isOutboundSession()
+          ? `Customer said: ${merged}\nDo not greet again. Continue the diagnostic center feedback survey naturally in simple Hindi. If termination rules apply, speak the required closing and end the call.`
+          : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`;
+        if (useGeminiLive()) {
+          sendGeminiLiveText(turnText, { interrupt: true });
+        } else if (useGemini()) {
+          sendGeminiClientTurn(turnText, { interrupt: true });
+        } else {
+          sendOpenAIClientTurn(turnText, { interrupt: true });
+        }
       }
     }
   }
@@ -3266,29 +3767,140 @@ function createIcallMateAiBridge(ws, session) {
     });
   }
 
+  function connectDeepgramTts() {
+    if (bridgeClosed || !useGemini()) {
+      return;
+    }
+
+    if (!process.env.DEEPGRAM_API_KEY) {
+      console.warn('[ICALLMATE][DEEPGRAM TTS] Missing DEEPGRAM_API_KEY; Gemini replies cannot be spoken.');
+      return;
+    }
+
+    if (ttsWs && ttsWs.readyState !== WebSocket.CLOSED) {
+      return;
+    }
+
+    deepgramTtsReady = false;
+    ttsWs = new WebSocket(createDeepgramSpeakUrl(), {
+      headers: {
+        Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`
+      }
+    });
+
+    ttsWs.on('open', () => {
+      if (bridgeClosed) {
+        ttsWs.close();
+        return;
+      }
+
+      deepgramTtsReady = true;
+      console.log(`[ICALLMATE][DEEPGRAM TTS] Connected streamId=${getSessionLabel()} model=${DEEPGRAM_TTS_MODEL}`);
+      const queued = pendingTtsTexts;
+      pendingTtsTexts = [];
+      queued.forEach((text) => sendDeepgramTtsText(text));
+    });
+
+    ttsWs.on('message', (raw) => {
+      if (bridgeClosed) {
+        return;
+      }
+
+      if (Buffer.isBuffer(raw)) {
+        sendIcallMateReverseMedia(ws, session, raw);
+        return;
+      }
+
+      const text = raw.toString();
+      if (!text.trim().startsWith('{')) {
+        return;
+      }
+
+      try {
+        const event = JSON.parse(text);
+        if (event.type === 'Warning' || event.type === 'Error') {
+          console.warn(`[ICALLMATE][DEEPGRAM TTS] ${JSON.stringify(event)}`);
+        }
+      } catch (error) {
+        console.error('[ICALLMATE][DEEPGRAM TTS] Parse error:', error.message);
+      }
+    });
+
+    ttsWs.on('close', () => {
+      deepgramTtsReady = false;
+      console.log(`[ICALLMATE][DEEPGRAM TTS] Closed streamId=${getSessionLabel()}`);
+    });
+
+    ttsWs.on('error', (error) => {
+      deepgramTtsReady = false;
+      if (bridgeClosed) {
+        return;
+      }
+
+      console.error('[ICALLMATE][DEEPGRAM TTS ERROR]', error.message);
+    });
+  }
+
   return {
     start() {
       if (bridgeClosed) {
         return;
       }
 
-      connectOpenAI();
+      if (useGeminiLive()) {
+        connectGeminiLive();
+      } else if (useGemini()) {
+        connectDeepgramTts();
+        sendOpeningPrompt();
+      } else {
+        connectOpenAI();
+      }
       connectDeepgram();
     },
     sendCallerAudio(payload) {
-      if (bridgeClosed || !payload || !deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
+      if (bridgeClosed || !payload) {
         return;
       }
 
-      deepgramWs.send(Buffer.from(payload, 'base64'));
+      if (useGeminiLive()) {
+        if (geminiLiveSession && geminiLiveReady) {
+          geminiLiveSession.sendRealtimeInput({
+            audio: {
+              data: payload,
+              mimeType: 'audio/pcm;rate=8000'
+            }
+          });
+        }
+      }
+
+      if (!deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      if (useGeminiFamily() || aiWs?.readyState === WebSocket.OPEN) {
+        deepgramWs.send(Buffer.from(payload, 'base64'));
+      }
     },
     close() {
       bridgeClosed = true;
+      if (ttsWs && ttsWs.readyState === WebSocket.OPEN) {
+        ttsWs.send(JSON.stringify({ type: 'Close' }));
+      }
       if (deepgramWs && deepgramWs.readyState < WebSocket.CLOSING) {
         deepgramWs.close();
       }
+      if (ttsWs && ttsWs.readyState < WebSocket.CLOSING) {
+        ttsWs.close();
+      }
       if (aiWs && aiWs.readyState < WebSocket.CLOSING) {
         aiWs.close();
+      }
+      if (geminiLiveSession) {
+        try {
+          geminiLiveSession.close();
+        } catch (error) {
+          console.error('[ICALLMATE][GEMINI LIVE CLOSE ERROR]', error.message);
+        }
       }
     }
   };
@@ -3307,6 +3919,12 @@ icallMateWss.on('connection', (ws, req) => {
     customerName: '',
     clientName: CLIENT_NAME,
     answered: false,
+    contextHydrated: false,
+    contextHydrating: false,
+    customerId: null,
+    callId: null,
+    providerCallId: '',
+    mediaPacketsSeen: 0,
     connectedAt: new Date().toISOString()
   };
   const aiBridge = createIcallMateAiBridge(ws, session);
@@ -3321,17 +3939,29 @@ icallMateWss.on('connection', (ws, req) => {
     }
 
     const eventName = String(message.event || '').toLowerCase();
-    console.log(`[ICALLMATE] event=${eventName || 'unknown'} streamId=${message.streamId || session.streamId || ''} callerId=${message.callerId || session.callerId || ''} did=${message.did || session.did || ''}`);
+    if (eventName === 'media') {
+      session.mediaPacketsSeen += 1;
+      if (session.mediaPacketsSeen <= 5 || session.mediaPacketsSeen % 50 === 0) {
+        console.log(
+          `[ICALLMATE] event=media count=${session.mediaPacketsSeen} ` +
+          `streamId=${message.streamId || session.streamId || ''} callerId=${message.callerId || session.callerId || ''} did=${message.did || session.did || ''}`
+        );
+      }
+    } else {
+      console.log(`[ICALLMATE] event=${eventName || 'unknown'} streamId=${message.streamId || session.streamId || ''} callerId=${message.callerId || session.callerId || ''} did=${message.did || session.did || ''}`);
+    }
     if (message.streamId) session.streamId = message.streamId;
     if (message.callerId) session.callerId = message.callerId;
     if (message.did) session.did = message.did;
     const extraParams = parseIcallMateExtraParams(message.extraParams || message.extraparam || message.extra_param);
-    if (extraParams.callDirection) session.callDirection = String(extraParams.callDirection).toLowerCase();
+    if (message.callDirection) session.callDirection = normalizeCallDirection(message.callDirection, session.callDirection);
+    if (extraParams.callDirection) session.callDirection = normalizeCallDirection(extraParams.callDirection, session.callDirection);
     if (extraParams.customerName) session.customerName = extraParams.customerName;
     if (extraParams.clientName) session.clientName = extraParams.clientName;
+    await hydrateIcallMateSessionContext(session, message, extraParams);
 
     if (eventName === 'connected') {
-      await upsertIncomingCallFromIcall(message, { status: 'active', notes: 'iCallMate connected' });
+      await upsertIcallMateCallFromMedia(message, session, { status: 'active', notes: 'iCallMate connected' });
       sendIcallMateMark(ws, message, 'connected-received');
       return;
     }
@@ -3345,7 +3975,7 @@ icallMateWss.on('connection', (ws, req) => {
         && Number(mediaFormat.bitsPerSample) === 16
       );
 
-      await upsertIncomingCallFromIcall(message, {
+      await upsertIcallMateCallFromMedia(message, session, {
         status: 'active',
         notes: isExpectedAudio ? 'iCallMate media stream started' : 'iCallMate media stream started with unexpected audio format'
       });
@@ -3353,10 +3983,10 @@ icallMateWss.on('connection', (ws, req) => {
 
       if (!session.answered) {
         session.answered = true;
-        await upsertIncomingCallFromIcall(message, {
+        await upsertIcallMateCallFromMedia(message, session, {
           status: 'active',
           answered_at: normalizeIcallTimestamp(message.timestamp),
-          notes: 'Incoming call answered via start event'
+          notes: session.callDirection === 'outbound' ? 'Outbound call answered via start event' : 'Incoming call answered via start event'
         });
         aiBridge.start();
         sendIcallMateMark(ws, message, 'answer-received');
@@ -3366,10 +3996,10 @@ icallMateWss.on('connection', (ws, req) => {
 
     if (eventName === 'answer') {
       session.answered = true;
-      await upsertIncomingCallFromIcall(message, {
+      await upsertIcallMateCallFromMedia(message, session, {
         status: 'active',
         answered_at: normalizeIcallTimestamp(message.timestamp),
-        notes: 'Incoming call answered'
+        notes: session.callDirection === 'outbound' ? 'Outbound call answered' : 'Incoming call answered'
       });
       aiBridge.start();
       sendIcallMateMark(ws, message, 'answer-received');
@@ -3377,20 +4007,20 @@ icallMateWss.on('connection', (ws, req) => {
     }
 
     if (eventName === 'media') {
-      await upsertIncomingCallFromIcall(message, {
+      await upsertIcallMateCallFromMedia(message, session, {
         status: 'active',
         media_packets: 1,
-        notes: session.answered ? 'Incoming audio streaming' : 'Incoming media before answer'
+        notes: session.answered ? 'Audio streaming' : 'Media before answer'
       });
       aiBridge.sendCallerAudio(message.payload);
       return;
     }
 
     if (eventName === 'hangup-call') {
-      await upsertIncomingCallFromIcall(message, {
+      await upsertIcallMateCallFromMedia(message, session, {
         status: session.answered ? 'completed' : 'missed',
         ended_at: normalizeIcallTimestamp(message.timestamp),
-        notes: session.answered ? 'Incoming call disconnected' : 'Incoming call missed'
+        notes: session.answered ? 'Call disconnected' : 'Call missed'
       });
       sendIcallMateJson(ws, {
         event: 'reverse-media-stop',
@@ -3414,16 +4044,16 @@ icallMateWss.on('connection', (ws, req) => {
     console.log('[ICALLMATE] Media stream closed');
     aiBridge.close();
     if (session.streamId) {
-      upsertIncomingCallFromIcall({
+      upsertIcallMateCallFromMedia({
         streamId: session.streamId,
         callerId: session.callerId,
         did: session.did,
         event: 'hangup-call',
         timestamp: new Date().toISOString()
-      }, {
+      }, session, {
         status: session.answered ? 'completed' : 'missed',
         ended_at: new Date().toISOString(),
-        notes: session.answered ? 'Incoming call disconnected' : 'Incoming call closed'
+        notes: session.answered ? 'Call disconnected' : 'Call closed'
       });
     }
   });
