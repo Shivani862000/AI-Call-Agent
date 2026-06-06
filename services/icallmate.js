@@ -2,6 +2,10 @@ function getOutboundEndpoint() {
   return `${String(process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in').replace(/\/+$/, '')}/OBDAPI/webresources/CreateOBDCampaignPost`;
 }
 
+function getMasterPostEndpoint() {
+  return String(process.env.ICALLMATE_MASTER_POST_API_ENDPOINT || 'https://crm.icallmate.in/WebSVC111/setMasterPostAPI').trim();
+}
+
 function normalizePhone(value) {
   return String(value || '').replace(/[^\d+]/g, '');
 }
@@ -46,6 +50,25 @@ function buildOutboundCampaignPayload(customerPhone, customerId, options = {}) {
   };
 }
 
+function buildMasterPostPayload(customerPhone, leadId, options = {}) {
+  const phoneNo = normalizePhone(customerPhone).replace(/^\+91/, '');
+  if (!phoneNo) {
+    throw new Error('Customer phone is required for iCallMate master-post call');
+  }
+
+  const wsurl = options.wsurl || process.env.ICALLMATE_MASTER_POST_WSURL || '';
+  return {
+    campid: String(options.campid || process.env.ICALLMATE_MASTER_POST_CAMP_ID || '54'),
+    leadid: String(leadId || options.leadid || process.env.ICALLMATE_MASTER_POST_LEAD_ID || '1031'),
+    fieldpairs: [
+      {
+        Phone_No: phoneNo,
+        wsurl
+      }
+    ]
+  };
+}
+
 function extractCallSid(payload, fallback) {
   const text = typeof payload === 'string' ? payload : JSON.stringify(payload || {});
   const parsedSid = (
@@ -69,11 +92,63 @@ function isFailurePayload(payload) {
   return status === 'failure' || (statusCode >= 400 && statusCode !== 0);
 }
 
+async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
+  const endpoint = getMasterPostEndpoint();
+  const payload = buildMasterPostPayload(customerPhone, options.leadid || customerId, options);
+
+  if (!payload.fieldpairs[0].wsurl) {
+    throw new Error('Missing iCallMate master-post config: wsurl or ICALLMATE_MASTER_POST_WSURL is required.');
+  }
+
+  console.log(
+    `[ICALLMATE OUTBOUND] Initiating call to ${customerPhone} provider=masterpost endpoint=${endpoint} ` +
+    `campid=${payload.campid} leadid=${payload.leadid}`
+  );
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const rawText = await response.text();
+  let parsed = {};
+  try {
+    parsed = rawText ? JSON.parse(rawText) : {};
+  } catch (error) {
+    parsed = { rawText };
+  }
+
+  if (!response.ok) {
+    throw new Error(`iCallMate master-post call failed (${response.status}): ${rawText || response.statusText}`);
+  }
+
+  if (isFailurePayload(parsed)) {
+    throw new Error(`iCallMate master-post call rejected: ${parsed.message || rawText || 'unknown failure'}`);
+  }
+
+  const sid = extractCallSid(parsed, `icallmate-masterpost-${Date.now()}`);
+  console.log(`[ICALLMATE OUTBOUND] Call accepted sid=${sid}`);
+  return {
+    sid,
+    status: 'queued',
+    raw: parsed
+  };
+}
+
 async function initiateCall(customerPhone, customerId, options = {}) {
+  const provider = String(options.provider || process.env.ICALLMATE_OUTBOUND_PROVIDER || '').toLowerCase();
+  if (provider === 'masterpost' || provider === 'master-post') {
+    return initiateMasterPostCall(customerPhone, customerId, options);
+  }
+
   const endpoint = getOutboundEndpoint();
   const payload = buildOutboundCampaignPayload(customerPhone, customerId, options);
 
   if (!payload.ukey || !payload.serviceno || !payload.ivrtemplateid) {
+    if (process.env.ICALLMATE_MASTER_POST_API_ENDPOINT || process.env.ICALLMATE_MASTER_POST_WSURL) {
+      console.log('[ICALLMATE OUTBOUND] Falling back to masterpost provider due to missing campaign credentials');
+      return initiateMasterPostCall(customerPhone, customerId, options);
+    }
     throw new Error('Missing iCallMate outbound config: ICALLMATE_UKEY, ICALLMATE_SERVICE_NO, and ICALLMATE_IVR_TEMPLATE_ID are required.');
   }
 
@@ -119,6 +194,7 @@ async function sendWhatsAppMessage() {
 
 module.exports = {
   buildOutboundCampaignPayload,
+  buildMasterPostPayload,
   initiateCall,
   sendWhatsAppMessage
 };

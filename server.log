@@ -1,0 +1,68 @@
+Connected to SQLite database: ./feedback.db
+✓ All tables created/verified
+[SERVER] {"NODE_ENV":"development","PORT":"3000","TZ":"","CALL_MODE":"gemini","VOICE_PIPELINE":"legacy","AI_PROVIDER":"gemini","REALTIME_MODEL":"models/gemini-2.5-flash-native-audio-preview-12-2025","REQUESTED_GEMINI_MODEL":"models/gemini-2.5-flash-native-audio-preview-12-2025","GEMINI_MODEL":"models/gemini-2.5-flash-native-audio-preview-12-2025","GEMINI_VOICE":"Aoede","OPENAI_REALTIME_MODEL":"gpt-realtime-2","OPENAI_REALTIME_VOICE":"marin","OPENAI_REALTIME_REASONING_EFFORT":"low","DISABLE_SCHEDULER":false,"DISABLE_OWNER_DIGEST":false,"APP_BASE_URL":"\"\" (len=0)","NGROK_URL":"\"https://your-ngrok-url.ngrok-free.app\" (len=37)","WEBHOOK_URL":"\"https://your-ngrok-url.ngrok-free.app\" (len=37)","SERVER_NAME":"\"\" (len=0)","ICALLMATE_IBD_API_ENDPOINT":"https://crm.icallmate.in","ICALLMATE_OBD_API_ENDPOINT":"https://ecp1.icallmate.in","ICALLMATE_DID":"8037259753","ICALLMATE_SERVICE_NO":"","ICALLMATE_IVR_TEMPLATE_ID":"","ICALLMATE_AGENT_ID":"0","ICALLMATE_UKEY_PRESENT":false,"GEMINI_API_KEY_PRESENT":true,"LIVE_STT_PROVIDER":"deepgram","DEEPGRAM_API_KEY_PRESENT":true,"OPENAI_API_KEY_PRESENT":false,"OPENAI_TRANSCRIPTION_MODEL":"gpt-realtime-whisper","DATABASE_URL":""}
+[SERVER] Running on http://localhost:3000
+[SERVER] Public base URL: https://your-ngrok-url.ngrok-free.app
+[SERVER] Call mode: gemini
+[SERVER] Voice pipeline: legacy
+[SERVER] Realtime model: models/gemini-2.5-flash-native-audio-preview-12-2025
+[SERVER] Scheduler active: checks pending customers every 15 seconds
+[SERVER] Owner digest active: checks 8 AM morning delivery every 60 seconds
+[SERVER] Admin UI: http://localhost:3000/admin.html
+[SERVER] Ready. Trigger a call with: curl -X POST http://localhost:3000/call/start
+[CALL REQUEST] to=+919354197715 serviceNo= baseUrl=https://your-ngrok-url.ngrok-free.app mode=gemini pipeline=legacy model=models/gemini-2.5-flash-native-audio-preview-12-2025
+[CALL REQUEST CONFIG] APP_BASE_URL="" (len=0) NGROK_URL="https://your-ngrok-url.ngrok-free.app" (len=37) WEBHOOK_URL="https://your-ngrok-url.ngrok-free.app" (len=37) SERVER_NAME="" (len=0) ICALLMATE_OBD_API_ENDPOINT=https://ecp1.icallmate.in ICALLMATE_SERVICE_NO= ICALLMATE_IVR_TEMPLATE_ID= GEMINI_MODEL=models/gemini-2.5-flash-native-audio-preview-12-2025 GEMINI_VOICE=Aoede TZ=
+[ICALLMATE OUTBOUND] Using ICALLMATE_MASTER_POST_WSURL from env for wsurl
+[ICALLMATE OUTBOUND] Falling back to masterpost provider due to missing campaign credentials
+[ICALLMATE OUTBOUND] Initiating call to +919354197715 provider=masterpost endpoint=https://crm.icallmate.in/WebSVC111/setMasterPostAPI serviceNo= ivrTemplate= campid=54 leadid=1031
+[ICALLMATE OUTBOUND] Call accepted sid=icallmate-masterpost-1780679661214
+[CALL STARTED] SID: icallmate-masterpost-1780679661214
+[CALL DIAGNOSTIC WARNING] sid=icallmate-masterpost-1780679661214 customerId=2 phone=+919354197715 voicebotHit=no streamHit=no statusHit=no publicBaseUrl=https://your-ngrok-url.ngrok-free.app icallmateMediaUrl=wss://your-ngrok-url.ngrok-free.app/icallmate/media
+[WS UPGRADE] path=/icallmate/media host=localhost:3000 origin= upgrade=websocket remote=::1
+[ICALLMATE] Media stream connected
+[ICALLMATE] Upgrade request from ::1
+[ICALLMATE] Request headers host=localhost:3000 ua= x-forwarded-for=
+[ICALLMATE] event=connected streamId=sim-1 callerId=sim-caller did=8037259753
+[ICALLMATE] event=answer streamId=sim-1 callerId=sim-caller did=8037259753
+[ICALLMATE INCOMING DB ERROR] SQLITE_CONSTRAINT: UNIQUE constraint failed: customers.phone
+[ICALLMATE][GEMINI] Live session opened streamId=sim-1 model=models/gemini-2.5-flash-native-audio-preview-12-2025 voice=Aoede
+[ICALLMATE][PROMPT] provider=gemini direction=incoming client="Your Diagnostic Center" customer="Customer Name" system="You are Priya, a calm Hindi/Hinglish receptionist for Your Diagnostic Center. The caller has called the business first. This is an inbound support call, not an outbound follow-up. Goal: - Greet briefly and ask how you can help. - Help with " opening="Sirf yeh exact line natural phone tone me boliye, aur is turn me kuch aur mat boliye: "Namaste, Your Diagnostic Center se Priya bol rahi hoon. Bataiye, main kaise madad kar sakti hoon?""
+[ICALLMATE][GEMINI] Live session closed code=1011 reason=Your prepayment credits are depleted. Please go to AI Studio at https://ai.studio/projects to manage your project and billi streamId=sim-1
+[ICALLMATE][DEEPGRAM] Live transcription connected streamId=sim-1 model=nova-3
+[ICALLMATE][DEEPGRAM] Live transcription closed streamId=sim-1
+[ICALLMATE] Media stream closed
+[ICALLMATE INCOMING DB ERROR] SQLITE_CONSTRAINT: UNIQUE constraint failed: customers.phone
+[TEST CALL] started session=test-call-1780680213526-zkwpco callId=9 prompt=path_lab_feedback_fallback
+[SCHEDULER] Skipping duplicate customer row id=2 phone=+919354197715 because row id=2 already queued
+[SCHEDULER] Skipping duplicate customer row id=2 phone=+919354197715 because row id=2 already queued
+[SCHEDULER] Skipping duplicate customer row id=2 phone=+919354197715 because row id=2 already queued
+[SCHEDULER] Skipping duplicate customer row id=2 phone=+919354197715 because row id=2 already queued
+[SCHEDULER] Found 1 eligible customer(s) due at 22:55
+[ICALLMATE OUTBOUND] Using ICALLMATE_MASTER_POST_WSURL from env for wsurl
+[ICALLMATE OUTBOUND] Falling back to masterpost provider due to missing campaign credentials
+[ICALLMATE OUTBOUND] Initiating call to +919354197715 provider=masterpost endpoint=https://crm.icallmate.in/WebSVC111/setMasterPostAPI serviceNo= ivrTemplate= campid=54 leadid=1031
+[ICALLMATE OUTBOUND] Call accepted sid=icallmate-masterpost-1780680311894
+[SCHEDULER] Scheduled call started for shivani (icallmate-masterpost-1780680311894)
+[CALL DIAGNOSTIC WARNING] sid=icallmate-masterpost-1780680311894 customerId=2 phone=+919354197715 voicebotHit=no streamHit=no statusHit=no publicBaseUrl=https://your-ngrok-url.ngrok-free.app icallmateMediaUrl=wss://your-ngrok-url.ngrok-free.app/icallmate/media
+[SCHEDULER] Found 1 eligible customer(s) due at 22:56
+[ICALLMATE OUTBOUND] Using ICALLMATE_MASTER_POST_WSURL from env for wsurl
+[ICALLMATE OUTBOUND] Falling back to masterpost provider due to missing campaign credentials
+[ICALLMATE OUTBOUND] Initiating call to +919354197715 provider=masterpost endpoint=https://crm.icallmate.in/WebSVC111/setMasterPostAPI serviceNo= ivrTemplate= campid=54 leadid=1031
+[ICALLMATE OUTBOUND] Call accepted sid=icallmate-masterpost-1780680371642
+[SCHEDULER] Scheduled call started for shivani (icallmate-masterpost-1780680371642)
+[CALL DIAGNOSTIC WARNING] sid=icallmate-masterpost-1780680371642 customerId=5 phone=+919354197715 voicebotHit=no streamHit=no statusHit=no publicBaseUrl=https://your-ngrok-url.ngrok-free.app icallmateMediaUrl=wss://your-ngrok-url.ngrok-free.app/icallmate/media
+[SCHEDULER] Found 1 eligible customer(s) due at 23:04
+[ICALLMATE OUTBOUND] Using ICALLMATE_MASTER_POST_WSURL from env for wsurl
+[ICALLMATE OUTBOUND] Falling back to masterpost provider due to missing campaign credentials
+[ICALLMATE OUTBOUND] Initiating call to +919354197715 provider=masterpost endpoint=https://crm.icallmate.in/WebSVC111/setMasterPostAPI serviceNo= ivrTemplate= campid=54 leadid=1031
+[ICALLMATE OUTBOUND] Call accepted sid=icallmate-masterpost-1780680851933
+[SCHEDULER] Scheduled call started for shivani (icallmate-masterpost-1780680851933)
+[CALL DIAGNOSTIC WARNING] sid=icallmate-masterpost-1780680851933 customerId=6 phone=+919354197715 voicebotHit=no streamHit=no statusHit=no publicBaseUrl=https://your-ngrok-url.ngrok-free.app icallmateMediaUrl=wss://your-ngrok-url.ngrok-free.app/icallmate/media
+[CALL REQUEST] to=+919354197715 serviceNo= baseUrl=https://your-ngrok-url.ngrok-free.app mode=gemini pipeline=legacy model=models/gemini-2.5-flash-native-audio-preview-12-2025
+[CALL REQUEST CONFIG] APP_BASE_URL="" (len=0) NGROK_URL="https://your-ngrok-url.ngrok-free.app" (len=37) WEBHOOK_URL="https://your-ngrok-url.ngrok-free.app" (len=37) SERVER_NAME="" (len=0) ICALLMATE_OBD_API_ENDPOINT=https://ecp1.icallmate.in ICALLMATE_SERVICE_NO= ICALLMATE_IVR_TEMPLATE_ID= GEMINI_MODEL=models/gemini-2.5-flash-native-audio-preview-12-2025 GEMINI_VOICE=Aoede TZ=
+[ICALLMATE OUTBOUND] Using ICALLMATE_MASTER_POST_WSURL from env for wsurl
+[ICALLMATE OUTBOUND] Falling back to masterpost provider due to missing campaign credentials
+[ICALLMATE OUTBOUND] Initiating call to +919354197715 provider=masterpost endpoint=https://crm.icallmate.in/WebSVC111/setMasterPostAPI serviceNo= ivrTemplate= campid=54 leadid=1031
+[ICALLMATE OUTBOUND] Call accepted sid=icallmate-masterpost-1780681547397
+[CALL STARTED] SID: icallmate-masterpost-1780681547397
+[CALL DIAGNOSTIC WARNING] sid=icallmate-masterpost-1780681547397 customerId=6 phone=+919354197715 voicebotHit=no streamHit=no statusHit=no publicBaseUrl=https://your-ngrok-url.ngrok-free.app icallmateMediaUrl=wss://your-ngrok-url.ngrok-free.app/icallmate/media

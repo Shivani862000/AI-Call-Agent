@@ -6,7 +6,7 @@ const sessions = new Map();
 const TEST_CALL_SOURCE = 'test_call';
 const TEST_CALL_TYPE = 'Test Feedback Call';
 const DEFAULT_CLIENT_NAME = process.env.CLIENT_NAME || 'Path Lab';
-const GEMINI_MODEL = process.env.TEST_CALL_GEMINI_MODEL || process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash';
+const OPENAI_TEXT_MODEL = process.env.TEST_CALL_OPENAI_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4o-mini';
 
 const QUESTION_PLAN = [
   {
@@ -121,70 +121,61 @@ async function getOutboundFeedbackPrompt(patientName) {
   };
 }
 
-function buildGeminiContents(session, nextUserTurn) {
-  const contents = [];
-  session.transcript.forEach((turn) => {
-    contents.push({
-      role: turn.role === 'AGENT' ? 'model' : 'user',
-      parts: [{ text: turn.text }]
-    });
-  });
-
-  if (nextUserTurn) {
-    contents.push({
-      role: 'user',
-      parts: [{ text: nextUserTurn }]
-    });
-  }
-
-  return contents;
-}
-
-function extractGeminiText(payload) {
-  const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
-  return candidates
-    .flatMap((candidate) => Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [])
-    .map((part) => typeof part?.text === 'string' ? part.text : '')
-    .join('')
-    .trim();
-}
-
-async function generateLlmReply(session, userText) {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY is not configured');
-  }
-
-  const modelPath = encodeURIComponent(String(GEMINI_MODEL).replace(/^models\//, ''));
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelPath}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{
-          text: `${session.systemPrompt}
+function buildOpenAIMessages(session, nextUserTurn) {
+  const messages = [{
+    role: 'system',
+    content: `${session.systemPrompt}
 
 Current simulation step: ${Math.min(session.step + 1, QUESTION_PLAN.length)} of ${QUESTION_PLAN.length}.
 Next required topic: ${QUESTION_PLAN[Math.min(session.step, QUESTION_PLAN.length - 1)]?.key || 'closing'}.
 Ask only the next required question unless the call is complete.`
-        }]
-      },
-      generationConfig: {
-        temperature: 0.35,
-        maxOutputTokens: 120
-      },
-      contents: buildGeminiContents(session, userText)
+  }];
+
+  session.transcript.forEach((turn) => {
+    messages.push({
+      role: turn.role === 'AGENT' ? 'assistant' : 'user',
+      content: turn.text
+    });
+  });
+
+  if (nextUserTurn) {
+    messages.push({
+      role: 'user',
+      content: nextUserTurn
+    });
+  }
+
+  return messages;
+}
+
+async function generateLlmReply(session, userText) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not configured');
+  }
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: OPENAI_TEXT_MODEL,
+      temperature: 0.35,
+      max_tokens: 120,
+      messages: buildOpenAIMessages(session, userText)
     })
   });
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => '');
-    throw new Error(`Gemini request failed (${response.status}): ${errorText || response.statusText}`);
+    throw new Error(`OpenAI request failed (${response.status}): ${errorText || response.statusText}`);
   }
 
   const payload = await response.json();
-  const text = extractGeminiText(payload);
+  const text = String(payload?.choices?.[0]?.message?.content || '').trim();
   if (!text) {
-    throw new Error('Gemini returned an empty response');
+    throw new Error('OpenAI returned an empty response');
   }
 
   return text;

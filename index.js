@@ -214,39 +214,13 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = Number(process.env.PORT || 3000);
-const CALL_MODE = 'gemini';
-const AI_PROVIDER = 'gemini';
-const DEFAULT_GEMINI_MODEL = 'models/gemini-2.5-flash-native-audio-preview-12-2025';
-const DEPRECATED_GEMINI_LIVE_MODELS = new Set([
-  'models/gemini-3.1-flash-live-preview',
-  'gemini-3.1-flash-live-preview',
-  'models/gemini-live-2.5-flash-preview',
-  'gemini-live-2.5-flash-preview'
-]);
-
-function normalizeGeminiModelName(modelName) {
-  const normalized = String(modelName || '').trim();
-  if (!normalized || DEPRECATED_GEMINI_LIVE_MODELS.has(normalized)) {
-    return DEFAULT_GEMINI_MODEL;
-  }
-
-  return normalized.startsWith('models/') ? normalized : `models/${normalized}`;
-}
-
-function resolveRealtimeModelName(modelName) {
-  const candidate = String(modelName || '').trim();
-  return normalizeGeminiModelName(candidate || REALTIME_MODEL);
-}
-
-const REQUESTED_GEMINI_MODEL = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
-const GEMINI_MODEL = normalizeGeminiModelName(REQUESTED_GEMINI_MODEL);
-if (GEMINI_MODEL !== String(REQUESTED_GEMINI_MODEL || '').trim()) {
-  console.warn(`[CONFIG] Gemini model "${REQUESTED_GEMINI_MODEL}" is deprecated or unsupported here; using "${GEMINI_MODEL}" instead.`);
-}
-const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
-const REALTIME_MODEL = GEMINI_MODEL;
-const GEMINI_OPENING_RETRY_MS = Math.max(Number(process.env.GEMINI_OPENING_RETRY_MS || 1500) || 1500, 800);
-const GEMINI_OPENING_RETRY_ENABLED = String(process.env.GEMINI_OPENING_RETRY_ENABLED || 'false').toLowerCase() === 'true';
+const CALL_MODE = 'openai';
+const AI_PROVIDER = 'openai';
+const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2';
+const OPENAI_REALTIME_VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin';
+const OPENAI_REALTIME_OUTPUT_SAMPLE_RATE = Number(process.env.OPENAI_REALTIME_OUTPUT_SAMPLE_RATE || 24000) || 24000;
+const REALTIME_MODEL = OPENAI_REALTIME_MODEL;
+const OPENAI_REALTIME_WS_BASE_URL = 'wss://api.openai.com/v1/realtime';
 const MAX_PRECONNECT_MEDIA_CHUNKS = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_CHUNKS || 60) || 60, 10);
 const MAX_PRECONNECT_MEDIA_BYTES = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_BYTES || 512000) || 512000, 64000);
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
@@ -259,7 +233,6 @@ const PUBLIC_BASE_URL = (
   || process.env.WEBHOOK_URL
   || HARDCODED_PUBLIC_BASE_URL
 ).replace(/\/$/, '');
-const GEMINI_WS_BASE_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
 const DISABLE_SCHEDULER = String(process.env.DISABLE_SCHEDULER || '').toLowerCase() === 'true';
@@ -301,9 +274,8 @@ function logConfigSnapshot(scope = 'CONFIG') {
     VOICE_PIPELINE,
     AI_PROVIDER,
     REALTIME_MODEL,
-    REQUESTED_GEMINI_MODEL,
-    GEMINI_MODEL,
-    GEMINI_VOICE,
+    OPENAI_REALTIME_MODEL,
+    OPENAI_REALTIME_VOICE,
     DISABLE_SCHEDULER,
     DISABLE_OWNER_DIGEST,
     APP_BASE_URL: describeEnvValue(process.env.APP_BASE_URL || ''),
@@ -317,7 +289,7 @@ function logConfigSnapshot(scope = 'CONFIG') {
     ICALLMATE_IVR_TEMPLATE_ID: process.env.ICALLMATE_IVR_TEMPLATE_ID || '',
     ICALLMATE_AGENT_ID: process.env.ICALLMATE_AGENT_ID || '',
     ICALLMATE_UKEY_PRESENT: Boolean(process.env.ICALLMATE_UKEY),
-    GEMINI_API_KEY_PRESENT: Boolean(process.env.GEMINI_API_KEY),
+    OPENAI_API_KEY_PRESENT: Boolean(process.env.OPENAI_API_KEY),
     DEEPGRAM_API_KEY_PRESENT: Boolean(process.env.DEEPGRAM_API_KEY),
     DATABASE_URL: process.env.DATABASE_URL || ''
   };
@@ -425,80 +397,102 @@ function applyAgentTemplate(template, replacements = {}) {
 
 function buildDefaultAgentSystemPrompt(clientName, customerName) {
   return `
-You are Priya, a warm and respectful Hindi-speaking calling assistant from ${clientName}.
-You are calling ${customerName} for a blood donation follow-up on behalf of Apna Blood Centre, Palwal.
+You are Priya, a customer feedback executive calling on behalf of ${clientName}.
 
-Purpose:
-Call previous blood donors after around 3 months, thank them for their earlier donation,
-ask whether they can donate blood again, and collect any problem/feedback from their last donation.
+PRIMARY OBJECTIVE:
+Collect feedback about the customer's recent visit in a friendly and professional manner.
 
-Tone and language:
-- Speak in simple, natural Hindi/Hinglish.
-- Be polite, warm, and brief.
-- Do not sound robotic or like an AI system.
-- Do not pressure the person to donate.
-- Ask only one main question at a time.
-- Keep every response short: 1-3 sentences.
-- If the person is busy, not interested, or says no, thank them respectfully and close.
-- Never give medical advice. If they mention a health issue, say the team will note it and they should follow doctor guidance.
+IMPORTANT BEHAVIOR RULES:
+- Speak only in simple conversational Hindi.
+- Never switch fully to English.
+- Never mention you are AI, virtual assistant, bot, system, or language model.
+- Never provide medical advice.
+- Never answer healthcare questions.
+- Never discuss reports, diagnosis, medicines, treatments, or test results.
+- If asked medical questions, say exactly: "Maaf kijiye, main sirf feedback collect karne ke liye call kar rahi hoon. Is vishay mein hamari team aapki madad karegi."
+- Never invent information.
+- Never guess facts.
+- Never create details not provided by the customer.
+- Never skip steps unless the customer wants to end the call.
+- Ask only one question at a time.
+- Keep every response under 20 words whenever possible.
+- Use short acknowledgements before the next question.
+- Do not generate long explanations.
+- Do not repeat previous questions.
 
-Conversation flow:
+SILENCE HANDLING:
+- If customer is silent for 3 seconds: "Ji, main sun rahi hoon."
+- If silent again: "Koi baat nahi, aap aaram se bata sakte hain."
+- If silent for 10 seconds: "Shayad aap vyast hain. Main call samaapt kar rahi hoon. Dhanyavaad." Then end the call.
 
-1. Greeting and identity confirmation
-Start by saying:
-"Good morning sir/ma'am, main Apna Blood Centre, Palwal se Priya baat kar rahi hoon. Kya main ${customerName} ji se baat kar rahi hoon?"
-If this is not the right person, apologize and end politely.
-If they are busy, say: "Koi baat nahi sir/ma'am, hum baad mein contact kar lenge. Dhanyavaad."
+OFF-TOPIC HANDLING:
+If customer goes off-topic: "Dhanyavaad. Aapki visit par wapas aate hain."
 
-2. Thank them for previous donation
-Say:
-"Sir/ma'am, aapne kuch time pehle blood donate kiya tha. Uske liye Apna Blood Centre ki taraf se aapka bahut-bahut dhanyavaad."
+INTERRUPTION HANDLING:
+If customer interrupts, stop current response immediately, listen, and continue from the same step.
 
-3. Ask about repeat donation after 3 months
-Say:
-"Aapke blood donation ko lagbhag 3 months ho gaye hain. Kya aap phir se blood donate karna chahenge?"
+RATING HANDLING:
+Accept only 1, 2, 3, 4, 5.
+If unclear: "Maaf kijiye, 1 se 5 ke beech ek rating bata sakte hain?"
+If still unclear: "Main ise rating na milne ke roop mein note kar leti hoon."
 
-4. If they say yes
-Thank them and say:
-"Bahut dhanyavaad sir/ma'am. Aap kisi bhi din apni suvidha ke hisaab se, khana khaane ke baad, 9 AM se 5 PM ke beech Apna Blood Centre aa sakte hain."
-Then add:
-"Humare yahan thalassemia patients, garbhwati mahilaon, aur zaruratmand bachchon ke liye free blood diya jaata hai. Aapka donation kisi ki jaan bachane mein madad kar sakta hai."
-If they ask date or place, collect it naturally:
-- Date: ask "Aap kis din aana chahenge?"
-- Place: say "Apna Blood Centre, Palwal."
+CALL FLOW:
+STEP 1 - INTRODUCTION:
+"Namaste. Main Priya bol rahi hoon ${clientName} se.
+Kya main ${customerName} ji se baat kar rahi hoon?
+Aapki haal hi ki visit ke baare mein 2-3 minute feedback lena chahti hoon.
+Kya abhi baat karna theek rahega?"
+If NO, say: "Bilkul theek hai. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then end the call.
 
-5. If they say no or not now
-Say:
-"Koi baat nahi sir/ma'am. Aapka pehle blood donate karne ke liye bahut dhanyavaad."
-Then ask:
-"Blood donate karne ke baad aapko koi problem ya dikkat hui thi?"
+STEP 2 - OVERALL EXPERIENCE:
+"Dhanyavaad. Aapka hamare collection center mein kul milaakar anubhav kaisa raha?"
+Acknowledge briefly with examples like "Achha laga sunkar.", "Dhanyavaad batane ke liye.", or "Samajh gayi."
 
-6. If they had no problem
-Say:
-"Theek hai sir/ma'am, bahut dhanyavaad. Aapka din shubh ho."
+STEP 3 - CLEANLINESS:
+"Hamare center ki safai aur hygiene ke baare mein aapka kya anubhav raha?"
+If negative: "Jo aapne notice kiya, uske baare mein thoda aur bata sakte hain?"
 
-7. If they had a problem
-Say:
-"Sorry sir/ma'am, aapko dikkat hui. Kya aap bata sakte hain kya problem hui thi?"
-After they explain, say:
-"Main aapki baat team tak pahucha dungi. Next time hum iska dhyan rakhenge."
+STEP 4 - STAFF BEHAVIOUR:
+"Hamare staff ka vyavhaar aapko kaisa laga?"
+If person mentioned, store name internally.
+Follow-up: "Kya hamari team mein koi aisa vyakti hai jinka aap vishesh roop se zikr karna chahenge?"
 
-8. Social follow-up, only if the conversation is positive and they are not annoyed
-Say:
-"Sir/ma'am, humne aapke paas ek video/link send kiya hai. Agar possible ho to please like, comment, share ya subscribe kar dijiye."
-Then say:
-"Facebook aur Google par Apna Blood Centre ke naam se page hai. Aapka support humein aur logon tak pahunchne mein madad karega."
+STEP 5 - WAITING TIME:
+"Waiting time aur sample collection process kaisa raha? Kya sab kuchh spasht roop se samjhaya gaya tha?"
 
-9. Closing
-End with:
-"Dhanyavaad sir/ma'am. Apna Blood Centre ki taraf se aapka bahut-bahut dhanyavaad. Aapka din shubh ho."
+STEP 6 - OVERALL RATING:
+"1 se 5 ke scale par, jahan 5 sabse behtar hai, aap apne anubhav ko kitni rating denge?"
 
-Important rules:
-- Do not ask survey-style diagnostic center questions about cleanliness, staff, sample collection, rating, or Google Form.
-- Do not invent appointment confirmation if the donor did not agree.
-- Do not repeat the same question again and again.
-- If the donor asks why you are calling, explain: "Sir/ma'am, hum previous blood donors ko 3 months ke baad follow-up karte hain, kyunki blood donation se zaruratmand patients ki madad hoti hai."
-- If the donor asks whether donation is safe, say: "Sir/ma'am, final decision aapki health aur doctor/team ki guidance ke hisaab se hi hoga."
+STEP 7 - IMPROVEMENT SUGGESTIONS:
+"Kya aapko lagta hai ki hum apni seva ko aur behtar bana sakte hain? Aapke sujhav humein zaroor batayein."
+Allow free response. Do not interrupt.
+
+STEP 8 - CLOSING:
+"${customerName} ji, apna feedback dene ke liye bahut dhanyavaad.
+Aapka feedback hamare liye bahut mahatvapurn hai aur humein apni seva behtar banane mein madad karega.
+Hum aapko WhatsApp par ek Google Review link bhi bhejenge. Agar aap suvidha anusar review de saken to humein khushi hogi.
+Dhanyavaad.
+Aapka din shubh ho."
+Then end the call.
+
+CALL TERMINATION / HANGUP RULES:
+You are allowed to end the call only in these situations.
+When ending a call, first speak the closing message, then call the end_call tool immediately. Do not generate any further response after calling end_call.
+
+- Customer is busy: if customer says Main busy hoon, Abhi baat nahi kar sakta/sakti, Meeting mein hoon, Call later, Baad mein call kariye, or Driving kar raha/rahi hoon, say: "Bilkul theek hai. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then call end_call.
+- Customer does not want to continue: if customer says Feedback nahi dena, Interested nahi hoon, Mujhe baat nahi karni, Call band kijiye, or Stop call, say: "Koi baat nahi. Apna samay dene ke liye dhanyavaad." Then call end_call.
+- Wrong person: if customer confirms they are not ${customerName}, say: "Maaf kijiye. Shayad galat vyakti se baat ho gayi. Dhanyavaad." Then call end_call.
+- Customer asks to end: if customer says Bye, Thank you, Bas itna hi, Theek hai bye, Call cut kijiye, or Goodbye, say: "Dhanyavaad. Aapka din shubh ho." Then call end_call.
+- Long silence: if silence exceeds 10 seconds, say: "Shayad aap vyast hain. Main call samaapt kar rahi hoon. Dhanyavaad." Then call end_call.
+- Abusive language: if customer repeatedly uses abusive language, say: "Main samajh gayi. Aapka samay dene ke liye dhanyavaad." Then call end_call.
+- Survey completed: after all required feedback steps and closing message, call end_call.
+
+CRITICAL RULES:
+- Never ask another question after calling end_call.
+- Never continue conversation after calling end_call.
+- Never restart the survey.
+- Never say "Is there anything else?"
+- The end_call tool has the highest priority.
 `.trim();
 }
 
@@ -516,7 +510,7 @@ function buildAgentSystemPrompt(clientName, customerName, agentConfig = null) {
 }
 
 function buildDefaultOpeningPrompt(clientName, customerName) {
-  return `Sirf yeh exact line boliye aur is turn me kuch aur mat boliye: "Good morning sir/ma'am, main Apna Blood Centre, Palwal se Priya baat kar rahi hoon. Kya main ${customerName} ji se baat kar rahi hoon?"`;
+  return `Sirf yeh exact line natural phone tone me boliye, aur is turn me kuch aur mat boliye: "Namaste. Main Priya bol rahi hoon ${clientName} se. Kya main ${customerName} ji se baat kar rahi hoon? Aapki haal hi ki visit ke baare mein 2-3 minute feedback lena chahti hoon. Kya abhi baat karna theek rahega?"`;
 }
 
 function buildOpeningPrompt(clientName, customerName, agentConfig = null) {
@@ -570,8 +564,12 @@ async function getDefaultAgentConfig() {
 function validateConfig() {
   const missing = [];
 
-  if (!process.env.GEMINI_API_KEY) {
-    missing.push('GEMINI_API_KEY');
+  if (!process.env.OPENAI_API_KEY) {
+    missing.push('OPENAI_API_KEY');
+  }
+
+  if (!process.env.DEEPGRAM_API_KEY) {
+    missing.push('DEEPGRAM_API_KEY');
   }
 
   if (USE_ORCHESTRATED_PIPELINE) {
@@ -848,18 +846,6 @@ function normalizePhoneLookupValue(value) {
   return digits;
 }
 
-function usesGeminiRealtimeTextInput(modelName) {
-  return /gemini-3\.1/i.test(String(modelName || ''));
-}
-
-function buildGeminiWsUrl() {
-  const url = new URL(GEMINI_WS_BASE_URL);
-  if (process.env.GEMINI_API_KEY) {
-    url.searchParams.set('key', process.env.GEMINI_API_KEY);
-  }
-  return url.toString();
-}
-
 function createDeepgramListenUrl() {
   const url = new URL('wss://api.deepgram.com/v1/listen');
   url.searchParams.set('model', 'nova-2');
@@ -873,42 +859,6 @@ function createDeepgramListenUrl() {
   return url.toString();
 }
 
-function buildGeminiContentsFromTranscript(transcript = [], nextUserTurn = null) {
-  const contents = transcript.map((turn) => ({
-    role: turn.role === 'AGENT' ? 'model' : 'user',
-    parts: [{ text: turn.text }]
-  }));
-
-  const normalizedNextUserTurn = String(nextUserTurn || '').trim();
-  const lastContent = contents[contents.length - 1];
-  const lastText = String(lastContent?.parts?.[0]?.text || '').trim();
-
-  if (normalizedNextUserTurn && !(lastContent?.role === 'user' && lastText === normalizedNextUserTurn)) {
-    contents.push({
-      role: 'user',
-      parts: [{ text: normalizedNextUserTurn }]
-    });
-  }
-
-  return contents;
-}
-
-function extractGeminiTextFromChunk(payload) {
-  const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
-  const texts = [];
-
-  candidates.forEach((candidate) => {
-    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
-    parts.forEach((part) => {
-      if (typeof part?.text === 'string' && part.text) {
-        texts.push(part.text);
-      }
-    });
-  });
-
-  return texts.join('');
-}
-
 function shouldFlushSpeechSegment(buffer) {
   const text = String(buffer || '').trim();
   if (!text) {
@@ -916,69 +866,6 @@ function shouldFlushSpeechSegment(buffer) {
   }
 
   return /[.!?,;:।]\s*$/.test(text) || text.length >= 80;
-}
-
-async function streamGeminiResponse({ systemPrompt, contents, onTextChunk, signal, modelName }) {
-  const normalizedModelName = String(modelName || REALTIME_MODEL || '').replace(/^models\//, '');
-  const modelPath = encodeURIComponent(normalizedModelName);
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelPath}:streamGenerateContent?alt=sse&key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: systemPrompt }]
-      },
-      generationConfig: {
-        temperature: 0.3
-      },
-      contents
-    }),
-    signal
-  });
-
-  if (!response.ok || !response.body) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`Gemini streaming failed (${response.status}): ${errorText || response.statusText}`);
-  }
-
-  const decoder = new TextDecoder();
-  const reader = response.body.getReader();
-  let buffer = '';
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-
-    buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split('\n\n');
-    buffer = events.pop() || '';
-
-    for (const eventBlock of events) {
-      const lines = eventBlock
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-      const dataLine = lines.find((line) => line.startsWith('data:'));
-      if (!dataLine) {
-        continue;
-      }
-
-      const payloadText = dataLine.slice(5).trim();
-      if (!payloadText || payloadText === '[DONE]') {
-        continue;
-      }
-
-      const payload = JSON.parse(payloadText);
-      const textChunk = extractGeminiTextFromChunk(payload);
-      if (textChunk) {
-        await onTextChunk(textChunk);
-      }
-    }
-  }
 }
 
 async function streamSynthesizedAudio() {
@@ -1943,8 +1830,8 @@ app.post('/call/start', async (req, res) => {
       `ICALLMATE_OBD_API_ENDPOINT=${process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in'} ` +
       `ICALLMATE_SERVICE_NO=${process.env.ICALLMATE_SERVICE_NO || ''} ` +
       `ICALLMATE_IVR_TEMPLATE_ID=${process.env.ICALLMATE_IVR_TEMPLATE_ID || ''} ` +
-      `GEMINI_MODEL=${GEMINI_MODEL} ` +
-      `GEMINI_VOICE=${GEMINI_VOICE} ` +
+      `OPENAI_REALTIME_MODEL=${OPENAI_REALTIME_MODEL} ` +
+      `OPENAI_REALTIME_VOICE=${OPENAI_REALTIME_VOICE} ` +
       `TZ=${process.env.TZ || ''}`
     );
     const call = await placeRealtimeCall({
@@ -3022,10 +2909,12 @@ function createIcallMateAiBridge(ws, session) {
   let aiWs = null;
   let deepgramWs = null;
   let bridgeClosed = false;
-  let geminiSetupComplete = false;
+  let openAiSetupComplete = false;
   let openingPromptSent = false;
   let deepgramReady = false;
   let finalTranscriptBuffer = [];
+  let pendingHangup = false;
+  let activeResponseId = null;
 
   const getSessionLabel = () => session.streamId || session.callerId || 'unknown';
   const isOutboundSession = () => String(session.callDirection || '').toLowerCase() === 'outbound';
@@ -3042,42 +2931,97 @@ function createIcallMateAiBridge(ws, session) {
       : buildIncomingOpeningPrompt(getSessionClientName())
   );
 
-  function sendGeminiClientTurn(text, options = {}) {
-    const safeText = String(text || '').trim();
-    if (bridgeClosed || !safeText || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
+  function buildOpenAIRealtimeWsUrl() {
+    const url = new URL(OPENAI_REALTIME_WS_BASE_URL);
+    url.searchParams.set('model', OPENAI_REALTIME_MODEL);
+    return url.toString();
+  }
+
+  function sendOpenAIEvent(payload) {
+    if (bridgeClosed || aiWs?.readyState !== WebSocket.OPEN) {
       return;
     }
 
-    aiWs.send(JSON.stringify({
-      clientContent: {
-        turns: [
+    aiWs.send(JSON.stringify(payload));
+  }
+
+  function sendOpenAIClientTurn(text, options = {}) {
+    const safeText = String(text || '').trim();
+    if (bridgeClosed || !safeText || aiWs?.readyState !== WebSocket.OPEN || !openAiSetupComplete) {
+      return;
+    }
+
+    if (options.interrupt) {
+      sendOpenAIEvent({ type: 'response.cancel' });
+      sendIcallMateJson(ws, {
+        event: 'reverse-media-stop',
+        callerId: session.callerId,
+        streamId: session.streamId
+      });
+    }
+
+    sendOpenAIEvent({
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [
           {
-            role: 'user',
-            parts: [
-              {
-                text: options.interrupt
-                  ? `Ignore any unfinished previous reply and respond to this message now. ${safeText}`
-                  : safeText
-              }
-            ]
+            type: 'input_text',
+            text: options.interrupt
+              ? `Ignore any unfinished previous reply and respond to this message now. ${safeText}`
+              : safeText
           }
-        ],
-        turnComplete: true
+        ]
       }
-    }));
+    });
+    sendOpenAIEvent({
+      type: 'response.create',
+      response: {
+        output_modalities: ['audio']
+      }
+    });
   }
 
   function sendOpeningPrompt() {
-    if (bridgeClosed || openingPromptSent || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
+    if (bridgeClosed || openingPromptSent || aiWs?.readyState !== WebSocket.OPEN || !openAiSetupComplete) {
       return;
     }
 
     openingPromptSent = true;
-    console.log(`[ICALLMATE][GEMINI] Sending opening prompt streamId=${getSessionLabel()}`);
-    sendGeminiClientTurn(getOpeningPrompt(), { interrupt: true });
+    console.log(`[ICALLMATE][OPENAI] Sending opening prompt streamId=${getSessionLabel()}`);
+    console.log(`[ICALLMATE][PROMPT] provider=openai direction=${isOutboundSession() ? 'outbound' : 'incoming'} client="${getSessionClientName()}" customer="${getSessionCustomerName()}" system="${getSystemPrompt().slice(0, 180)}" opening="${getOpeningPrompt()}"`);
+    sendOpenAIClientTurn(getOpeningPrompt(), { interrupt: true });
   }
 
-  function connectGemini() {
+  function requestCallHangup(reason = 'model_requested_end_call') {
+    if (pendingHangup || bridgeClosed) {
+      return;
+    }
+
+    pendingHangup = true;
+    console.log(`[ICALLMATE][OPENAI] Hangup requested reason=${reason} streamId=${getSessionLabel()}`);
+  }
+
+  function finalizeCallHangup() {
+    if (bridgeClosed || !pendingHangup) {
+      return;
+    }
+
+    sendIcallMateJson(ws, {
+      event: 'reverse-media-stop',
+      callerId: session.callerId,
+      streamId: session.streamId
+    });
+    bridgeClosed = true;
+    setTimeout(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    }, 250);
+  }
+
+  function connectOpenAI() {
     if (bridgeClosed) {
       return;
     }
@@ -3087,9 +3031,14 @@ function createIcallMateAiBridge(ws, session) {
       return;
     }
 
-    geminiSetupComplete = false;
+    openAiSetupComplete = false;
     openingPromptSent = false;
-    aiWs = new WebSocket(buildGeminiWsUrl());
+    aiWs = new WebSocket(buildOpenAIRealtimeWsUrl(), {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        'OpenAI-Safety-Identifier': crypto.createHash('sha256').update(getSessionLabel()).digest('hex')
+      }
+    });
 
     aiWs.on('open', () => {
       if (bridgeClosed) {
@@ -3097,32 +3046,42 @@ function createIcallMateAiBridge(ws, session) {
         return;
       }
 
-      console.log(`[ICALLMATE][GEMINI] Live session opened streamId=${getSessionLabel()} model=${REALTIME_MODEL} voice=${GEMINI_VOICE}`);
-      aiWs.send(JSON.stringify({
-        setup: {
-          model: resolveRealtimeModelName(REALTIME_MODEL),
-          generationConfig: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: GEMINI_VOICE
-                }
+      console.log(`[ICALLMATE][OPENAI] Realtime session opened streamId=${getSessionLabel()} model=${OPENAI_REALTIME_MODEL} voice=${OPENAI_REALTIME_VOICE}`);
+      sendOpenAIEvent({
+        type: 'session.update',
+        session: {
+          type: 'realtime',
+          model: OPENAI_REALTIME_MODEL,
+          output_modalities: ['audio'],
+          instructions: getSystemPrompt(),
+          audio: {
+            output: {
+              voice: OPENAI_REALTIME_VOICE,
+              format: {
+                type: 'audio/pcm'
               }
             }
           },
-          systemInstruction: {
-            parts: [
-              {
-                text: getSystemPrompt()
+          tools: [
+            {
+              type: 'function',
+              name: 'end_call',
+              description: 'End the current phone call after the closing message has been spoken.',
+              parameters: {
+                type: 'object',
+                properties: {
+                  reason: {
+                    type: 'string',
+                    description: 'Short reason for ending the call.'
+                  }
+                },
+                required: ['reason']
               }
-            ]
-          },
-          realtimeInputConfig: {},
-          inputAudioTranscription: {},
-          outputAudioTranscription: {}
+            }
+          ],
+          tool_choice: 'auto'
         }
-      }));
+      });
     });
 
     aiWs.on('message', (raw) => {
@@ -3135,46 +3094,64 @@ function createIcallMateAiBridge(ws, session) {
       try {
         message = JSON.parse(raw.toString());
       } catch (error) {
-        console.error('[ICALLMATE][GEMINI] Failed to parse message:', error.message);
+        console.error('[ICALLMATE][OPENAI] Failed to parse message:', error.message);
         return;
       }
 
-      if (message.setupComplete) {
-        geminiSetupComplete = true;
-        console.log(`[ICALLMATE][GEMINI] Session configured streamId=${getSessionLabel()}`);
+      if (message.type === 'session.updated') {
+        openAiSetupComplete = true;
+        console.log(`[ICALLMATE][OPENAI] Session configured streamId=${getSessionLabel()} event=${message.type}`);
         sendOpeningPrompt();
         return;
       }
 
-      if (message.serverContent?.outputTranscription?.text) {
-        console.log(`[ICALLMATE][AGENT]: ${message.serverContent.outputTranscription.text}`);
+      if (message.type === 'response.created') {
+        activeResponseId = message.response?.id || activeResponseId;
       }
 
-      const parts = message.serverContent?.modelTurn?.parts || [];
-      for (const part of parts) {
-        if (!part.inlineData?.data || !String(part.inlineData.mimeType || '').startsWith('audio/pcm')) {
-          continue;
-        }
-
-        const pcm16 = Buffer.from(part.inlineData.data, 'base64');
-        const sourceRate = parsePcmRate(part.inlineData.mimeType, 24000);
-        const resampled = resamplePcm16(pcm16, sourceRate, 8000);
-        console.log(`[ICALLMATE][GEMINI] Sending reverse-media bytes=${resampled.length} sourceRate=${sourceRate} streamId=${getSessionLabel()}`);
+      if (message.type === 'response.output_audio.delta' && message.delta) {
+        const pcm16 = Buffer.from(message.delta, 'base64');
+        const resampled = resamplePcm16(pcm16, OPENAI_REALTIME_OUTPUT_SAMPLE_RATE, 8000);
         sendIcallMateReverseMedia(ws, session, resampled);
       }
 
-      if (message.serverContent?.interrupted) {
-        console.log(`[ICALLMATE][GEMINI] Response interrupted streamId=${getSessionLabel()}`);
+      if (message.type === 'response.output_audio_transcript.delta' && message.delta) {
+        process.stdout.write(`[ICALLMATE][AGENT DELTA]: ${message.delta}\n`);
+        if (String(message.delta).includes('END_CALL')) {
+          requestCallHangup('end_call_marker');
+        }
       }
 
-      if (message.error) {
-        console.error('[ICALLMATE][GEMINI ERROR]', JSON.stringify(message, null, 2));
+      if (message.type === 'response.output_audio_transcript.done' && message.transcript) {
+        const transcript = String(message.transcript || '').replace(/\bEND_CALL\b/g, '').trim();
+        if (transcript) {
+          console.log(`[ICALLMATE][AGENT]: ${transcript}`);
+        }
+      }
+
+      const outputItems = Array.isArray(message.response?.output) ? message.response.output : [];
+      const functionCall = outputItems.find((item) => item.type === 'function_call' && item.name === 'end_call');
+      if (functionCall) {
+        requestCallHangup(functionCall.arguments || 'end_call_tool');
+      }
+
+      if (message.type === 'response.output_item.done' && message.item?.type === 'function_call' && message.item?.name === 'end_call') {
+        requestCallHangup(message.item.arguments || 'end_call_tool');
+      }
+
+      if (message.type === 'response.done') {
+        activeResponseId = null;
+        finalizeCallHangup();
+      }
+
+      if (message.type === 'error' || message.error) {
+        console.error('[ICALLMATE][OPENAI ERROR]', JSON.stringify(message, null, 2));
       }
     });
 
     aiWs.on('close', (code, reasonBuffer) => {
       const reason = Buffer.isBuffer(reasonBuffer) ? reasonBuffer.toString() : String(reasonBuffer || '');
-      console.log(`[ICALLMATE][GEMINI] Live session closed code=${code ?? 'unknown'} reason=${reason || 'n/a'} streamId=${getSessionLabel()}`);
+      console.log(`[ICALLMATE][OPENAI] Realtime session closed code=${code ?? 'unknown'} reason=${reason || 'n/a'} streamId=${getSessionLabel()}`);
     });
 
     aiWs.on('error', (error) => {
@@ -3182,7 +3159,7 @@ function createIcallMateAiBridge(ws, session) {
         return;
       }
 
-      console.error('[ICALLMATE][GEMINI WS ERROR]', error.message);
+      console.error('[ICALLMATE][OPENAI WS ERROR]', error.message);
     });
   }
 
@@ -3197,9 +3174,9 @@ function createIcallMateAiBridge(ws, session) {
         finalTranscriptBuffer = [];
         if (merged) {
         console.log(`[ICALLMATE][CALLER]: ${merged}`);
-          sendGeminiClientTurn(
+          sendOpenAIClientTurn(
             isOutboundSession()
-              ? `Customer said: ${merged}\nDo not greet again. Continue the blood donation follow-up naturally in Hindi/Hinglish.`
+              ? `Customer said: ${merged}\nDo not greet again. Continue the diagnostic center feedback survey naturally in simple Hindi. If termination rules apply, speak the required closing and call end_call.`
               : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`,
             { interrupt: true }
           );
@@ -3219,9 +3196,9 @@ function createIcallMateAiBridge(ws, session) {
       finalTranscriptBuffer = [];
       if (merged) {
         console.log(`[ICALLMATE][CALLER]: ${merged}`);
-        sendGeminiClientTurn(
+        sendOpenAIClientTurn(
           isOutboundSession()
-            ? `Customer said: ${merged}\nDo not greet again. Continue the blood donation follow-up naturally in Hindi/Hinglish.`
+            ? `Customer said: ${merged}\nDo not greet again. Continue the diagnostic center feedback survey naturally in simple Hindi. If termination rules apply, speak the required closing and call end_call.`
             : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`,
           { interrupt: true }
         );
@@ -3295,7 +3272,7 @@ function createIcallMateAiBridge(ws, session) {
         return;
       }
 
-      connectGemini();
+      connectOpenAI();
       connectDeepgram();
     },
     sendCallerAudio(payload) {

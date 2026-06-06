@@ -5,9 +5,9 @@ const { categorizeFeedback } = require('./openai');
 const sessions = new Map();
 const SOURCE = 'test_ai_call';
 const DEFAULT_CLIENT_NAME = process.env.CLIENT_NAME || 'KC Prashant Path Lab';
-const TEXT_MODEL = process.env.TEST_CALL_GEMINI_MODEL || process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash';
+const TEXT_MODEL = process.env.TEST_CALL_OPENAI_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4o-mini';
 const BROWSER_TEST_CALLER = 'Browser Test Caller';
-const OPENING_LINE = 'Namaste, main KC Prashant Path Lab se AI assistant bol rahi hoon. Main aapse aapke recent lab visit ka feedback lena chahti hoon. Kya main 1 minute le sakti hoon?';
+const OPENING_LINE = 'Namaste, main KC Prashant Path Lab se Priya bol rahi hoon. Main aapse recent lab visit ka feedback lena chahti hoon. Kya main 1 minute le sakti hoon?';
 
 const QUESTION_PLAN = [
   {
@@ -42,7 +42,7 @@ function applyAgentTemplate(template, values) {
 
 function buildBrowserFeedbackPrompt(clientName = DEFAULT_CLIENT_NAME) {
   return `
-You are Priya, a premium AI receptionist for ${clientName}.
+You are Priya, a customer feedback executive for ${clientName}.
 This is a browser-based AI voice call test for the admin dashboard.
 
 Conversation rules:
@@ -109,65 +109,59 @@ function serialize(session, extra = {}) {
   };
 }
 
-function buildGeminiContents(session, userText) {
-  const contents = session.transcript.map((turn) => ({
-    role: turn.role === 'AGENT' ? 'model' : 'user',
-    parts: [{ text: turn.text }]
-  }));
-
-  if (userText) {
-    contents.push({ role: 'user', parts: [{ text: userText }] });
-  }
-
-  return contents;
-}
-
-function extractGeminiText(payload) {
-  const candidates = Array.isArray(payload?.candidates) ? payload.candidates : [];
-  return candidates
-    .flatMap((candidate) => Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [])
-    .map((part) => typeof part?.text === 'string' ? part.text : '')
-    .join('')
-    .trim();
-}
-
-async function generateLlmReply(session, userText) {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY is not configured');
-  }
-
+function buildOpenAIMessages(session, userText) {
   const nextQuestion = QUESTION_PLAN[Math.min(session.step, QUESTION_PLAN.length - 1)];
-  const modelPath = encodeURIComponent(String(TEXT_MODEL).replace(/^models\//, ''));
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelPath}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{
-          text: `${session.systemPrompt}
+  const messages = [{
+    role: 'system',
+    content: `${session.systemPrompt}
 
 Current required topic: ${nextQuestion?.key || 'closing'}.
 If the previous user answer completed the current topic, ask the next topic naturally.
 Never ask for typed input, name, or phone number.`
-        }]
-      },
-      generationConfig: {
-        temperature: 0.35,
-        maxOutputTokens: 120
-      },
-      contents: buildGeminiContents(session, userText)
+  }];
+
+  session.transcript.forEach((turn) => {
+    messages.push({
+      role: turn.role === 'AGENT' ? 'assistant' : 'user',
+      content: turn.text
+    });
+  });
+
+  if (userText) {
+    messages.push({ role: 'user', content: userText });
+  }
+
+  return messages;
+}
+
+async function generateLlmReply(session, userText) {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is not configured');
+  }
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+    },
+    body: JSON.stringify({
+      model: TEXT_MODEL,
+      temperature: 0.35,
+      max_tokens: 120,
+      messages: buildOpenAIMessages(session, userText)
     })
   });
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => '');
-    throw new Error(`Gemini request failed (${response.status}): ${errorText || response.statusText}`);
+    throw new Error(`OpenAI request failed (${response.status}): ${errorText || response.statusText}`);
   }
 
   const payload = await response.json();
-  const text = extractGeminiText(payload);
+  const text = String(payload?.choices?.[0]?.message?.content || '').trim();
   if (!text) {
-    throw new Error('Gemini returned an empty response');
+    throw new Error('OpenAI returned an empty response');
   }
 
   return text;

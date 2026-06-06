@@ -1,7 +1,7 @@
 {
   "name": "feedback-automation-system",
   "version": "1.0.0",
-  "description": "Customer feedback automation system using iCallMate, Gemini, and Express",
+  "description": "Customer feedback automation system using iCallMate, OpenAI, Deepgram, and Express",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",

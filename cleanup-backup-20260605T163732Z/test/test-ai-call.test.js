@@ -6,7 +6,7 @@ const { OPENING_LINE, _test } = require('../services/test-ai-call');
 test('browser AI call opening line matches required script', () => {
   assert.equal(
     OPENING_LINE,
-    'Namaste, main KC Prashant Path Lab se Priya bol rahi hoon. Main aapse recent lab visit ka feedback lena chahti hoon. Kya main 1 minute le sakti hoon?'
+    'नमस्ते, मैं केसी प्रशांत पैथ लैब से प्रिया बोल रही हूं। आपके हाल के लैब विजिट का छोटा सा फीडबैक लेना है। क्या मैं एक मिनट ले सकती हूं?'
   );
 });
 

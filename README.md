@@ -1,6 +1,6 @@
 # Conversational Voice Agent
 
-Node.js + Express voice agent for iCallMate inbound and outbound calls, with Gemini Live audio and Deepgram transcription.
+Node.js + Express voice agent for iCallMate inbound and outbound calls, with OpenAI Realtime voice and Deepgram transcription.
 
 ## Endpoints
 
@@ -31,7 +31,9 @@ ICALLMATE_BOT_ID=0
 ICALLMATE_DID=07971644996
 ICALLMATE_IBD_API_ENDPOINT=https://crm.icallmate.in
 ICALLMATE_OBD_API_ENDPOINT=https://ecp1.icallmate.in
-GEMINI_API_KEY=
+OPENAI_API_KEY=
+OPENAI_REALTIME_MODEL=gpt-realtime-2
+OPENAI_REALTIME_VOICE=marin
 DEEPGRAM_API_KEY=
 APP_BASE_URL=https://your-public-domain.example
 PORT=3000
