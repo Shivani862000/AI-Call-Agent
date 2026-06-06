@@ -7,6 +7,7 @@ const { parse } = require('csv-parse/sync');
 const upload = multer({ storage: multer.memoryStorage() });
 const PHONE_PATTERN = /^\+\d{10,15}$/;
 const SLOT_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const ALLOWED_CALL_TYPES = new Set(['REVIEW_CALL', 'THREE_MONTH_FOLLOWUP']);
 const RESCHEDULABLE_STATUSES = new Set([
   'called',
   'no_answer',
@@ -41,11 +42,40 @@ function getNextIsoForPreferredSlot(slot, now = new Date()) {
   return scheduled.toISOString();
 }
 
+function normalizeCallType(value) {
+  const normalized = String(value || 'REVIEW_CALL').trim().toUpperCase();
+  if (['REVIEW', 'REVIEW_CALLING'].includes(normalized)) return 'REVIEW_CALL';
+  if (['THREE_MONTH', 'THREE_MONTH_FOLLOW_UP', '3_MONTH_FOLLOWUP', '3_MONTH_FOLLOW_UP'].includes(normalized)) {
+    return 'THREE_MONTH_FOLLOWUP';
+  }
+  return ALLOWED_CALL_TYPES.has(normalized) ? normalized : 'REVIEW_CALL';
+}
+
+function normalizePreferredSlot(payload = {}) {
+  const directSlot = String(payload.preferred_slot || payload.call_time || '').trim();
+  if (directSlot) {
+    return directSlot;
+  }
+
+  const callTime = String(payload.callTime || '').trim();
+  if (!callTime) {
+    return '10:00';
+  }
+
+  const parsed = new Date(callTime);
+  if (Number.isNaN(parsed.getTime())) {
+    return callTime;
+  }
+
+  return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+}
+
 function normalizeCustomerPayload(payload = {}) {
   return {
-    name: String(payload.name || '').trim(),
-    phone: String(payload.phone || '').trim(),
-    preferred_slot: String(payload.preferred_slot || '10:00').trim() || '10:00',
+    name: String(payload.name || payload.patientName || '').trim(),
+    phone: String(payload.phone || payload.phoneNumber || '').trim(),
+    preferred_slot: normalizePreferredSlot(payload),
+    call_type: normalizeCallType(payload.call_type || payload.callType),
     customer_value: String(payload.customer_value || 'standard').trim().toLowerCase() || 'standard',
     urgency_level: String(payload.urgency_level || 'normal').trim().toLowerCase() || 'normal',
     preferred_language: String(payload.preferred_language || 'hi').trim().toLowerCase() || 'hi',
@@ -100,6 +130,10 @@ function validateCustomerPayload(payload) {
     errors.consent_status = 'Consent status must be unknown, granted, denied, or pending';
   }
 
+  if (!ALLOWED_CALL_TYPES.has(payload.call_type)) {
+    errors.call_type = 'Call type must be REVIEW_CALL or THREE_MONTH_FOLLOWUP';
+  }
+
   return errors;
 }
 
@@ -121,8 +155,8 @@ async function saveCustomer(payload) {
       name, phone, preferred_slot, status, customer_value, urgency_level,
       preferred_language, preferred_dialect, do_not_call, consent_status,
       outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
-      campaign_name, service_interest
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      campaign_name, service_interest, call_type
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       payload.name,
       payload.phone,
@@ -139,7 +173,8 @@ async function saveCustomer(payload) {
       payload.revenue_stage,
       payload.revenue_estimate,
       payload.campaign_name || null,
-      payload.service_interest || null
+      payload.service_interest || null,
+      payload.call_type
     ]
   );
 }
@@ -278,7 +313,8 @@ router.put('/:id', async (req, res) => {
               revenue_stage = ?,
               revenue_estimate = ?,
               campaign_name = ?,
-              service_interest = ?
+              service_interest = ?,
+              call_type = ?
         WHERE id = ?`,
       [
         payload.name,
@@ -298,6 +334,7 @@ router.put('/:id', async (req, res) => {
         payload.revenue_estimate,
         payload.campaign_name || null,
         payload.service_interest || null,
+        payload.call_type,
         req.params.id
       ]
     );

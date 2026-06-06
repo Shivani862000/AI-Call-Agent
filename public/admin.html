@@ -247,6 +247,20 @@
         </label>
       </div>
 
+      <div class="form-field-block">
+        <div class="field-label">Call Type</div>
+        <div class="segmented-control call-type-control" role="radiogroup" aria-label="Call type">
+          <label class="segment-button active">
+            <input type="radio" name="overviewCallType" value="REVIEW_CALL" checked>
+            Review Calling
+          </label>
+          <label class="segment-button">
+            <input type="radio" name="overviewCallType" value="THREE_MONTH_FOLLOWUP">
+            3 Month Follow-up
+          </label>
+        </div>
+      </div>
+
       <details id="overviewCareDetailsToggle" class="details-toggle">
         <summary>Additional Care Details</summary>
         <div class="details-content">
@@ -318,6 +332,24 @@
       return `+91 ${national.slice(0, 5)} ${national.slice(5, 10)}`.trim();
     }
 
+    function normalizeCallType(value) {
+      return String(value || 'REVIEW_CALL').toUpperCase() === 'THREE_MONTH_FOLLOWUP'
+        ? 'THREE_MONTH_FOLLOWUP'
+        : 'REVIEW_CALL';
+    }
+
+    function setOverviewCallTypeSelection(value) {
+      const normalized = normalizeCallType(value);
+      document.querySelectorAll('input[name="overviewCallType"]').forEach((input) => {
+        input.checked = input.value === normalized;
+        input.closest('.segment-button')?.classList.toggle('active', input.checked);
+      });
+    }
+
+    function getSelectedOverviewCallType() {
+      return document.querySelector('input[name="overviewCallType"]:checked')?.value || 'REVIEW_CALL';
+    }
+
     function getClientByPhone(phone) {
       const normalized = normalizePhoneForApi(phone);
       return clientCache.find((client) => normalizePhoneForApi(client.phone) === normalized) || null;
@@ -338,7 +370,8 @@
       return {
         name: document.getElementById('overviewCallCustomerName').value.trim(),
         phone: normalizePhoneForApi(document.getElementById('overviewCallCustomerPhone').value),
-        preferred_slot: document.getElementById('overviewCallCustomerTime').value.trim()
+        preferred_slot: document.getElementById('overviewCallCustomerTime').value.trim(),
+        callType: getSelectedOverviewCallType()
       };
     }
 
@@ -381,6 +414,7 @@
       document.getElementById('overviewCareDob').value = '';
       document.getElementById('overviewCareLastVisit').value = '';
       document.getElementById('overviewCareTreatment').value = '';
+      setOverviewCallTypeSelection('REVIEW_CALL');
       document.getElementById('overviewCareDetailsToggle').open = false;
       clearOverviewFormErrors();
     }
@@ -724,6 +758,9 @@
       document.getElementById('overviewMobileMenuLogout').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('closeOverviewNewCallModal').addEventListener('click', closeOverviewNewCallModal);
       document.getElementById('submitOverviewNewCall').addEventListener('click', submitOverviewNewCall);
+      document.querySelectorAll('input[name="overviewCallType"]').forEach((input) => {
+        input.addEventListener('change', () => setOverviewCallTypeSelection(input.value));
+      });
       document.getElementById('overviewCallCustomerPhone').addEventListener('input', (event) => {
         event.target.value = formatPhoneForInput(event.target.value);
       });

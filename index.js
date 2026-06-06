@@ -25,6 +25,14 @@ const {
 } = require('./services/icallmate');
 const { generateGeminiReply } = require('./services/gemini');
 const {
+  buildReviewCallingPrompt,
+  buildReviewCallingOpeningPrompt
+} = require('./prompts/review-calling.ts');
+const {
+  buildThreeMonthFollowupPrompt,
+  buildThreeMonthFollowupOpeningPrompt
+} = require('./prompts/three-month-followup.ts');
+const {
   buildPreCallIntelligence,
   computePriorityScore,
   getCurrentSlotLabel,
@@ -411,6 +419,56 @@ function applyAgentTemplate(template, replacements = {}) {
   });
 }
 
+const CALL_TYPES = Object.freeze({
+  REVIEW_CALL: 'REVIEW_CALL',
+  THREE_MONTH_FOLLOWUP: 'THREE_MONTH_FOLLOWUP'
+});
+
+function normalizeOutboundCallType(value) {
+  const normalized = String(value || CALL_TYPES.REVIEW_CALL).trim().toUpperCase();
+  if (['REVIEW', 'REVIEW_CALLING'].includes(normalized)) return CALL_TYPES.REVIEW_CALL;
+  if (['THREE_MONTH', 'THREE_MONTH_FOLLOW_UP', '3_MONTH_FOLLOWUP', '3_MONTH_FOLLOW_UP'].includes(normalized)) {
+    return CALL_TYPES.THREE_MONTH_FOLLOWUP;
+  }
+  return Object.values(CALL_TYPES).includes(normalized) ? normalized : CALL_TYPES.REVIEW_CALL;
+}
+
+function formatOutboundCallTypeLabel(value) {
+  return normalizeOutboundCallType(value) === CALL_TYPES.THREE_MONTH_FOLLOWUP
+    ? '3 Month Follow-up'
+    : 'Review Calling';
+}
+
+function buildCallTypeSystemPrompt(callType, clientName, customerName) {
+  const normalizedCallType = normalizeOutboundCallType(callType);
+  const promptClientName = process.env.CALL_PROMPT_CLIENT_NAME || 'Apna Blood Centre';
+  if (normalizedCallType === CALL_TYPES.THREE_MONTH_FOLLOWUP) {
+    return buildThreeMonthFollowupPrompt({
+      clientName: promptClientName,
+      donorName: customerName || 'Donor'
+    });
+  }
+
+  return buildReviewCallingPrompt({
+    clientName: promptClientName
+  });
+}
+
+function buildCallTypeOpeningPrompt(callType, clientName, customerName) {
+  const normalizedCallType = normalizeOutboundCallType(callType);
+  const promptClientName = process.env.CALL_PROMPT_CLIENT_NAME || 'Apna Blood Centre';
+  if (normalizedCallType === CALL_TYPES.THREE_MONTH_FOLLOWUP) {
+    return buildThreeMonthFollowupOpeningPrompt({
+      clientName: promptClientName,
+      donorName: customerName || 'Donor'
+    });
+  }
+
+  return buildReviewCallingOpeningPrompt({
+    clientName: promptClientName
+  });
+}
+
 function buildDefaultAgentSystemPrompt(clientName, customerName) {
   return `
 You are Priya, a customer feedback executive calling on behalf of ${clientName}.
@@ -517,7 +575,12 @@ CRITICAL RULES:
 `.trim();
 }
 
-function buildAgentSystemPrompt(clientName, customerName, agentConfig = null) {
+function buildAgentSystemPrompt(clientName, customerName, agentConfig = null, callType = CALL_TYPES.REVIEW_CALL) {
+  const normalizedCallType = normalizeOutboundCallType(callType);
+  if (normalizedCallType === CALL_TYPES.REVIEW_CALL || normalizedCallType === CALL_TYPES.THREE_MONTH_FOLLOWUP) {
+    return buildCallTypeSystemPrompt(normalizedCallType, clientName, customerName);
+  }
+
   if (agentConfig?.system_prompt) {
     return applyAgentTemplate(agentConfig.system_prompt, {
       client_name: clientName,
@@ -534,7 +597,12 @@ function buildDefaultOpeningPrompt(clientName, customerName) {
   return `Sirf yeh exact line natural phone tone me boliye, aur is turn me kuch aur mat boliye: "Namaste. Main Priya bol rahi hoon ${clientName} se. Kya main ${customerName} ji se baat kar rahi hoon? Aapki haal hi ki visit ke baare mein 2-3 minute feedback lena chahti hoon. Kya abhi baat karna theek rahega?"`;
 }
 
-function buildOpeningPrompt(clientName, customerName, agentConfig = null) {
+function buildOpeningPrompt(clientName, customerName, agentConfig = null, callType = CALL_TYPES.REVIEW_CALL) {
+  const normalizedCallType = normalizeOutboundCallType(callType);
+  if (normalizedCallType === CALL_TYPES.REVIEW_CALL || normalizedCallType === CALL_TYPES.THREE_MONTH_FOLLOWUP) {
+    return buildCallTypeOpeningPrompt(normalizedCallType, clientName, customerName);
+  }
+
   if (agentConfig?.opening_prompt) {
     return applyAgentTemplate(agentConfig.opening_prompt, {
       client_name: clientName,
@@ -909,12 +977,13 @@ async function streamSynthesizedAudio() {
   throw new Error('Orchestrated third-party TTS has been removed. Use VOICE_PIPELINE=legacy.');
 }
 
-async function placeRealtimeCall({ customerPhone, customerName, customerId, clientName, agentId }) {
+async function placeRealtimeCall({ customerPhone, customerName, customerId, clientName, agentId, callType }) {
   return initiateCall(customerPhone, customerId, {
     baseUrl: PUBLIC_BASE_URL,
     customerName,
     clientName,
     agentId,
+    callType: normalizeOutboundCallType(callType),
     wsurl: toWssUrl(PUBLIC_BASE_URL, '/icallmate/media'),
     callbackapi: `${PUBLIC_BASE_URL}/api/icallmate/callback`
   });
@@ -1137,6 +1206,9 @@ async function hydrateIcallMateSessionContext(session, message = {}, extraParams
 
   if (extraParams.callDirection) {
     session.callDirection = normalizeCallDirection(extraParams.callDirection, session.callDirection);
+    if (extraParams.callType || extraParams.call_type) {
+      session.callType = normalizeOutboundCallType(extraParams.callType || extraParams.call_type);
+    }
     session.contextHydrated = true;
     return;
   }
@@ -1155,10 +1227,12 @@ async function hydrateIcallMateSessionContext(session, message = {}, extraParams
     session.customerId = context.customer.id;
     session.callId = context.call.id;
     session.providerCallId = context.call.provider_call_id || '';
+    session.callType = normalizeOutboundCallType(context.call.call_type || context.customer.call_type);
 
     console.log(
       `[ICALLMATE] Hydrated outbound context streamId=${message.streamId || session.streamId || ''} ` +
-      `phone=${message.callerId || session.callerId || ''} customerId=${session.customerId} callId=${session.callId}`
+      `phone=${message.callerId || session.callerId || ''} customerId=${session.customerId} ` +
+      `callId=${session.callId} callType=${session.callType}`
     );
   } finally {
     session.contextHydrating = false;
@@ -1374,62 +1448,103 @@ function isAffirmativeReply(text) {
 
 function isNegativeOrBusyReply(text) {
   const normalized = normalizeHindiEnglishText(text);
-  return /(busy|baad mein|bad mein|later|nahi|nahin|no|not now|driving|meeting|stop|band|interested nahi)/i.test(normalized)
-    || /नहीं|बाद में|व्यस्त|बंद/.test(text);
+  return /(busy|baad mein|bad mein|later|not now|driving|meeting|stop|band|interested nahi)/i.test(normalized)
+    || /बाद में|व्यस्त|बंद/.test(text);
 }
 
-function buildOutboundDemoTurnInstruction(callerText, state, clientName, customerName) {
+function isNoReply(text) {
+  const normalized = normalizeHindiEnglishText(text);
+  return /(^|\b)(nahi|nahin|no|nope|not yet|abhi nahi)(\b|$)/i.test(normalized)
+    || /नहीं|नही/.test(text);
+}
+
+function buildReviewCallTurnInstruction(customerReply, state) {
+  if (state.step === 'intro') {
+    state.step = 'problem_check';
+  }
+
+  if (state.step === 'problem_check') {
+    if (isNegativeOrBusyReply(customerReply)) {
+      state.step = 'closing';
+      return 'Donor wants to stop or is busy. Say exactly: "Koi baat nahi sir. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then end the call.';
+    }
+
+    if (isNoReply(customerReply)) {
+      state.step = 'closing';
+      return 'Donor had no problem. Say exactly: "Bahut achhi baat hai sir. Dhanyavaad. Hamne aapko ek video bheja hai. Kripya use like, comment aur subscribe karein. Hamara Facebook aur Google page bhi hai. Kripya like, share aur review zarur karein. Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
+    }
+
+    if (isAffirmativeReply(customerReply)) {
+      state.step = 'issue_detail';
+      return 'Donor had a problem. Say exactly: "Maaf kijiye sir. Kripya batayein aapko kya problem hui thi?"';
+    }
+
+    return 'Clarify briefly. Say exactly: "Sir, blood donate karne ke baad aapko koi dikkat ya problem hui thi?"';
+  }
+
+  if (state.step === 'issue_detail') {
+    state.step = 'closing';
+    return 'Capture the issue from the donor response. Say exactly: "Dhanyavaad sir. Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge. Hamne aapko ek video bheja hai. Kripya use like, comment aur subscribe karein. Hamara Facebook aur Google page bhi hai. Kripya like, share aur review zarur karein. Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
+  }
+
+  return 'Say exactly: "Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
+}
+
+function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
+  if (state.step === 'intro') {
+    if (isNegativeOrBusyReply(customerReply) || isNoReply(customerReply)) {
+      state.step = 'closing';
+      return 'Wrong person or donor declined. Say exactly: "Koi baat nahi sir. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then end the call.';
+    }
+
+    state.step = 'donated_again';
+    return 'Donor confirmed identity. Say exactly: "Aapne kuch mahine pehle blood donate kiya tha. Sir, blood donation ke 3 mahine poore ho gaye hain. Kya aapne uske baad dobara blood donate kiya hai?"';
+  }
+
+  if (state.step === 'donated_again') {
+    if (isAffirmativeReply(customerReply)) {
+      state.step = 'donation_date';
+      return 'Donor donated again. Say exactly: "Bahut achha sir. Kab donate kiya tha?"';
+    }
+
+    if (isNoReply(customerReply)) {
+      state.step = 'closing';
+      return 'Donor has not donated again. Say exactly: "Hamare yahan garbhvati mahilaon aur thalassemia se grast bachchon ko free blood diya jata hai. Yadi sambhav ho to kisi bhi din nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain. Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
+    }
+
+    return 'Clarify briefly. Say exactly: "Kya aapne 3 mahine ke baad dobara blood donate kiya hai?"';
+  }
+
+  if (state.step === 'donation_date') {
+    state.step = 'donation_place';
+    return 'Capture the donation date. Say exactly: "Kahan donate kiya tha?"';
+  }
+
+  if (state.step === 'donation_place') {
+    state.step = 'closing';
+    return 'Capture the donation place. Say exactly: "Bahut achha kaam kiya sir. Dhanyavaad. Aapka din shubh ho." Then end the call.';
+  }
+
+  return 'Say exactly: "Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
+}
+
+function buildOutboundDemoTurnInstruction(callerText, state, clientName, customerName, callType = CALL_TYPES.REVIEW_CALL) {
   const customerReply = String(callerText || '').trim();
   const prefix = [
     `Customer said: ${customerReply}`,
     'Respond in simple Hindi/Hinglish, natural phone tone.',
-    'Keep it under 18 words unless closing.',
+    `Call type: ${formatOutboundCallTypeLabel(callType)}.`,
+    'Keep it concise unless closing.',
     'Ask only one question.',
-    'Do not repeat the full greeting or restart the survey.'
+    'Do not repeat the full greeting or restart the call.',
+    'Never say "end_call" aloud.'
   ];
 
-  if (isNegativeOrBusyReply(customerReply) && state.step === 'intro') {
-    state.step = 'closing';
-    return `${prefix.join('\n')}\nCustomer is not available or does not want to continue. Say exactly: "Bilkul theek hai. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then end the call.`;
-  }
+  const instruction = normalizeOutboundCallType(callType) === CALL_TYPES.THREE_MONTH_FOLLOWUP
+    ? buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName, customerName)
+    : buildReviewCallTurnInstruction(customerReply, state, clientName, customerName);
 
-  if (state.step === 'intro') {
-    if (isGreetingOnly(customerReply)) {
-      state.step = 'confirm_permission';
-      return `${prefix.join('\n')}\nNext action: say exactly "Kya main ${customerName} ji se baat kar rahi hoon, aur abhi 2 minute feedback le sakti hoon?"`;
-    }
-
-    if (isAffirmativeReply(customerReply)) {
-      state.step = 'overall';
-      return `${prefix.join('\n')}\nCustomer confirmed. Next action: say exactly "Dhanyavaad. Aapka hamare collection center mein kul milaakar anubhav kaisa raha?"`;
-    }
-
-    state.step = 'confirm_permission';
-    return `${prefix.join('\n')}\nNext action: briefly confirm identity and permission: "Kya main ${customerName} ji se baat kar rahi hoon, aur abhi 2 minute feedback le sakti hoon?"`;
-  }
-
-  if (state.step === 'confirm_permission') {
-    if (isNegativeOrBusyReply(customerReply)) {
-      state.step = 'closing';
-      return `${prefix.join('\n')}\nCustomer declined. Say exactly: "Koi baat nahi. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then end the call.`;
-    }
-    state.step = 'overall';
-    return `${prefix.join('\n')}\nCustomer agreed. Next action: say exactly "Dhanyavaad. Aapka hamare collection center mein kul milaakar anubhav kaisa raha?"`;
-  }
-
-  const nextByStep = {
-    overall: ['cleanliness', 'Achha laga sunkar. Safai aur hygiene ke baare mein aapka kya anubhav raha?'],
-    cleanliness: ['staff', 'Dhanyavaad. Hamare staff ka vyavhaar aapko kaisa laga?'],
-    staff: ['waiting', 'Samajh gayi. Waiting time aur sample collection process kaisa raha?'],
-    waiting: ['rating', 'Dhanyavaad. 1 se 5 ke scale par aap kitni rating denge?'],
-    rating: ['suggestions', 'Dhanyavaad. Kya hum apni seva ko aur behtar bana sakte hain?'],
-    suggestions: ['closing', `${customerName} ji, feedback ke liye bahut dhanyavaad. Hum WhatsApp par review link bhejenge. Aapka din shubh ho.`]
-  };
-
-  const [nextStep, nextLine] = nextByStep[state.step] || nextByStep.overall;
-  state.step = nextStep;
-  const closingInstruction = nextStep === 'closing' ? ' Then end the call.' : '';
-  return `${prefix.join('\n')}\nAcknowledge briefly, then say exactly: "${nextLine}"${closingInstruction}`;
+  return `${prefix.join('\n')}\n${instruction}`;
 }
 
 function buildTranscriptPreviewText(text, maxLines = 4) {
@@ -1687,14 +1802,15 @@ async function triggerScheduledCalls() {
         customerName: customer.name,
         customerId: customer.id,
         clientName: agentConfig?.client_name || CLIENT_NAME,
-        agentId: agentConfig?.id || null
+        agentId: agentConfig?.id || null,
+        callType: customer.call_type
       });
 
       await dbRun(
         `INSERT INTO calls (
           customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           agentConfig?.id || null,
@@ -1706,7 +1822,8 @@ async function triggerScheduledCalls() {
           agentConfig?.slug || 'hindi-feedback-v1',
           'normal',
           'outbound',
-          'icallmate'
+          'icallmate',
+          normalizeOutboundCallType(customer.call_type)
         ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
@@ -1789,14 +1906,15 @@ async function triggerAnnualClientReminderCalls() {
         customerName: hydratedCustomer.name,
         customerId: hydratedCustomer.id,
         clientName: agentConfig?.client_name || CLIENT_NAME,
-        agentId: agentConfig?.id || null
+        agentId: agentConfig?.id || null,
+        callType: CALL_TYPES.THREE_MONTH_FOLLOWUP
       });
 
       await dbRun(
         `INSERT INTO calls (
           customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           hydratedCustomer.id,
           agentConfig?.id || null,
@@ -1808,7 +1926,8 @@ async function triggerAnnualClientReminderCalls() {
           `annual-reminder:${client.treatment_type || 'client-care'}`,
           'normal',
           'outbound',
-          'icallmate'
+          'icallmate',
+          CALL_TYPES.THREE_MONTH_FOLLOWUP
         ]
       );
 
@@ -2033,6 +2152,7 @@ app.post('/call/start', async (req, res) => {
     const customerName = req.body.customerName || process.env.CUSTOMER_NAME;
     const requestedCustomerId = req.body.customerId;
     const requestedAgentId = Number(req.body.agentId || req.query.agentId || 0) || null;
+    const callType = normalizeOutboundCallType(req.body.callType || req.body.call_type);
     customer = await ensureCustomerForCall({
       customerId: requestedCustomerId,
       customerName,
@@ -2074,14 +2194,15 @@ app.post('/call/start', async (req, res) => {
       customerName: customer.name || customerName,
       customerId: customer.id,
       clientName,
-      agentId: agentConfig?.id || null
+      agentId: agentConfig?.id || null,
+      callType
     });
 
     const result = await dbRun(
       `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         customer.id,
         agentConfig?.id || null,
@@ -2093,7 +2214,8 @@ app.post('/call/start', async (req, res) => {
         agentConfig?.slug || 'hindi-feedback-v1',
         'normal',
         'outbound',
-        'icallmate'
+        'icallmate',
+        callType
       ]
     );
     await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
@@ -2275,6 +2397,7 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
 
     customer = await hydratePreCallIntelligence(customer);
     const requestedAgentId = Number(req.body?.agentId || req.query.agentId || customer.default_agent_id || 0) || null;
+    const callType = normalizeOutboundCallType(req.body?.callType || req.body?.call_type || customer.call_type);
     const agentConfig = requestedAgentId ? await getAgentConfigById(requestedAgentId) : await getDefaultAgentConfig();
     const blockedReason = shouldBlockCustomerCall(customer);
     if (blockedReason) {
@@ -2291,14 +2414,15 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
       customerName: customer.name,
       customerId: customer.id,
       clientName: agentConfig?.client_name || CLIENT_NAME,
-      agentId: agentConfig?.id || null
+      agentId: agentConfig?.id || null,
+      callType
     });
 
     const result = await dbRun(
       `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         customer.id,
         agentConfig?.id || null,
@@ -2310,7 +2434,8 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
         agentConfig?.slug || 'hindi-feedback-v1',
         'normal',
         'outbound',
-        'icallmate'
+        'icallmate',
+        callType
       ]
     );
 
@@ -2637,6 +2762,7 @@ app.post('/api/icallmate/outgoing-call', async (req, res) => {
     const wsurl = firstFieldPair.wsurl || req.body.wsurl || toWssUrl(getRequestPublicBaseUrl(req), '/icallmate/media');
     const customerName = req.body.customerName || firstFieldPair.Name || 'Outgoing Customer';
     const requestedAgentId = Number(req.body.agentId || req.query.agentId || 0) || null;
+    const callType = normalizeOutboundCallType(req.body.callType || req.body.call_type || firstFieldPair.callType || firstFieldPair.call_type);
 
     if (!phone) {
       return res.status(400).json({ error: 'Phone_No, phone, customerPhone, or fieldpairs[0].Phone_No is required' });
@@ -2676,15 +2802,16 @@ app.post('/api/icallmate/outgoing-call', async (req, res) => {
       wsurl,
       customerName: customer.name || customerName,
       clientName: agentConfig?.client_name || CLIENT_NAME,
-      agentId: agentConfig?.id || null
+      agentId: agentConfig?.id || null,
+      callType
     });
 
     const result = await dbRun(
       `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
         consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source,
-        provider_payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        provider_payload_json, call_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         customer.id,
         agentConfig?.id || null,
@@ -2697,7 +2824,8 @@ app.post('/api/icallmate/outgoing-call', async (req, res) => {
         'normal',
         'outbound',
         'icallmate-masterpost',
-        JSON.stringify(payload)
+        JSON.stringify(payload),
+        callType
       ]
     );
 
@@ -2768,6 +2896,7 @@ app.get('/api/calls/recent', async (req, res) => {
          agents.slug AS agent_slug,
          calls.called_at,
          calls.outcome,
+         calls.call_type,
          calls.call_direction,
          calls.call_source,
          calls.did,
@@ -2831,6 +2960,7 @@ app.get('/api/calls/:callId(\\d+)', async (req, res) => {
          agents.slug AS agent_slug,
          calls.called_at,
          calls.outcome,
+         calls.call_type,
          calls.call_direction,
          calls.call_source,
          calls.did,
@@ -3272,14 +3402,15 @@ function createIcallMateAiBridge(ws, session) {
   const isOutboundSession = () => normalizeCallDirection(session.callDirection) === 'outbound';
   const getSessionClientName = () => session.clientName || CLIENT_NAME;
   const getSessionCustomerName = () => session.customerName || process.env.CUSTOMER_NAME || 'sir/maam';
+  const getSessionCallType = () => normalizeOutboundCallType(session.callType);
   const getSystemPrompt = () => (
     isOutboundSession()
-      ? buildAgentSystemPrompt(getSessionClientName(), getSessionCustomerName())
+      ? buildAgentSystemPrompt(getSessionClientName(), getSessionCustomerName(), null, getSessionCallType())
       : buildIncomingAgentSystemPrompt(getSessionClientName())
   );
   const getOpeningPrompt = () => (
     isOutboundSession()
-      ? buildOpeningPrompt(getSessionClientName(), getSessionCustomerName())
+      ? buildOpeningPrompt(getSessionClientName(), getSessionCustomerName(), null, getSessionCallType())
       : buildIncomingOpeningPrompt(getSessionClientName())
   );
   const useGemini = () => AI_PROVIDER === 'gemini';
@@ -3557,7 +3688,7 @@ function createIcallMateAiBridge(ws, session) {
 
     openingPromptSent = true;
     console.log(`[ICALLMATE][${useGeminiLive() ? 'GEMINI LIVE' : useGemini() ? 'GEMINI' : 'OPENAI'}] Sending opening prompt streamId=${getSessionLabel()}`);
-    console.log(`[ICALLMATE][PROMPT] provider=${AI_PROVIDER} direction=${isOutboundSession() ? 'outbound' : 'incoming'} client="${getSessionClientName()}" customer="${getSessionCustomerName()}" system="${getSystemPrompt().slice(0, 180)}" opening="${getOpeningPrompt()}"`);
+    console.log(`[ICALLMATE][PROMPT] provider=${AI_PROVIDER} direction=${isOutboundSession() ? 'outbound' : 'incoming'} callType=${getSessionCallType()} client="${getSessionClientName()}" customer="${getSessionCustomerName()}" system="${getSystemPrompt().slice(0, 180)}" opening="${getOpeningPrompt()}"`);
 
     if (useGeminiLive()) {
       sendGeminiLiveText(getOpeningPrompt(), { interrupt: true });
@@ -3761,7 +3892,7 @@ function createIcallMateAiBridge(ws, session) {
         if (merged) {
         console.log(`[ICALLMATE][CALLER]: ${merged}`);
           const turnText = isOutboundSession()
-            ? buildOutboundDemoTurnInstruction(merged, outboundDemoState, getSessionClientName(), getSessionCustomerName())
+            ? buildOutboundDemoTurnInstruction(merged, outboundDemoState, getSessionClientName(), getSessionCustomerName(), getSessionCallType())
             : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`;
           if (useGeminiLive()) {
             sendGeminiLiveText(turnText, { interrupt: true });
@@ -3787,7 +3918,7 @@ function createIcallMateAiBridge(ws, session) {
       if (merged) {
         console.log(`[ICALLMATE][CALLER]: ${merged}`);
         const turnText = isOutboundSession()
-          ? buildOutboundDemoTurnInstruction(merged, outboundDemoState, getSessionClientName(), getSessionCustomerName())
+          ? buildOutboundDemoTurnInstruction(merged, outboundDemoState, getSessionClientName(), getSessionCustomerName(), getSessionCallType())
           : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`;
         if (useGeminiLive()) {
           sendGeminiLiveText(turnText, { interrupt: true });
@@ -4009,6 +4140,7 @@ icallMateWss.on('connection', (ws, req) => {
     callerId: '',
     did: '',
     callDirection: 'incoming',
+    callType: CALL_TYPES.REVIEW_CALL,
     customerName: '',
     clientName: CLIENT_NAME,
     answered: false,
@@ -4049,6 +4181,8 @@ icallMateWss.on('connection', (ws, req) => {
     const extraParams = parseIcallMateExtraParams(message.extraParams || message.extraparam || message.extra_param);
     if (message.callDirection) session.callDirection = normalizeCallDirection(message.callDirection, session.callDirection);
     if (extraParams.callDirection) session.callDirection = normalizeCallDirection(extraParams.callDirection, session.callDirection);
+    if (message.callType || message.call_type) session.callType = normalizeOutboundCallType(message.callType || message.call_type);
+    if (extraParams.callType || extraParams.call_type) session.callType = normalizeOutboundCallType(extraParams.callType || extraParams.call_type);
     if (extraParams.customerName) session.customerName = extraParams.customerName;
     if (extraParams.clientName) session.clientName = extraParams.clientName;
     await hydrateIcallMateSessionContext(session, message, extraParams);

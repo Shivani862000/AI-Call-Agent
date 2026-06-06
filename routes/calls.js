@@ -22,6 +22,7 @@ router.post('/initiate/:customerId', async (req, res) => {
       customerId,
       {
         baseUrl,
+        callType: customer.call_type || 'REVIEW_CALL',
         wsurl: `${baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:')}/icallmate/media`,
         callbackapi: `${baseUrl}/api/icallmate/callback`
       }
@@ -29,8 +30,8 @@ router.post('/initiate/:customerId', async (req, res) => {
 
     // Save call record
     const result = await dbRun(
-      'INSERT INTO calls (customer_id, outcome, provider_call_id, called_at, call_direction, call_source) VALUES (?, ?, ?, ?, ?, ?)',
-      [customerId, 'initiated', call.sid, new Date().toISOString(), 'outbound', 'icallmate']
+      'INSERT INTO calls (customer_id, outcome, provider_call_id, called_at, call_direction, call_source, call_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [customerId, 'initiated', call.sid, new Date().toISOString(), 'outbound', 'icallmate', customer.call_type || 'REVIEW_CALL']
     );
 
     // Update customer status

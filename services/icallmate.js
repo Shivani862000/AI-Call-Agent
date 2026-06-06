@@ -41,7 +41,8 @@ function buildOutboundCampaignPayload(customerPhone, customerId, options = {}) {
           callDirection: 'outbound',
           customerId: customerId || null,
           customerName: options.customerName || '',
-          clientName: options.clientName || ''
+          clientName: options.clientName || '',
+          callType: options.callType || 'REVIEW_CALL'
         }),
         iscallbackapi: String(options.iscallbackapi ?? process.env.ICALLMATE_IS_CALLBACK_API ?? '1'),
         callbackapi: options.callbackapi || ''
@@ -94,7 +95,7 @@ function isFailurePayload(payload) {
 
 async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
   const endpoint = getMasterPostEndpoint();
-  const payload = buildMasterPostPayload(customerPhone, options.leadid || customerId, options);
+  const payload = buildMasterPostPayload(customerPhone, options.leadid || process.env.ICALLMATE_MASTER_POST_LEAD_ID, options);
 
   if (!payload.fieldpairs[0].wsurl) {
     throw new Error('Missing iCallMate master-post config: wsurl or ICALLMATE_MASTER_POST_WSURL is required.');

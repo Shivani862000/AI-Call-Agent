@@ -202,6 +202,7 @@ function runMigrations() {
     await addColumnIfMissing('customers', 'revenue_estimate', 'REAL DEFAULT 0');
     await addColumnIfMissing('customers', 'campaign_name', 'VARCHAR(100)');
     await addColumnIfMissing('customers', 'service_interest', 'VARCHAR(100)');
+    await addColumnIfMissing('customers', 'call_type', "VARCHAR(50) DEFAULT 'REVIEW_CALL'");
     await addColumnIfMissing('customers', 'last_competitor_mention', 'TEXT');
     await addColumnIfMissing('customers', 'data_retention_until', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'dnd_checked_at', 'TIMESTAMP');
@@ -258,6 +259,7 @@ function runMigrations() {
     await addColumnIfMissing('calls', 'whatsapp_summary_sent', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('calls', 'revenue_attribution_status', "VARCHAR(30) DEFAULT 'pending'");
     await addColumnIfMissing('calls', 'call_script_version', "VARCHAR(40) DEFAULT 'hindi-feedback-v1'");
+    await addColumnIfMissing('calls', 'call_type', "VARCHAR(50) DEFAULT 'REVIEW_CALL'");
     await addColumnIfMissing('calls', 'competitor_mentions_json', 'TEXT');
     await addColumnIfMissing('calls', 'objections_json', 'TEXT');
     await addColumnIfMissing('calls', 'interest_detected', 'INTEGER DEFAULT 0');

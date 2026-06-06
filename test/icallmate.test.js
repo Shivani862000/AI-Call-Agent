@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildMasterPostPayload } = require('../services/icallmate');
+const {
+  buildMasterPostPayload,
+  buildOutboundCampaignPayload
+} = require('../services/icallmate');
 
 test('builds iCallMate master-post outbound payload', () => {
   const payload = buildMasterPostPayload('9354197715', '1031', {
@@ -18,4 +21,17 @@ test('builds iCallMate master-post outbound payload', () => {
       }
     ]
   });
+});
+
+test('includes call type in iCallMate outbound extra params', () => {
+  const payload = buildOutboundCampaignPayload('+919876543210', 42, {
+    customerName: 'Rahul Sharma',
+    clientName: 'Apna Blood Centre',
+    callType: 'THREE_MONTH_FOLLOWUP',
+    wsurl: 'wss://example.com/icallmate/media'
+  });
+
+  const extraParams = JSON.parse(payload.msisdnlist[0].extraparam);
+  assert.equal(extraParams.callType, 'THREE_MONTH_FOLLOWUP');
+  assert.equal(extraParams.customerName, 'Rahul Sharma');
 });

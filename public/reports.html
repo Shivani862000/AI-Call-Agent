@@ -374,6 +374,12 @@
       return 'neutral';
     }
 
+    function formatCallTypeLabel(value) {
+      return String(value || 'REVIEW_CALL').toUpperCase() === 'THREE_MONTH_FOLLOWUP'
+        ? '3 Month Follow-up'
+        : 'Review Calling';
+    }
+
     function isThisWeek(value) {
       if (!value) return false;
       const date = new Date(value);
@@ -571,7 +577,7 @@
           .slice(0, 6)
           .map((item) => ({
             title: item.customer_name || 'Patient',
-            subtitle: `${AppShell.formatDateTime(item.called_at)} · Rating ${item.extracted_rating || '--'}/5`,
+            subtitle: `${formatCallTypeLabel(item.call_type)} · ${AppShell.formatDateTime(item.called_at)} · Rating ${item.extracted_rating || '--'}/5`,
             tone: 'positive',
             value: item.analysis_status ? AppShell.formatStatusLabel(item.analysis_status) : 'Completed'
           }));
@@ -582,7 +588,7 @@
           .slice(0, 6)
           .map((item) => ({
             title: item.customer_name || 'Patient',
-            subtitle: `${AppShell.formatDateTime(item.called_at)} · ${AppShell.formatStatusLabel(item.outcome || 'failed')}`,
+            subtitle: `${formatCallTypeLabel(item.call_type)} · ${AppShell.formatDateTime(item.called_at)} · ${AppShell.formatStatusLabel(item.outcome || 'failed')}`,
             tone: 'negative',
             value: item.follow_up_task || 'Retry needed'
           }));
@@ -602,7 +608,7 @@
         title.textContent = 'Recent Calls';
         items = recentCalls.slice(0, 6).map((item) => ({
           title: item.customer_name || 'Patient',
-          subtitle: `${AppShell.formatDateTime(item.called_at)} · ${AppShell.formatStatusLabel(item.outcome || 'pending')}`,
+          subtitle: `${formatCallTypeLabel(item.call_type)} · ${AppShell.formatDateTime(item.called_at)} · ${AppShell.formatStatusLabel(item.outcome || 'pending')}`,
           tone: ['failed', 'busy', 'no_answer'].includes(String(item.outcome || '').toLowerCase())
             ? 'negative'
             : String(item.outcome || '').toLowerCase() === 'completed'

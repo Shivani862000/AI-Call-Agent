@@ -131,6 +131,11 @@
             <option value="failed">Failed</option>
             <option value="retry_scheduled">Retry scheduled</option>
           </select>
+          <select id="callTypeFilter" class="table-filter desktop-only">
+            <option value="">All Calls</option>
+            <option value="REVIEW_CALL">Review Calling</option>
+            <option value="THREE_MONTH_FOLLOWUP">3 Month Follow-up</option>
+          </select>
           <button id="mobileFilterButton" class="mobile-filter-button mobile-only" type="button" aria-label="Open filters">Filter</button>
         </div>
 
@@ -140,6 +145,7 @@
               <tr>
                 <th>Patient</th>
                 <th>Phone</th>
+                <th>Call Type</th>
                 <th>Call Time</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -195,6 +201,20 @@
           <input id="callCustomerTime" type="time">
           <span class="error-text" id="callCustomerTimeError"></span>
         </label>
+      </div>
+
+      <div class="form-field-block">
+        <div class="field-label">Call Type</div>
+        <div class="segmented-control call-type-control" role="radiogroup" aria-label="Call type">
+          <label class="segment-button active">
+            <input type="radio" name="callType" value="REVIEW_CALL" checked>
+            Review Calling
+          </label>
+          <label class="segment-button">
+            <input type="radio" name="callType" value="THREE_MONTH_FOLLOWUP">
+            3 Month Follow-up
+          </label>
+        </div>
       </div>
 
       <details id="careDetailsToggle" class="details-toggle">
@@ -298,6 +318,8 @@
         <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="completed">Completed</button>
         <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="failed">Failed</button>
         <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="retry_scheduled">Retry Scheduled</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="REVIEW_CALL">Review Calling</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="THREE_MONTH_FOLLOWUP">3 Month Follow-up</button>
       </div>
     </div>
   </div>
@@ -353,6 +375,28 @@
       return normalized || '--';
     }
 
+    function normalizeCallType(value) {
+      return String(value || 'REVIEW_CALL').toUpperCase() === 'THREE_MONTH_FOLLOWUP'
+        ? 'THREE_MONTH_FOLLOWUP'
+        : 'REVIEW_CALL';
+    }
+
+    function formatCallTypeLabel(value) {
+      return normalizeCallType(value) === 'THREE_MONTH_FOLLOWUP' ? '3 Month Follow-up' : 'Review Calling';
+    }
+
+    function setCallTypeSelection(value) {
+      const normalized = normalizeCallType(value);
+      document.querySelectorAll('input[name="callType"]').forEach((input) => {
+        input.checked = input.value === normalized;
+        input.closest('.segment-button')?.classList.toggle('active', input.checked);
+      });
+    }
+
+    function getSelectedCallType() {
+      return document.querySelector('input[name="callType"]:checked')?.value || 'REVIEW_CALL';
+    }
+
     function isToday(value) {
       if (!value) return false;
       const date = new Date(value);
@@ -395,7 +439,8 @@
       return {
         name: document.getElementById('callCustomerName').value.trim(),
         phone: normalizePhoneForApi(document.getElementById('callCustomerPhone').value),
-        preferred_slot: document.getElementById('callCustomerTime').value.trim()
+        preferred_slot: document.getElementById('callCustomerTime').value.trim(),
+        callType: getSelectedCallType()
       };
     }
 
@@ -440,6 +485,7 @@
       document.getElementById('careDob').value = '';
       document.getElementById('careLastVisit').value = '';
       document.getElementById('careTreatment').value = '';
+      setCallTypeSelection('REVIEW_CALL');
       document.getElementById('careDetailsToggle').open = false;
       clearFormErrors();
     }
@@ -457,6 +503,7 @@
           document.getElementById('callCustomerName').value = customer.name || '';
           document.getElementById('callCustomerPhone').value = formatPhoneForInput(customer.phone || '');
           document.getElementById('callCustomerTime').value = customer.preferred_slot || '';
+          setCallTypeSelection(customer.call_type || 'REVIEW_CALL');
         }
         if (client) {
           document.getElementById('careDetailsToggle').open = true;
@@ -635,8 +682,13 @@
 
     function syncMobileFilterOptions() {
       const activeValue = document.getElementById('statusFilter').value;
+      const activeCallType = document.getElementById('callTypeFilter').value;
       document.querySelectorAll('.mobile-filter-option').forEach((button) => {
-        button.classList.toggle('active', button.dataset.filterValue === activeValue);
+        if (button.dataset.callTypeValue !== undefined) {
+          button.classList.toggle('active', button.dataset.callTypeValue === activeCallType);
+        } else {
+          button.classList.toggle('active', button.dataset.filterValue === activeValue && !activeCallType);
+        }
       });
     }
 
@@ -702,10 +754,12 @@
     function getFilteredCustomers() {
       const search = document.getElementById('customerSearch').value.trim().toLowerCase();
       const status = document.getElementById('statusFilter').value;
+      const callType = document.getElementById('callTypeFilter').value;
       const pendingStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
       return customerCache.filter((customer) => {
         const matchesSearch = !search || `${customer.name} ${customer.phone}`.toLowerCase().includes(search);
         const matchesStatus = !status || String(customer.status || '').toLowerCase() === status;
+        const matchesCallType = !callType || normalizeCallType(customer.call_type) === callType;
         let matchesMetricFilter = true;
 
         if (activeCustomerMetricFilter === 'scheduled') {
@@ -718,7 +772,7 @@
           matchesMetricFilter = hasFailedCall(customer.id);
         }
 
-        return matchesSearch && matchesStatus && matchesMetricFilter;
+        return matchesSearch && matchesStatus && matchesCallType && matchesMetricFilter;
       });
     }
 
@@ -767,7 +821,7 @@
       if (!customers.length) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="5">
+            <td colspan="6">
               <div class="empty-state">
                 <strong>No scheduled calls found</strong>
                 <div class="supporting-text">Add a patient to schedule the next follow-up call.</div>
@@ -791,6 +845,7 @@
               <div class="row-subtitle">ID #${customer.id}</div>
             </td>
             <td>${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</td>
+            <td>${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))}</td>
             <td>${AppShell.escapeHtml(customer.preferred_slot || '--:--')}</td>
             <td><span class="status-badge ${AppShell.escapeHtml(String(customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(customer.status || 'pending')}</span></td>
             <td>
@@ -833,7 +888,7 @@
               </div>
               <span class="status-badge ${AppShell.escapeHtml(String(customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(customer.status || 'pending')}</span>
             </div>
-            <div class="mobile-subtext">${latestCall ? AppShell.formatDateTime(latestCall.called_at) : 'No call history yet'}</div>
+            <div class="mobile-subtext">${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))} · ${latestCall ? AppShell.formatDateTime(latestCall.called_at) : 'No call history yet'}</div>
             <div class="mobile-call-actions">
               <button class="warning mobile-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
               ${actionButton}
@@ -916,9 +971,22 @@
         currentQueuePage = 1;
         renderQueue();
       });
+      document.getElementById('callTypeFilter').addEventListener('change', () => {
+        syncMobileFilterOptions();
+        currentQueuePage = 1;
+        renderQueue();
+      });
+      document.querySelectorAll('input[name="callType"]').forEach((input) => {
+        input.addEventListener('change', () => setCallTypeSelection(input.value));
+      });
       document.querySelectorAll('.mobile-filter-option').forEach((button) => {
         button.addEventListener('click', () => {
-          document.getElementById('statusFilter').value = button.dataset.filterValue || '';
+          if (button.dataset.callTypeValue !== undefined) {
+            document.getElementById('callTypeFilter').value = button.dataset.callTypeValue || '';
+          } else {
+            document.getElementById('statusFilter').value = button.dataset.filterValue || '';
+            document.getElementById('callTypeFilter').value = '';
+          }
           syncMobileFilterOptions();
           closeMobileFilterSheet();
           renderQueue();

@@ -1459,6 +1459,31 @@ body.poc-page .search-row .table-filter.desktop-only {
   font-weight: 700;
 }
 
+.form-field-block {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.call-type-control {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.call-type-control .segment-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.call-type-control input {
+  width: 16px;
+  height: 16px;
+  accent-color: #2563eb;
+}
+
 .details-toggle {
   margin-top: 6px;
   border-top: 1px solid #eef2f7;
