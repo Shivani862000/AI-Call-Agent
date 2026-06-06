@@ -279,28 +279,28 @@
         <section class="poc-card analysis-section-card">
           <div class="analysis-section-header">
             <h4 class="poc-card-title analysis-section-title">Outcome</h4>
-            <span id="analysisOutcomeValue" class="status-badge pending">--</span>
+            <span id="analysisOutcomeValue" class="status-badge pending"></span>
           </div>
           <div class="analysis-meta-grid">
             <div class="analysis-meta-item">
               <span>Rating</span>
-              <strong id="analysisRatingValue">--</strong>
+              <strong id="analysisRatingValue"></strong>
             </div>
             <div class="analysis-meta-item">
               <span>Processing</span>
-              <strong id="analysisStatusValue">--</strong>
+              <strong id="analysisStatusValue"></strong>
             </div>
           </div>
         </section>
 
         <section class="poc-card analysis-section-card">
           <h4 class="poc-card-title analysis-section-title">Recording</h4>
-          <div id="analysisRecordingWrap" class="poc-card-subtitle analysis-section-copy">Recording not available yet.</div>
+          <div id="analysisRecordingWrap" class="poc-card-subtitle analysis-section-copy"></div>
         </section>
 
         <section class="poc-card analysis-section-card">
           <h4 class="poc-card-title analysis-section-title">Summary</h4>
-          <div id="analysisSummaryValue" class="poc-card-subtitle analysis-section-copy">Analysis summary not available yet.</div>
+          <div id="analysisSummaryValue" class="poc-card-subtitle analysis-section-copy"></div>
         </section>
       </section>
 
@@ -308,7 +308,7 @@
         <summary>Patient Review</summary>
         <div class="details-content">
           <section class="poc-card analysis-section-card analysis-section-card--nested">
-            <div id="analysisReviewValue" class="poc-card-subtitle analysis-section-copy">No review extracted yet.</div>
+            <div id="analysisReviewValue" class="poc-card-subtitle analysis-section-copy"></div>
           </section>
         </div>
       </details>
@@ -317,7 +317,7 @@
         <summary>Full Transcript</summary>
         <div class="details-content">
           <section class="poc-card analysis-section-card analysis-section-card--nested">
-            <div id="analysisTranscriptValue" class="poc-card-subtitle analysis-section-copy">Transcript not available yet.</div>
+            <div id="analysisTranscriptValue" class="poc-card-subtitle analysis-section-copy"></div>
           </section>
         </div>
       </details>
@@ -509,7 +509,7 @@
             <strong>${AppShell.escapeHtml(call.customer_name || 'Patient')}</strong>
             <div class="muted">${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.outcome || 'completed')}</div>
           </div>
-          <button class="secondary" type="button" onclick="openAnalysisModal(${call.id})">View Analysis</button>
+          <button class="secondary" type="button" onclick="openAnalysisPage(${call.id})">View Analysis</button>
         </div>
       `).join('');
     }
@@ -533,7 +533,7 @@
         <div class="compact-row">
           <div>
             <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
-            <div class="muted">${AppShell.formatDateTime(item.submitted_at)} · ${item.stars || '--'}/5</div>
+            <div class="muted">${AppShell.formatDateTime(item.submitted_at)}${item.stars ? ` · ${item.stars}/5` : ''}</div>
           </div>
           <span class="status-badge ${filterName}">${AppShell.formatStatusLabel(filterName)}</span>
         </div>
@@ -577,8 +577,8 @@
               </div>
               <span class="status-badge ${activeFeedbackFilter}">${AppShell.formatStatusLabel(activeFeedbackFilter)}</span>
             </div>
-            <div class="mobile-subtext" style="margin-top:10px;">${AppShell.escapeHtml(item.review_text || '--')}</div>
-            <div class="mobile-subtext" style="margin-top:8px;">Rating: ${Number(item.stars || 0) ? `${item.stars}/5` : '--'}</div>
+            ${item.review_text ? `<div class="mobile-subtext" style="margin-top:10px;">${AppShell.escapeHtml(item.review_text)}</div>` : ''}
+            ${Number(item.stars || 0) ? `<div class="mobile-subtext" style="margin-top:8px;">Rating: ${item.stars}/5</div>` : ''}
           </article>
         `).join('');
         renderPagination('mobileFeedbackListPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
@@ -663,8 +663,8 @@
               <div class="row-subtitle">${AppShell.escapeHtml(item.source || 'call')}</div>
             </td>
             <td><span class="status-badge ${sentiment}">${AppShell.formatStatusLabel(sentiment)}</span></td>
-            <td>${Number(item.stars || 0) ? `${item.stars}/5` : '--'}</td>
-            <td class="summary-cell">${AppShell.escapeHtml(item.review_text || '--')}</td>
+            <td>${Number(item.stars || 0) ? `${item.stars}/5` : ''}</td>
+            <td class="summary-cell">${AppShell.escapeHtml(item.review_text || '')}</td>
             <td>${AppShell.formatDateTime(item.submitted_at)}</td>
           </tr>
         `;
@@ -681,8 +681,8 @@
               </div>
               <span class="status-badge ${sentiment}">${AppShell.formatStatusLabel(sentiment)}</span>
             </div>
-            <div class="mobile-subtext" style="margin-top:10px;">${AppShell.escapeHtml(item.review_text || '--')}</div>
-            <div class="mobile-subtext" style="margin-top:8px;">Rating: ${Number(item.stars || 0) ? `${item.stars}/5` : '--'}</div>
+            ${item.review_text ? `<div class="mobile-subtext" style="margin-top:10px;">${AppShell.escapeHtml(item.review_text)}</div>` : ''}
+            ${Number(item.stars || 0) ? `<div class="mobile-subtext" style="margin-top:8px;">Rating: ${item.stars}/5</div>` : ''}
           </article>
         `;
       }).join('');
@@ -828,39 +828,15 @@
           AppShell.redirectToLogin();
           throw new Error('Authentication required');
         }
-        if (!response.ok) throw new Error('Transcript not available yet');
+        if (!response.ok) return '';
         return response.text();
       } catch (error) {
-        return `Transcript not available yet.\n${error.message}`;
+        return '';
       }
     }
 
     async function openAnalysisModal(callId) {
-      const call = recentCallsCache.find((item) => Number(item.id) === Number(callId));
-      if (!call) {
-        AppShell.showAlert('Call analysis not found', 'error');
-        return;
-      }
-      document.getElementById('analysisModalTitle').textContent = `Analysis for ${call.customer_name || 'Patient'}`;
-      document.getElementById('analysisModalSubtitle').textContent = AppShell.formatDateTime(call.called_at);
-      document.getElementById('analysisRatingValue').textContent = call.extracted_rating ? `${call.extracted_rating}/5` : '--';
-      document.getElementById('analysisOutcomeValue').textContent = AppShell.formatStatusLabel(call.outcome || '--');
-      document.getElementById('analysisStatusValue').textContent = AppShell.formatStatusLabel(call.analysis_status || 'pending');
-      document.getElementById('analysisSummaryValue').textContent = call.analysis_summary || call.report_excerpt || 'Analysis summary not available yet.';
-      document.getElementById('analysisReviewValue').innerHTML = `${AppShell.escapeHtml(call.extracted_review_text || 'No review extracted yet.')}`;
-
-      const recordingWrap = document.getElementById('analysisRecordingWrap');
-      if (call.recording_url || call.recording_sid || String(call.recording_status || '').toLowerCase() === 'completed') {
-        recordingWrap.innerHTML = `<audio class="audio-player" controls preload="none" src="${AppShell.API_BASE}/calls/${call.id}/recording"></audio>`;
-      } else {
-        recordingWrap.textContent = 'Recording not available yet.';
-      }
-
-      document.getElementById('analysisTranscriptValue').textContent = 'Loading transcript...';
-      document.getElementById('analysisModal').classList.add('open');
-      document.getElementById('analysisModal').setAttribute('aria-hidden', 'false');
-      const transcript = await loadTranscriptForCall(call.id);
-      document.getElementById('analysisTranscriptValue').textContent = transcript;
+      openAnalysisPage(callId);
     }
 
     function closeAnalysisModal() {
@@ -892,9 +868,6 @@
         AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
       ]);
-      customers = customers.length ? customers : AppShell.DEMO_DATA.customers;
-      feedback = feedback.length ? feedback : AppShell.DEMO_DATA.feedback;
-      recentCalls = recentCalls.length ? recentCalls : AppShell.DEMO_DATA.recentCalls;
       customerCache = customers;
       feedbackCache = feedback;
       recentCallsCache = recentCalls;

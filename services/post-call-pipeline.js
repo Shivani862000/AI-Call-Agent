@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { analyzeCallTranscript, transcribeAudioFile, categorizeFeedback } = require('./openai');
 const { extractCallFeedback } = require('./call-feedback');
+const { buildCallAnalysis, storeCallAnalysis } = require('./call-analysis');
 const {
   detectConversationOutcome,
   detectObjectionsAndCompetitors,
@@ -160,7 +161,12 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
   };
   const analysis = await analyzeCallTranscript(transcriptText, {
     customerName: callRecord.customer_name,
-    clientName: process.env.CLIENT_NAME
+    clientName: process.env.CLIENT_NAME,
+    callType: callRecord.call_type
+  });
+  const productAnalysis = buildCallAnalysis({
+    ...callRecord,
+    transcript_text: transcriptText
   });
   const outcome = detectConversationOutcome({
     analysisSummary: analysis.summary,
@@ -173,7 +179,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     analysisSummary: analysis.summary
   });
   const sentimentLabel = analysis.customer_sentiment || 'neutral';
-  const sentimentScore = deriveSentimentScore(sentimentLabel);
+  const sentimentScore = Number(productAnalysis.sentiment_score || 0) || deriveSentimentScore(sentimentLabel);
 
   const mergedRating = Number.isInteger(analysis.rating) ? analysis.rating : heuristicExtraction.stars;
   const mergedReviewText = analysis.review_text || heuristicExtraction.reviewText || '';
@@ -184,6 +190,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
             transcript_status = ?,
             transcript_source = ?,
             analysis_status = ?,
+            summary = ?,
             analysis_summary = ?,
             analysis_json = ?,
             key_points_json = ?,
@@ -191,8 +198,15 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
             extracted_rating = ?,
             extracted_review_text = ?,
             outcome_detail = ?,
+            sentiment = ?,
             sentiment_label = ?,
             sentiment_score = ?,
+            call_duration = ?,
+            ai_talk_time = ?,
+            patient_talk_time = ?,
+            quality_score = ?,
+            timeline_events = ?,
+            extracted_entities = ?,
             competitor_mentions_json = ?,
             objections_json = ?,
             callback_requested = ?,
@@ -207,15 +221,23 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
       'completed',
       transcriptSource,
       'completed',
-      analysis.summary || null,
-      JSON.stringify(analysis),
+      productAnalysis.summary || analysis.summary || null,
+      productAnalysis.summary || analysis.summary || null,
+      JSON.stringify({ ...analysis, product_analysis: productAnalysis }),
       JSON.stringify(analysis.key_points || []),
       analysis.report_excerpt || null,
       mergedRating,
       mergedReviewText || null,
       outcome,
-      sentimentLabel,
+      productAnalysis.sentiment || sentimentLabel,
+      productAnalysis.sentiment || sentimentLabel,
       sentimentScore,
+      productAnalysis.metrics.total_duration,
+      productAnalysis.metrics.ai_talk_time,
+      productAnalysis.metrics.patient_talk_time,
+      productAnalysis.quality_score,
+      JSON.stringify(productAnalysis.timeline_events || []),
+      JSON.stringify(productAnalysis.entities || {}),
       JSON.stringify(competitors),
       JSON.stringify(objections),
       outcome === 'callback' ? 1 : 0,
@@ -227,6 +249,16 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
       callRecord.id
     ]
   );
+
+  await storeCallAnalysis({
+    dbRun,
+    callId: callRecord.id,
+    analysis: {
+      ...productAnalysis,
+      sentiment: productAnalysis.sentiment || sentimentLabel,
+      sentiment_score: sentimentScore
+    }
+  });
 
   const feedbackResult = await upsertFeedbackFromAnalysis({
     dbGet,

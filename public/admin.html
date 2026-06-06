@@ -695,10 +695,6 @@
         AppShell.fetchJson(`${AppShell.API_BASE}/clients`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/metrics`)
       ]);
-      customers = customers.length ? customers : AppShell.DEMO_DATA.customers;
-      feedback = feedback.length ? feedback : AppShell.DEMO_DATA.feedback;
-      recentCalls = recentCalls.length ? recentCalls : AppShell.DEMO_DATA.recentCalls;
-      clients = clients.length ? clients : AppShell.DEMO_DATA.clients;
       callMetrics = callMetrics || {};
       clientCache = clients;
 

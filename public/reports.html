@@ -780,11 +780,11 @@
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`),
         AppShell.fetchJson(`${AppShell.API_BASE}/feedback`)
       ]);
-      recentCalls = recentCalls.length ? recentCalls : AppShell.DEMO_DATA.recentCalls;
-      feedback = feedback.length ? feedback : AppShell.DEMO_DATA.feedback;
-      preview = preview?.total_calls ? preview : AppShell.DEMO_DATA.preview;
-      weeklyPreview = weeklyPreview?.total_calls ? weeklyPreview : AppShell.DEMO_DATA.preview;
-      ownerPreview = ownerPreview?.alerts?.length ? ownerPreview : AppShell.DEMO_DATA.ownerPreview;
+      recentCalls = Array.isArray(recentCalls) ? recentCalls : [];
+      feedback = Array.isArray(feedback) ? feedback : [];
+      preview = preview || {};
+      weeklyPreview = weeklyPreview || {};
+      ownerPreview = ownerPreview || {};
 
       const completedCalls = recentCalls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
       const failedCalls = recentCalls.filter((call) => ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase()));

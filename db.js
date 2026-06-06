@@ -243,6 +243,7 @@ function runMigrations() {
     await addColumnIfMissing('calls', 'transcript_source', 'VARCHAR(20)');
     await addColumnIfMissing('calls', 'analysis_status', "VARCHAR(30) DEFAULT 'pending'");
     await addColumnIfMissing('calls', 'analysis_summary', 'TEXT');
+    await addColumnIfMissing('calls', 'summary', 'TEXT');
     await addColumnIfMissing('calls', 'analysis_json', 'TEXT');
     await addColumnIfMissing('calls', 'key_points_json', 'TEXT');
     await addColumnIfMissing('calls', 'report_excerpt', 'TEXT');
@@ -250,7 +251,14 @@ function runMigrations() {
     await addColumnIfMissing('calls', 'outcome_detail', 'VARCHAR(40)');
     await addColumnIfMissing('calls', 'fallback_triggered', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('calls', 'sentiment_label', 'VARCHAR(20)');
+    await addColumnIfMissing('calls', 'sentiment', 'VARCHAR(20)');
     await addColumnIfMissing('calls', 'sentiment_score', 'REAL');
+    await addColumnIfMissing('calls', 'call_duration', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'ai_talk_time', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'patient_talk_time', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'quality_score', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'timeline_events', 'TEXT');
+    await addColumnIfMissing('calls', 'extracted_entities', 'TEXT');
     await addColumnIfMissing('calls', 'hot_lead_score', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('calls', 'next_action_at', 'TIMESTAMP');
     await addColumnIfMissing('calls', 'follow_up_task', 'TEXT');

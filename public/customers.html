@@ -259,37 +259,37 @@
 
       <section class="poc-mini-grid" style="margin-bottom: 16px;">
         <article class="mini-stat">
-          <strong id="analysisRatingValue">--</strong>
+          <strong id="analysisRatingValue"></strong>
           <span>Rating</span>
         </article>
         <article class="mini-stat">
-          <strong id="analysisOutcomeValue">--</strong>
+          <strong id="analysisOutcomeValue"></strong>
           <span>Outcome</span>
         </article>
         <article class="mini-stat">
-          <strong id="analysisStatusValue">--</strong>
+          <strong id="analysisStatusValue"></strong>
           <span>Processing</span>
         </article>
       </section>
 
       <section  style="margin-bottom: 14px;">
         <h4 class="poc-card-title" style="font-size:16px;">Recording</h4>
-        <div id="analysisRecordingWrap" class="poc-card-subtitle" style="margin-top:10px;">Recording not available yet.</div>
+        <div id="analysisRecordingWrap" class="poc-card-subtitle" style="margin-top:10px;"></div>
       </section>
 
       <section class="poc-card" style="margin-bottom: 14px;">
         <h4 class="poc-card-title" style="font-size:16px;">Summary</h4>
-        <div id="analysisSummaryValue" class="poc-card-subtitle" style="margin-top:10px;">Analysis summary not available yet.</div>
+        <div id="analysisSummaryValue" class="poc-card-subtitle" style="margin-top:10px;"></div>
       </section>
 
       <section class="poc-card" style="margin-bottom: 14px;">
         <h4 class="poc-card-title" style="font-size:16px;">Patient Review</h4>
-        <div id="analysisReviewValue" class="poc-card-subtitle" style="margin-top:10px;">No review extracted yet.</div>
+        <div id="analysisReviewValue" class="poc-card-subtitle" style="margin-top:10px;"></div>
       </section>
 
       <section class="poc-card">
         <h4 class="poc-card-title" style="font-size:16px;">Transcript</h4>
-        <div id="analysisTranscriptValue" class="poc-card-subtitle" style="margin-top:10px;">Transcript not available yet.</div>
+        <div id="analysisTranscriptValue" class="poc-card-subtitle" style="margin-top:10px;"></div>
       </section>
     </div>
   </div>
@@ -372,7 +372,7 @@
       if (national.length === 10) {
         return `+91 ${national.slice(0, 5)} ${national.slice(5)}`;
       }
-      return normalized || '--';
+      return normalized || '';
     }
 
     function normalizeCallType(value) {
@@ -463,6 +463,17 @@
       if (!payload.name || payload.name.length < 2) fieldErrors.callCustomerName = 'Patient name is required';
       if (!/^\+\d{12}$/.test(payload.phone)) fieldErrors.callCustomerPhone = 'Use a valid Indian mobile number';
       if (!payload.preferred_slot) fieldErrors.callCustomerTime = 'Call time is required';
+      const editingId = Number(document.getElementById('editingCustomerId').value || 0);
+      const duplicateCustomer = customerCache.find((customer) => (
+        Number(customer.id) !== editingId
+        && normalizePhoneForApi(customer.phone) === payload.phone
+      ));
+      if (duplicateCustomer) {
+        const activeStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
+        fieldErrors.callCustomerPhone = activeStatuses.has(String(duplicateCustomer.status || '').toLowerCase())
+          ? 'This patient already has a scheduled call.'
+          : 'A patient with this phone number already exists.';
+      }
       return fieldErrors;
     }
 
@@ -566,6 +577,13 @@
         closeNewCallModal();
         await loadPageData();
       } catch (error) {
+        if (error.fieldErrors) {
+          AppShell.applyFieldErrors(error.fieldErrors, {
+            phone: 'callCustomerPhone',
+            name: 'callCustomerName',
+            preferred_slot: 'callCustomerTime'
+          });
+        }
         AppShell.showAlert(error.message, 'error');
       }
     }
@@ -608,7 +626,8 @@
     function buildAnalysisReview(call) {
       const rating = Number(call.extracted_rating || 0);
       const stars = rating ? ('★'.repeat(rating) + '☆'.repeat(Math.max(0, 5 - rating))) : 'No rating';
-      return `<strong>${stars}</strong><div style="margin-top:8px;">${AppShell.escapeHtml(call.extracted_review_text || 'No review extracted yet.')}</div>`;
+      const review = call.extracted_review_text ? `<div style="margin-top:8px;">${AppShell.escapeHtml(call.extracted_review_text)}</div>` : '';
+      return `<strong>${stars}</strong>${review}`;
     }
 
     async function loadTranscriptForCall(callId) {
@@ -618,39 +637,15 @@
           AppShell.redirectToLogin();
           throw new Error('Authentication required');
         }
-        if (!response.ok) throw new Error('Transcript not available yet');
+        if (!response.ok) return '';
         return response.text();
       } catch (error) {
-        return `Transcript not available yet.\n${error.message}`;
+        return '';
       }
     }
 
     async function openAnalysisModal(callId) {
-      const call = recentCallsCache.find((item) => Number(item.id) === Number(callId));
-      if (!call) {
-        AppShell.showAlert('Call analysis not found', 'error');
-        return;
-      }
-      document.getElementById('analysisModalTitle').textContent = `Analysis for ${call.customer_name || 'Patient'}`;
-      document.getElementById('analysisModalSubtitle').textContent = AppShell.formatDateTime(call.called_at);
-      document.getElementById('analysisRatingValue').textContent = call.extracted_rating ? `${call.extracted_rating}/5` : '--';
-      document.getElementById('analysisOutcomeValue').textContent = AppShell.formatStatusLabel(call.outcome || '--');
-      document.getElementById('analysisStatusValue').textContent = AppShell.formatStatusLabel(call.analysis_status || 'pending');
-      document.getElementById('analysisSummaryValue').textContent = call.analysis_summary || call.report_excerpt || 'Analysis summary not available yet.';
-      document.getElementById('analysisReviewValue').innerHTML = buildAnalysisReview(call);
-
-      const recordingWrap = document.getElementById('analysisRecordingWrap');
-      if (call.recording_url || call.recording_sid || String(call.recording_status || '').toLowerCase() === 'completed') {
-        recordingWrap.innerHTML = `<audio class="audio-player" controls preload="none" src="${AppShell.API_BASE}/calls/${call.id}/recording"></audio>`;
-      } else {
-        recordingWrap.textContent = 'Recording not available yet.';
-      }
-
-      document.getElementById('analysisTranscriptValue').textContent = 'Loading transcript...';
-      document.getElementById('analysisModal').classList.add('open');
-      document.getElementById('analysisModal').setAttribute('aria-hidden', 'false');
-      const transcript = await loadTranscriptForCall(call.id);
-      document.getElementById('analysisTranscriptValue').textContent = transcript;
+      openAnalysisPage(callId);
     }
 
     function closeAnalysisModal() {
@@ -706,6 +701,10 @@
       activeMobileActionCallId = Number(callId) || null;
       document.getElementById('mobileActionAnalysis').disabled = !activeMobileActionCallId;
       openSheet('mobileActionSheet');
+    }
+
+    function openAnalysisPage(callId) {
+      window.location.href = `/feedback-analysis.html?callId=${encodeURIComponent(callId)}`;
     }
 
     function closeMobileActionSheet() {
@@ -835,7 +834,7 @@
       tbody.innerHTML = customers.map((customer) => {
         const completedCall = getLatestCompletedCall(customer.id);
         const contextButton = completedCall
-          ? `<button class="secondary" type="button" onclick="openAnalysisModal(${completedCall.id})">Analysis</button>`
+          ? `<button class="secondary" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
           : `<button class="secondary" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
 
         return `
@@ -877,7 +876,7 @@
         const latestCall = getLatestCall(customer.id);
         const completedCall = getLatestCompletedCall(customer.id);
         const actionButton = completedCall
-          ? `<button class="secondary mobile-action-button" type="button" onclick="openAnalysisModal(${completedCall.id})">Analysis</button>`
+          ? `<button class="secondary mobile-action-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
           : `<button class="secondary mobile-action-button" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
         return `
           <article class="mobile-call-card">
@@ -921,9 +920,6 @@
         AppShell.fetchJson(`${AppShell.API_BASE}/clients`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
       ]);
-      customers = customers.length ? customers : AppShell.DEMO_DATA.customers;
-      clients = clients.length ? clients : AppShell.DEMO_DATA.clients;
-      recentCalls = recentCalls.length ? recentCalls : AppShell.DEMO_DATA.recentCalls;
       customerCache = customers;
       clientCache = clients;
       recentCallsCache = recentCalls;
@@ -957,7 +953,7 @@
       document.getElementById('mobileActionAnalysis').addEventListener('click', async () => {
         const callId = activeMobileActionCallId;
         closeMobileActionSheet();
-        if (callId) await openAnalysisModal(callId);
+        if (callId) openAnalysisPage(callId);
       });
       document.getElementById('closeNewCallModal').addEventListener('click', closeNewCallModal);
       document.getElementById('scheduleCallSubmit').addEventListener('click', submitNewCall);
@@ -1018,6 +1014,7 @@
     window.scheduleRetry = scheduleRetry;
     window.deleteCustomer = deleteCustomer;
     window.openAnalysisModal = openAnalysisModal;
+    window.openAnalysisPage = openAnalysisPage;
     window.openNewCallModal = openNewCallModal;
     window.openMobileActionSheet = openMobileActionSheet;
     window.changeQueuePage = changeQueuePage;

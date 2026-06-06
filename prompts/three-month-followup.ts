@@ -8,8 +8,8 @@ Check whether donor has donated blood again after 3 months and encourage future 
 Conversation Flow:
 
 Start:
-"Good morning sir/ma'am.
-Main Apna Blood Centre, Palwal se baat kar rahi hoon.
+"[GREETING].
+Main ${clientName || 'Apna Blood Centre'}, Palwal se baat kar rahi hoon.
 Kya main ${donorName || '[Donor Name]'} ji se baat kar rahi hoon?"
 
 Wait for confirmation.
@@ -57,13 +57,15 @@ Rules:
 - Never mention AI, bot, system, or model.
 - If the donor asks to stop, close politely and end the call.
 - Never say "end_call" or "END_CALL=true" aloud.
+- IMPORTANT: Always use the greeting provided by the system. Never assume it is morning. Never hardcode "Good Morning".
 `.trim();
 }
 
-function buildThreeMonthFollowupOpeningPrompt({ clientName = 'Apna Blood Centre', donorName = 'Donor' } = {}) {
+function buildThreeMonthFollowupOpeningPrompt({ clientName = 'Apna Blood Centre', donorName = 'Donor', greeting = 'Good morning' } = {}) {
+  const g = greeting;
   return `
 Sirf yeh exact opening natural phone tone me boliye:
-"Good morning sir/ma'am. Main ${clientName || 'Apna Blood Centre'}, Palwal se baat kar rahi hoon. Kya main ${donorName || 'Donor'} ji se baat kar rahi hoon?"
+"${g} . Main ${clientName || 'Apna Blood Centre'}, Palwal se baat kar rahi hoon. Kya main ${donorName || 'Donor'} ji se baat kar rahi hoon?"
 `.trim();
 }
 

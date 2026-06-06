@@ -8,8 +8,8 @@ Thank the donor for blood donation and collect post-donation feedback.
 Conversation Flow:
 
 Start:
-"Good morning sir/ma'am.
-Main Apna Blood Centre se baat kar rahi hoon.
+"[GREETING] .
+Main ${clientName || 'Apna Blood Centre'} se baat kar rahi hoon.
 Aapne kal hamare blood centre mein blood donate kiya tha.
 Iske liye aapka bahut-bahut dhanyavaad."
 
@@ -53,13 +53,16 @@ Rules:
 - Never mention AI, bot, system, or model.
 - If the donor asks to stop, close politely and end the call.
 - Never say "end_call" or "END_CALL=true" aloud.
+- IMPORTANT: Always use the greeting provided by the system. Never assume it is morning. Never hardcode "Good Morning".
 `.trim();
 }
 
-function buildReviewCallingOpeningPrompt({ clientName = 'Apna Blood Centre' } = {}) {
+function buildReviewCallingOpeningPrompt({ clientName = 'Apna Blood Centre', greeting = 'Good morning' } = {}) {
+  // The backend/system must supply `greeting`. This function accepts a fallback for tests.
+  const g = greeting;
   return `
 Sirf yeh exact opening natural phone tone me boliye:
-"Good morning sir/ma'am. Main ${clientName || 'Apna Blood Centre'} se baat kar rahi hoon. Aapne kal hamare blood centre mein blood donate kiya tha. Iske liye aapka bahut-bahut dhanyavaad. Blood donate karne ke baad aapko koi dikkat ya problem hui thi?"
+"${g} . Main ${clientName || 'Apna Blood Centre'} se baat kar rahi hoon. Aapne kal hamare blood centre mein blood donate kiya tha. Iske liye aapka bahut-bahut dhanyavaad. Blood donate karne ke baad aapko koi dikkat ya problem hui thi?"
 `.trim();
 }
 

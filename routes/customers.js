@@ -17,6 +17,8 @@ const RESCHEDULABLE_STATUSES = new Set([
   'retry_scheduled',
   'callback_scheduled'
 ]);
+const ACTIVE_CUSTOMER_STATUSES = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
+const ACTIVE_CALL_OUTCOMES = new Set(['initiated', 'scheduled_initiated', 'active']);
 
 function toBooleanFlag(value) {
   if (typeof value === 'boolean') return value ? 1 : 0;
@@ -137,11 +139,57 @@ function validateCustomerPayload(payload) {
   return errors;
 }
 
+function normalizePhoneLookupValue(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length === 10) return digits;
+  if (digits.length > 10) return digits.slice(-10);
+  return digits;
+}
+
+async function findCustomerByNormalizedPhone(phone, excludeCustomerId = null) {
+  const normalized = normalizePhoneLookupValue(phone);
+  if (!normalized) return null;
+
+  const rows = await dbAll('SELECT * FROM customers ORDER BY id DESC LIMIT 500');
+  return rows.find((row) => {
+    if (excludeCustomerId && Number(row.id) === Number(excludeCustomerId)) return false;
+    return normalizePhoneLookupValue(row.phone) === normalized;
+  }) || null;
+}
+
+async function getDuplicateScheduleMessage(phone, excludeCustomerId = null) {
+  const existingCustomer = await findCustomerByNormalizedPhone(phone, excludeCustomerId);
+  if (!existingCustomer) {
+    return null;
+  }
+
+  const activeCall = await dbGet(
+    `SELECT calls.id, calls.outcome
+       FROM calls
+      WHERE calls.customer_id = ?
+        AND COALESCE(calls.outcome, '') IN ('initiated', 'scheduled_initiated', 'active')
+      ORDER BY calls.id DESC
+      LIMIT 1`,
+    [existingCustomer.id]
+  );
+
+  if (activeCall && ACTIVE_CALL_OUTCOMES.has(String(activeCall.outcome || '').toLowerCase())) {
+    return 'An active call already exists for this phone number.';
+  }
+
+  if (ACTIVE_CUSTOMER_STATUSES.has(String(existingCustomer.status || '').toLowerCase())) {
+    return 'This patient already has a scheduled call.';
+  }
+
+  return 'A patient with this phone number already exists.';
+}
+
 function handleSqliteError(error, res) {
   if (error.message && error.message.includes('UNIQUE constraint failed: customers.phone')) {
     return res.status(409).json({
-      error: 'A customer with this phone number already exists',
-      fieldErrors: { phone: 'Phone number already exists' }
+      error: 'This patient already has a scheduled call.',
+      fieldErrors: { phone: 'This phone number is already in use' }
     });
   }
 
@@ -189,6 +237,14 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
+    const duplicateMessage = await getDuplicateScheduleMessage(payload.phone);
+    if (duplicateMessage) {
+      return res.status(409).json({
+        error: duplicateMessage,
+        fieldErrors: { phone: duplicateMessage }
+      });
+    }
+
     const result = await saveCustomer(payload);
     res.json({ id: result.lastID, message: 'Customer added successfully' });
   } catch (error) {
@@ -225,6 +281,12 @@ router.post('/csv', upload.single('file'), async (req, res) => {
       }
 
       try {
+        const duplicateMessage = await getDuplicateScheduleMessage(payload.phone);
+        if (duplicateMessage) {
+          errorCount += 1;
+          errors.push({ row: index + 2, error: duplicateMessage });
+          continue;
+        }
         await saveCustomer(payload);
         successCount += 1;
       } catch (err) {
@@ -285,6 +347,14 @@ router.put('/:id', async (req, res) => {
 
     if (Object.keys(fieldErrors).length > 0) {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
+    }
+
+    const duplicateMessage = await getDuplicateScheduleMessage(payload.phone, existing.id);
+    if (duplicateMessage) {
+      return res.status(409).json({
+        error: duplicateMessage,
+        fieldErrors: { phone: duplicateMessage }
+      });
     }
 
     const slotChanged = payload.preferred_slot !== (existing.preferred_slot || '10:00');

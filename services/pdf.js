@@ -407,6 +407,134 @@ function generateReportPDF(reportData) {
   });
 }
 
+function formatDuration(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds || 0)));
+  const minutes = Math.floor(total / 60);
+  const remainingSeconds = total % 60;
+  return minutes ? `${minutes}m ${remainingSeconds}s` : `${remainingSeconds}s`;
+}
+
+function drawCallAnalysisHeader(doc, fonts, call, analysis, watermarkText) {
+  drawPanel(doc, 40, 34, doc.page.width - 80, 132, COLORS.dark, COLORS.dark, 24);
+  setFont(doc, fonts, 'regular', 11, '#c8d8ff');
+  doc.text('Call Analysis Report', 64, 56);
+  setFont(doc, fonts, 'heading', 24, '#ffffff');
+  doc.text(call.customer_name || 'Patient', 64, 78, { width: doc.page.width - 128 });
+  setFont(doc, fonts, 'regular', 10, '#dce6ff');
+  doc.text(`Phone: ${call.customer_phone || ''}`, 64, 112);
+  doc.text(`Call type: ${analysis.call_type_label || call.call_type || ''}`, 64, 130);
+  doc.text(`Outcome: ${call.outcome || ''} | Quality: ${analysis.quality_score || 0}%`, 300, 112);
+  doc.text(`Generated: ${new Date().toLocaleString()}`, 300, 130);
+  doc.y = 188;
+}
+
+function drawAnalysisSummary(doc, fonts, call, analysis, watermarkText) {
+  drawSectionTitle(doc, fonts, 'Summary', 'AI-generated operational summary', watermarkText);
+  ensureSpace(doc, fonts, watermarkText, 96);
+  const y = doc.y;
+  drawPanel(doc, 40, y, doc.page.width - 80, 78, COLORS.soft, COLORS.line, 18);
+  setFont(doc, fonts, 'regular', 10, COLORS.ink);
+  doc.text(analysis.summary || call.analysis_summary || 'Summary not available.', 58, y + 18, {
+    width: doc.page.width - 116
+  });
+  doc.y = y + 96;
+}
+
+function drawAnalysisMetrics(doc, fonts, analysis, watermarkText) {
+  drawSectionTitle(doc, fonts, 'Call Metrics', 'Duration, sentiment, and quality indicators', watermarkText);
+  ensureSpace(doc, fonts, watermarkText, 126);
+  const metrics = analysis.metrics || {};
+  const cards = [
+    ['Sentiment', `${analysis.sentiment || 'neutral'} (${Math.round(Number(analysis.sentiment_score || 0) * 100)}%)`],
+    ['Duration', formatDuration(metrics.total_duration)],
+    ['AI Talk Time', formatDuration(metrics.ai_talk_time)],
+    ['Patient Talk Time', formatDuration(metrics.patient_talk_time)],
+    ['Questions Asked', String(metrics.questions_asked || 0)],
+    ['Questions Answered', String(metrics.questions_answered || 0)]
+  ];
+  const y = doc.y;
+  const cardWidth = (doc.page.width - 104) / 3;
+  cards.forEach((card, index) => {
+    const x = 40 + (index % 3) * (cardWidth + 12);
+    const rowY = y + Math.floor(index / 3) * 58;
+    drawPanel(doc, x, rowY, cardWidth, 46, COLORS.panel, COLORS.line, 12);
+    setFont(doc, fonts, 'regular', 8, COLORS.muted);
+    doc.text(card[0], x + 12, rowY + 10, { width: cardWidth - 24 });
+    setFont(doc, fonts, 'heading', 10, COLORS.ink);
+    doc.text(card[1], x + 12, rowY + 25, { width: cardWidth - 24 });
+  });
+  doc.y = y + 128;
+}
+
+function drawAnalysisOutcomes(doc, fonts, analysis, watermarkText) {
+  drawSectionTitle(doc, fonts, 'Key Outcomes', 'Structured information extracted from the call', watermarkText);
+  const rows = Array.isArray(analysis.outcome_cards) ? analysis.outcome_cards : [];
+  if (!rows.length) {
+    drawBulletList(doc, fonts, [], watermarkText, 'No key outcomes were extracted.');
+    return;
+  }
+  rows.forEach((row) => {
+    ensureSpace(doc, fonts, watermarkText, 42);
+    const y = doc.y;
+    drawPanel(doc, 40, y, doc.page.width - 80, 34, COLORS.panel, COLORS.line, 10);
+    setFont(doc, fonts, 'regular', 9, COLORS.muted);
+    doc.text(row.label, 56, y + 11, { width: 190 });
+    setFont(doc, fonts, 'heading', 10, COLORS.ink);
+    doc.text(String(row.value || ''), 250, y + 11, { width: doc.page.width - 306 });
+    doc.y = y + 42;
+  });
+}
+
+function drawAnalysisTranscript(doc, fonts, turns, watermarkText) {
+  drawSectionTitle(doc, fonts, 'Transcript', 'Speaker-separated conversation', watermarkText);
+  const safeTurns = Array.isArray(turns) ? turns : [];
+  if (!safeTurns.length) {
+    drawBulletList(doc, fonts, [], watermarkText, 'Transcript not available.');
+    return;
+  }
+  safeTurns.slice(0, 40).forEach((turn) => {
+    const role = turn.role === 'AI' ? 'AI' : turn.role === 'PATIENT' ? 'Patient' : turn.role || 'Note';
+    const text = String(turn.text || '');
+    const height = Math.max(44, doc.heightOfString(text, { width: doc.page.width - 150 }) + 26);
+    ensureSpace(doc, fonts, watermarkText, height + 8);
+    const y = doc.y;
+    drawPanel(doc, 40, y, doc.page.width - 80, height, role === 'AI' ? COLORS.blueSoft : COLORS.panel, COLORS.line, 12);
+    setFont(doc, fonts, 'heading', 9, role === 'AI' ? COLORS.blue : COLORS.green);
+    doc.text(role, 56, y + 12, { width: 80 });
+    setFont(doc, fonts, 'regular', 9, COLORS.ink);
+    doc.text(text, 130, y + 12, { width: doc.page.width - 190 });
+    doc.y = y + height + 8;
+  });
+}
+
+function generateCallAnalysisPDF({ call, analysis }) {
+  return new Promise((resolve, reject) => {
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const reportPath = `/tmp/call_analysis_${call.id || timestamp}_${timestamp}.pdf`;
+      const doc = new PDFDocument({ margin: 40, size: 'A4', autoFirstPage: true });
+      const stream = fs.createWriteStream(reportPath);
+      const fonts = registerFonts(doc);
+      const watermarkText = process.env.CLIENT_NAME || 'Call Analysis';
+
+      doc.pipe(stream);
+      decoratePage(doc, fonts, watermarkText);
+      drawCallAnalysisHeader(doc, fonts, call, analysis, watermarkText);
+      drawAnalysisSummary(doc, fonts, call, analysis, watermarkText);
+      drawAnalysisMetrics(doc, fonts, analysis, watermarkText);
+      drawAnalysisOutcomes(doc, fonts, analysis, watermarkText);
+      drawAnalysisTranscript(doc, fonts, analysis.transcript_turns || [], watermarkText);
+      doc.end();
+
+      stream.on('finish', () => resolve(reportPath));
+      stream.on('error', reject);
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
 module.exports = {
-  generateReportPDF
+  generateReportPDF,
+  generateCallAnalysisPDF
 };

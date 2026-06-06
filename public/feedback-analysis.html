@@ -5,118 +5,1056 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Call Analysis</title>
   <link rel="stylesheet" href="/app-shell.css">
+  <style>
+    :root {
+      --analysis-bg: #f6f8fb;
+      --analysis-panel: #ffffff;
+      --analysis-ink: #152033;
+      --analysis-muted: #667085;
+      --analysis-line: #dde5ef;
+      --analysis-blue: #2563eb;
+      --analysis-green: #15945b;
+      --analysis-red: #d92d20;
+      --analysis-amber: #b86b00;
+      --analysis-plum: #7c3aed;
+      --analysis-shadow: 0 18px 42px rgba(28, 40, 64, 0.09);
+    }
+
+    body.feedback-analysis-page {
+      background: var(--analysis-bg);
+      color: var(--analysis-ink);
+    }
+
+    .analysis-shell {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      padding: 18px;
+    }
+
+    .analysis-topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin: -18px -18px 18px;
+      padding: 14px 18px;
+      background: rgba(246, 248, 251, 0.92);
+      border-bottom: 1px solid var(--analysis-line);
+      backdrop-filter: blur(16px);
+    }
+
+    .analysis-back {
+      border: 1px solid var(--analysis-line);
+      background: #fff;
+      color: var(--analysis-ink);
+      border-radius: 10px;
+      padding: 10px 13px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .analysis-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .analysis-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 10px 14px;
+      border: 1px solid var(--analysis-line);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--analysis-ink);
+      font-weight: 800;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .analysis-button.primary {
+      border-color: var(--analysis-blue);
+      background: var(--analysis-blue);
+      color: #fff;
+    }
+
+    .analysis-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.7fr);
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .analysis-card {
+      background: var(--analysis-panel);
+      border: 1px solid var(--analysis-line);
+      border-radius: 8px;
+      box-shadow: var(--analysis-shadow);
+    }
+
+    .analysis-overview {
+      padding: 22px;
+    }
+
+    .analysis-status-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .analysis-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      padding: 8px 11px;
+      border-radius: 999px;
+      background: #eef4ff;
+      color: var(--analysis-blue);
+      font-size: 13px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .analysis-status.completed { background: #eaf7ef; color: var(--analysis-green); }
+    .analysis-status.failed,
+    .analysis-status.busy,
+    .analysis-status.no_answer { background: #fff0ed; color: var(--analysis-red); }
+
+    .analysis-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
+    .analysis-title h1 {
+      margin: 0;
+      font-size: clamp(28px, 5vw, 44px);
+      line-height: 1;
+      letter-spacing: -0.03em;
+    }
+
+    .analysis-title p {
+      margin: 10px 0 0;
+      color: var(--analysis-muted);
+      font-size: 15px;
+    }
+
+    .analysis-overview-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(130px, 1fr));
+      gap: 10px;
+    }
+
+    .analysis-fact {
+      min-width: 0;
+      padding: 13px;
+      border: 1px solid var(--analysis-line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .analysis-fact span {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--analysis-muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .analysis-fact strong {
+      display: block;
+      font-size: 15px;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+
+    .analysis-score-card {
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .analysis-score-ring {
+      width: 148px;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      margin: 0 auto;
+      background: conic-gradient(var(--analysis-green) var(--score-angle, 0deg), #edf1f6 0);
+    }
+
+    .analysis-score-ring > div {
+      width: 112px;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #fff;
+      font-size: 30px;
+      font-weight: 900;
+    }
+
+    .analysis-section-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .analysis-stack {
+      display: grid;
+      gap: 16px;
+      min-width: 0;
+    }
+
+    .analysis-section {
+      padding: 18px;
+    }
+
+    .analysis-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .analysis-section-title {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .analysis-section-subtitle {
+      margin: 4px 0 0;
+      color: var(--analysis-muted);
+      font-size: 13px;
+    }
+
+    .recording-player {
+      display: grid;
+      gap: 14px;
+    }
+
+    .recording-controls {
+      display: grid;
+      grid-template-columns: auto auto auto minmax(120px, 1fr);
+      gap: 10px;
+      align-items: center;
+    }
+
+    .control-button {
+      min-width: 64px;
+      height: 42px;
+      border-radius: 10px;
+      border: 1px solid var(--analysis-line);
+      background: #fff;
+      color: var(--analysis-ink);
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .progress-wrap {
+      display: grid;
+      gap: 8px;
+    }
+
+    .progress-bar {
+      width: 100%;
+      accent-color: var(--analysis-blue);
+    }
+
+    .time-row,
+    .recording-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--analysis-muted);
+      font-size: 13px;
+      flex-wrap: wrap;
+    }
+
+    .volume-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--analysis-muted);
+      font-size: 13px;
+    }
+
+    .volume-row input {
+      width: 130px;
+      accent-color: var(--analysis-blue);
+    }
+
+    .empty-state {
+      padding: 18px;
+      border: 1px dashed #ccd6e3;
+      border-radius: 8px;
+      background: #fbfcfe;
+      color: var(--analysis-muted);
+    }
+
+    .summary-text {
+      margin: 0;
+      color: #243047;
+      line-height: 1.7;
+      font-size: 16px;
+    }
+
+    .outcome-grid,
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .outcome-card,
+    .metric-card {
+      min-width: 0;
+      padding: 14px;
+      border: 1px solid var(--analysis-line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .outcome-card span,
+    .metric-card span {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--analysis-muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .outcome-card strong,
+    .metric-card strong {
+      display: block;
+      font-size: 17px;
+      overflow-wrap: anywhere;
+    }
+
+    .outcome-card.positive strong { color: var(--analysis-green); }
+    .outcome-card.negative strong { color: var(--analysis-red); }
+
+    .sentiment-panel {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+    }
+
+    .sentiment-mark {
+      width: 58px;
+      height: 58px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      background: #eef4ff;
+      color: var(--analysis-blue);
+      font-size: 24px;
+      font-weight: 900;
+    }
+
+    .sentiment-copy strong {
+      display: block;
+      font-size: 22px;
+    }
+
+    .sentiment-copy span {
+      color: var(--analysis-muted);
+    }
+
+    .transcript-toolbar {
+      display: grid;
+      grid-template-columns: minmax(160px, 1fr) auto auto auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .transcript-search {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid var(--analysis-line);
+      border-radius: 10px;
+      padding: 0 12px;
+      font: inherit;
+    }
+
+    .transcript-list {
+      display: grid;
+      gap: 10px;
+      max-height: 620px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .transcript-turn {
+      display: grid;
+      grid-template-columns: 86px minmax(0, 1fr);
+      gap: 12px;
+      padding: 13px;
+      border: 1px solid var(--analysis-line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .transcript-turn.ai {
+      background: #f4f8ff;
+      border-color: #cfe0ff;
+    }
+
+    .turn-role {
+      color: var(--analysis-muted);
+      font-size: 12px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .turn-text {
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 0;
+    }
+
+    .timeline-item {
+      position: relative;
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      gap: 14px;
+      padding: 0 0 18px;
+    }
+
+    .timeline-item::before {
+      content: "";
+      position: absolute;
+      left: 82px;
+      top: 18px;
+      bottom: -2px;
+      width: 1px;
+      background: var(--analysis-line);
+    }
+
+    .timeline-item:last-child::before {
+      display: none;
+    }
+
+    .timeline-time {
+      color: var(--analysis-muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .timeline-label {
+      position: relative;
+      min-width: 0;
+      padding-left: 20px;
+      font-weight: 800;
+    }
+
+    .timeline-label::before {
+      content: "";
+      position: absolute;
+      left: -1px;
+      top: 4px;
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--analysis-green);
+      box-shadow: 0 0 0 4px #eaf7ef;
+    }
+
+    .quality-checks {
+      display: grid;
+      gap: 9px;
+    }
+
+    .quality-check {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--analysis-line);
+      font-weight: 700;
+    }
+
+    .quality-check:last-child {
+      border-bottom: 0;
+    }
+
+    .check-pass { color: var(--analysis-green); }
+    .check-fail { color: var(--analysis-red); }
+
+    @media (max-width: 1060px) {
+      .analysis-hero,
+      .analysis-section-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .analysis-overview-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 720px) {
+      .analysis-shell {
+        padding: 12px;
+      }
+
+      .analysis-topbar {
+        margin: -12px -12px 12px;
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .analysis-actions {
+        justify-content: stretch;
+      }
+
+      .analysis-button {
+        flex: 1 1 auto;
+      }
+
+      .analysis-status-row,
+      .analysis-section-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .analysis-overview-grid,
+      .outcome-grid,
+      .metric-grid,
+      .recording-controls,
+      .transcript-toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .control-button {
+        width: 100%;
+        border-radius: 10px;
+      }
+
+      .transcript-turn,
+      .timeline-item {
+        grid-template-columns: 1fr;
+      }
+
+      .timeline-item::before {
+        left: 5px;
+      }
+    }
+  </style>
 </head>
 <body class="poc-page feedback-analysis-page">
-  <main class="analysis-detail-page">
-    <header class="analysis-detail-header">
-      <button id="analysisPageBackButton" class="analysis-detail-back" type="button" aria-label="Back to feedback">
-        <span aria-hidden="true">&larr;</span>
-        <span>Back</span>
-      </button>
-      <div class="analysis-detail-heading">
-        <h1 id="analysisPageTitle">Call Analysis</h1>
-        <p id="analysisPageSubtitle">Loading details...</p>
+  <main class="analysis-shell">
+    <div class="analysis-topbar">
+      <button id="analysisPageBackButton" class="analysis-back" type="button">Back</button>
+      <div class="analysis-actions">
+        <button id="rerunAnalysisButton" class="analysis-button" type="button">Re-run Analysis</button>
+        <button id="copySummaryButton" class="analysis-button" type="button">Copy Summary</button>
+        <a id="downloadTranscriptButton" class="analysis-button" href="#">Download Transcript</a>
+        <a id="downloadRecordingButton" class="analysis-button" href="#">Download Recording</a>
+        <a id="exportPdfButton" class="analysis-button primary" href="#">Export PDF Report</a>
       </div>
-    </header>
+    </div>
 
     <div id="alertContainer" class="alert-stack"></div>
 
-    <section class="analysis-detail-primary">
-      <section class="analysis-detail-card">
-        <div class="analysis-detail-card-header">
-          <h2>Outcome</h2>
-          <span id="analysisPageOutcome" class="status-badge pending">--</span>
+    <section class="analysis-hero">
+      <article class="analysis-card analysis-overview">
+        <div class="analysis-status-row">
+          <div class="analysis-title">
+            <span id="callStatusBadge" class="analysis-status"><i class="analysis-dot"></i><span>Loading</span></span>
+            <h1 id="analysisPageTitle">Call Analysis</h1>
+            <p id="analysisPageSubtitle">Loading call details...</p>
+          </div>
+          <div class="analysis-fact">
+            <span>Overall Outcome</span>
+            <strong id="overallOutcomeValue">--</strong>
+          </div>
         </div>
-        <div class="analysis-detail-meta-grid">
-          <article class="analysis-detail-meta-card">
-            <span>Rating</span>
-            <strong id="analysisPageRating">--</strong>
-          </article>
-          <article class="analysis-detail-meta-card">
-            <span>Processing</span>
-            <strong id="analysisPageStatus">--</strong>
-          </article>
+        <div class="analysis-overview-grid">
+          <div class="analysis-fact"><span>Call Type</span><strong id="callTypeValue">--</strong></div>
+          <div class="analysis-fact"><span>Patient Name</span><strong id="patientNameValue">--</strong></div>
+          <div class="analysis-fact"><span>Phone Number</span><strong id="phoneValue">--</strong></div>
+          <div class="analysis-fact"><span>Call Date & Time</span><strong id="calledAtValue">--</strong></div>
+          <div class="analysis-fact"><span>Call Duration</span><strong id="durationValue">--</strong></div>
+          <div class="analysis-fact"><span>Agent Used</span><strong id="agentValue">--</strong></div>
+          <div class="analysis-fact"><span>Transcript</span><strong id="transcriptStatusValue">--</strong></div>
+          <div class="analysis-fact"><span>Analysis</span><strong id="analysisStatusValue">--</strong></div>
         </div>
-      </section>
+      </article>
 
-      <section class="analysis-detail-card">
-        <h2>Recording</h2>
-        <div id="analysisPageRecording" class="analysis-detail-copy">Recording not available yet.</div>
-      </section>
-
-      <section class="analysis-detail-card">
-        <h2>Summary</h2>
-        <div id="analysisPageSummary" class="analysis-detail-copy">Analysis summary not available yet.</div>
-      </section>
+      <aside id="qualitySection" class="analysis-card analysis-score-card" hidden>
+        <div>
+          <div class="analysis-section-header">
+            <div>
+              <h2 class="analysis-section-title">AI Quality Score</h2>
+              <p class="analysis-section-subtitle">Execution quality for this call</p>
+            </div>
+          </div>
+          <div id="qualityRing" class="analysis-score-ring" style="--score-angle: 0deg;"><div id="qualityScoreValue">--</div></div>
+        </div>
+        <div id="qualityChecks" class="quality-checks"></div>
+      </aside>
     </section>
 
-    <details class="details-toggle analysis-detail-toggle" open>
-      <summary>Patient Review</summary>
-      <div class="details-content">
-        <section class="analysis-detail-card analysis-detail-card-nested">
-          <div id="analysisPageReview" class="analysis-detail-copy">No review extracted yet.</div>
+    <section class="analysis-section-grid">
+      <div class="analysis-stack">
+        <section id="recordingSection" class="analysis-card analysis-section" hidden>
+          <div class="analysis-section-header">
+            <div>
+              <h2 class="analysis-section-title">Recording</h2>
+              <p class="analysis-section-subtitle">Playback and download</p>
+            </div>
+            <span id="recordingQualityValue" class="analysis-status">Checking</span>
+          </div>
+          <div id="recordingContainer"></div>
         </section>
-      </div>
-    </details>
 
-    <details class="details-toggle analysis-detail-toggle">
-      <summary>Full Transcript</summary>
-      <div class="details-content">
-        <section class="analysis-detail-card analysis-detail-card-nested">
-          <div id="analysisPageTranscript" class="analysis-detail-copy">Loading transcript...</div>
+        <section id="summarySection" class="analysis-card analysis-section" hidden>
+          <div class="analysis-section-header">
+            <div>
+              <h2 class="analysis-section-title">AI Generated Summary</h2>
+              <p class="analysis-section-subtitle">What happened in the call</p>
+            </div>
+          </div>
+          <p id="summaryValue" class="summary-text">Loading summary...</p>
+        </section>
+
+        <section id="outcomesSection" class="analysis-card analysis-section" hidden>
+          <div class="analysis-section-header">
+            <div>
+              <h2 class="analysis-section-title">Key Outcomes</h2>
+              <p class="analysis-section-subtitle">Automatically extracted answers</p>
+            </div>
+          </div>
+          <div id="outcomeCards" class="outcome-grid"></div>
+        </section>
+
+        <section id="transcriptSection" class="analysis-card analysis-section" hidden>
+          <div class="analysis-section-header">
+            <div>
+              <h2 class="analysis-section-title">Full Transcript</h2>
+              <p class="analysis-section-subtitle">Speaker-separated, searchable transcript</p>
+            </div>
+          </div>
+          <div class="transcript-toolbar">
+            <input id="transcriptSearch" class="transcript-search" type="search" placeholder="Search transcript">
+            <button id="copyTranscriptButton" class="analysis-button" type="button">Copy Transcript</button>
+            <a id="viewTranscriptButton" class="analysis-button" href="#">View Transcript</a>
+            <button id="clearSearchButton" class="analysis-button" type="button">Clear</button>
+          </div>
+          <div id="transcriptList" class="transcript-list" style="margin-top: 14px;"></div>
         </section>
       </div>
-    </details>
+
+      <aside class="analysis-stack">
+        <section id="sentimentSection" class="analysis-card analysis-section" hidden>
+          <div class="analysis-section-header">
+            <div>
+              <h2 class="analysis-section-title">Sentiment Analysis</h2>
+              <p class="analysis-section-subtitle">Patient tone and confidence</p>
+            </div>
+          </div>
+          <div class="sentiment-panel">
+            <div id="sentimentMark" class="sentiment-mark">--</div>
+            <div class="sentiment-copy">
+              <strong id="sentimentValue">--</strong>
+              <span id="sentimentConfidenceValue">-- Confidence</span>
+            </div>
+          </div>
+        </section>
+
+        <section id="timelineSection" class="analysis-card analysis-section" hidden>
+          <div class="analysis-section-header">
+            <div>
+              <h2 class="analysis-section-title">Conversation Timeline</h2>
+              <p class="analysis-section-subtitle">Call progress at a glance</p>
+            </div>
+          </div>
+          <div id="timelineList" class="timeline"></div>
+        </section>
+
+        <section id="metricsSection" class="analysis-card analysis-section" hidden>
+          <div class="analysis-section-header">
+            <div>
+              <h2 class="analysis-section-title">Call Metrics</h2>
+              <p class="analysis-section-subtitle">Operational conversation metrics</p>
+            </div>
+          </div>
+          <div id="metricsGrid" class="metric-grid"></div>
+        </section>
+
+        <section id="exportSection" class="analysis-card analysis-section" hidden>
+          <div class="analysis-section-header">
+            <div>
+              <h2 class="analysis-section-title">Export Actions</h2>
+              <p class="analysis-section-subtitle">Share or archive this call</p>
+            </div>
+          </div>
+          <div class="analysis-actions" style="justify-content: flex-start;">
+            <a id="exportPdfButtonSecondary" class="analysis-button primary" href="#">Export PDF Report</a>
+            <button id="copySummaryButtonSecondary" class="analysis-button" type="button">Copy Summary</button>
+            <a id="downloadTranscriptButtonSecondary" class="analysis-button" href="#">Download Transcript</a>
+          </div>
+        </section>
+      </aside>
+    </section>
   </main>
 
   <script src="/app-shell.js"></script>
   <script>
+    let activeCall = null;
+    let transcriptTurns = [];
+    let audioEl = null;
+
     function getCallIdFromLocation() {
       const params = new URLSearchParams(window.location.search);
       return Number(params.get('callId') || 0);
     }
 
-    async function loadTranscriptForCall(callId) {
-      try {
-        const response = await fetch(`${AppShell.API_BASE}/calls/${callId}/transcript?raw=1`, { cache: 'no-store' });
-        if (response.status === 401) {
-          AppShell.redirectToLogin();
-          throw new Error('Authentication required');
-        }
-        if (!response.ok) throw new Error('Transcript not available yet');
-        return response.text();
-      } catch (error) {
-        return `Transcript not available yet.\n${error.message}`;
-      }
+    function formatCallType(value) {
+      return String(value || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP' ? '3 Month Follow-up' : 'Review Calling';
     }
 
-    function renderCallAnalysis(call) {
-      document.getElementById('analysisPageTitle').textContent = `Analysis for ${call.customer_name || 'Patient'}`;
-      document.getElementById('analysisPageSubtitle').textContent = AppShell.formatDateTime(call.called_at);
-      document.getElementById('analysisPageOutcome').textContent = AppShell.formatStatusLabel(call.outcome || '--');
-      document.getElementById('analysisPageOutcome').className = `status-badge ${String(call.outcome || 'pending').toLowerCase()}`;
-      document.getElementById('analysisPageRating').textContent = call.extracted_rating ? `${call.extracted_rating}/5` : '--';
-      document.getElementById('analysisPageStatus').textContent = AppShell.formatStatusLabel(call.analysis_status || 'pending');
-      document.getElementById('analysisPageSummary').textContent = call.analysis_summary || call.report_excerpt || 'Analysis summary not available yet.';
-      document.getElementById('analysisPageReview').textContent = call.extracted_review_text || 'No review extracted yet.';
+    function formatDuration(seconds) {
+      const total = Math.max(0, Math.round(Number(seconds || 0)));
+      const minutes = Math.floor(total / 60);
+      const remaining = total % 60;
+      return minutes ? `${minutes}m ${remaining}s` : `${remaining}s`;
+    }
 
-      const recordingWrap = document.getElementById('analysisPageRecording');
-      if (call.recording_url || call.recording_sid || String(call.recording_status || '').toLowerCase() === 'completed') {
-        recordingWrap.innerHTML = `<audio class="audio-player" controls preload="none" src="${AppShell.API_BASE}/calls/${call.id}/recording"></audio>`;
-      } else {
-        recordingWrap.textContent = 'Recording not available yet.';
+    function formatClock(value) {
+      if (!value) return '--';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '--';
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function parseTurnsFromText(text) {
+      return String(text || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const match = line.match(/^\[?([A-Z]+)\]?\s*:\s*(.*)$/);
+          if (!match) return { role: 'NOTE', text: line };
+          const rawRole = match[1];
+          return {
+            role: rawRole === 'AGENT' || rawRole === 'AI' ? 'AI' : rawRole === 'CUSTOMER' || rawRole === 'PATIENT' ? 'PATIENT' : rawRole,
+            text: match[2] || ''
+          };
+        });
+    }
+
+    function rawTranscriptText() {
+      return transcriptTurns.map((turn) => `${turn.role}: ${turn.text}`).join('\n');
+    }
+
+    function setText(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value || '';
+    }
+
+    function setSectionVisible(id, isVisible) {
+      const section = document.getElementById(id);
+      if (section) section.hidden = !isVisible;
+    }
+
+    function hasText(value) {
+      return Boolean(String(value || '').trim());
+    }
+
+    function renderStatus(call) {
+      const status = String(call.outcome || 'pending').toLowerCase();
+      const badge = document.getElementById('callStatusBadge');
+      badge.className = `analysis-status ${status}`;
+      badge.innerHTML = `<i class="analysis-dot"></i><span>${AppShell.escapeHtml(AppShell.formatStatusLabel(status))}</span>`;
+    }
+
+    function renderOverview(call) {
+      const analysis = call.analysis || {};
+      document.getElementById('analysisPageTitle').textContent = call.customer_name || 'Patient';
+      document.getElementById('analysisPageSubtitle').textContent = `${formatCallType(call.call_type)} · ${AppShell.formatDateTime(call.called_at)}`;
+      renderStatus(call);
+      setText('overallOutcomeValue', String(call.outcome || '').toLowerCase() === 'completed' ? 'Successful' : AppShell.formatStatusLabel(call.outcome || 'Pending'));
+      setText('callTypeValue', formatCallType(call.call_type));
+      setText('patientNameValue', call.customer_name || 'Patient');
+      setText('phoneValue', call.customer_phone || '--');
+      setText('calledAtValue', AppShell.formatDateTime(call.called_at));
+      setText('durationValue', formatDuration(call.call_duration || analysis.metrics?.total_duration || 0));
+      setText('agentValue', call.agent_name || 'Default AI Agent');
+      setText('transcriptStatusValue', AppShell.formatStatusLabel(call.transcript_status || 'pending'));
+      setText('analysisStatusValue', AppShell.formatStatusLabel(call.analysis_status || 'pending'));
+    }
+
+    function renderRecording(call) {
+      const container = document.getElementById('recordingContainer');
+      const hasRecording = call.recording_url || call.recording_sid || String(call.recording_status || '').toLowerCase() === 'completed';
+      setSectionVisible('recordingSection', Boolean(hasRecording));
+      document.getElementById('downloadRecordingButton').hidden = !hasRecording;
+      document.getElementById('recordingQualityValue').textContent = hasRecording ? 'Available' : 'Unavailable';
+      document.getElementById('recordingQualityValue').className = `analysis-status ${hasRecording ? 'completed' : 'failed'}`;
+
+      if (!hasRecording) {
+        container.innerHTML = '';
+        return;
       }
+
+      const recordingUrl = `${AppShell.API_BASE}/calls/${call.id}/recording`;
+      container.innerHTML = `
+        <div class="recording-player">
+          <audio id="analysisAudio" preload="metadata" src="${recordingUrl}"></audio>
+          <div class="recording-controls">
+            <button id="playPauseButton" class="control-button" type="button" title="Play or pause">Play</button>
+            <button id="stopButton" class="control-button" type="button" title="Stop">Stop</button>
+            <button id="muteButton" class="control-button" type="button" title="Mute">Vol</button>
+            <div class="progress-wrap">
+              <input id="audioProgress" class="progress-bar" type="range" min="0" max="100" value="0">
+              <div class="time-row"><span id="audioCurrentTime">0s</span><span id="audioTotalTime">${formatDuration(call.call_duration || 0)}</span></div>
+            </div>
+          </div>
+          <div class="volume-row">
+            <span>Volume</span>
+            <input id="volumeControl" type="range" min="0" max="1" step="0.05" value="1">
+          </div>
+          <div class="recording-meta">
+            <span>Recording Duration: <strong>${formatDuration(call.call_duration || 0)}</strong></span>
+            <span>Audio Quality: <strong>Available</strong></span>
+          </div>
+        </div>
+      `;
+
+      audioEl = document.getElementById('analysisAudio');
+      const playPause = document.getElementById('playPauseButton');
+      const stop = document.getElementById('stopButton');
+      const mute = document.getElementById('muteButton');
+      const progress = document.getElementById('audioProgress');
+      const volume = document.getElementById('volumeControl');
+
+      playPause.addEventListener('click', async () => {
+        if (audioEl.paused) {
+          await audioEl.play();
+        } else {
+          audioEl.pause();
+        }
+      });
+      stop.addEventListener('click', () => {
+        audioEl.pause();
+        audioEl.currentTime = 0;
+      });
+      mute.addEventListener('click', () => {
+        audioEl.muted = !audioEl.muted;
+        mute.textContent = audioEl.muted ? 'Mute' : 'Vol';
+      });
+      volume.addEventListener('input', () => {
+        audioEl.volume = Number(volume.value);
+      });
+      progress.addEventListener('input', () => {
+        if (audioEl.duration) audioEl.currentTime = (Number(progress.value) / 100) * audioEl.duration;
+      });
+      audioEl.addEventListener('loadedmetadata', () => {
+        document.getElementById('audioTotalTime').textContent = formatDuration(audioEl.duration || call.call_duration || 0);
+      });
+      audioEl.addEventListener('timeupdate', () => {
+        const pct = audioEl.duration ? (audioEl.currentTime / audioEl.duration) * 100 : 0;
+        progress.value = String(pct);
+        document.getElementById('audioCurrentTime').textContent = formatDuration(audioEl.currentTime);
+      });
+      audioEl.addEventListener('play', () => { playPause.textContent = 'Pause'; });
+      audioEl.addEventListener('pause', () => { playPause.textContent = 'Play'; });
+    }
+
+    function renderSummary(call) {
+      const summary = call.summary || call.analysis_summary || call.analysis?.summary || '';
+      setSectionVisible('summarySection', hasText(summary));
+      document.getElementById('summaryValue').textContent = summary;
+    }
+
+    function renderOutcomes(call) {
+      const cards = (call.analysis?.outcome_cards || []).filter((card) => {
+        const value = String(card.value || '').trim().toUpperCase();
+        return value && value !== 'UNKNOWN' && value !== '--';
+      });
+      const container = document.getElementById('outcomeCards');
+      if (!cards.length) {
+        setSectionVisible('outcomesSection', false);
+        container.innerHTML = '';
+        return;
+      }
+      setSectionVisible('outcomesSection', true);
+      container.innerHTML = cards.map((card) => `
+        <article class="outcome-card ${AppShell.escapeHtml(card.tone || '')}">
+          <span>${AppShell.escapeHtml(card.label)}</span>
+          <strong>${AppShell.escapeHtml(card.value || '')}</strong>
+        </article>
+      `).join('');
+    }
+
+    function renderSentiment(call) {
+      const sentiment = String(call.sentiment || call.sentiment_label || call.analysis?.sentiment || 'neutral').toLowerCase();
+      const confidence = Math.round(Number(call.sentiment_score || call.analysis?.sentiment_score || 0) * 100);
+      const hasSentiment = hasText(sentiment) && confidence > 0;
+      setSectionVisible('sentimentSection', hasSentiment);
+      if (!hasSentiment) return;
+      const letter = sentiment === 'positive' ? '+' : sentiment === 'negative' ? '-' : '=';
+      document.getElementById('sentimentMark').textContent = letter;
+      document.getElementById('sentimentValue').textContent = AppShell.formatStatusLabel(sentiment);
+      document.getElementById('sentimentConfidenceValue').textContent = `${confidence || 0}% Confidence`;
+    }
+
+    function renderTranscript(filter = '') {
+      const container = document.getElementById('transcriptList');
+      const needle = String(filter || '').trim().toLowerCase();
+      const visibleTurns = needle
+        ? transcriptTurns.filter((turn) => `${turn.role} ${turn.text}`.toLowerCase().includes(needle))
+        : transcriptTurns;
+
+      setSectionVisible('transcriptSection', transcriptTurns.length > 0);
+      if (!visibleTurns.length) {
+        container.innerHTML = '';
+        return;
+      }
+
+      container.innerHTML = visibleTurns.map((turn) => `
+        <div class="transcript-turn ${turn.role === 'AI' ? 'ai' : 'patient'}">
+          <div class="turn-role">${turn.role === 'PATIENT' ? 'Patient' : AppShell.escapeHtml(turn.role)}</div>
+          <div class="turn-text">${AppShell.escapeHtml(turn.text)}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderTimeline(call) {
+      const events = call.analysis?.timeline_events || call.timeline_events || [];
+      const container = document.getElementById('timelineList');
+      if (!events.length) {
+        setSectionVisible('timelineSection', false);
+        container.innerHTML = '';
+        return;
+      }
+      setSectionVisible('timelineSection', true);
+      container.innerHTML = events.map((event) => `
+        <div class="timeline-item">
+          <div class="timeline-time">${formatClock(event.at)}</div>
+          <div class="timeline-label">${AppShell.escapeHtml(event.label || '')}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderMetrics(call) {
+      const metrics = call.analysis?.metrics || {};
+      const hasMetrics = Object.values(metrics).some((value) => Number(value || 0) > 0);
+      setSectionVisible('metricsSection', hasMetrics);
+      if (!hasMetrics) {
+        document.getElementById('metricsGrid').innerHTML = '';
+        return;
+      }
+      const rows = [
+        ['Total Duration', formatDuration(call.call_duration || metrics.total_duration || 0)],
+        ['AI Talk Time', formatDuration(call.ai_talk_time || metrics.ai_talk_time || 0)],
+        ['Patient Talk Time', formatDuration(call.patient_talk_time || metrics.patient_talk_time || 0)],
+        ['Silence Duration', formatDuration(metrics.silence_duration || 0)],
+        ['Interruptions', String(metrics.interruptions || 0)],
+        ['Questions Asked', String(metrics.questions_asked || 0)],
+        ['Questions Answered', String(metrics.questions_answered || 0)],
+        ['Avg Response Time', metrics.average_response_time_ms ? `${metrics.average_response_time_ms}ms` : '']
+      ].filter(([, value]) => String(value || '').trim() && value !== '0s' && value !== '0');
+      document.getElementById('metricsGrid').innerHTML = rows.map(([label, value]) => `
+        <article class="metric-card"><span>${label}</span><strong>${value}</strong></article>
+      `).join('');
+    }
+
+    function renderQuality(call) {
+      const score = Number(call.quality_score || call.analysis?.quality_score || 0);
+      setSectionVisible('qualitySection', score > 0);
+      if (score <= 0) return;
+      const ring = document.getElementById('qualityRing');
+      ring.style.setProperty('--score-angle', `${Math.min(100, Math.max(0, score)) * 3.6}deg`);
+      document.getElementById('qualityScoreValue').textContent = `${score || 0}%`;
+
+      const checks = call.analysis?.quality_checks || [];
+      document.getElementById('qualityChecks').innerHTML = checks.map((check) => `
+        <div class="quality-check">
+          <span>${AppShell.escapeHtml(check.label)}</span>
+          <strong class="${check.passed ? 'check-pass' : 'check-fail'}">${check.passed ? 'Yes' : 'No'}</strong>
+        </div>
+      `).join('');
+    }
+
+    function updateActionLinks(call) {
+      const transcriptUrl = `${AppShell.API_BASE}/calls/${call.id}/transcript?raw=1`;
+      const recordingUrl = `${AppShell.API_BASE}/calls/${call.id}/recording`;
+      const pdfUrl = `${AppShell.API_BASE}/calls/${call.id}/analysis-pdf`;
+      const hasTranscript = transcriptTurns.length > 0;
+      const hasSummary = hasText(call.summary || call.analysis_summary || call.analysis?.summary);
+      const hasRecording = call.recording_url || call.recording_sid || String(call.recording_status || '').toLowerCase() === 'completed';
+      setSectionVisible('exportSection', hasTranscript || hasSummary || hasRecording);
+      ['downloadTranscriptButton', 'downloadTranscriptButtonSecondary'].forEach((id) => {
+        const link = document.getElementById(id);
+        link.href = transcriptUrl;
+        link.download = `call-${call.id}-transcript.txt`;
+        link.hidden = !hasTranscript;
+      });
+      document.getElementById('viewTranscriptButton').href = `${AppShell.API_BASE}/calls/${call.id}/transcript`;
+      document.getElementById('viewTranscriptButton').hidden = !hasTranscript;
+      document.getElementById('downloadRecordingButton').href = recordingUrl;
+      document.getElementById('downloadRecordingButton').download = `call-${call.id}-recording.mp3`;
+      document.getElementById('downloadRecordingButton').hidden = !hasRecording;
+      ['exportPdfButton', 'exportPdfButtonSecondary'].forEach((id) => {
+        document.getElementById(id).href = pdfUrl;
+        document.getElementById(id).hidden = !(hasTranscript || hasSummary);
+      });
+      ['copySummaryButton', 'copySummaryButtonSecondary'].forEach((id) => {
+        document.getElementById(id).hidden = !hasSummary;
+      });
+    }
+
+    function renderCall(call) {
+      activeCall = call;
+      transcriptTurns = call.analysis?.transcript_turns?.length
+        ? call.analysis.transcript_turns
+        : parseTurnsFromText(call.transcript_text || '');
+      renderOverview(call);
+      renderRecording(call);
+      renderSummary(call);
+      renderOutcomes(call);
+      renderSentiment(call);
+      renderTranscript();
+      renderTimeline(call);
+      renderMetrics(call);
+      renderQuality(call);
+      updateActionLinks(call);
     }
 
     async function loadAnalysisPage() {
       const callId = getCallIdFromLocation();
-      if (!callId) {
-        throw new Error('Missing call id');
-      }
-
+      if (!callId) throw new Error('Missing call id');
       const call = await AppShell.fetchJson(`${AppShell.API_BASE}/calls/${callId}`);
-      renderCallAnalysis(call);
-      document.getElementById('analysisPageTranscript').textContent = await loadTranscriptForCall(call.id);
+      renderCall(call);
     }
 
     function goBackToFeedback() {
@@ -127,16 +1065,45 @@
       window.location.href = '/feedback.html';
     }
 
+    async function copyText(text, successMessage) {
+      await navigator.clipboard.writeText(text || '');
+      AppShell.showAlert(successMessage);
+    }
+
+    async function rerunAnalysis() {
+      if (!activeCall?.id) return;
+      const button = document.getElementById('rerunAnalysisButton');
+      button.disabled = true;
+      button.textContent = 'Running...';
+      try {
+        await AppShell.fetchJson(`${AppShell.API_BASE}/calls/${activeCall.id}/analyze`, { method: 'POST' });
+        const call = await AppShell.fetchJson(`${AppShell.API_BASE}/calls/${activeCall.id}`);
+        renderCall(call);
+        AppShell.showAlert('Analysis updated successfully');
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Re-run Analysis';
+      }
+    }
+
     document.addEventListener('DOMContentLoaded', async () => {
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('analysisPageBackButton').addEventListener('click', goBackToFeedback);
+      document.getElementById('transcriptSearch').addEventListener('input', (event) => renderTranscript(event.target.value));
+      document.getElementById('clearSearchButton').addEventListener('click', () => {
+        document.getElementById('transcriptSearch').value = '';
+        renderTranscript();
+      });
+      document.getElementById('copyTranscriptButton').addEventListener('click', () => copyText(rawTranscriptText(), 'Transcript copied'));
+      document.getElementById('copySummaryButton').addEventListener('click', () => copyText(document.getElementById('summaryValue').textContent, 'Summary copied'));
+      document.getElementById('copySummaryButtonSecondary').addEventListener('click', () => copyText(document.getElementById('summaryValue').textContent, 'Summary copied'));
+      document.getElementById('rerunAnalysisButton').addEventListener('click', rerunAnalysis);
 
       try {
         await loadAnalysisPage();
       } catch (error) {
         AppShell.showAlert(error.message, 'error');
-        document.getElementById('analysisPageSubtitle').textContent = 'Unable to load analysis details.';
-        document.getElementById('analysisPageTranscript').textContent = error.message;
+        setText('analysisPageSubtitle', 'Unable to load analysis details.');
       }
     });
   </script>

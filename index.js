@@ -17,6 +17,8 @@ const testAiCallRouter = require('./routes/test-ai-call');
 const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
 const { processCompletedCallPipeline } = require('./services/post-call-pipeline');
 const { buildOwnerDashboardData } = require('./services/reporting');
+const { buildCallAnalysis, storeCallAnalysis } = require('./services/call-analysis');
+const { generateCallAnalysisPDF } = require('./services/pdf');
 const { sendSimpleEmail } = require('./services/email');
 const {
   initiateCall,
@@ -32,6 +34,7 @@ const {
   buildThreeMonthFollowupPrompt,
   buildThreeMonthFollowupOpeningPrompt
 } = require('./prompts/three-month-followup.ts');
+const { getGreeting } = require('./utils/greeting');
 const {
   buildPreCallIntelligence,
   computePriorityScore,
@@ -451,30 +454,34 @@ function formatOutboundCallTypeLabel(value) {
 function buildCallTypeSystemPrompt(callType, clientName, customerName) {
   const normalizedCallType = normalizeOutboundCallType(callType);
   const promptClientName = process.env.CALL_PROMPT_CLIENT_NAME || 'Apna Blood Centre';
+  const greeting = getGreeting();
   if (normalizedCallType === CALL_TYPES.THREE_MONTH_FOLLOWUP) {
     return buildThreeMonthFollowupPrompt({
       clientName: promptClientName,
       donorName: customerName || 'Donor'
-    });
+    }).replace(/\[GREETING\]/g, greeting);
   }
 
   return buildReviewCallingPrompt({
     clientName: promptClientName
-  });
+  }).replace(/\[GREETING\]/g, greeting);
 }
 
 function buildCallTypeOpeningPrompt(callType, clientName, customerName) {
   const normalizedCallType = normalizeOutboundCallType(callType);
   const promptClientName = process.env.CALL_PROMPT_CLIENT_NAME || 'Apna Blood Centre';
+  const greeting = getGreeting();
   if (normalizedCallType === CALL_TYPES.THREE_MONTH_FOLLOWUP) {
     return buildThreeMonthFollowupOpeningPrompt({
       clientName: promptClientName,
-      donorName: customerName || 'Donor'
+      donorName: customerName || 'Donor',
+      greeting
     });
   }
 
   return buildReviewCallingOpeningPrompt({
-    clientName: promptClientName
+    clientName: promptClientName,
+    greeting
   });
 }
 
@@ -1170,6 +1177,22 @@ function parseIcallMateExtraParams(value) {
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (error) {
     return {};
+  }
+}
+
+function safeJsonParse(value, fallback = null) {
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return fallback;
   }
 }
 
@@ -2939,9 +2962,11 @@ app.get('/api/calls/recent', async (req, res) => {
          calls.recording_url,
          calls.recording_status,
          calls.recording_local_path,
+         calls.transcript_text,
          calls.transcript_status,
          calls.transcript_source,
          calls.analysis_status,
+         calls.summary,
          calls.analysis_summary,
          calls.analysis_json,
          calls.key_points_json,
@@ -2950,7 +2975,14 @@ app.get('/api/calls/recent', async (req, res) => {
          calls.extracted_rating,
          calls.extracted_review_text,
          calls.sentiment_label,
+         calls.sentiment,
          calls.sentiment_score,
+         calls.call_duration,
+         calls.ai_talk_time,
+         calls.patient_talk_time,
+         calls.quality_score,
+         calls.timeline_events,
+         calls.extracted_entities,
          calls.hot_lead_score,
          calls.next_action_at,
          calls.follow_up_task,
@@ -3003,9 +3035,11 @@ app.get('/api/calls/:callId(\\d+)', async (req, res) => {
          calls.recording_url,
          calls.recording_status,
          calls.recording_local_path,
+         calls.transcript_text,
          calls.transcript_status,
          calls.transcript_source,
          calls.analysis_status,
+         calls.summary,
          calls.analysis_summary,
          calls.analysis_json,
          calls.key_points_json,
@@ -3014,7 +3048,14 @@ app.get('/api/calls/:callId(\\d+)', async (req, res) => {
          calls.extracted_rating,
          calls.extracted_review_text,
          calls.sentiment_label,
+         calls.sentiment,
          calls.sentiment_score,
+         calls.call_duration,
+         calls.ai_talk_time,
+         calls.patient_talk_time,
+         calls.quality_score,
+         calls.timeline_events,
+         calls.extracted_entities,
          calls.hot_lead_score,
          calls.next_action_at,
          calls.follow_up_task,
@@ -3038,10 +3079,103 @@ app.get('/api/calls/:callId(\\d+)', async (req, res) => {
       return res.status(404).json({ error: 'Call not found' });
     }
 
-    res.json(row);
+    const storedAnalysis = safeJsonParse(row.analysis_json, null);
+    const generatedAnalysis = buildCallAnalysis(row);
+    const analysis = storedAnalysis?.product_analysis || storedAnalysis || generatedAnalysis;
+    const timelineEvents = safeJsonParse(row.timeline_events, analysis.timeline_events || []);
+    const extractedEntities = safeJsonParse(row.extracted_entities, analysis.entities || {});
+
+    res.json({
+      ...row,
+      summary: row.summary || row.analysis_summary || analysis.summary || null,
+      analysis_summary: row.analysis_summary || row.summary || analysis.summary || null,
+      sentiment: row.sentiment || row.sentiment_label || analysis.sentiment || 'neutral',
+      sentiment_label: row.sentiment_label || row.sentiment || analysis.sentiment || 'neutral',
+      sentiment_score: Number(row.sentiment_score || analysis.sentiment_score || 0),
+      call_duration: Number(row.call_duration || analysis.metrics?.total_duration || 0),
+      ai_talk_time: Number(row.ai_talk_time || analysis.metrics?.ai_talk_time || 0),
+      patient_talk_time: Number(row.patient_talk_time || analysis.metrics?.patient_talk_time || 0),
+      quality_score: Number(row.quality_score || analysis.quality_score || 0),
+      timeline_events: timelineEvents,
+      extracted_entities: extractedEntities,
+      analysis: {
+        ...generatedAnalysis,
+        ...analysis,
+        timeline_events: timelineEvents,
+        entities: extractedEntities,
+        summary: row.summary || row.analysis_summary || analysis.summary || generatedAnalysis.summary,
+        sentiment: row.sentiment || row.sentiment_label || analysis.sentiment || generatedAnalysis.sentiment,
+        sentiment_score: Number(row.sentiment_score || analysis.sentiment_score || generatedAnalysis.sentiment_score || 0),
+        quality_score: Number(row.quality_score || analysis.quality_score || generatedAnalysis.quality_score || 0)
+      }
+    });
   } catch (error) {
     console.error('[CALL DETAIL ERROR]', error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/calls/:callId(\\d+)/analyze', async (req, res) => {
+  try {
+    const call = await dbGet(
+      `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone, agents.name AS agent_name, agents.slug AS agent_slug
+         FROM calls
+         JOIN customers ON customers.id = calls.customer_id
+         LEFT JOIN agents ON agents.id = calls.agent_id
+        WHERE calls.id = ?`,
+      [req.params.callId]
+    );
+
+    if (!call) {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+
+    const analysis = buildCallAnalysis(call);
+    await storeCallAnalysis({ dbRun, callId: call.id, analysis });
+    const updatedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [call.id]);
+    res.json({
+      success: true,
+      call: updatedCall,
+      analysis
+    });
+  } catch (error) {
+    console.error('[CALL ANALYSIS RERUN ERROR]', error.message);
+    res.status(500).json({ error: 'Failed to re-run analysis' });
+  }
+});
+
+app.get('/api/calls/:callId(\\d+)/analysis-pdf', async (req, res) => {
+  try {
+    const call = await dbGet(
+      `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone, agents.name AS agent_name, agents.slug AS agent_slug
+         FROM calls
+         JOIN customers ON customers.id = calls.customer_id
+         LEFT JOIN agents ON agents.id = calls.agent_id
+        WHERE calls.id = ?`,
+      [req.params.callId]
+    );
+
+    if (!call) {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+
+    const storedAnalysis = safeJsonParse(call.analysis_json, null);
+    const analysis = storedAnalysis?.product_analysis || storedAnalysis || buildCallAnalysis(call);
+    const pdfPath = await generateCallAnalysisPDF({
+      call,
+      analysis: {
+        ...buildCallAnalysis(call),
+        ...analysis,
+        timeline_events: safeJsonParse(call.timeline_events, analysis.timeline_events || []),
+        entities: safeJsonParse(call.extracted_entities, analysis.entities || {})
+      }
+    });
+
+    const filename = `Call-Analysis-${call.id}-${new Date().toISOString().slice(0, 10)}.pdf`;
+    res.download(pdfPath, filename);
+  } catch (error) {
+    console.error('[CALL ANALYSIS PDF ERROR]', error.message);
+    res.status(500).json({ error: 'Failed to export analysis PDF' });
   }
 });
 
