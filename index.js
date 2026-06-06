@@ -226,6 +226,7 @@ const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
 const GEMINI_LIVE_THINKING_LEVEL = process.env.GEMINI_LIVE_THINKING_LEVEL || 'minimal';
 const GEMINI_LIVE_SILENCE_DURATION_MS = Math.max(Number(process.env.GEMINI_LIVE_SILENCE_DURATION_MS || 120) || 120, 80);
 const GEMINI_LIVE_PREFIX_PADDING_MS = Math.max(Number(process.env.GEMINI_LIVE_PREFIX_PADDING_MS || 20) || 20, 0);
+const GEMINI_LIVE_DIRECT_AUDIO = String(process.env.GEMINI_LIVE_DIRECT_AUDIO || 'false').toLowerCase() === 'true';
 const DEEPGRAM_TTS_MODEL = process.env.DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
 const REALTIME_MODEL = AI_PROVIDER.startsWith('gemini') ? GEMINI_MODEL : OPENAI_REALTIME_MODEL;
 const OPENAI_REALTIME_WS_BASE_URL = 'wss://api.openai.com/v1/realtime';
@@ -286,6 +287,7 @@ function logConfigSnapshot(scope = 'CONFIG') {
     GEMINI_VOICE,
     GEMINI_LIVE_THINKING_LEVEL,
     GEMINI_LIVE_SILENCE_DURATION_MS,
+    GEMINI_LIVE_DIRECT_AUDIO,
     DEEPGRAM_TTS_MODEL,
     OPENAI_REALTIME_MODEL,
     OPENAI_REALTIME_VOICE,
@@ -508,6 +510,7 @@ When ending a call, first speak the closing message, then call the end_call tool
 CRITICAL RULES:
 - Never ask another question after calling end_call.
 - Never continue conversation after calling end_call.
+- Never say "end_call" aloud to the customer.
 - Never restart the survey.
 - Never say "Is there anything else?"
 - The end_call tool has the highest priority.
@@ -3509,7 +3512,14 @@ function createIcallMateAiBridge(ws, session) {
               || message?.serverContent?.output_transcription?.text
               || '';
             if (transcript) {
-              console.log(`[ICALLMATE][AGENT][GEMINI LIVE]: ${String(transcript).trim()}`);
+              const cleanTranscript = String(transcript).replace(/\bend_call\b/gi, '').trim();
+              if (cleanTranscript) {
+                console.log(`[ICALLMATE][AGENT][GEMINI LIVE]: ${cleanTranscript}`);
+              }
+              if (/\bend_call\b/i.test(String(transcript))) {
+                requestCallHangup('gemini_live_end_call_marker');
+                setTimeout(finalizeCallHangup, estimateHangupDelayMs(cleanTranscript));
+              }
             }
 
             if (message?.serverContent?.interrupted) {
@@ -3945,7 +3955,7 @@ function createIcallMateAiBridge(ws, session) {
         return;
       }
 
-      if (useGeminiLive()) {
+      if (useGeminiLive() && GEMINI_LIVE_DIRECT_AUDIO) {
         if (geminiLiveSession && geminiLiveReady) {
           geminiLiveSession.sendRealtimeInput({
             audio: {
