@@ -249,7 +249,8 @@ const OPENAI_REALTIME_WS_BASE_URL = 'wss://api.openai.com/v1/realtime';
 const MAX_PRECONNECT_MEDIA_CHUNKS = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_CHUNKS || 60) || 60, 10);
 const MAX_PRECONNECT_MEDIA_BYTES = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_BYTES || 512000) || 512000, 64000);
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
-const HARDCODED_PUBLIC_BASE_URL = 'https://winter-undeclamatory-unstammeringly.ngrok-free.dev';
+// Clear any hardcoded demo public URL to avoid leaking demo/NGROK addresses
+const HARDCODED_PUBLIC_BASE_URL = '';
 const SERVER_NAME_BASE_URL = process.env.SERVER_NAME ? `https://${String(process.env.SERVER_NAME).replace(/^https?:\/\//i, '').replace(/\/+$/g, '')}` : '';
 const PUBLIC_BASE_URL = (
   SERVER_NAME_BASE_URL
