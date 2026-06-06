@@ -26,7 +26,7 @@ function normalizeAgentPayload(payload = {}) {
     client_name: String(payload.client_name || '').trim(),
     language: String(payload.language || 'hi').trim().toLowerCase() || 'hi',
     voice_pipeline: String(payload.voice_pipeline || 'legacy').trim().toLowerCase() || 'legacy',
-    stt_provider: String(payload.stt_provider || 'deepgram').trim().toLowerCase() || 'deepgram',
+    stt_provider: String(payload.stt_provider || 'gemini').trim().toLowerCase() || 'gemini',
     llm_provider: String(payload.llm_provider || 'gemini').trim().toLowerCase() || 'gemini',
     llm_model: String(payload.llm_model || '').trim(),
     tts_provider: String(payload.tts_provider || 'native').trim().toLowerCase() || 'native',

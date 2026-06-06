@@ -3,7 +3,6 @@
     return;
   }
 
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const STATUS_LABELS = {
     ready: 'Ready',
     permission: 'Mic Permission Needed',
@@ -27,6 +26,15 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId, message })
+      });
+    },
+    messageAudio(sessionId, audioBlob) {
+      const form = new FormData();
+      form.append('sessionId', sessionId);
+      form.append('audio', audioBlob, 'test-call.webm');
+      return window.AppShell.fetchJson(`${window.AppShell.API_BASE}/test-ai-call/message-audio`, {
+        method: 'POST',
+        body: form
       });
     },
     end(sessionId) {
@@ -58,8 +66,17 @@
   class TestAICallWidget {
     constructor() {
       this.root = null;
-      this.recognition = null;
       this.mediaStream = null;
+      this.mediaRecorder = null;
+      this.audioChunks = [];
+      this.audioContext = null;
+      this.audioAnalyser = null;
+      this.audioLevelTimerId = null;
+      this.bargeInTimerId = null;
+      this.currentAudio = null;
+      this.currentAudioStop = null;
+      this.lastPlaybackStartedAt = 0;
+      this.recordingStartedAt = 0;
       this.sessionId = '';
       this.callId = '';
       this.status = 'ready';
@@ -74,6 +91,10 @@
       this.durationSeconds = 0;
       this.timerId = null;
       this.shouldListen = false;
+      this.listenTimeoutId = null;
+      this.hindiVoice = null;
+      this.userHasSpoken = false;
+      this.silenceStartedAt = 0;
     }
 
     mount() {
@@ -171,6 +192,9 @@
       this.root.querySelectorAll('[data-action="transcript"]').forEach((button) => {
         button.addEventListener('click', () => this.toggleTranscript());
       });
+      window.speechSynthesis?.addEventListener?.('voiceschanged', () => {
+        this.hindiVoice = this.pickHindiVoice();
+      });
     }
 
     open() {
@@ -234,6 +258,13 @@
       }
     }
 
+    clearListenTimeout() {
+      if (this.listenTimeoutId) {
+        window.clearTimeout(this.listenTimeoutId);
+        this.listenTimeoutId = null;
+      }
+    }
+
     async requestMicPermission() {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error('Microphone permission is not supported in this browser.');
@@ -244,46 +275,166 @@
       return stream;
     }
 
-    createRecognition() {
-      if (!SpeechRecognition) {
-        throw new Error('SpeechRecognition is not available in this browser. Chrome or Edge works best for this POC.');
+    getRecorderMimeType() {
+      const candidates = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/mp4'
+      ];
+      return candidates.find((type) => window.MediaRecorder?.isTypeSupported?.(type)) || '';
+    }
+
+    async ensureActiveMicStream() {
+      const hasLiveAudioTrack = this.mediaStream
+        && this.mediaStream.getAudioTracks().some((track) => track.readyState === 'live' && track.enabled);
+
+      if (hasLiveAudioTrack) {
+        return this.mediaStream;
       }
 
-      const recognition = new SpeechRecognition();
-      recognition.lang = 'hi-IN';
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
+      this.mediaStream?.getTracks().forEach((track) => track.stop());
+      this.mediaStream = null;
+      return this.requestMicPermission();
+    }
 
-      recognition.onresult = (event) => {
-        const result = event.results?.[0]?.[0]?.transcript || '';
-        const text = String(result).trim();
-        if (text) {
-          this.handleUserSpeech(text);
-        } else if (this.shouldListen && !this.isMuted) {
-          this.listen();
+    createMediaRecorder(stream) {
+      const mimeType = this.getRecorderMimeType();
+      const attempts = mimeType ? [{ mimeType }, undefined] : [undefined];
+      let lastError = null;
+
+      for (const options of attempts) {
+        try {
+          return new MediaRecorder(stream, options);
+        } catch (error) {
+          lastError = error;
         }
-      };
+      }
 
-      recognition.onerror = (event) => {
-        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-          this.error = 'Microphone permission was blocked. Allow mic access and try again.';
-          this.setStatus('failed');
+      throw lastError || new Error('MediaRecorder is not available for this microphone stream.');
+    }
+
+    setupAudioAnalyser() {
+      if (!window.AudioContext && !window.webkitAudioContext) {
+        return;
+      }
+
+      this.audioContext = this.audioContext || new (window.AudioContext || window.webkitAudioContext)();
+      if (this.audioContext.state === 'suspended') {
+        this.audioContext.resume().catch(() => {});
+      }
+      const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+      this.audioAnalyser = this.audioContext.createAnalyser();
+      this.audioAnalyser.fftSize = 1024;
+      source.connect(this.audioAnalyser);
+    }
+
+    stopAudioLevelWatch() {
+      if (this.audioLevelTimerId) {
+        window.clearInterval(this.audioLevelTimerId);
+        this.audioLevelTimerId = null;
+      }
+    }
+
+    stopBargeInWatch() {
+      if (this.bargeInTimerId) {
+        window.clearInterval(this.bargeInTimerId);
+        this.bargeInTimerId = null;
+      }
+    }
+
+    watchAudioLevel() {
+      this.stopAudioLevelWatch();
+      if (!this.audioAnalyser) {
+        return;
+      }
+
+      const data = new Uint8Array(this.audioAnalyser.fftSize);
+      this.audioLevelTimerId = window.setInterval(() => {
+        if (!this.mediaRecorder || this.mediaRecorder.state !== 'recording') {
+          this.stopAudioLevelWatch();
           return;
         }
 
-        if (this.shouldListen && !this.isMuted && this.status === 'listening') {
-          window.setTimeout(() => this.listen(), 600);
+        this.audioAnalyser.getByteTimeDomainData(data);
+        let total = 0;
+        for (let index = 0; index < data.length; index += 1) {
+          const value = data[index] - 128;
+          total += value * value;
         }
-      };
+        const volume = Math.sqrt(total / data.length);
+        const now = Date.now();
 
-      recognition.onend = () => {
-        if (this.shouldListen && !this.isMuted && this.status === 'listening') {
-          window.setTimeout(() => this.listen(), 350);
+        if (volume > 8) {
+          this.userHasSpoken = true;
+          this.silenceStartedAt = 0;
+        } else if (this.userHasSpoken) {
+          this.silenceStartedAt = this.silenceStartedAt || now;
+          if (now - this.silenceStartedAt > 850) {
+            this.stopListening();
+          }
         }
-      };
+      }, 120);
+    }
 
-      this.recognition = recognition;
+    watchBargeIn() {
+      this.stopBargeInWatch();
+      if (!this.audioAnalyser) {
+        return;
+      }
+
+      const data = new Uint8Array(this.audioAnalyser.fftSize);
+      let loudFrames = 0;
+      this.bargeInTimerId = window.setInterval(() => {
+        if (this.status !== 'speaking' || !this.currentAudio) {
+          this.stopBargeInWatch();
+          return;
+        }
+
+        if (Date.now() - this.lastPlaybackStartedAt < 700) {
+          return;
+        }
+
+        this.audioAnalyser.getByteTimeDomainData(data);
+        let total = 0;
+        for (let index = 0; index < data.length; index += 1) {
+          const value = data[index] - 128;
+          total += value * value;
+        }
+        const volume = Math.sqrt(total / data.length);
+        loudFrames = volume > 18 ? loudFrames + 1 : 0;
+
+        if (loudFrames >= 4) {
+          this.currentAudioStop?.();
+          window.speechSynthesis?.cancel();
+          this.stopBargeInWatch();
+          if (this.shouldListen && !this.isMuted && this.status !== 'completed') {
+            this.listen();
+          }
+        }
+      }, 100);
+    }
+
+    pickHindiVoice() {
+      const voices = window.speechSynthesis?.getVoices?.() || [];
+      const femaleVoiceNames = /lekha|kalpana|sangeeta|veena|female|woman|google\s+हिन्दी|google\s+हिंदी|hindi/i;
+      return voices.find((voice) => /^hi(-|_)?IN$/i.test(voice.lang) && femaleVoiceNames.test(voice.name))
+        || voices.find((voice) => /^hi\b/i.test(voice.lang) && femaleVoiceNames.test(voice.name))
+        || voices.find((voice) => femaleVoiceNames.test(`${voice.name} ${voice.lang}`))
+        || voices.find((voice) => /^hi(-|_)?IN$/i.test(voice.lang))
+        || voices.find((voice) => /^hi\b/i.test(voice.lang))
+        || voices.find((voice) => /hindi|हिन्दी|हिंदी/i.test(`${voice.name} ${voice.lang}`))
+        || null;
+    }
+
+    warmVoiceCache() {
+      if (!window.speechSynthesis) {
+        return;
+      }
+      this.hindiVoice = this.pickHindiVoice();
+      window.speechSynthesis.getVoices();
+      window.setTimeout(() => {
+        this.hindiVoice = this.pickHindiVoice();
+      }, 250);
     }
 
     async startCall() {
@@ -296,14 +447,15 @@
 
       try {
         await this.requestMicPermission();
-        this.createRecognition();
+        this.setupAudioAnalyser();
+        this.warmVoiceCache();
         const result = await TestAICallService.start();
         this.sessionId = result.sessionId;
         this.callId = result.callId;
         this.transcript = result.transcript || [];
         this.shouldListen = true;
         this.startTimer();
-        await this.speak(result.aiResponse || this.latestAgentText());
+        await this.speak(result.aiResponse || this.latestAgentText(), result);
       } catch (error) {
         this.error = error.message || 'Unable to start browser AI call';
         this.setStatus('failed');
@@ -325,10 +477,59 @@
       return `${latest.role === 'AGENT' ? 'AI' : 'You'}: ${latest.text}`;
     }
 
-    speak(text) {
+    playServerAudio(audioBase64, audioMimeType = 'audio/mpeg') {
+      return new Promise((resolve) => {
+        if (!audioBase64) {
+          resolve(false);
+          return;
+        }
+
+        try {
+          const binary = window.atob(audioBase64);
+          const bytes = new Uint8Array(binary.length);
+          for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+          }
+          const url = URL.createObjectURL(new Blob([bytes], { type: audioMimeType }));
+          const audio = new Audio(url);
+          let settled = false;
+          const cleanup = (played) => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            this.stopBargeInWatch();
+            URL.revokeObjectURL(url);
+            this.currentAudio = null;
+            this.currentAudioStop = null;
+            resolve(played);
+          };
+          this.currentAudio = audio;
+          this.currentAudioStop = () => {
+            audio.pause();
+            cleanup(false);
+          };
+          this.lastPlaybackStartedAt = Date.now();
+          this.watchBargeIn();
+          audio.onended = () => {
+            cleanup(true);
+          };
+          audio.onerror = () => {
+            cleanup(false);
+          };
+          audio.play().catch(() => {
+            cleanup(false);
+          });
+        } catch (error) {
+          resolve(false);
+        }
+      });
+    }
+
+    speak(text, audio = {}) {
       return new Promise((resolve) => {
         const speechText = String(text || '').trim();
-        if (!speechText || !window.speechSynthesis) {
+        if (!speechText) {
           this.listen();
           resolve();
           return;
@@ -336,53 +537,120 @@
 
         this.stopListening();
         this.setStatus('speaking');
+        if (this.currentAudio) {
+          this.currentAudioStop?.();
+        }
         window.speechSynthesis.cancel();
 
-        const utterance = new SpeechSynthesisUtterance(speechText);
-        utterance.lang = 'hi-IN';
-        utterance.rate = 0.92;
-        utterance.pitch = 1;
-        utterance.onend = () => {
-          if (this.status !== 'completed' && this.status !== 'failed') {
-            this.listen();
+        this.playServerAudio(audio.audioBase64, audio.audioMimeType).then((played) => {
+          if (played) {
+            if (this.status !== 'completed' && this.status !== 'failed') {
+              this.listen();
+            }
+            resolve();
+            return;
           }
+
+            if (this.status !== 'completed' && this.status !== 'failed') {
+              this.error = 'TTS audio could not play. Tap the page once and try again.';
+              this.setStatus('failed');
+            }
           resolve();
-        };
-        utterance.onerror = () => {
-          if (this.status !== 'completed' && this.status !== 'failed') {
-            this.listen();
-          }
-          resolve();
-        };
-        window.speechSynthesis.speak(utterance);
+        });
       });
     }
 
-    listen() {
-      if (!this.recognition || this.isMuted || !this.shouldListen || this.status === 'completed') {
+    async listen() {
+      if (!this.mediaStream || this.isMuted || !this.shouldListen || this.status === 'completed') {
         return;
       }
 
       try {
         this.setStatus('listening');
-        this.recognition.start();
+        this.audioChunks = [];
+        this.userHasSpoken = false;
+        this.silenceStartedAt = 0;
+        this.recordingStartedAt = Date.now();
+        this.clearListenTimeout();
+        this.listenTimeoutId = window.setTimeout(() => {
+          if (this.shouldListen && !this.isMuted && this.status === 'listening') {
+            this.stopListening();
+            this.error = 'Mic did not catch your voice. Please speak closer to the mic and try again.';
+            this.render();
+            window.setTimeout(() => {
+              this.error = '';
+              if (this.shouldListen && !this.isMuted && this.status === 'listening') {
+                this.listen();
+              }
+            }, 1200);
+          }
+        }, 9000);
+
+        const stream = await this.ensureActiveMicStream();
+        if (!this.audioAnalyser) {
+          this.setupAudioAnalyser();
+        }
+        this.mediaRecorder = this.createMediaRecorder(stream);
+        this.mediaRecorder.ondataavailable = (event) => {
+          if (event.data?.size) {
+            this.audioChunks.push(event.data);
+          }
+        };
+        this.mediaRecorder.onstop = () => {
+          this.clearListenTimeout();
+          this.stopAudioLevelWatch();
+          if (!this.shouldListen || this.status === 'completed') {
+            return;
+          }
+          const recordedMs = Date.now() - this.recordingStartedAt;
+          if (!this.userHasSpoken) {
+            this.error = 'Mic did not catch your voice. Please speak closer to the mic and try again.';
+            this.render();
+            window.setTimeout(() => {
+              this.error = '';
+              if (this.shouldListen && !this.isMuted && this.status === 'listening') {
+                this.listen();
+              }
+            }, 1200);
+            return;
+          }
+          const audioBlob = new Blob(this.audioChunks, { type: this.mediaRecorder?.mimeType || 'audio/webm' });
+          this.audioChunks = [];
+          if (audioBlob.size < 8000 || recordedMs < 500) {
+            this.error = 'Audio was too short. Please speak a little longer.';
+            this.render();
+            window.setTimeout(() => {
+              this.error = '';
+              if (this.shouldListen && !this.isMuted && this.status === 'listening') {
+                this.listen();
+              }
+            }, 1200);
+            return;
+          }
+          this.handleUserAudio(audioBlob);
+        };
+        this.mediaRecorder.start(250);
+        this.watchAudioLevel();
       } catch (error) {
-        // Recognition may already be active; ignore and let the active listener finish.
+        this.error = `${error.message || 'Unable to start microphone recording'}. Please refresh the page and allow microphone access.`;
+        this.setStatus('failed');
       }
     }
 
     stopListening() {
-      if (!this.recognition) {
+      this.clearListenTimeout();
+      this.stopAudioLevelWatch();
+      if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
         return;
       }
       try {
-        this.recognition.stop();
+        this.mediaRecorder.stop();
       } catch (error) {
-        // Stop can throw when recognition is idle.
+        // Stop can throw when recorder is idle.
       }
     }
 
-    async handleUserSpeech(text) {
+    async handleUserAudio(audioBlob) {
       if (!this.sessionId || this.status === 'completed') {
         return;
       }
@@ -392,13 +660,24 @@
       this.setStatus('thinking');
 
       try {
-        const result = await TestAICallService.message(this.sessionId, text);
+        const result = await TestAICallService.messageAudio(this.sessionId, audioBlob);
         this.transcript = result.transcript || this.transcript;
         this.shouldListen = true;
-        await this.speak(result.aiResponse);
+        await this.speak(result.aiResponse, result);
       } catch (error) {
         this.error = error.message || 'Unable to get AI response';
+        this.shouldListen = true;
         this.setStatus('failed');
+        window.setTimeout(() => {
+          if (this.error.includes('DEEPGRAM_API_KEY')) {
+            return;
+          }
+          this.error = '';
+          this.setStatus('listening');
+          if (this.shouldListen && !this.isMuted && this.status === 'listening') {
+            this.listen();
+          }
+        }, 1600);
       } finally {
         this.setBusy(false);
       }
@@ -423,7 +702,15 @@
     async endCall() {
       this.shouldListen = false;
       this.stopListening();
+      this.stopAudioLevelWatch();
+      this.stopBargeInWatch();
+      if (this.currentAudio) {
+        this.currentAudioStop?.();
+      }
       window.speechSynthesis?.cancel();
+      this.audioContext?.close?.().catch?.(() => {});
+      this.audioContext = null;
+      this.audioAnalyser = null;
       this.mediaStream?.getTracks().forEach((track) => track.stop());
       this.mediaStream = null;
       this.stopTimer();

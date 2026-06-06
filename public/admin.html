@@ -661,10 +661,10 @@
         AppShell.fetchJson(`${AppShell.API_BASE}/clients`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/metrics`)
       ]);
-      customers = customers.length ? customers : AppShell.DEMO_DATA.customers;
-      feedback = feedback.length ? feedback : AppShell.DEMO_DATA.feedback;
-      recentCalls = recentCalls.length ? recentCalls : AppShell.DEMO_DATA.recentCalls;
-      clients = clients.length ? clients : AppShell.DEMO_DATA.clients;
+      customers = Array.isArray(customers) ? customers : [];
+      feedback = Array.isArray(feedback) ? feedback : [];
+      recentCalls = Array.isArray(recentCalls) ? recentCalls : [];
+      clients = Array.isArray(clients) ? clients : [];
       callMetrics = callMetrics || {};
       clientCache = clients;
 
@@ -744,6 +744,9 @@
       });
       try {
         await loadOverview();
+        window.setInterval(() => {
+          loadOverview().catch((error) => AppShell.showAlert(error.message, 'error'));
+        }, 5000);
       } catch (error) {
         AppShell.showAlert(error.message, 'error');
       }

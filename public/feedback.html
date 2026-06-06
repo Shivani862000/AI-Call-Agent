@@ -892,9 +892,9 @@
         AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
       ]);
-      customers = customers.length ? customers : AppShell.DEMO_DATA.customers;
-      feedback = feedback.length ? feedback : AppShell.DEMO_DATA.feedback;
-      recentCalls = recentCalls.length ? recentCalls : AppShell.DEMO_DATA.recentCalls;
+      customers = Array.isArray(customers) ? customers : [];
+      feedback = Array.isArray(feedback) ? feedback : [];
+      recentCalls = Array.isArray(recentCalls) ? recentCalls : [];
       customerCache = customers;
       feedbackCache = feedback;
       recentCallsCache = recentCalls;
@@ -955,6 +955,9 @@
         toggleCustomDateRange('mobile');
         toggleCustomDateRange('desktop');
         await loadPageData();
+        window.setInterval(() => {
+          loadPageData().catch((error) => AppShell.showAlert(error.message, 'error'));
+        }, 7000);
       } catch (error) {
         AppShell.showAlert(error.message, 'error');
       }

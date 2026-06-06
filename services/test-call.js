@@ -1,6 +1,6 @@
 const { dbRun, dbGet } = require('../db');
 const { extractCallFeedback } = require('./call-feedback');
-const { categorizeFeedback } = require('./openai');
+const { categorizeFeedback } = require('./gemini');
 
 const sessions = new Map();
 const TEST_CALL_SOURCE = 'test_call';
@@ -62,7 +62,7 @@ function validatePhone(phone) {
 
 function buildFallbackOutboundFeedbackPrompt(clientName, patientName) {
   return `
-You are Priya, a calm and friendly AI receptionist for ${clientName}.
+You are Priya, a calm and friendly feedback executive for ${clientName}.
 This is an outbound feedback call simulation for ${patientName}.
 
 Use a natural, concise Hindi/Hinglish or English tone based on the patient's language.
@@ -209,12 +209,17 @@ async function createCustomerForTestCall(name, phone) {
   }
 
   const result = await dbRun(
-    `INSERT INTO customers (name, phone, preferred_slot, status, created_at)
+    `INSERT OR IGNORE INTO customers (name, phone, preferred_slot, status, created_at)
      VALUES (?, ?, ?, ?, ?)`,
     [name, normalizedPhone, 'test', 'completed', new Date().toISOString()]
   );
 
-  return result.lastID;
+  if (result.lastID) {
+    return result.lastID;
+  }
+
+  const existingAgain = await dbGet('SELECT id FROM customers WHERE phone = ?', [normalizedPhone]);
+  return existingAgain?.id;
 }
 
 function toPlainTranscript(transcript) {

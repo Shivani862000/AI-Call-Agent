@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { dbRun, dbGet, dbAll } = require('../db');
-const { categorizeFeedback } = require('../services/openai');
+const { categorizeFeedback } = require('../services/gemini');
 
 // Manual feedback entry
 router.post('/manual', async (req, res) => {

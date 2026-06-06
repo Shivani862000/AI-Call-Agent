@@ -41,7 +41,7 @@
       <header class="page-header desktop-page-header">
         <div class="page-title-wrap">
           <h2>Outbound Calls</h2>
-          <div class="page-subtitle">Calls placed from the lab or AI assistant to customers for feedback and follow-up.</div>
+          <div class="page-subtitle">Calls placed from the lab to customers for feedback and follow-up.</div>
         </div>
         <div class="header-actions">
           <button id="newCallButton" class="primary" type="button">New Call</button>
@@ -866,9 +866,9 @@
         AppShell.fetchJson(`${AppShell.API_BASE}/clients`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
       ]);
-      customers = customers.length ? customers : AppShell.DEMO_DATA.customers;
-      clients = clients.length ? clients : AppShell.DEMO_DATA.clients;
-      recentCalls = recentCalls.length ? recentCalls : AppShell.DEMO_DATA.recentCalls;
+      customers = Array.isArray(customers) ? customers : [];
+      clients = Array.isArray(clients) ? clients : [];
+      recentCalls = Array.isArray(recentCalls) ? recentCalls : [];
       customerCache = customers;
       clientCache = clients;
       recentCallsCache = recentCalls;
@@ -941,6 +941,9 @@
 
       try {
         await loadPageData();
+        window.setInterval(() => {
+          loadPageData().catch((error) => AppShell.showAlert(error.message, 'error'));
+        }, 5000);
       } catch (error) {
         AppShell.showAlert(error.message, 'error');
       }

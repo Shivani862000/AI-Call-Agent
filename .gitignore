@@ -5,3 +5,12 @@ node_modules/
 *.pdf
 .DS_Store
 docs/
+package-lock.json
+Dockerfile
+docker-compose.yml
+docker-compose.prod.yml
+deploy/
+k8s/
+cookies.txt
+test/
+.env.production

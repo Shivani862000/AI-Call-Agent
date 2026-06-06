@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const crypto = require('crypto');
 const express = require('express');
+const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const WebSocket = require('ws');
@@ -214,8 +215,8 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = Number(process.env.PORT || 3000);
-const CALL_MODE = 'gemini';
-const AI_PROVIDER = 'gemini';
+const CALL_MODE = String(process.env.CALL_MODE || 'gemini').trim().toLowerCase();
+const AI_PROVIDER = String(process.env.AI_PROVIDER || CALL_MODE || 'gemini').trim().toLowerCase();
 const DEFAULT_GEMINI_MODEL = 'models/gemini-2.5-flash-native-audio-preview-12-2025';
 const DEPRECATED_GEMINI_LIVE_MODELS = new Set([
   'models/gemini-3.1-flash-live-preview',
@@ -244,7 +245,18 @@ if (GEMINI_MODEL !== String(REQUESTED_GEMINI_MODEL || '').trim()) {
   console.warn(`[CONFIG] Gemini model "${REQUESTED_GEMINI_MODEL}" is deprecated or unsupported here; using "${GEMINI_MODEL}" instead.`);
 }
 const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
-const REALTIME_MODEL = GEMINI_MODEL;
+const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime-2';
+const OPENAI_REALTIME_VOICE = process.env.OPENAI_REALTIME_VOICE || 'marin';
+const OPENAI_REALTIME_REASONING_EFFORT = process.env.OPENAI_REALTIME_REASONING_EFFORT || 'low';
+const OPENAI_REALTIME_TURN_SILENCE_MS = Math.max(Number(process.env.OPENAI_REALTIME_TURN_SILENCE_MS || 450) || 450, 250);
+const REALTIME_MODEL = AI_PROVIDER === 'openai' ? OPENAI_REALTIME_MODEL : GEMINI_MODEL;
+const LIVE_STT_PROVIDER = String(process.env.LIVE_STT_PROVIDER || 'deepgram').trim().toLowerCase();
+const OPENAI_TRANSCRIPTION_MODEL = process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-realtime-whisper';
+const OPENAI_TRANSCRIPTION_LANGUAGE = process.env.OPENAI_TRANSCRIPTION_LANGUAGE || 'hi';
+const OPENAI_TRANSCRIPTION_DELAY = process.env.OPENAI_TRANSCRIPTION_DELAY || 'low';
+const OPENAI_STT_SILENCE_COMMIT_MS = Math.max(Number(process.env.OPENAI_STT_SILENCE_COMMIT_MS || 350) || 350, 150);
+const OPENAI_STT_MAX_SEGMENT_MS = Math.max(Number(process.env.OPENAI_STT_MAX_SEGMENT_MS || 2500) || 2500, 1000);
+const GEMINI_NATIVE_AUDIO_INPUT = String(process.env.GEMINI_NATIVE_AUDIO_INPUT || 'false').toLowerCase() === 'true';
 const GEMINI_OPENING_RETRY_MS = Math.max(Number(process.env.GEMINI_OPENING_RETRY_MS || 1500) || 1500, 800);
 const GEMINI_OPENING_RETRY_ENABLED = String(process.env.GEMINI_OPENING_RETRY_ENABLED || 'false').toLowerCase() === 'true';
 const MAX_PRECONNECT_MEDIA_CHUNKS = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_CHUNKS || 60) || 60, 10);
@@ -260,6 +272,7 @@ const PUBLIC_BASE_URL = (
   || HARDCODED_PUBLIC_BASE_URL
 ).replace(/\/$/, '');
 const GEMINI_WS_BASE_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+const OPENAI_REALTIME_WS_BASE_URL = 'wss://api.openai.com/v1/realtime';
 const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
 const DISABLE_SCHEDULER = String(process.env.DISABLE_SCHEDULER || '').toLowerCase() === 'true';
@@ -273,6 +286,7 @@ const INCOMING_CALL_RETENTION_MS = 60 * 60 * 1000;
 const ICALLMATE_DEFAULT_DID = '8037259753';
 const ICALLMATE_DEFAULT_TEST_NUMBER = '+918037259753';
 const CALL_DIAGNOSTIC_WARN_MS = Math.max(Number(process.env.CALL_DIAGNOSTIC_WARN_MS || 20000) || 20000, 5000);
+const LOCAL_RECORDINGS_DIR = path.join('/tmp', 'feedback-call-recordings');
 
 function redactSecret(value, visiblePrefix = 4, visibleSuffix = 4) {
   const text = String(value || '').trim();
@@ -304,6 +318,9 @@ function logConfigSnapshot(scope = 'CONFIG') {
     REQUESTED_GEMINI_MODEL,
     GEMINI_MODEL,
     GEMINI_VOICE,
+    OPENAI_REALTIME_MODEL,
+    OPENAI_REALTIME_VOICE,
+    OPENAI_REALTIME_REASONING_EFFORT,
     DISABLE_SCHEDULER,
     DISABLE_OWNER_DIGEST,
     APP_BASE_URL: describeEnvValue(process.env.APP_BASE_URL || ''),
@@ -318,7 +335,10 @@ function logConfigSnapshot(scope = 'CONFIG') {
     ICALLMATE_AGENT_ID: process.env.ICALLMATE_AGENT_ID || '',
     ICALLMATE_UKEY_PRESENT: Boolean(process.env.ICALLMATE_UKEY),
     GEMINI_API_KEY_PRESENT: Boolean(process.env.GEMINI_API_KEY),
+    LIVE_STT_PROVIDER,
     DEEPGRAM_API_KEY_PRESENT: Boolean(process.env.DEEPGRAM_API_KEY),
+    OPENAI_API_KEY_PRESENT: Boolean(process.env.OPENAI_API_KEY),
+    OPENAI_TRANSCRIPTION_MODEL,
     DATABASE_URL: process.env.DATABASE_URL || ''
   };
 
@@ -425,80 +445,89 @@ function applyAgentTemplate(template, replacements = {}) {
 
 function buildDefaultAgentSystemPrompt(clientName, customerName) {
   return `
-You are Priya, a warm and respectful Hindi-speaking calling assistant from ${clientName}.
-You are calling ${customerName} for a blood donation follow-up on behalf of Apna Blood Centre, Palwal.
+You are Priya, a customer feedback executive calling on behalf of ${clientName}.
 
-Purpose:
-Call previous blood donors after around 3 months, thank them for their earlier donation,
-ask whether they can donate blood again, and collect any problem/feedback from their last donation.
+PRIMARY OBJECTIVE:
+Collect feedback about the customer's recent visit in a friendly and professional manner.
 
-Tone and language:
-- Speak in simple, natural Hindi/Hinglish.
-- Be polite, warm, and brief.
-- Do not sound robotic or like an AI system.
-- Do not pressure the person to donate.
-- Ask only one main question at a time.
-- Keep every response short: 1-3 sentences.
-- If the person is busy, not interested, or says no, thank them respectfully and close.
-- Never give medical advice. If they mention a health issue, say the team will note it and they should follow doctor guidance.
+IMPORTANT BEHAVIOR RULES:
+- Speak only in simple conversational Hindi.
+- Never switch fully to English.
+- Never mention you are AI, virtual assistant, bot, system, or language model.
+- Never provide medical advice.
+- Never answer healthcare questions.
+- Never discuss reports, diagnosis, medicines, treatments, or test results.
+- If asked medical questions, politely say:
+"Maaf kijiye, main sirf feedback collect karne ke liye call kar rahi hoon. Is vishay mein hamari team aapki madad karegi."
+- Never invent information.
+- Never guess facts.
+- Never create details not provided by the customer.
+- Never skip steps unless the customer wants to end the call.
+- Ask only ONE question at a time.
+- Keep every response under 20 words whenever possible.
+- Use short acknowledgements before the next question.
+- Respond within 1 second after customer stops speaking.
+- Do not generate long explanations.
+- Do not repeat previous questions.
 
-Conversation flow:
+SILENCE HANDLING:
+- If customer is silent for 3 seconds: "Ji, main sun rahi hoon."
+- If silent again: "Koi baat nahi, aap aaram se bata sakte hain."
+- If silent for 10 seconds: "Shayad aap vyast hain. Hum yahin call samaapt kar sakte hain. Dhanyavaad." Then END_CALL.
 
-1. Greeting and identity confirmation
-Start by saying:
-"Good morning sir/ma'am, main Apna Blood Centre, Palwal se Priya baat kar rahi hoon. Kya main ${customerName} ji se baat kar rahi hoon?"
-If this is not the right person, apologize and end politely.
-If they are busy, say: "Koi baat nahi sir/ma'am, hum baad mein contact kar lenge. Dhanyavaad."
+OFF-TOPIC HANDLING:
+- If customer goes off-topic: "Dhanyavaad. Aapki visit par wapas aate hain."
 
-2. Thank them for previous donation
-Say:
-"Sir/ma'am, aapne kuch time pehle blood donate kiya tha. Uske liye Apna Blood Centre ki taraf se aapka bahut-bahut dhanyavaad."
+INTERRUPTION HANDLING:
+- If customer interrupts, stop current response, listen, then continue from the same step.
 
-3. Ask about repeat donation after 3 months
-Say:
-"Aapke blood donation ko lagbhag 3 months ho gaye hain. Kya aap phir se blood donate karna chahenge?"
+RATING HANDLING:
+- Accept only 1, 2, 3, 4, 5.
+- If unclear: "Maaf kijiye, 1 se 5 ke beech ek rating bata sakte hain?"
+- If still unclear: "Main ise rating na milne ke roop mein note kar leti hoon."
 
-4. If they say yes
-Thank them and say:
-"Bahut dhanyavaad sir/ma'am. Aap kisi bhi din apni suvidha ke hisaab se, khana khaane ke baad, 9 AM se 5 PM ke beech Apna Blood Centre aa sakte hain."
-Then add:
-"Humare yahan thalassemia patients, garbhwati mahilaon, aur zaruratmand bachchon ke liye free blood diya jaata hai. Aapka donation kisi ki jaan bachane mein madad kar sakta hai."
-If they ask date or place, collect it naturally:
-- Date: ask "Aap kis din aana chahenge?"
-- Place: say "Apna Blood Centre, Palwal."
+CALL FLOW:
+STEP 1 - INTRODUCTION:
+"Namaste. Main Priya bol rahi hoon ${clientName} se. Kya main ${customerName} ji se baat kar rahi hoon? Aapki haal hi ki visit ke baare mein 2-3 minute feedback lena chahti hoon. Kya abhi baat karna theek rahega?"
+If no, say: "Bilkul theek hai. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then END_CALL.
 
-5. If they say no or not now
-Say:
-"Koi baat nahi sir/ma'am. Aapka pehle blood donate karne ke liye bahut dhanyavaad."
-Then ask:
-"Blood donate karne ke baad aapko koi problem ya dikkat hui thi?"
+STEP 2 - OVERALL EXPERIENCE:
+"Dhanyavaad. Aapka hamare collection center mein kul milaakar anubhav kaisa raha?"
+Acknowledge briefly.
+Examples: "Achha laga sunkar." "Dhanyavaad batane ke liye." "Samajh gayi."
 
-6. If they had no problem
-Say:
-"Theek hai sir/ma'am, bahut dhanyavaad. Aapka din shubh ho."
+STEP 3 - CLEANLINESS:
+"Hamare center ki safai aur hygiene ke baare mein aapka kya anubhav raha?"
+If negative: "Jo aapne notice kiya, uske baare mein thoda aur bata sakte hain?"
 
-7. If they had a problem
-Say:
-"Sorry sir/ma'am, aapko dikkat hui. Kya aap bata sakte hain kya problem hui thi?"
-After they explain, say:
-"Main aapki baat team tak pahucha dungi. Next time hum iska dhyan rakhenge."
+STEP 4 - STAFF BEHAVIOUR:
+"Hamare staff ka vyavhaar aapko kaisa laga?"
+If person mentioned, remember the name internally.
+Follow-up: "Kya hamari team mein koi aisa vyakti hai jinka aap vishesh roop se zikr karna chahenge?"
 
-8. Social follow-up, only if the conversation is positive and they are not annoyed
-Say:
-"Sir/ma'am, humne aapke paas ek video/link send kiya hai. Agar possible ho to please like, comment, share ya subscribe kar dijiye."
-Then say:
-"Facebook aur Google par Apna Blood Centre ke naam se page hai. Aapka support humein aur logon tak pahunchne mein madad karega."
+STEP 5 - WAITING TIME:
+"Waiting time aur sample collection process kaisa raha? Kya sab kuchh spasht roop se samjhaya gaya tha?"
 
-9. Closing
-End with:
-"Dhanyavaad sir/ma'am. Apna Blood Centre ki taraf se aapka bahut-bahut dhanyavaad. Aapka din shubh ho."
+STEP 6 - OVERALL RATING:
+"1 se 5 ke scale par, jahan 5 sabse behtar hai, aap apne anubhav ko kitni rating denge?"
 
-Important rules:
-- Do not ask survey-style diagnostic center questions about cleanliness, staff, sample collection, rating, or Google Form.
-- Do not invent appointment confirmation if the donor did not agree.
-- Do not repeat the same question again and again.
-- If the donor asks why you are calling, explain: "Sir/ma'am, hum previous blood donors ko 3 months ke baad follow-up karte hain, kyunki blood donation se zaruratmand patients ki madad hoti hai."
-- If the donor asks whether donation is safe, say: "Sir/ma'am, final decision aapki health aur doctor/team ki guidance ke hisaab se hi hoga."
+STEP 7 - IMPROVEMENT SUGGESTIONS:
+"Kya aapko lagta hai ki hum apni seva ko aur behtar bana sakte hain? Aapke sujhav humein zaroor batayein."
+
+STEP 8 - CLOSING:
+"${customerName} ji, apna feedback dene ke liye bahut dhanyavaad. Aapka feedback hamare liye bahut mahatvapurn hai aur humein apni seva behtar banane mein madad karega. Hum aapko WhatsApp par ek Google Review link bhi bhejenge. Agar aap suvidha anusar review de saken to humein khushi hogi. Dhanyavaad. Aapka din shubh ho."
+Then END_CALL.
+
+HANGUP RULES:
+- Busy, later call, meeting, driving, cannot talk now: say "Bilkul theek hai. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then END_CALL.
+- Does not want feedback or says stop/cut call: say "Koi baat nahi. Apna samay dene ke liye dhanyavaad." Then END_CALL.
+- Wrong person: say "Maaf kijiye. Shayad galat number par call lag gayi hai. Dhanyavaad." Then END_CALL.
+- Bye/thank you/bas/call cut kijiye: say "Dhanyavaad. Aapka din shubh ho." Then END_CALL.
+- Abusive language: say "Main samajh gayi. Aapka samay dene ke liye dhanyavaad." Then END_CALL.
+- After feedback completed and closing delivered, immediately END_CALL.
+- After END_CALL, do not generate any additional text.
+- Do not ask "Is there anything else?"
+- Do not restart the conversation.
 `.trim();
 }
 
@@ -516,7 +545,7 @@ function buildAgentSystemPrompt(clientName, customerName, agentConfig = null) {
 }
 
 function buildDefaultOpeningPrompt(clientName, customerName) {
-  return `Sirf yeh exact line boliye aur is turn me kuch aur mat boliye: "Good morning sir/ma'am, main Apna Blood Centre, Palwal se Priya baat kar rahi hoon. Kya main ${customerName} ji se baat kar rahi hoon?"`;
+  return `Sirf yeh exact opening natural phone tone mein boliye, aur is turn mein kuch aur mat boliye: "Namaste. Main Priya bol rahi hoon ${clientName} se. Kya main ${customerName} ji se baat kar rahi hoon? Aapki haal hi ki visit ke baare mein 2-3 minute feedback lena chahti hoon. Kya abhi baat karna theek rahega?"`;
 }
 
 function buildOpeningPrompt(clientName, customerName, agentConfig = null) {
@@ -543,10 +572,14 @@ Goal:
 - If details are needed, collect name, phone number, and the issue in a natural way.
 - If the caller asks for something you cannot verify, say the team will check and call back.
 - Keep responses short, polite, and human.
+- Speak like a real receptionist, not like a chatbot.
+- Use simple spoken Hindi/Hinglish. Avoid long explanations and formal language.
+- Ask only one question at a time.
+- Let the caller finish. If they interrupt or correct you, follow their latest message.
 
 Rules:
 - Do not say you are calling them.
-- Do not talk about previous blood donation follow-up unless the caller asks about blood donation.
+- Do not talk about outbound feedback unless the caller asks about a feedback call.
 - Do not ask outbound survey questions.
 - Do not invent report results, appointment confirmations, prices, or medical advice.
 - If the caller is angry or reports a problem, apologize once, collect the issue, and say the team will follow up.
@@ -555,7 +588,7 @@ Rules:
 }
 
 function buildIncomingOpeningPrompt(clientName) {
-  return `Sirf yeh exact line boliye aur is turn me kuch aur mat boliye: "Namaste, ${clientName} se Priya bol rahi hoon. Main aapki kis tarah madad kar sakti hoon?"`;
+  return `Sirf yeh exact line natural phone tone me boliye, aur is turn me kuch aur mat boliye: "Namaste, ${clientName} se Priya bol rahi hoon. Bataiye, main kaise madad kar sakti hoon?"`;
 }
 
 async function getAgentConfigById(agentId) {
@@ -570,6 +603,7 @@ async function getDefaultAgentConfig() {
 function validateConfig() {
   const missing = [];
 
+  // Gemini is the default and required provider. Ensure its API key is present.
   if (!process.env.GEMINI_API_KEY) {
     missing.push('GEMINI_API_KEY');
   }
@@ -725,98 +759,34 @@ function detectLanguageChoice(speech, digit) {
 function getScriptedCopy(language, customerName = process.env.CUSTOMER_NAME, clientName = CLIENT_NAME) {
   if (language === 'en') {
     return {
-      intro: `Hello, am I speaking with ${customerName}? This is Priya calling from Apna Blood Centre, Palwal. To continue in English, say English or press 2. Hindi mein baat karne ke liye Hindi boliye ya 1 dabaiye.`,
+      intro: `Namaste. This is Priya calling from ${clientName}. Am I speaking with ${customerName}? I want to take quick feedback about your recent visit. Hindi mein baat karne ke liye 1 dabaiye.`,
       noLanguageResponse: 'We did not receive your language preference. Thank you for your time. Goodbye.',
-      consent: `Thank you. You donated blood some time ago. It has been around 3 months since your donation. Would you like to donate blood again? Please say yes or press 1 if you are interested.`,
+      consent: 'Thank you. Was your overall experience at our collection center good? Please say yes or press 1.',
       decline: 'No problem. Thank you for your time. Goodbye.',
       noConsentResponse: 'We did not receive a response. Thank you for your time. Goodbye.',
-      rating: 'Thank you. You can visit Apna Blood Centre, Palwal any day between 9 AM and 5 PM after having food. Did you face any problem after your previous blood donation? Please say yes or no.',
+      rating: 'Thank you. On a scale of 1 to 5, where 5 is best, what rating would you give your experience?',
       noRatingResponse: 'We did not receive a response. Thank you for your time. Goodbye.',
-      closing: 'Thank you. Your donation can help thalassemia patients, pregnant women, and children in need. Have a good day.'
+      closing: 'Thank you for your feedback. Your feedback helps us improve our service. Have a good day.'
     };
   }
 
   return {
-    intro: `Namaste. Kya main ${customerName} se baat kar rahi hoon? Main Priya bol rahi hoon, Apna Blood Centre, Palwal se. Hindi mein baat karne ke liye haan boliye ya 1 dabaiye.`,
+    intro: `Namaste. Main Priya bol rahi hoon ${clientName} se. Kya main ${customerName} ji se baat kar rahi hoon? Aapki haal hi ki visit ke baare mein feedback lena chahti hoon.`,
     noLanguageResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
-    consent: `Dhanyavaad. Aapne kuch time pehle blood donate kiya tha. Aapke blood donation ko lagbhag 3 months ho gaye hain. Kya aap phir se blood donate karna chahenge?`,
+    consent: 'Dhanyavaad. Aapka hamare collection center mein kul milaakar anubhav kaisa raha?',
     decline: 'Koi baat nahin. Aapke samay ke liye dhanyavaad. Namaste.',
     noConsentResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
-    rating: 'Bahut dhanyavaad. Aap kisi bhi din khana khaane ke baad 9 AM se 5 PM ke beech Apna Blood Centre, Palwal aa sakte hain. Blood donate karne ke baad aapko koi problem ya dikkat hui thi?',
+    rating: 'Dhanyavaad. 1 se 5 ke scale par, jahan 5 sabse behtar hai, aap kitni rating denge?',
     noRatingResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
-    closing: 'Dhanyavaad. Aapka donation thalassemia patients, garbhwati mahilaon, aur zaruratmand bachchon ki madad kar sakta hai. Aapka din shubh ho.'
+    closing: 'Apna feedback dene ke liye bahut dhanyavaad. Aapka feedback hamare liye mahatvapurn hai. Aapka din shubh ho.'
   };
 }
 
 function buildXmlResponse(innerXml) {
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n${innerXml}\n</Response>`;
-}
-
-function buildScriptedTwiml(customerName, clientName) {
-  const encodedCustomerName = encodeURIComponent(customerName || process.env.CUSTOMER_NAME || 'Customer');
-  const encodedClientName = encodeURIComponent(clientName || CLIENT_NAME);
-  const copy = getScriptedCopy('hi', customerName, clientName);
-
-  return buildXmlResponse(`  <Gather input="dtmf speech" numDigits="1" timeout="6" speechTimeout="auto" language="hi-IN" actionOnEmptyResult="true" action="/call/scripted/consent?lang=hi&amp;customerName=${xmlEscape(encodedCustomerName)}&amp;clientName=${xmlEscape(encodedClientName)}" method="POST">
-    <Say language="hi-IN">${xmlEscape(copy.intro)}</Say>
-  </Gather>
-  <Say language="hi-IN">${xmlEscape(copy.noLanguageResponse)}</Say>
-  <Hangup />`);
-}
-
-function buildScriptedLanguageResponse(req) {
-  const speech = String(req.body.SpeechResult || '').trim().toLowerCase();
-  const digit = String(req.body.Digits || '').trim();
-  const language = detectLanguageChoice(speech, digit);
-  const copy = getScriptedCopy(language, req.query.customerName, req.query.clientName);
-  const encodedCustomerName = encodeURIComponent(req.query.customerName || process.env.CUSTOMER_NAME || 'Customer');
-  const encodedClientName = encodeURIComponent(req.query.clientName || CLIENT_NAME);
-
-  return buildXmlResponse(`  <Gather input="speech dtmf" numDigits="1" timeout="7" speechTimeout="auto" language="${language === 'en' ? 'en-IN' : 'hi-IN'}" actionOnEmptyResult="true" action="/call/scripted/consent?lang=${xmlEscape(language)}&amp;customerName=${xmlEscape(encodedCustomerName)}&amp;clientName=${xmlEscape(encodedClientName)}" method="POST">
-    <Say language="${language === 'en' ? 'en-IN' : 'hi-IN'}">${xmlEscape(copy.consent)}</Say>
-  </Gather>
-  <Say language="${language === 'en' ? 'en-IN' : 'hi-IN'}">${xmlEscape(copy.noConsentResponse)}</Say>
-  <Hangup />`);
-}
-
-function buildScriptedConsentResponse(req) {
-  const speech = String(req.body.SpeechResult || '').trim();
-  const digit = String(req.body.Digits || '').trim();
-  const language = req.query.lang === 'en' ? 'en' : 'hi';
-  const copy = getScriptedCopy(language, req.query.customerName, req.query.clientName);
-  const encodedCustomerName = encodeURIComponent(req.query.customerName || process.env.CUSTOMER_NAME || 'Customer');
-  const encodedClientName = encodeURIComponent(req.query.clientName || CLIENT_NAME);
-
-  if (!isAffirmativeResponse(speech, digit)) {
-    return buildXmlResponse(`  <Say language="hi-IN">${xmlEscape(copy.decline)}</Say>
-  <Hangup />`);
-  }
-
-  return buildXmlResponse(`  <Gather input="speech dtmf" numDigits="1" timeout="10" speechTimeout="auto" language="hi-IN" actionOnEmptyResult="true" action="/call/scripted/rating?lang=${xmlEscape(language)}&amp;customerName=${xmlEscape(encodedCustomerName)}&amp;clientName=${xmlEscape(encodedClientName)}" method="POST">
-    <Say language="hi-IN">${xmlEscape(copy.rating)}</Say>
-  </Gather>
-  <Say language="hi-IN">${xmlEscape(copy.noRatingResponse)}</Say>
-  <Hangup />`);
-}
-
-function buildScriptedRatingResponse(req) {
-  const speech = String(req.body.SpeechResult || '').trim();
-  const digit = String(req.body.Digits || '').trim();
-  const language = req.query.lang === 'en' ? 'en' : 'hi';
-  const copy = getScriptedCopy(language, req.query.customerName, req.query.clientName);
-  const rating = digit || speech;
-
-  console.log(`[SCRIPTED] Rating response: ${rating || 'none'}`);
-
-  return buildXmlResponse(`  <Say language="hi-IN">${xmlEscape(copy.closing)}</Say>
-  <Hangup />`);
+  return `<Response>${innerXml}</Response>`;
 }
 
 function resamplePcm16(buffer, fromRate, toRate) {
-  if (!buffer.length || fromRate === toRate) {
-    return buffer;
-  }
-
   const inputSamples = Math.floor(buffer.length / 2);
   const outputSamples = Math.max(1, Math.round((inputSamples * toRate) / fromRate));
   const output = Buffer.alloc(outputSamples * 2);
@@ -840,6 +810,25 @@ function parsePcmRate(mimeType, fallbackRate) {
   return match ? Number(match[1]) : fallbackRate;
 }
 
+function buildWavBufferFromPcm16(pcmBuffer, sampleRate = 8000) {
+  const pcm = Buffer.isBuffer(pcmBuffer) ? pcmBuffer : Buffer.from(pcmBuffer || []);
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
 function normalizePhoneLookupValue(value) {
   const digits = String(value || '').replace(/\D/g, '');
   if (!digits) return '';
@@ -860,17 +849,43 @@ function buildGeminiWsUrl() {
   return url.toString();
 }
 
+function buildOpenAiRealtimeWsUrl() {
+  const url = new URL(OPENAI_REALTIME_WS_BASE_URL);
+  url.searchParams.set('model', OPENAI_REALTIME_MODEL);
+  return url.toString();
+}
+
+function buildOpenAiTranscriptionWsUrl() {
+  const url = new URL('wss://api.openai.com/v1/realtime');
+  url.searchParams.set('model', OPENAI_TRANSCRIPTION_MODEL);
+  return url.toString();
+}
+
 function createDeepgramListenUrl() {
   const url = new URL('wss://api.deepgram.com/v1/listen');
-  url.searchParams.set('model', 'nova-2');
-  url.searchParams.set('language', 'hi');
+  url.searchParams.set('model', process.env.DEEPGRAM_MODEL || 'nova-2');
+  url.searchParams.set('language', process.env.DEEPGRAM_LANGUAGE || 'hi');
   url.searchParams.set('interim_results', 'true');
-  url.searchParams.set('endpointing', '300');
+  url.searchParams.set('endpointing', process.env.DEEPGRAM_ENDPOINTING_MS || '250');
   url.searchParams.set('smart_format', 'true');
   url.searchParams.set('encoding', 'linear16');
   url.searchParams.set('sample_rate', '8000');
   url.searchParams.set('channels', '1');
   return url.toString();
+}
+
+function isSilentPcm16(buffer, threshold = 500) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 2) {
+    return true;
+  }
+
+  let total = 0;
+  const samples = Math.floor(buffer.length / 2);
+  for (let offset = 0; offset + 1 < buffer.length; offset += 2) {
+    total += Math.abs(buffer.readInt16LE(offset));
+  }
+
+  return (total / Math.max(samples, 1)) < threshold;
 }
 
 function buildGeminiContentsFromTranscript(transcript = [], nextUserTurn = null) {
@@ -1143,7 +1158,7 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
   }
 
   const result = await dbRun(
-    'INSERT INTO customers (name, phone, preferred_slot, status, created_at) VALUES (?, ?, ?, ?, ?)',
+    'INSERT OR IGNORE INTO customers (name, phone, preferred_slot, status, created_at) VALUES (?, ?, ?, ?, ?)',
     [
       fallbackName || 'Incoming caller',
       normalizedPhone,
@@ -1153,7 +1168,11 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
     ]
   );
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  if (result.lastID) {
+    return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  }
+
+  return dbGet('SELECT * FROM customers WHERE phone = ?', [normalizedPhone]);
 }
 
 function parseIcallMateExtraParams(value) {
@@ -1392,7 +1411,22 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
 
   try {
     const customer = await ensureIncomingCustomerForCall(row.phone, row.caller_name);
-    const existingCall = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [row.stream_id]);
+    let existingCall = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [row.stream_id]);
+    const recentOutboundCall = !existingCall ? await dbGet(
+        `SELECT *
+           FROM calls
+          WHERE customer_id = ?
+            AND COALESCE(call_direction, 'outbound') = 'outbound'
+            AND outcome IN ('initiated', 'scheduled_initiated', 'active', 'called')
+            AND DATETIME(called_at) >= DATETIME('now', '-2 hours')
+          ORDER BY called_at DESC, id DESC
+          LIMIT 1`,
+      [customer.id]
+    ) : null;
+    if (!existingCall && recentOutboundCall) {
+      existingCall = recentOutboundCall;
+      row.call_direction = 'outbound';
+    }
     const outcome = row.status === 'active' ? 'active' : row.status;
     const providerPayload = JSON.stringify({
       event: eventName,
@@ -1438,8 +1472,9 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
           existingCall.id
         ]
       );
+      row.call_id = existingCall.id;
     } else {
-      await dbRun(
+      const insertResult = await dbRun(
         `INSERT INTO calls (
           customer_id, outcome, provider_call_id, called_at, call_direction, call_source,
           did, answered_at, ended_at, media_packets, last_event, notes,
@@ -1463,6 +1498,7 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
           providerPayload
         ]
       );
+      row.call_id = insertResult.lastID;
     }
   } catch (error) {
     console.error('[ICALLMATE INCOMING DB ERROR]', error.message);
@@ -1571,8 +1607,9 @@ async function triggerScheduledCalls() {
       await dbRun(
         `INSERT INTO calls (
           customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source,
+          provider_payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           agentConfig?.id || null,
@@ -1584,10 +1621,18 @@ async function triggerScheduledCalls() {
           agentConfig?.slug || 'hindi-feedback-v1',
           'normal',
           'outbound',
-          'icallmate'
+          'icallmate',
+          JSON.stringify(call.raw || {})
         ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      schedulePendingCallDiagnostic(call.sid, {
+        customerId: customer.id,
+        customerPhone: customer.phone,
+        customerName: customer.name,
+        agentId: agentConfig?.id || null,
+        trigger: 'scheduler'
+      });
       console.log(`[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`);
     } catch (error) {
       console.error(`[SCHEDULER] Failed to call ${customer.name}:`, error.message);
@@ -1673,8 +1718,9 @@ async function triggerAnnualClientReminderCalls() {
       await dbRun(
         `INSERT INTO calls (
           customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source,
+          provider_payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           hydratedCustomer.id,
           agentConfig?.id || null,
@@ -1686,7 +1732,8 @@ async function triggerAnnualClientReminderCalls() {
           `annual-reminder:${client.treatment_type || 'client-care'}`,
           'normal',
           'outbound',
-          'icallmate'
+          'icallmate',
+          JSON.stringify(call.raw || {})
         ]
       );
 
@@ -1740,6 +1787,10 @@ function toWssUrl(baseUrl, pathName) {
 }
 
 function getRequestPublicBaseUrl(req) {
+  if (PUBLIC_BASE_URL && !/localhost|127\.0\.0\.1/i.test(PUBLIC_BASE_URL)) {
+    return PUBLIC_BASE_URL;
+  }
+
   const forwardedHost = String(req.headers['x-forwarded-host'] || '')
     .split(',')[0]
     .trim();
@@ -1802,6 +1853,92 @@ function isCustomerHangupIntent(text) {
   return patterns.some((pattern) => pattern.test(normalized));
 }
 
+function getDeterministicHangupReply(text, customerName) {
+  const normalized = String(text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) {
+    return '';
+  }
+
+  const wrongPersonPatterns = [
+    /wrong\s+number/i,
+    /galat\s+number/i,
+    /main\s+.*nahi\s+(bol|hoon|hu)/i,
+    /yeh\s+.*nahi\s+(hai|h)/i,
+    /nahi\s+main\s+.*nahi/i
+  ];
+  if (wrongPersonPatterns.some((pattern) => pattern.test(normalized))) {
+    return 'Maaf kijiye. Shayad galat number par call lag gayi hai. Dhanyavaad.';
+  }
+
+  const busyPatterns = [
+    /busy/i,
+    /baad\s+mein/i,
+    /meeting/i,
+    /driving/i,
+    /abhi\s+baat\s+nahi/i,
+    /baat\s+nahi\s+kar\s+(sakta|sakti)/i
+  ];
+  if (busyPatterns.some((pattern) => pattern.test(normalized))) {
+    return 'Bilkul theek hai. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho.';
+  }
+
+  const noFeedbackPatterns = [
+    /feedback\s+nahi/i,
+    /interested\s+nahi/i,
+    /call\s+band/i,
+    /baat\s+nahi\s+karni/i,
+    /call\s+cut/i,
+    /band\s+kijiye/i,
+    /band\s+karo/i
+  ];
+  if (noFeedbackPatterns.some((pattern) => pattern.test(normalized))) {
+    return 'Koi baat nahi. Apna samay dene ke liye dhanyavaad.';
+  }
+
+  const stopPatterns = [
+    /^stop$/,
+    /^bas$/,
+    /\bbye\b/i,
+    /good\s*bye/i,
+    /thank\s+you/i,
+    /dhanyavaad/i,
+    /shukriya/i
+  ];
+  if (stopPatterns.some((pattern) => pattern.test(normalized))) {
+    return 'Dhanyavaad. Aapka din shubh ho.';
+  }
+
+  const abusivePatterns = [
+    /\b(chutiya|madarchod|bhenchod|behenchod|gandu|harami|fuck|shit|idiot)\b/i
+  ];
+  if (abusivePatterns.some((pattern) => pattern.test(normalized))) {
+    return 'Main samajh gayi. Aapka samay dene ke liye dhanyavaad.';
+  }
+
+  return '';
+}
+
+function isMedicalOrReportQuestion(text) {
+  const normalized = String(text || '').toLowerCase();
+  return [
+    'report',
+    'diagnosis',
+    'medicine',
+    'dawai',
+    'treatment',
+    'इलाज',
+    'दवाई',
+    'रिपोर्ट',
+    'result',
+    'test result'
+  ].some((keyword) => normalized.includes(keyword));
+}
+
 function isAffirmativeAvailabilityResponse(text) {
   const normalized = String(text || '')
     .toLowerCase()
@@ -1840,6 +1977,77 @@ function pushTranscriptTurn(transcript, role, text) {
     text: nextText,
     time: nowIso
   });
+}
+
+function transcriptToPlainText(transcript = []) {
+  return transcript
+    .filter((turn) => turn?.role && turn?.text)
+    .map((turn) => `${turn.role}: ${turn.text}`)
+    .join('\n');
+}
+
+async function persistLiveTranscriptForSession(session, transcriptStatus = 'live_stream') {
+  if (!session?.callId && !session?.streamId) {
+    return;
+  }
+
+  const transcriptText = transcriptToPlainText(session.transcript || []);
+  if (!transcriptText) {
+    return;
+  }
+
+  try {
+    if (session.callId) {
+      await dbRun(
+        `UPDATE calls
+            SET transcript_text = ?,
+                transcript_status = ?,
+                transcript_source = ?,
+                analysis_status = CASE WHEN analysis_status = 'completed' THEN analysis_status ELSE 'pending' END
+          WHERE id = ?`,
+        [transcriptText, transcriptStatus, 'live_stream', session.callId]
+      );
+      return;
+    }
+
+    await dbRun(
+      `UPDATE calls
+          SET transcript_text = ?,
+              transcript_status = ?,
+              transcript_source = ?
+        WHERE provider_call_id = ?`,
+      [transcriptText, transcriptStatus, 'live_stream', session.streamId]
+    );
+  } catch (error) {
+    console.error('[LIVE TRANSCRIPT DB ERROR]', error.message);
+  }
+}
+
+async function persistLocalRecordingForSession(session) {
+  if (!session?.callId || !Array.isArray(session.localRecordingChunks) || !session.localRecordingChunks.length) {
+    return;
+  }
+
+  try {
+    await fs.promises.mkdir(LOCAL_RECORDINGS_DIR, { recursive: true });
+    const pcm = Buffer.concat(session.localRecordingChunks);
+    const wav = buildWavBufferFromPcm16(pcm, 8000);
+    const targetPath = path.join(LOCAL_RECORDINGS_DIR, `${session.callId}-${Date.now()}.wav`);
+    await fs.promises.writeFile(targetPath, wav);
+    await dbRun(
+      `UPDATE calls
+          SET recording_local_path = ?,
+              recording_status = CASE
+                WHEN recording_status IS NULL OR recording_status = '' OR recording_status = 'pending' THEN ?
+                ELSE recording_status
+              END
+        WHERE id = ?`,
+      [targetPath, 'completed', session.callId]
+    );
+    session.localRecordingChunks = [];
+  } catch (error) {
+    console.error('[LOCAL RECORDING ERROR]', error.message);
+  }
 }
 
 app.get('/health', (req, res) => {
@@ -1958,8 +2166,9 @@ app.post('/call/start', async (req, res) => {
     const result = await dbRun(
       `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source,
+        provider_payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         customer.id,
         agentConfig?.id || null,
@@ -1971,7 +2180,8 @@ app.post('/call/start', async (req, res) => {
         agentConfig?.slug || 'hindi-feedback-v1',
         'normal',
         'outbound',
-        'icallmate'
+        'icallmate',
+        JSON.stringify(call.raw || {})
       ]
     );
     await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
@@ -2175,8 +2385,9 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
     const result = await dbRun(
       `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source,
+        provider_payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         customer.id,
         agentConfig?.id || null,
@@ -2188,7 +2399,8 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
         agentConfig?.slug || 'hindi-feedback-v1',
         'normal',
         'outbound',
-        'icallmate'
+        'icallmate',
+        JSON.stringify(call.raw || {})
       ]
     );
 
@@ -2760,10 +2972,22 @@ app.post('/api/calls/:callId/escalate', async (req, res) => {
 
 app.get('/api/calls/:callId/recording', async (req, res) => {
   try {
-    const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status FROM calls WHERE id = ?', [req.params.callId]);
+    const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status, recording_local_path FROM calls WHERE id = ?', [req.params.callId]);
 
-    if (!call?.recording_url && !call?.provider_call_id) {
+    if (!call?.recording_url && !call?.recording_local_path && !call?.provider_call_id) {
       return res.status(404).json({ error: 'Recording not available yet' });
+    }
+
+    if (call.recording_local_path) {
+      try {
+        const localAudio = await fs.promises.readFile(call.recording_local_path);
+        res.setHeader('Content-Type', call.recording_local_path.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg');
+        res.setHeader('Cache-Control', 'private, max-age=300');
+        res.send(localAudio);
+        return;
+      } catch (error) {
+        console.warn(`[RECORDING PROXY] Local recording unavailable path=${call.recording_local_path}: ${error.message}`);
+      }
     }
 
     let playbackUrl = call.recording_url || null;
@@ -2825,10 +3049,10 @@ app.get('/api/calls/:callId/transcript', async (req, res) => {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const match = line.match(/^\[([A-Z]+)\]:\s*(.*)$/);
+        const match = line.match(/^(?:\[([A-Z]+)\]|([A-Z]+)):\s*(.*)$/);
         return {
-          role: match?.[1] || 'NOTE',
-          text: match?.[2] || line
+          role: match?.[1] || match?.[2] || 'NOTE',
+          text: match?.[3] || line
         };
       });
 
@@ -3006,6 +3230,9 @@ function sendIcallMateReverseMedia(ws, session, pcmBuffer) {
 
   for (let offset = 0; offset < buffer.length; offset += 3200) {
     const chunk = buffer.subarray(offset, Math.min(offset + 3200, buffer.length));
+    if (Array.isArray(session.localRecordingChunks)) {
+      session.localRecordingChunks.push(Buffer.from(chunk));
+    }
     sendIcallMateJson(ws, {
       event: 'reverse-media',
       encoding: 'LINEAR16',
@@ -3021,11 +3248,22 @@ function sendIcallMateReverseMedia(ws, session, pcmBuffer) {
 function createIcallMateAiBridge(ws, session) {
   let aiWs = null;
   let deepgramWs = null;
+  let openaiSttWs = null;
   let bridgeClosed = false;
+  let bridgeProvider = AI_PROVIDER;
   let geminiSetupComplete = false;
+  let openaiRealtimeReady = false;
   let openingPromptSent = false;
   let deepgramReady = false;
   let finalTranscriptBuffer = [];
+  let openaiSttReady = false;
+  let openaiPendingAudioMs = 0;
+  let openaiTrailingSilenceMs = 0;
+  let openaiHasSpeech = false;
+  let openaiAgentTranscriptBuffer = '';
+  let closeAfterResponse = false;
+  let closeTimer = null;
+  session.transcript = Array.isArray(session.transcript) ? session.transcript : [];
 
   const getSessionLabel = () => session.streamId || session.callerId || 'unknown';
   const isOutboundSession = () => String(session.callDirection || '').toLowerCase() === 'outbound';
@@ -3042,9 +3280,90 @@ function createIcallMateAiBridge(ws, session) {
       : buildIncomingOpeningPrompt(getSessionClientName())
   );
 
+  function logPromptSnapshot() {
+    const systemPrompt = getSystemPrompt().replace(/\s+/g, ' ').trim();
+    const openingPrompt = getOpeningPrompt().replace(/\s+/g, ' ').trim();
+    console.log(
+      `[ICALLMATE][PROMPT] provider=${AI_PROVIDER} direction=${session.callDirection} ` +
+      `client="${getSessionClientName()}" customer="${getSessionCustomerName()}" ` +
+      `system="${systemPrompt.slice(0, 240)}" opening="${openingPrompt.slice(0, 220)}"`
+    );
+  }
+
+  function updateTranscript(role, text, transcriptStatus = 'live_stream') {
+    pushTranscriptTurn(session.transcript, role, text);
+    persistLiveTranscriptForSession(session, transcriptStatus);
+  }
+
+  function scheduleBridgeClose(reason = 'ended_by_agent', delayMs = 1800) {
+    if (bridgeClosed || closeTimer) {
+      return;
+    }
+
+    closeTimer = setTimeout(() => {
+      console.log(`[ICALLMATE] Ending media session reason=${reason} streamId=${getSessionLabel()}`);
+      sendIcallMateJson(ws, {
+        event: 'reverse-media-stop',
+        callerId: session.callerId,
+        streamId: session.streamId
+      });
+      bridgeClosed = true;
+      if (deepgramWs && deepgramWs.readyState < WebSocket.CLOSING) deepgramWs.close();
+      if (openaiSttWs && openaiSttWs.readyState < WebSocket.CLOSING) openaiSttWs.close();
+      if (aiWs && aiWs.readyState < WebSocket.CLOSING) aiWs.close();
+      if (ws.readyState < WebSocket.CLOSING) ws.close();
+    }, delayMs);
+  }
+
+  function sendOpenAiResponse(instructions, options = {}) {
+    const safeInstructions = String(instructions || '').trim();
+    if (
+      bridgeClosed
+      || bridgeProvider !== 'openai'
+      || !safeInstructions
+      || aiWs?.readyState !== WebSocket.OPEN
+      || !openaiRealtimeReady
+    ) {
+      return;
+    }
+
+    aiWs.send(JSON.stringify({
+      type: 'response.create',
+      response: {
+        modalities: ['audio'],
+        instructions: safeInstructions,
+        max_output_tokens: options.maxOutputTokens || 160
+      }
+    }));
+  }
+
+  function speakFixedReply(reply, { endCall = false } = {}) {
+    const safeReply = String(reply || '').trim();
+    if (!safeReply || bridgeClosed) {
+      return;
+    }
+
+    updateTranscript('AGENT', safeReply, endCall ? 'completed' : 'live_stream');
+    if (bridgeProvider === 'openai') {
+      closeAfterResponse = Boolean(endCall);
+      sendOpenAiResponse(`Sirf yeh exact line bolo, aur kuch nahi: "${safeReply}"`, { maxOutputTokens: 80 });
+    } else {
+      sendGeminiClientTurn(`Sirf yeh exact line bolo, aur kuch nahi: "${safeReply}"`, { interrupt: true });
+      if (endCall) {
+        scheduleBridgeClose('deterministic_end_call', estimateHangupDelayMs(safeReply));
+      }
+    }
+  }
+
   function sendGeminiClientTurn(text, options = {}) {
     const safeText = String(text || '').trim();
-    if (bridgeClosed || !safeText || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
+    if (
+      bridgeClosed
+      || bridgeProvider !== 'gemini'
+      || !safeText
+      || aiWs?.readyState !== WebSocket.OPEN
+      || !geminiSetupComplete
+    ) {
       return;
     }
 
@@ -3068,18 +3387,49 @@ function createIcallMateAiBridge(ws, session) {
   }
 
   function sendOpeningPrompt() {
-    if (bridgeClosed || openingPromptSent || aiWs?.readyState !== WebSocket.OPEN || !geminiSetupComplete) {
+    if (bridgeClosed || openingPromptSent || aiWs?.readyState !== WebSocket.OPEN) {
       return;
     }
 
     openingPromptSent = true;
-    console.log(`[ICALLMATE][GEMINI] Sending opening prompt streamId=${getSessionLabel()}`);
-    sendGeminiClientTurn(getOpeningPrompt(), { interrupt: true });
+    console.log(`[ICALLMATE][${bridgeProvider.toUpperCase()}] Sending opening prompt streamId=${getSessionLabel()}`);
+    if (bridgeProvider === 'openai') {
+      sendOpenAiResponse(getOpeningPrompt(), { maxOutputTokens: 180 });
+    } else {
+      sendGeminiClientTurn(getOpeningPrompt(), { interrupt: true });
+    }
+  }
+
+  function sendGeminiRealtimeAudio(payload) {
+    if (
+      bridgeClosed
+      || !payload
+      || !GEMINI_NATIVE_AUDIO_INPUT
+      || aiWs?.readyState !== WebSocket.OPEN
+      || !geminiSetupComplete
+    ) {
+      return;
+    }
+
+    aiWs.send(JSON.stringify({
+      realtimeInput: {
+        mediaChunks: [
+          {
+            mimeType: 'audio/pcm;rate=8000',
+            data: payload
+          }
+        ]
+      }
+    }));
   }
 
   function connectGemini() {
     if (bridgeClosed) {
       return;
+    }
+
+    if (bridgeProvider !== 'gemini') {
+      return connectOpenAiRealtime();
     }
 
     if (aiWs && aiWs.readyState !== WebSocket.CLOSED) {
@@ -3098,6 +3448,7 @@ function createIcallMateAiBridge(ws, session) {
       }
 
       console.log(`[ICALLMATE][GEMINI] Live session opened streamId=${getSessionLabel()} model=${REALTIME_MODEL} voice=${GEMINI_VOICE}`);
+      logPromptSnapshot();
       aiWs.send(JSON.stringify({
         setup: {
           model: resolveRealtimeModelName(REALTIME_MODEL),
@@ -3150,6 +3501,10 @@ function createIcallMateAiBridge(ws, session) {
         console.log(`[ICALLMATE][AGENT]: ${message.serverContent.outputTranscription.text}`);
       }
 
+      if (message.serverContent?.inputTranscription?.text) {
+        console.log(`[ICALLMATE][CALLER][GEMINI]: ${message.serverContent.inputTranscription.text}`);
+      }
+
       const parts = message.serverContent?.modelTurn?.parts || [];
       for (const part of parts) {
         if (!part.inlineData?.data || !String(part.inlineData.mimeType || '').startsWith('audio/pcm')) {
@@ -3175,6 +3530,18 @@ function createIcallMateAiBridge(ws, session) {
     aiWs.on('close', (code, reasonBuffer) => {
       const reason = Buffer.isBuffer(reasonBuffer) ? reasonBuffer.toString() : String(reasonBuffer || '');
       console.log(`[ICALLMATE][GEMINI] Live session closed code=${code ?? 'unknown'} reason=${reason || 'n/a'} streamId=${getSessionLabel()}`);
+
+      if (!bridgeClosed && (code === 1011 || /prepayment credits/i.test(reason))) {
+        if (process.env.OPENAI_API_KEY && bridgeProvider !== 'openai') {
+          console.warn(`[ICALLMATE][GEMINI] Prepayment credit failure detected; falling back to OpenAI realtime streamId=${getSessionLabel()}`);
+          bridgeProvider = 'openai';
+          connectOpenAiRealtime();
+          return;
+        }
+
+        console.warn(`[ICALLMATE][GEMINI] Prepayment credits depleted and no OpenAI fallback available; closing media bridge streamId=${getSessionLabel()}`);
+        scheduleBridgeClose('gemini_credit_failure', 1200);
+      }
     });
 
     aiWs.on('error', (error) => {
@@ -3186,6 +3553,195 @@ function createIcallMateAiBridge(ws, session) {
     });
   }
 
+  function connectOpenAiRealtime() {
+    if (bridgeClosed) {
+      return;
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      console.warn('[ICALLMATE][OPENAI REALTIME] Missing OPENAI_API_KEY; realtime fallback is unavailable.');
+      scheduleBridgeClose('openai_realtime_missing_key', 1200);
+      return;
+    }
+
+    if (aiWs && aiWs.readyState !== WebSocket.CLOSED) {
+      sendOpeningPrompt();
+      return;
+    }
+
+    openaiRealtimeReady = false;
+    openingPromptSent = false;
+    openaiAgentTranscriptBuffer = '';
+    aiWs = new WebSocket(buildOpenAiRealtimeWsUrl(), {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+      }
+    });
+
+    aiWs.on('open', () => {
+      if (bridgeClosed) {
+        aiWs.close();
+        return;
+      }
+
+      console.log(`[ICALLMATE][OPENAI REALTIME] Session opened streamId=${getSessionLabel()} model=${OPENAI_REALTIME_MODEL} voice=${OPENAI_REALTIME_VOICE}`);
+      logPromptSnapshot();
+      aiWs.send(JSON.stringify({
+        type: 'session.update',
+        session: {
+          type: 'realtime',
+          model: OPENAI_REALTIME_MODEL,
+          instructions: getSystemPrompt(),
+          output_modalities: ['audio'],
+          audio: {
+            input: {
+              format: { type: 'audio/pcm', rate: 24000 },
+              transcription: {
+                model: OPENAI_TRANSCRIPTION_MODEL,
+                language: OPENAI_TRANSCRIPTION_LANGUAGE
+              },
+              turn_detection: {
+                type: 'server_vad',
+                threshold: 0.45,
+                prefix_padding_ms: 200,
+                silence_duration_ms: OPENAI_REALTIME_TURN_SILENCE_MS,
+                interrupt_response: true,
+                create_response: true
+              }
+            },
+            output: {
+              format: { type: 'audio/pcm', rate: 24000 },
+              voice: OPENAI_REALTIME_VOICE
+            }
+          },
+          reasoning: {
+            effort: OPENAI_REALTIME_REASONING_EFFORT
+          }
+        }
+      }));
+    });
+
+    aiWs.on('message', (raw) => {
+      if (bridgeClosed) {
+        return;
+      }
+
+      let event;
+      try {
+        event = JSON.parse(raw.toString());
+      } catch (error) {
+        console.error('[ICALLMATE][OPENAI REALTIME] Parse error:', error.message);
+        return;
+      }
+
+      if (event.type === 'session.created') {
+        return;
+      }
+
+      if (event.type === 'session.updated') {
+        openaiRealtimeReady = true;
+        console.log(`[ICALLMATE][OPENAI REALTIME] Session configured streamId=${getSessionLabel()}`);
+        sendOpeningPrompt();
+        return;
+      }
+
+      const audioDelta = event.delta || event.audio;
+      if ((event.type === 'response.audio.delta' || event.type === 'response.output_audio.delta') && audioDelta) {
+        const pcm24k = Buffer.from(audioDelta, 'base64');
+        sendIcallMateReverseMedia(ws, session, resamplePcm16(pcm24k, 24000, 8000));
+        return;
+      }
+
+      if (event.type === 'response.audio_transcript.delta' && event.delta) {
+        openaiAgentTranscriptBuffer += event.delta;
+        return;
+      }
+
+      if (event.type === 'response.audio_transcript.done' || event.type === 'response.output_audio_transcript.done') {
+        const transcript = String(event.transcript || openaiAgentTranscriptBuffer || '').trim();
+        openaiAgentTranscriptBuffer = '';
+        if (transcript) {
+          console.log(`[ICALLMATE][AGENT]: ${transcript}`);
+          updateTranscript('AGENT', transcript, closeAfterResponse ? 'completed' : 'live_stream');
+          if (shouldAutoHangupAfterAgentTurn(transcript)) {
+            closeAfterResponse = true;
+          }
+        }
+        return;
+      }
+
+      if (event.type === 'conversation.item.input_audio_transcription.completed') {
+        handleCallerTranscript(event.transcript);
+        return;
+      }
+
+      if (event.type === 'input_audio_buffer.speech_started') {
+        if (aiWs.readyState === WebSocket.OPEN) {
+          aiWs.send(JSON.stringify({ type: 'response.cancel' }));
+        }
+        return;
+      }
+
+      if (event.type === 'response.done') {
+        if (closeAfterResponse) {
+          scheduleBridgeClose('end_call', 1000);
+        }
+        return;
+      }
+
+      if (event.type === 'error') {
+        console.error('[ICALLMATE][OPENAI REALTIME ERROR]', JSON.stringify(event, null, 2));
+      }
+    });
+
+    aiWs.on('close', (code, reasonBuffer) => {
+      const reason = Buffer.isBuffer(reasonBuffer) ? reasonBuffer.toString() : String(reasonBuffer || '');
+      openaiRealtimeReady = false;
+      console.log(`[ICALLMATE][OPENAI REALTIME] Session closed code=${code ?? 'unknown'} reason=${reason || 'n/a'} streamId=${getSessionLabel()}`);
+    });
+
+    aiWs.on('error', (error) => {
+      openaiRealtimeReady = false;
+      if (bridgeClosed) {
+        return;
+      }
+
+      console.error('[ICALLMATE][OPENAI REALTIME ERROR]', error.message);
+    });
+  }
+
+  function handleCallerTranscript(transcriptText) {
+    const merged = String(transcriptText || '').replace(/\s+/g, ' ').trim();
+    if (!merged) {
+      return;
+    }
+
+    console.log(`[ICALLMATE][CALLER]: ${merged}`);
+    updateTranscript('CUSTOMER', merged);
+
+    const deterministicHangupReply = getDeterministicHangupReply(merged, getSessionCustomerName());
+    if (deterministicHangupReply) {
+      speakFixedReply(deterministicHangupReply, { endCall: true });
+      return;
+    }
+
+    if (isMedicalOrReportQuestion(merged)) {
+      speakFixedReply('Maaf kijiye, main sirf feedback collect karne ke liye call kar rahi hoon. Is vishay mein hamari team aapki madad karegi.');
+      return;
+    }
+
+    if (bridgeProvider === 'openai' || GEMINI_NATIVE_AUDIO_INPUT) {
+      return;
+    }
+
+    sendGeminiClientTurn(
+      isOutboundSession()
+        ? `Customer said: ${merged}\nDo not greet again. Continue the diagnostic center feedback flow naturally in simple Hindi. Ask one question only. Never invent facts.`
+        : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`,
+      { interrupt: true }
+    );
+  }
+
   function handleDeepgramTranscript(event) {
     const transcriptText = String(event?.channel?.alternatives?.[0]?.transcript || '').trim();
     const isFinal = Boolean(event?.is_final);
@@ -3193,17 +3749,8 @@ function createIcallMateAiBridge(ws, session) {
 
     if (!transcriptText) {
       if (isSpeechFinal && finalTranscriptBuffer.length) {
-        const merged = finalTranscriptBuffer.join(' ').replace(/\s+/g, ' ').trim();
+        handleCallerTranscript(finalTranscriptBuffer.join(' '));
         finalTranscriptBuffer = [];
-        if (merged) {
-        console.log(`[ICALLMATE][CALLER]: ${merged}`);
-          sendGeminiClientTurn(
-            isOutboundSession()
-              ? `Customer said: ${merged}\nDo not greet again. Continue the blood donation follow-up naturally in Hindi/Hinglish.`
-              : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`,
-            { interrupt: true }
-          );
-        }
       }
       return;
     }
@@ -3213,19 +3760,8 @@ function createIcallMateAiBridge(ws, session) {
     }
 
     if (isSpeechFinal) {
-      const merged = (finalTranscriptBuffer.length ? finalTranscriptBuffer.join(' ') : transcriptText)
-        .replace(/\s+/g, ' ')
-        .trim();
+      handleCallerTranscript(finalTranscriptBuffer.length ? finalTranscriptBuffer.join(' ') : transcriptText);
       finalTranscriptBuffer = [];
-      if (merged) {
-        console.log(`[ICALLMATE][CALLER]: ${merged}`);
-        sendGeminiClientTurn(
-          isOutboundSession()
-            ? `Customer said: ${merged}\nDo not greet again. Continue the blood donation follow-up naturally in Hindi/Hinglish.`
-            : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`,
-          { interrupt: true }
-        );
-      }
     }
   }
 
@@ -3243,6 +3779,8 @@ function createIcallMateAiBridge(ws, session) {
       return;
     }
 
+    deepgramReady = false;
+    finalTranscriptBuffer = [];
     deepgramWs = new WebSocket(createDeepgramListenUrl(), {
       headers: {
         Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`
@@ -3256,7 +3794,7 @@ function createIcallMateAiBridge(ws, session) {
       }
 
       deepgramReady = true;
-      console.log(`[ICALLMATE][DEEPGRAM] Live transcription connected streamId=${getSessionLabel()}`);
+      console.log(`[ICALLMATE][DEEPGRAM] Live transcription connected streamId=${getSessionLabel()} model=${process.env.DEEPGRAM_MODEL || 'nova-2'}`);
     });
 
     deepgramWs.on('message', (raw) => {
@@ -3289,26 +3827,109 @@ function createIcallMateAiBridge(ws, session) {
     });
   }
 
+  function commitOpenAiAudioBuffer() {
+    if (!openaiHasSpeech || openaiPendingAudioMs <= 0 || openaiSttWs?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    openaiSttWs.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+    openaiPendingAudioMs = 0;
+    openaiTrailingSilenceMs = 0;
+    openaiHasSpeech = false;
+  }
+
+  function connectOpenAiTranscription() {
+    // OpenAI transcription connector disabled — use Gemini realtime/transcription instead.
+    connectGemini();
+    return;
+  }
+
   return {
     start() {
       if (bridgeClosed) {
         return;
       }
 
-      connectGemini();
-      connectDeepgram();
+      if (AI_PROVIDER === 'openai') {
+        connectOpenAiRealtime();
+      } else {
+        connectGemini();
+      }
+
+      if (AI_PROVIDER !== 'openai' && LIVE_STT_PROVIDER === 'deepgram') {
+        connectDeepgram();
+      } else if (AI_PROVIDER !== 'openai') {
+        connectOpenAiTranscription();
+      }
     },
     sendCallerAudio(payload) {
-      if (bridgeClosed || !payload || !deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
+      if (bridgeClosed || !payload) {
         return;
       }
 
-      deepgramWs.send(Buffer.from(payload, 'base64'));
+      sendGeminiRealtimeAudio(payload);
+
+      if (bridgeProvider === 'openai') {
+        if (!openaiRealtimeReady || aiWs?.readyState !== WebSocket.OPEN) {
+          return;
+        }
+
+        const pcm8k = Buffer.from(payload, 'base64');
+        const pcm24k = resamplePcm16(pcm8k, 8000, 24000);
+        aiWs.send(JSON.stringify({
+          type: 'input_audio_buffer.append',
+          audio: pcm24k.toString('base64')
+        }));
+        return;
+      }
+
+      if (LIVE_STT_PROVIDER === 'deepgram') {
+        if (!deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
+          return;
+        }
+
+        deepgramWs.send(Buffer.from(payload, 'base64'));
+        return;
+      }
+
+      if (!openaiSttReady || openaiSttWs?.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      const pcm8k = Buffer.from(payload, 'base64');
+      const pcm24k = resamplePcm16(pcm8k, 8000, 24000);
+      openaiSttWs.send(JSON.stringify({
+        type: 'input_audio_buffer.append',
+        audio: pcm24k.toString('base64')
+      }));
+
+      const audioMs = (Math.floor(pcm8k.length / 2) / 8000) * 1000;
+      openaiPendingAudioMs += audioMs;
+      if (isSilentPcm16(pcm8k)) {
+        openaiTrailingSilenceMs += audioMs;
+      } else {
+        openaiTrailingSilenceMs = 0;
+        openaiHasSpeech = true;
+      }
+
+      if (
+        (openaiHasSpeech && openaiTrailingSilenceMs >= OPENAI_STT_SILENCE_COMMIT_MS)
+        || openaiPendingAudioMs >= OPENAI_STT_MAX_SEGMENT_MS
+      ) {
+        commitOpenAiAudioBuffer();
+      }
     },
     close() {
       bridgeClosed = true;
+      if (closeTimer) {
+        clearTimeout(closeTimer);
+      }
+      commitOpenAiAudioBuffer();
       if (deepgramWs && deepgramWs.readyState < WebSocket.CLOSING) {
         deepgramWs.close();
+      }
+      if (openaiSttWs && openaiSttWs.readyState < WebSocket.CLOSING) {
+        openaiSttWs.close();
       }
       if (aiWs && aiWs.readyState < WebSocket.CLOSING) {
         aiWs.close();
@@ -3326,11 +3947,13 @@ icallMateWss.on('connection', (ws, req) => {
     streamId: '',
     callerId: '',
     did: '',
+    callId: null,
     callDirection: 'incoming',
     customerName: '',
     clientName: CLIENT_NAME,
     answered: false,
-    connectedAt: new Date().toISOString()
+    connectedAt: new Date().toISOString(),
+    localRecordingChunks: []
   };
   const aiBridge = createIcallMateAiBridge(ws, session);
 
@@ -3354,7 +3977,9 @@ icallMateWss.on('connection', (ws, req) => {
     if (extraParams.clientName) session.clientName = extraParams.clientName;
 
     if (eventName === 'connected') {
-      await upsertIncomingCallFromIcall(message, { status: 'active', notes: 'iCallMate connected' });
+      const row = await upsertIncomingCallFromIcall(message, { status: 'active', notes: 'iCallMate connected' });
+      if (row.call_id) session.callId = row.call_id;
+      if (row.call_direction) session.callDirection = row.call_direction;
       sendIcallMateMark(ws, message, 'connected-received');
       return;
     }
@@ -3368,19 +3993,23 @@ icallMateWss.on('connection', (ws, req) => {
         && Number(mediaFormat.bitsPerSample) === 16
       );
 
-      await upsertIncomingCallFromIcall(message, {
+      const row = await upsertIncomingCallFromIcall(message, {
         status: 'active',
         notes: isExpectedAudio ? 'iCallMate media stream started' : 'iCallMate media stream started with unexpected audio format'
       });
+      if (row.call_id) session.callId = row.call_id;
+      if (row.call_direction) session.callDirection = row.call_direction;
       sendIcallMateMark(ws, message, 'start-received');
 
       if (!session.answered) {
         session.answered = true;
-        await upsertIncomingCallFromIcall(message, {
+        const answerRow = await upsertIncomingCallFromIcall(message, {
           status: 'active',
           answered_at: normalizeIcallTimestamp(message.timestamp),
           notes: 'Incoming call answered via start event'
         });
+        if (answerRow.call_id) session.callId = answerRow.call_id;
+        if (answerRow.call_direction) session.callDirection = answerRow.call_direction;
         aiBridge.start();
         sendIcallMateMark(ws, message, 'answer-received');
       }
@@ -3389,32 +4018,53 @@ icallMateWss.on('connection', (ws, req) => {
 
     if (eventName === 'answer') {
       session.answered = true;
-      await upsertIncomingCallFromIcall(message, {
+      const row = await upsertIncomingCallFromIcall(message, {
         status: 'active',
         answered_at: normalizeIcallTimestamp(message.timestamp),
         notes: 'Incoming call answered'
       });
+      if (row.call_id) session.callId = row.call_id;
+      if (row.call_direction) session.callDirection = row.call_direction;
       aiBridge.start();
       sendIcallMateMark(ws, message, 'answer-received');
       return;
     }
 
     if (eventName === 'media') {
-      await upsertIncomingCallFromIcall(message, {
+      const row = await upsertIncomingCallFromIcall(message, {
         status: 'active',
         media_packets: 1,
         notes: session.answered ? 'Incoming audio streaming' : 'Incoming media before answer'
       });
+      if (row.call_id) session.callId = row.call_id;
+      if (row.call_direction) session.callDirection = row.call_direction;
+      if (message.payload && Array.isArray(session.localRecordingChunks)) {
+        session.localRecordingChunks.push(Buffer.from(message.payload, 'base64'));
+      }
       aiBridge.sendCallerAudio(message.payload);
       return;
     }
 
     if (eventName === 'hangup-call') {
-      await upsertIncomingCallFromIcall(message, {
+      const row = await upsertIncomingCallFromIcall(message, {
         status: session.answered ? 'completed' : 'missed',
         ended_at: normalizeIcallTimestamp(message.timestamp),
         notes: session.answered ? 'Incoming call disconnected' : 'Incoming call missed'
       });
+      if (row.call_id) session.callId = row.call_id;
+      await persistLiveTranscriptForSession(session, session.answered ? 'completed' : 'missing');
+      await persistLocalRecordingForSession(session);
+      if (session.answered && session.callId && session.transcript?.length) {
+        runInBackground('post-call-live-transcript-pipeline', async () => {
+          const call = await dbGet('SELECT provider_call_id FROM calls WHERE id = ?', [session.callId]);
+          if (call?.provider_call_id) {
+            const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: call.provider_call_id });
+            if (result.ok) {
+              console.log(`[POST CALL PIPELINE] Processed live transcript call ${call.provider_call_id}`);
+            }
+          }
+        });
+      }
       sendIcallMateJson(ws, {
         event: 'reverse-media-stop',
         callerId: message.callerId || session.callerId,
@@ -3436,6 +4086,8 @@ icallMateWss.on('connection', (ws, req) => {
   ws.on('close', () => {
     console.log('[ICALLMATE] Media stream closed');
     aiBridge.close();
+    persistLiveTranscriptForSession(session, session.answered ? 'completed' : 'missing');
+    persistLocalRecordingForSession(session);
     if (session.streamId) {
       upsertIncomingCallFromIcall({
         streamId: session.streamId,

@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { analyzeCallTranscript, transcribeAudioFile, categorizeFeedback } = require('./openai');
+const { analyzeCallTranscript, transcribeAudioFile, categorizeFeedback } = require('./gemini');
 const { extractCallFeedback } = require('./call-feedback');
 const {
   detectConversationOutcome,

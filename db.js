@@ -299,9 +299,9 @@ function runMigrations() {
             'legacy',
             'deepgram',
             'gemini',
-            process.env.GEMINI_MODEL || 'models/gemini-2.5-flash-native-audio-preview-12-2025',
+            process.env.GEMINI_REALTIME_MODEL || process.env.GEMINI_MODEL || 'models/gemini-2.5-flash-native-audio-preview-12-2025',
             'native',
-            process.env.GEMINI_VOICE || null,
+            process.env.GEMINI_REALTIME_VOICE || process.env.GEMINI_VOICE || 'Aoede',
             null,
             null,
             1,
@@ -315,6 +315,36 @@ function runMigrations() {
         );
       });
     }
+
+    await new Promise((resolve, reject) => {
+      db.run(
+        `UPDATE agents
+            SET stt_provider = ?,
+                llm_provider = ?,
+                llm_model = ?,
+                tts_voice = COALESCE(NULLIF(tts_voice, ''), ?),
+                updated_at = ?
+          WHERE slug = ?
+            AND is_default = 1
+            AND (
+              stt_provider IS NULL OR stt_provider = '' OR stt_provider = 'deepgram'
+              OR llm_provider IS NULL OR llm_provider = '' OR llm_provider = 'gemini'
+              OR llm_model IS NULL OR llm_model = '' OR llm_model LIKE 'models/gemini%'
+            )`,
+        [
+          'deepgram',
+          'gemini',
+          process.env.GEMINI_REALTIME_MODEL || process.env.GEMINI_MODEL || 'models/gemini-2.5-flash-native-audio-preview-12-2025',
+          process.env.GEMINI_REALTIME_VOICE || process.env.GEMINI_VOICE || 'Aoede',
+          new Date().toISOString(),
+          'default-feedback-agent'
+        ],
+        (err) => {
+          if (err) reject(err);
+          else resolve();
+        }
+      );
+    });
 
     console.log('✓ All tables created/verified');
   })();

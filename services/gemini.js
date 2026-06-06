@@ -1,3 +1,21 @@
+const fs = require('fs/promises');
+const path = require('path');
+
+const GEMINI_TRANSCRIPTION_ENDPOINT = process.env.GEMINI_TRANSCRIPTION_ENDPOINT || 'https://api.gemini.example/v1/audio/transcriptions';
+const GEMINI_BATCH_TRANSCRIPTION_MODEL = process.env.GEMINI_BATCH_TRANSCRIPTION_MODEL || process.env.GEMINI_MODEL || 'models/gemini-2.5-flash-native-audio-preview-12-2025';
+
+function getAudioMimeType(filePath = '') {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === '.mp3') return 'audio/mpeg';
+  if (extension === '.mp4') return 'audio/mp4';
+  if (extension === '.mpeg') return 'audio/mpeg';
+  if (extension === '.mpga') return 'audio/mpeg';
+  if (extension === '.m4a') return 'audio/mp4';
+  if (extension === '.wav') return 'audio/wav';
+  if (extension === '.webm') return 'audio/webm';
+  return 'application/octet-stream';
+}
+
 function buildFallbackCallScript(customerName) {
   const safeName = customerName || 'there';
   return `Hi ${safeName}, thank you for choosing ${process.env.CLIENT_NAME || 'us'}. Press 1 to receive a review link, or press 2 to skip.`;
@@ -65,8 +83,36 @@ function analyzeCallTranscript(transcriptText, context = {}) {
   };
 }
 
-async function transcribeAudioFile() {
-  return null;
+async function transcribeAudioFile(filePath, options = {}) {
+  if (!filePath) return null;
+
+  if (!process.env.GEMINI_API_KEY) {
+    console.warn('[GEMINI STT] Missing GEMINI_API_KEY; recording transcription skipped.');
+    return null;
+  }
+
+  const audioBuffer = await fs.readFile(filePath);
+  // Minimal compatibility: send multipart/form-data if endpoint expects it.
+  const form = new FormData();
+  form.append('model', options.model || GEMINI_BATCH_TRANSCRIPTION_MODEL);
+  form.append('response_format', 'text');
+  if (options.language) form.append('language', options.language);
+  form.append('file', new Blob([audioBuffer], { type: getAudioMimeType(filePath) }), path.basename(filePath));
+
+  const response = await fetch(GEMINI_TRANSCRIPTION_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.GEMINI_API_KEY}`
+    },
+    body: form
+  });
+
+  const responseText = await response.text();
+  if (!response.ok) {
+    throw new Error(`Gemini transcription failed (${response.status}): ${responseText || response.statusText}`);
+  }
+
+  return responseText.trim();
 }
 
 async function generateCallScript(customerName) {

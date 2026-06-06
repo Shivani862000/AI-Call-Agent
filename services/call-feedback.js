@@ -1,4 +1,4 @@
-const { categorizeFeedback } = require('./openai');
+const { categorizeFeedback } = require('./gemini');
 
 const NUMBER_WORDS = new Map([
   ['one', 1],

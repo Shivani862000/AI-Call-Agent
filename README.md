@@ -1,6 +1,6 @@
 # Conversational Voice Agent
 
-Node.js + Express voice agent for iCallMate inbound and outbound calls, with Gemini Live audio and Deepgram transcription.
+Node.js + Express voice agent for iCallMate inbound and outbound calls, with Gemini Live audio and Deepgram live transcription.
 
 ## Endpoints
 
@@ -31,10 +31,29 @@ ICALLMATE_BOT_ID=0
 ICALLMATE_DID=07971644996
 ICALLMATE_IBD_API_ENDPOINT=https://crm.icallmate.in
 ICALLMATE_OBD_API_ENDPOINT=https://ecp1.icallmate.in
+ICALLMATE_OUTBOUND_PROVIDER=campaign
+CALL_MODE=gemini
+AI_PROVIDER=gemini
 GEMINI_API_KEY=
-DEEPGRAM_API_KEY=
+GEMINI_REALTIME_MODEL=models/gemini-2.5-flash-native-audio-preview-12-2025
+GEMINI_REALTIME_VOICE=Aoede
+GEMINI_REALTIME_REASONING_EFFORT=low
+GEMINI_TRANSCRIPTION_MODEL=gpt-realtime-whisper
+GEMINI_TRANSCRIPTION_LANGUAGE=hi
+GEMINI_TRANSCRIPTION_DELAY=low
+GEMINI_BATCH_TRANSCRIPTION_MODEL=gpt-4o-transcribe
 APP_BASE_URL=https://your-public-domain.example
 PORT=3000
+```
+
+For CRM master-post outbound calls, set:
+
+```env
+ICALLMATE_OUTBOUND_PROVIDER=masterpost
+ICALLMATE_MASTER_POST_API_ENDPOINT=https://crm.icallmate.in/WebSVC111/setMasterPostAPI
+ICALLMATE_MASTER_POST_CAMP_ID=54
+ICALLMATE_MASTER_POST_LEAD_ID=1031
+ICALLMATE_MASTER_POST_WSURL=wss://your-public-domain.example/icallmate/media
 ```
 
 ## Run
