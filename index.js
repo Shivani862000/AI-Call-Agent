@@ -430,6 +430,10 @@ IMPORTANT BEHAVIOR RULES:
 - Never skip steps unless the customer wants to end the call.
 - Ask only one question at a time.
 - Keep every response under 20 words whenever possible.
+- For a client demo, sound confident, warm, and calm. Avoid filler.
+- Do not repeat the greeting after the customer has responded once.
+- If the customer says only "hello", confirm identity and permission in one short sentence.
+- If the customer says "haan", "yes", "ji", or "okay" after the introduction, move to the first feedback question.
 - Use short acknowledgements before the next question.
 - Do not generate long explanations.
 - Do not repeat previous questions.
@@ -1345,6 +1349,84 @@ function estimateHangupDelayMs(text) {
 
   const length = normalized.length;
   return Math.min(7000, Math.max(2800, 1800 + (length * 24)));
+}
+
+function normalizeHindiEnglishText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isGreetingOnly(text) {
+  const normalized = normalizeHindiEnglishText(text).replace(/[.,!?।]/g, '').trim();
+  return ['hello', 'helo', 'hi', 'haan hello', 'ji hello', 'namaste', 'हेलो', 'नमस्ते'].includes(normalized);
+}
+
+function isAffirmativeReply(text) {
+  const normalized = normalizeHindiEnglishText(text);
+  return /(^|\b)(haan|han|ha|yes|yeah|ji|jee|okay|ok|theek|thik|sure)(\b|$)/i.test(normalized)
+    || /हाँ|हां|जी|ठीक/.test(text);
+}
+
+function isNegativeOrBusyReply(text) {
+  const normalized = normalizeHindiEnglishText(text);
+  return /(busy|baad mein|bad mein|later|nahi|nahin|no|not now|driving|meeting|stop|band|interested nahi)/i.test(normalized)
+    || /नहीं|बाद में|व्यस्त|बंद/.test(text);
+}
+
+function buildOutboundDemoTurnInstruction(callerText, state, clientName, customerName) {
+  const customerReply = String(callerText || '').trim();
+  const prefix = [
+    `Customer said: ${customerReply}`,
+    'Respond in simple Hindi/Hinglish, natural phone tone.',
+    'Keep it under 18 words unless closing.',
+    'Ask only one question.',
+    'Do not repeat the full greeting or restart the survey.'
+  ];
+
+  if (isNegativeOrBusyReply(customerReply) && state.step === 'intro') {
+    state.step = 'closing';
+    return `${prefix.join('\n')}\nCustomer is not available or does not want to continue. Say exactly: "Bilkul theek hai. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then end the call.`;
+  }
+
+  if (state.step === 'intro') {
+    if (isGreetingOnly(customerReply)) {
+      state.step = 'confirm_permission';
+      return `${prefix.join('\n')}\nNext action: say exactly "Kya main ${customerName} ji se baat kar rahi hoon, aur abhi 2 minute feedback le sakti hoon?"`;
+    }
+
+    if (isAffirmativeReply(customerReply)) {
+      state.step = 'overall';
+      return `${prefix.join('\n')}\nCustomer confirmed. Next action: say exactly "Dhanyavaad. Aapka hamare collection center mein kul milaakar anubhav kaisa raha?"`;
+    }
+
+    state.step = 'confirm_permission';
+    return `${prefix.join('\n')}\nNext action: briefly confirm identity and permission: "Kya main ${customerName} ji se baat kar rahi hoon, aur abhi 2 minute feedback le sakti hoon?"`;
+  }
+
+  if (state.step === 'confirm_permission') {
+    if (isNegativeOrBusyReply(customerReply)) {
+      state.step = 'closing';
+      return `${prefix.join('\n')}\nCustomer declined. Say exactly: "Koi baat nahi. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then end the call.`;
+    }
+    state.step = 'overall';
+    return `${prefix.join('\n')}\nCustomer agreed. Next action: say exactly "Dhanyavaad. Aapka hamare collection center mein kul milaakar anubhav kaisa raha?"`;
+  }
+
+  const nextByStep = {
+    overall: ['cleanliness', 'Achha laga sunkar. Safai aur hygiene ke baare mein aapka kya anubhav raha?'],
+    cleanliness: ['staff', 'Dhanyavaad. Hamare staff ka vyavhaar aapko kaisa laga?'],
+    staff: ['waiting', 'Samajh gayi. Waiting time aur sample collection process kaisa raha?'],
+    waiting: ['rating', 'Dhanyavaad. 1 se 5 ke scale par aap kitni rating denge?'],
+    rating: ['suggestions', 'Dhanyavaad. Kya hum apni seva ko aur behtar bana sakte hain?'],
+    suggestions: ['closing', `${customerName} ji, feedback ke liye bahut dhanyavaad. Hum WhatsApp par review link bhejenge. Aapka din shubh ho.`]
+  };
+
+  const [nextStep, nextLine] = nextByStep[state.step] || nextByStep.overall;
+  state.step = nextStep;
+  const closingInstruction = nextStep === 'closing' ? ' Then end the call.' : '';
+  return `${prefix.join('\n')}\nAcknowledge briefly, then say exactly: "${nextLine}"${closingInstruction}`;
 }
 
 function buildTranscriptPreviewText(text, maxLines = 4) {
@@ -3181,6 +3263,7 @@ function createIcallMateAiBridge(ws, session) {
   let pendingHangup = false;
   let activeResponseId = null;
   const transcript = [];
+  const outboundDemoState = { step: 'intro' };
 
   const getSessionLabel = () => session.streamId || session.callerId || 'unknown';
   const isOutboundSession = () => normalizeCallDirection(session.callDirection) === 'outbound';
@@ -3668,7 +3751,7 @@ function createIcallMateAiBridge(ws, session) {
         if (merged) {
         console.log(`[ICALLMATE][CALLER]: ${merged}`);
           const turnText = isOutboundSession()
-            ? `Customer said: ${merged}\nDo not greet again. Continue the diagnostic center feedback survey naturally in simple Hindi. If termination rules apply, speak the required closing and end the call.`
+            ? buildOutboundDemoTurnInstruction(merged, outboundDemoState, getSessionClientName(), getSessionCustomerName())
             : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`;
           if (useGeminiLive()) {
             sendGeminiLiveText(turnText, { interrupt: true });
@@ -3694,7 +3777,7 @@ function createIcallMateAiBridge(ws, session) {
       if (merged) {
         console.log(`[ICALLMATE][CALLER]: ${merged}`);
         const turnText = isOutboundSession()
-          ? `Customer said: ${merged}\nDo not greet again. Continue the diagnostic center feedback survey naturally in simple Hindi. If termination rules apply, speak the required closing and end the call.`
+          ? buildOutboundDemoTurnInstruction(merged, outboundDemoState, getSessionClientName(), getSessionCustomerName())
           : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`;
         if (useGeminiLive()) {
           sendGeminiLiveText(turnText, { interrupt: true });
