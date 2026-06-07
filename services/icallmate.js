@@ -188,14 +188,8 @@ async function initiateCall(customerPhone, customerId, options = {}) {
   };
 }
 
-async function sendWhatsAppMessage() {
-  console.warn('[ICALLMATE] WhatsApp sending is disabled; only iCallMate voice calls are configured.');
-  return { sid: null, skipped: true };
-}
-
 module.exports = {
   buildOutboundCampaignPayload,
   buildMasterPostPayload,
   initiateCall,
-  sendWhatsAppMessage
 };

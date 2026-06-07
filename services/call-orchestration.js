@@ -1,4 +1,3 @@
-const { sendWhatsAppMessage } = require('./icallmate');
 
 const VALUE_SCORES = {
   vip: 95,
@@ -237,25 +236,9 @@ async function maybeSendBusyFallback({ customer, callId }) {
     return false;
   }
 
-  const message = `Namaste ${customer.name || 'Customer'}, humne aapse ${process.env.CLIENT_NAME || 'hamare path lab'} ke recent visit feedback ke liye call kiya tha. Jab aap free hon, WhatsApp par yeh Google Form fill karke apna feedback share kar dijiye: ${process.env.GOOGLE_REVIEW_LINK}`;
-  await sendWhatsAppMessage(customer.phone, message);
   return true;
 }
 
-async function sendCustomerWhatsAppSummary({ customer, callSummary }) {
-  if (!customer?.phone || !process.env.GOOGLE_REVIEW_LINK || process.env.ICALLMATE_WHATSAPP_ENABLED !== 'true') {
-    return false;
-  }
-
-  const message = [
-    `Namaste ${customer.name || 'Customer'},`,
-    callSummary || 'Aaj ke feedback call ke liye dhanyavaad.',
-    `Agar aap chahein to WhatsApp par yeh Google Form fill karke apna feedback bhi share kar sakte hain: ${process.env.GOOGLE_REVIEW_LINK}`
-  ].join(' ');
-
-  await sendWhatsAppMessage(customer.phone, message);
-  return true;
-}
 
 async function createSupervisorEvent({ dbRun, callId, eventType, severity = 'info', payload = {} }) {
   if (!callId) return;
@@ -403,6 +386,5 @@ module.exports = {
   getCurrentSlotLabel,
   buildFollowUpTask,
   applyCallOutcomeWorkflow,
-  sendCustomerWhatsAppSummary,
   createSupervisorEvent
 };

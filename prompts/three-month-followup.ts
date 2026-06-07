@@ -1,6 +1,15 @@
-function buildThreeMonthFollowupPrompt({ clientName = 'Apna Blood Centre', donorName = 'Donor' } = {}) {
+type FollowupParams = {
+  clientName?: string;
+  donorName?: string;
+  greeting?: string;
+};
+
+export function buildThreeMonthFollowupPrompt({
+  clientName = "Apna Blood Centre",
+  donorName = "Donor",
+}: FollowupParams = {}) {
   return `
-You are Priya, calling on behalf of ${clientName || 'Apna Blood Centre'}.
+You are Priya, calling on behalf of ${clientName}.
 
 Goal:
 Check whether donor has donated blood again after 3 months and encourage future donation.
@@ -9,8 +18,8 @@ Conversation Flow:
 
 Start:
 "[GREETING].
-Main ${clientName || 'Apna Blood Centre'}, Palwal se baat kar rahi hoon.
-Kya main ${donorName || '[Donor Name]'} ji se baat kar rahi hoon?"
+Main ${clientName}, Palwal se baat kar rahi hoon.
+Kya main ${donorName} ji se baat kar rahi hoon?"
 
 Wait for confirmation.
 
@@ -52,24 +61,18 @@ Rules:
 - Keep replies short and confident.
 - Keep each reply under 60 tokens unless the fixed closing message is required.
 - Use the exact fixed lines in the flow wherever possible.
-- When all required questions are answered, say the final thank-you message only once and then return END_CALL=true internally.
-- After the final thank-you message, do not ask any more questions and do not continue the conversation.
 - Never mention AI, bot, system, or model.
 - If the donor asks to stop, close politely and end the call.
-- Never say "end_call" or "END_CALL=true" aloud.
-- IMPORTANT: Always use the greeting provided by the system. Never assume it is morning. Never hardcode "Good Morning".
 `.trim();
 }
 
-function buildThreeMonthFollowupOpeningPrompt({ clientName = 'Apna Blood Centre', donorName = 'Donor', greeting = 'Good morning' } = {}) {
-  const g = greeting;
+export function buildThreeMonthFollowupOpeningPrompt({
+  clientName = "Apna Blood Centre",
+  donorName = "Donor",
+  greeting = "Good morning",
+}: FollowupParams = {}) {
   return `
 Sirf yeh exact opening natural phone tone me boliye:
-"${g} . Main ${clientName || 'Apna Blood Centre'}, Palwal se baat kar rahi hoon. Kya main ${donorName || 'Donor'} ji se baat kar rahi hoon?"
+"${greeting}. Main ${clientName}, Palwal se baat kar rahi hoon. Kya main ${donorName} ji se baat kar rahi hoon?"
 `.trim();
 }
-
-module.exports = {
-  buildThreeMonthFollowupPrompt,
-  buildThreeMonthFollowupOpeningPrompt
-};

@@ -1,0 +1,193 @@
+/**
+ * src/config.js
+ * All configuration constants, environment variable parsing, validation,
+ * and shared in-memory state maps.
+ */
+
+'use strict';
+
+// ── Environment-derived constants ──────────────────────────────────────────────
+
+const PORT = Number(process.env.PORT || 3000);
+const AI_PROVIDER = String(process.env.AI_PROVIDER || process.env.LLM_PROVIDER || 'gemini').trim().toLowerCase();
+const CALL_MODE = AI_PROVIDER;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || (AI_PROVIDER === 'gemini-live' ? 'gemini-3.1-flash-live-preview' : 'gemini-2.5-flash');
+const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
+const GEMINI_LIVE_THINKING_LEVEL = process.env.GEMINI_LIVE_THINKING_LEVEL || 'minimal';
+const GEMINI_LIVE_SILENCE_DURATION_MS = Math.max(Number(process.env.GEMINI_LIVE_SILENCE_DURATION_MS || 1500) || 1500, 1500);
+const GEMINI_LIVE_PREFIX_PADDING_MS = Math.max(Number(process.env.GEMINI_LIVE_PREFIX_PADDING_MS || 200) || 200, 200);
+const GEMINI_LIVE_DIRECT_AUDIO = String(process.env.GEMINI_LIVE_DIRECT_AUDIO || 'false').toLowerCase() === 'true';
+const DEEPGRAM_ENDPOINTING_MS = Math.max(Number(process.env.DEEPGRAM_ENDPOINTING_MS || 180) || 180, 80);
+const LIVE_MAX_RESPONSE_TOKENS = Math.max(Number(process.env.LIVE_MAX_RESPONSE_TOKENS || 150) || 150, 24);
+const GEMINI_LIVE_MAX_OUTPUT_TOKENS = Math.max(Number(process.env.GEMINI_LIVE_MAX_OUTPUT_TOKENS || 1024) || 1024, 512);
+const LIVE_TEMPERATURE = Number(process.env.LIVE_TEMPERATURE || 0.3);
+const FINAL_AUDIO_GRACE_MS = Math.max(Number(process.env.FINAL_AUDIO_GRACE_MS || 1100) || 1100, 600);
+const DEEPGRAM_TTS_MODEL = process.env.DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
+const REALTIME_MODEL = GEMINI_MODEL;
+const MAX_PRECONNECT_MEDIA_CHUNKS = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_CHUNKS || 60) || 60, 10);
+const MAX_PRECONNECT_MEDIA_BYTES = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_BYTES || 512000) || 512000, 64000);
+const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
+const HARDCODED_PUBLIC_BASE_URL = 'https://winter-undeclamatory-unstammeringly.ngrok-free.dev';
+const SERVER_NAME_BASE_URL = process.env.SERVER_NAME ? `https://${String(process.env.SERVER_NAME).replace(/^https?:\/\//i, '').replace(/\/+$/g, '')}` : '';
+const PUBLIC_BASE_URL = (
+  SERVER_NAME_BASE_URL
+  || process.env.APP_BASE_URL
+  || process.env.NGROK_URL
+  || process.env.WEBHOOK_URL
+  || HARDCODED_PUBLIC_BASE_URL
+).replace(/\/$/, '');
+const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
+const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
+const DISABLE_SCHEDULER = String(process.env.DISABLE_SCHEDULER || '').toLowerCase() === 'true';
+const DISABLE_OWNER_DIGEST = String(process.env.DISABLE_OWNER_DIGEST || '').toLowerCase() === 'true';
+
+// ── In-memory state maps (shared across modules) ──────────────────────────────
+
+const liveCallState = new Map();
+const incomingCallState = new Map();
+const pendingCallDiagnostics = new Map();
+
+// ── Retention / timing constants ───────────────────────────────────────────────
+
+const LIVE_CALL_RETENTION_MS = 20 * 60 * 1000;
+const LIVE_CALL_ACTIVE_STALE_MS = 90 * 60 * 1000;
+const INCOMING_CALL_RETENTION_MS = 60 * 60 * 1000;
+const ICALLMATE_DEFAULT_DID = '8037259753';
+const ICALLMATE_DEFAULT_TEST_NUMBER = '+918037259753';
+const CALL_DIAGNOSTIC_WARN_MS = Math.max(Number(process.env.CALL_DIAGNOSTIC_WARN_MS || 20000) || 20000, 5000);
+
+// ── Call types ─────────────────────────────────────────────────────────────────
+
+const CALL_TYPES = Object.freeze({
+  REVIEW_CALL: 'REVIEW_CALL',
+  THREE_MONTH_FOLLOWUP: 'THREE_MONTH_FOLLOWUP'
+});
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function redactSecret(value, visiblePrefix = 4, visibleSuffix = 4) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  if (text.length <= visiblePrefix + visibleSuffix) {
+    return '[set]';
+  }
+
+  return `${text.slice(0, visiblePrefix)}…${text.slice(-visibleSuffix)} (len=${text.length})`;
+}
+
+function describeEnvValue(value) {
+  const text = String(value ?? '');
+  return `${JSON.stringify(text)} (len=${text.length})`;
+}
+
+function logConfigSnapshot(scope = 'CONFIG') {
+  const snapshot = {
+    NODE_ENV: process.env.NODE_ENV || '',
+    PORT: process.env.PORT || '',
+    TZ: process.env.TZ || '',
+    CALL_MODE,
+    VOICE_PIPELINE,
+    AI_PROVIDER,
+    REALTIME_MODEL,
+    GEMINI_MODEL,
+    GEMINI_VOICE,
+    GEMINI_LIVE_THINKING_LEVEL,
+    GEMINI_LIVE_SILENCE_DURATION_MS,
+    DEEPGRAM_ENDPOINTING_MS,
+    LIVE_MAX_RESPONSE_TOKENS,
+    GEMINI_LIVE_MAX_OUTPUT_TOKENS,
+    LIVE_TEMPERATURE,
+    GEMINI_LIVE_DIRECT_AUDIO,
+    DEEPGRAM_TTS_MODEL,
+    DISABLE_SCHEDULER,
+    DISABLE_OWNER_DIGEST,
+    APP_BASE_URL: describeEnvValue(process.env.APP_BASE_URL || ''),
+    NGROK_URL: describeEnvValue(process.env.NGROK_URL || ''),
+    WEBHOOK_URL: describeEnvValue(process.env.WEBHOOK_URL || ''),
+    SERVER_NAME: describeEnvValue(process.env.SERVER_NAME || ''),
+    ICALLMATE_IBD_API_ENDPOINT: process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in',
+    ICALLMATE_OBD_API_ENDPOINT: process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in',
+    ICALLMATE_DID: process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID,
+    ICALLMATE_SERVICE_NO: process.env.ICALLMATE_SERVICE_NO || '',
+    ICALLMATE_IVR_TEMPLATE_ID: process.env.ICALLMATE_IVR_TEMPLATE_ID || '',
+    ICALLMATE_AGENT_ID: process.env.ICALLMATE_AGENT_ID || '',
+    ICALLMATE_UKEY_PRESENT: Boolean(process.env.ICALLMATE_UKEY),
+    GEMINI_API_KEY_PRESENT: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
+    DEEPGRAM_API_KEY_PRESENT: Boolean(process.env.DEEPGRAM_API_KEY),
+    DATABASE_URL: process.env.DATABASE_URL || ''
+  };
+
+  console.log(`[${scope}] ${JSON.stringify(snapshot)}`);
+}
+
+function validateConfig() {
+  const missing = [];
+
+  if (AI_PROVIDER.startsWith('gemini') && !process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
+    missing.push('GEMINI_API_KEY or GOOGLE_API_KEY');
+  }
+
+  if (!['gemini', 'gemini-live'].includes(AI_PROVIDER)) {
+    missing.push('AI_PROVIDER must be gemini or gemini-live');
+  }
+
+  if (!process.env.DEEPGRAM_API_KEY) {
+    missing.push('DEEPGRAM_API_KEY');
+  }
+
+  if (USE_ORCHESTRATED_PIPELINE) {
+    throw new Error('VOICE_PIPELINE=orchestrated is no longer supported. iCallMate media is the only voice stream path.');
+  }
+
+  if (!PUBLIC_BASE_URL) {
+    missing.push('APP_BASE_URL or NGROK_URL or WEBHOOK_URL or SERVER_NAME');
+  }
+
+  if (missing.length > 0) {
+    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+  }
+}
+
+module.exports = {
+  PORT,
+  AI_PROVIDER,
+  CALL_MODE,
+  GEMINI_MODEL,
+  GEMINI_VOICE,
+  GEMINI_LIVE_THINKING_LEVEL,
+  GEMINI_LIVE_SILENCE_DURATION_MS,
+  GEMINI_LIVE_PREFIX_PADDING_MS,
+  GEMINI_LIVE_DIRECT_AUDIO,
+  DEEPGRAM_ENDPOINTING_MS,
+  LIVE_MAX_RESPONSE_TOKENS,
+  GEMINI_LIVE_MAX_OUTPUT_TOKENS,
+  LIVE_TEMPERATURE,
+  FINAL_AUDIO_GRACE_MS,
+  DEEPGRAM_TTS_MODEL,
+  REALTIME_MODEL,
+  MAX_PRECONNECT_MEDIA_CHUNKS,
+  MAX_PRECONNECT_MEDIA_BYTES,
+  CLIENT_NAME,
+  PUBLIC_BASE_URL,
+  VOICE_PIPELINE,
+  USE_ORCHESTRATED_PIPELINE,
+  DISABLE_SCHEDULER,
+  DISABLE_OWNER_DIGEST,
+  liveCallState,
+  incomingCallState,
+  pendingCallDiagnostics,
+  LIVE_CALL_RETENTION_MS,
+  LIVE_CALL_ACTIVE_STALE_MS,
+  INCOMING_CALL_RETENTION_MS,
+  ICALLMATE_DEFAULT_DID,
+  ICALLMATE_DEFAULT_TEST_NUMBER,
+  CALL_DIAGNOSTIC_WARN_MS,
+  CALL_TYPES,
+  redactSecret,
+  describeEnvValue,
+  logConfigSnapshot,
+  validateConfig
+};

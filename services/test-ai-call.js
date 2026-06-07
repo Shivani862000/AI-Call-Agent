@@ -1,13 +1,12 @@
 const { dbRun, dbGet } = require('../db');
 const { extractCallFeedback } = require('./call-feedback');
-const { categorizeFeedback } = require('./openai');
+const { categorizeFeedback, generateGeminiReply } = require('./gemini');
+const { buildAgentSystemPrompt, buildOpeningPrompt } = require('../src/prompt-builder');
 
 const sessions = new Map();
 const SOURCE = 'test_ai_call';
 const DEFAULT_CLIENT_NAME = process.env.CLIENT_NAME || 'KC Prashant Path Lab';
-const TEXT_MODEL = process.env.TEST_CALL_OPENAI_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4o-mini';
 const BROWSER_TEST_CALLER = 'Browser Test Caller';
-const OPENING_LINE = 'Namaste, main KC Prashant Path Lab se Priya bol rahi hoon. Main aapse recent lab visit ka feedback lena chahti hoon. Kya main 1 minute le sakti hoon?';
 
 const QUESTION_PLAN = [
   {
@@ -40,23 +39,6 @@ function applyAgentTemplate(template, values) {
   return String(template || '').replace(/\{\{\s*(client_name|customer_name|language|agent_name)\s*\}\}/g, (match, key) => values[key] || '');
 }
 
-function buildBrowserFeedbackPrompt(clientName = DEFAULT_CLIENT_NAME) {
-  return `
-You are Priya, a customer feedback executive for ${clientName}.
-This is a browser-based AI voice call test for the admin dashboard.
-
-Conversation rules:
-- Speak naturally in Hindi/Hinglish.
-- Ask one short question at a time.
-- Do not ask for patient name, phone number, address, or medical details.
-- Start by asking permission for quick feedback.
-- If the user agrees, ask naturally about visit experience, staff behavior, lab cleanliness, overall rating from 1 to 5, and improvement suggestions.
-- If the user refuses, politely thank them and close.
-- Keep responses under 35 words.
-- When the feedback is complete, close the call politely.
-`.trim();
-}
-
 async function getOutboundPrompt() {
   const agent = await dbGet(
     `SELECT *
@@ -67,30 +49,19 @@ async function getOutboundPrompt() {
   );
   const clientName = agent?.client_name || DEFAULT_CLIENT_NAME;
 
-  if (agent?.system_prompt) {
-    return {
-      prompt: `${applyAgentTemplate(agent.system_prompt, {
-        client_name: clientName,
-        customer_name: BROWSER_TEST_CALLER,
-        language: agent.language || 'hi',
-        agent_name: agent.name || 'Priya'
-      })}
+  const systemPrompt = buildAgentSystemPrompt(clientName, BROWSER_TEST_CALLER, agent, 'review_call');
+  const openingLine = buildOpeningPrompt(clientName, BROWSER_TEST_CALLER, agent, 'review_call');
+
+  return {
+    prompt: `${systemPrompt}
 
 Browser test-call override:
 - Do not ask for name or phone number.
-- Use the Path Lab feedback flow.
 - Ask one short voice-call question at a time.`,
-      agentId: agent.id,
-      clientName,
-      promptSource: 'agent_system_prompt'
-    };
-  }
-
-  return {
-    prompt: buildBrowserFeedbackPrompt(clientName),
+    openingLine,
     agentId: agent?.id || null,
     clientName,
-    promptSource: 'browser_feedback_fallback'
+    promptSource: 'prompt-builder'
   };
 }
 
@@ -109,62 +80,12 @@ function serialize(session, extra = {}) {
   };
 }
 
-function buildOpenAIMessages(session, userText) {
-  const nextQuestion = QUESTION_PLAN[Math.min(session.step, QUESTION_PLAN.length - 1)];
-  const messages = [{
-    role: 'system',
-    content: `${session.systemPrompt}
-
-Current required topic: ${nextQuestion?.key || 'closing'}.
-If the previous user answer completed the current topic, ask the next topic naturally.
-Never ask for typed input, name, or phone number.`
-  }];
-
-  session.transcript.forEach((turn) => {
-    messages.push({
-      role: turn.role === 'AGENT' ? 'assistant' : 'user',
-      content: turn.text
-    });
-  });
-
-  if (userText) {
-    messages.push({ role: 'user', content: userText });
-  }
-
-  return messages;
-}
-
 async function generateLlmReply(session, userText) {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is not configured');
-  }
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: TEXT_MODEL,
-      temperature: 0.35,
-      max_tokens: 120,
-      messages: buildOpenAIMessages(session, userText)
-    })
+  return generateGeminiReply({
+    systemPrompt: session.systemPrompt,
+    transcript: session.transcript,
+    userText
   });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`OpenAI request failed (${response.status}): ${errorText || response.statusText}`);
-  }
-
-  const payload = await response.json();
-  const text = String(payload?.choices?.[0]?.message?.content || '').trim();
-  if (!text) {
-    throw new Error('OpenAI returned an empty response');
-  }
-
-  return text;
 }
 
 function scriptedReply(session) {
@@ -240,14 +161,14 @@ async function startBrowserTestCall() {
     step: 0,
     systemPrompt: promptConfig.prompt,
     promptSource: promptConfig.promptSource,
-    transcript: [{ role: 'AGENT', text: OPENING_LINE, at: now }],
+    transcript: [{ role: 'AGENT', text: promptConfig.openingLine, at: now }],
     createdAt: now,
     summary: null
   };
 
   sessions.set(session.id, session);
   console.log(`[TEST AI CALL] started session=${session.id} callId=${session.callId} prompt=${session.promptSource}`);
-  return serialize(session, { aiResponse: OPENING_LINE });
+  return serialize(session, { aiResponse: promptConfig.openingLine });
 }
 
 async function handleUserMessage({ sessionId, message }) {
@@ -351,12 +272,13 @@ async function endBrowserTestCall({ sessionId }) {
 }
 
 module.exports = {
-  OPENING_LINE,
+  SOURCE,
+  BROWSER_TEST_CALLER,
+  QUESTION_PLAN,
   startBrowserTestCall,
   handleUserMessage,
   endBrowserTestCall,
   _test: {
-    buildBrowserFeedbackPrompt,
     buildSummary
   }
 };

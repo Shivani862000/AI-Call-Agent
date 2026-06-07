@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { analyzeCallTranscript, transcribeAudioFile, categorizeFeedback } = require('./openai');
+const { analyzeCallTranscript, transcribeAudioFile, categorizeFeedback } = require('./gemini');
 const { extractCallFeedback } = require('./call-feedback');
 const { buildCallAnalysis, storeCallAnalysis } = require('./call-analysis');
 const {
@@ -8,7 +8,6 @@ const {
   detectObjectionsAndCompetitors,
   deriveSentimentScore,
   applyCallOutcomeWorkflow,
-  sendCustomerWhatsAppSummary,
   createSupervisorEvent
 } = require('./call-orchestration');
 const { syncCallToCrm, sendHotLeadAlert } = require('./crm-sync');
@@ -339,18 +338,6 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     } catch (error) {
       console.error('[HOT LEAD ALERT ERROR]', error.message);
     }
-  }
-
-  try {
-    const sent = await sendCustomerWhatsAppSummary({
-      customer: updatedCustomer,
-      callSummary: analysis.report_excerpt || analysis.summary
-    });
-    if (sent) {
-      await dbRun('UPDATE calls SET whatsapp_summary_sent = ?, whatsapp_sent = ? WHERE id = ?', [1, 1, updatedCall.id]);
-    }
-  } catch (error) {
-    console.error('[WHATSAPP SUMMARY ERROR]', error.message);
   }
 
   if (String(updatedCall.outcome || '').toLowerCase() === 'interested') {

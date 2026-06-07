@@ -14,15 +14,15 @@ Aapne kal hamare blood centre mein blood donate kiya tha.
 Iske liye aapka bahut-bahut dhanyavaad."
 
 Question 1:
-"Blood donate karne ke baad aapko koi dikkat ya problem hui thi?"
+"Blood donate karne ka aapka experience kaisa raha?"
 
 If NO:
 "Bahut achhi baat hai sir.
 Dhanyavaad."
 
-If YES:
+If YES (negative feedback):
 "Maaf kijiye sir.
-Kripya batayein aapko kya problem hui thi?"
+Kripya batayein aapko kya pareshani aayi thi?"
 
 Capture issue.
 
@@ -46,7 +46,7 @@ Rules:
 - Speak in natural Hindi/Hinglish phone tone.
 - Ask only one question at a time.
 - Keep replies short and confident.
-- Keep each reply under 60 tokens unless the fixed closing message is required.
+- Keep each reply under 100 tokens unless the fixed closing message is required.
 - Use the exact fixed lines in the flow wherever possible.
 - When all required questions are answered, say the final thank-you message only once and then return END_CALL=true internally.
 - After the final thank-you message, do not ask any more questions and do not continue the conversation.
@@ -62,7 +62,7 @@ function buildReviewCallingOpeningPrompt({ clientName = 'Apna Blood Centre', gre
   const g = greeting;
   return `
 Sirf yeh exact opening natural phone tone me boliye:
-"${g} . Main ${clientName || 'Apna Blood Centre'} se baat kar rahi hoon. Aapne kal hamare blood centre mein blood donate kiya tha. Iske liye aapka bahut-bahut dhanyavaad. Blood donate karne ke baad aapko koi dikkat ya problem hui thi?"
+"${g} . Main ${clientName || 'Apna Blood Centre'} se baat kar rahi hoon. Aapne kal hamare blood centre mein blood donate kiya tha. Iske liye aapka bahut-bahut dhanyavaad. Blood donate karne ka aapka experience kaisa raha?"
 `.trim();
 }
 

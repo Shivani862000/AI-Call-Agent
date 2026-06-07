@@ -48,7 +48,6 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
       SUM(CASE WHEN outcome = 'no_answer' THEN 1 ELSE 0 END) as no_answer,
       SUM(CASE WHEN outcome = 'declined' THEN 1 ELSE 0 END) as declined,
       SUM(CASE WHEN outcome = 'consent_given' THEN 1 ELSE 0 END) as consent_given,
-      SUM(CASE WHEN whatsapp_sent = 1 THEN 1 ELSE 0 END) as whatsapp_sent,
       SUM(CASE WHEN fallback_triggered = 1 THEN 1 ELSE 0 END) as fallbacks_triggered,
       SUM(CASE WHEN outcome IN ('interested', 'hot_lead') THEN 1 ELSE 0 END) as hot_leads
     FROM calls
@@ -103,7 +102,6 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
       calls.hot_lead_score,
       calls.sentiment_label,
       calls.crm_sync_status,
-      calls.whatsapp_summary_sent,
       calls.objections_json,
       calls.competitor_mentions_json,
       calls.live_red_flag,
@@ -166,9 +164,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const safeFailedCalls = Number(callStats?.failed_calls) || 0;
   const safeNoAnswer = Number(callStats?.no_answer) || 0;
   const safeDeclined = Number(callStats?.declined) || 0;
-  const safeConsent = Number(callStats?.consent_given) || 0;
-  const safeWhatsapp = Number(callStats?.whatsapp_sent) || 0;
-  const safeFallbacks = Number(callStats?.fallbacks_triggered) || 0;
+  const safeConsent = Number(callStats?.consent_given) || 0;  const safeFallbacks = Number(callStats?.fallbacks_triggered) || 0;
   const safeHotLeads = Number(callStats?.hot_leads) || 0;
   const safeFeedbackCount = Number(feedbackStats?.feedback_count) || 0;
   const safeGoodCount = Number(feedbackStats?.good_count) || 0;
@@ -291,7 +287,6 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
     no_answer: safeNoAnswer,
     declined: safeDeclined,
     consent_given: safeConsent,
-    whatsapp_sent: safeWhatsapp,
     fallbacks_triggered: safeFallbacks,
     hot_leads: effectiveHotLeadCount,
     feedback_count: safeFeedbackCount,

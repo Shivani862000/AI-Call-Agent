@@ -80,7 +80,6 @@ function runMigrations() {
         called_at TIMESTAMP,
         outcome VARCHAR(20),
         provider_call_id VARCHAR(100),
-        whatsapp_sent BOOLEAN DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (customer_id) REFERENCES customers(id)
       )
@@ -264,7 +263,6 @@ function runMigrations() {
     await addColumnIfMissing('calls', 'follow_up_task', 'TEXT');
     await addColumnIfMissing('calls', 'recording_download_status', "VARCHAR(30) DEFAULT 'pending'");
     await addColumnIfMissing('calls', 'crm_sync_status', "VARCHAR(30) DEFAULT 'pending'");
-    await addColumnIfMissing('calls', 'whatsapp_summary_sent', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('calls', 'revenue_attribution_status', "VARCHAR(30) DEFAULT 'pending'");
     await addColumnIfMissing('calls', 'call_script_version', "VARCHAR(40) DEFAULT 'hindi-feedback-v1'");
     await addColumnIfMissing('calls', 'call_type', "VARCHAR(50) DEFAULT 'REVIEW_CALL'");

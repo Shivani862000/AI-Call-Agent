@@ -1,4 +1,4 @@
-const { sendSimpleEmail } = require('./email');
+
 
 async function postJson(url, payload) {
   const response = await fetch(url, {
@@ -92,7 +92,7 @@ async function sendHotLeadAlert({ customer, call }) {
     call?.next_action_at ? `Next Action Time: ${call.next_action_at}` : null
   ].filter(Boolean).join('\n');
 
-  await sendSimpleEmail(process.env.OWNER_EMAIL, subject, text);
+  console.log('[HOT LEAD]', subject, text);
   return { ok: true };
 }
 

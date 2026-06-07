@@ -1,8 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const { generateReportPDF } = require('../services/pdf');
-const { sendEmailWithAttachment, sendSimpleEmail } = require('../services/email');
-const { sendWhatsAppMessage } = require('../services/icallmate');
 const { buildReportData, buildWeeklySummary, buildOwnerDashboardData, getCurrentWeekDateRange } = require('../services/reporting');
 
 function weeklyTimestampFilename(prefix = 'Weekly-Report') {
@@ -51,13 +49,6 @@ router.post('/generate', async (req, res) => {
   try {
     const reportData = await buildDailyPreview();
     const pdfPath = await generateReportPDF(reportData);
-
-    await sendEmailWithAttachment(
-      process.env.OWNER_EMAIL,
-      `Feedback Report — ${reportData.date}`,
-      `${reportData.summary_text}\n\nPlease find today's feedback report attached.`,
-      pdfPath
-    );
 
     res.json({
       success: true,
@@ -138,19 +129,7 @@ router.post('/weekly-email', async (req, res) => {
       '',
       summary.pending_summary?.length ? `Pending items:\n- ${summary.pending_summary.join('\n- ')}` : 'Pending items: none'
     ].join('\n');
-
-    if (process.env.OWNER_EMAIL) {
-      await sendEmailWithAttachment(
-        process.env.OWNER_EMAIL,
-        `Weekly AI Summary — ${summary.date}`,
-        plainText,
-        pdfPath
-      );
-    } else {
-      await sendSimpleEmail(process.env.OWNER_EMAIL, `Weekly AI Summary — ${summary.date}`, plainText);
-    }
-
-    res.json({ success: true, message: 'Weekly summary emailed successfully', path: pdfPath });
+    res.json({ success: true, message: 'Weekly summary generated successfully', path: pdfPath });
   } catch (error) {
     console.error('Error emailing weekly summary:', error);
     res.status(500).json({ error: error.message });
@@ -172,26 +151,10 @@ router.post('/owner-digest/send', async (req, res) => {
         : 'Priority alerts: none'
     ].join('\n');
 
-    let emailSent = false;
-    let whatsappSent = false;
-
-    if (process.env.OWNER_EMAIL) {
-      emailSent = await sendSimpleEmail(
-        process.env.OWNER_EMAIL,
-        `CEO Morning Digest — ${new Date().toLocaleDateString()}`,
-        lines
-      );
-    }
-
-    if (process.env.OWNER_PHONE && process.env.ICALLMATE_WHATSAPP_ENABLED === 'true') {
-      await sendWhatsAppMessage(process.env.OWNER_PHONE, digest.digest_text);
-      whatsappSent = true;
-    }
-
     res.json({
-      success: emailSent || whatsappSent,
-      email_sent: emailSent,
-      whatsapp_sent: whatsappSent,
+      success: true,
+      email_sent: false,
+      whatsapp_sent: false,
       digest: digest.digest_text
     });
   } catch (error) {

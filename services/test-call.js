@@ -1,12 +1,11 @@
 const { dbRun, dbGet } = require('../db');
 const { extractCallFeedback } = require('./call-feedback');
-const { categorizeFeedback } = require('./openai');
+const { categorizeFeedback, generateGeminiReply } = require('./gemini');
 
 const sessions = new Map();
 const TEST_CALL_SOURCE = 'test_call';
 const TEST_CALL_TYPE = 'Test Feedback Call';
 const DEFAULT_CLIENT_NAME = process.env.CLIENT_NAME || 'Path Lab';
-const OPENAI_TEXT_MODEL = process.env.TEST_CALL_OPENAI_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4o-mini';
 
 const QUESTION_PLAN = [
   {
@@ -121,64 +120,12 @@ async function getOutboundFeedbackPrompt(patientName) {
   };
 }
 
-function buildOpenAIMessages(session, nextUserTurn) {
-  const messages = [{
-    role: 'system',
-    content: `${session.systemPrompt}
-
-Current simulation step: ${Math.min(session.step + 1, QUESTION_PLAN.length)} of ${QUESTION_PLAN.length}.
-Next required topic: ${QUESTION_PLAN[Math.min(session.step, QUESTION_PLAN.length - 1)]?.key || 'closing'}.
-Ask only the next required question unless the call is complete.`
-  }];
-
-  session.transcript.forEach((turn) => {
-    messages.push({
-      role: turn.role === 'AGENT' ? 'assistant' : 'user',
-      content: turn.text
-    });
-  });
-
-  if (nextUserTurn) {
-    messages.push({
-      role: 'user',
-      content: nextUserTurn
-    });
-  }
-
-  return messages;
-}
-
 async function generateLlmReply(session, userText) {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is not configured');
-  }
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: OPENAI_TEXT_MODEL,
-      temperature: 0.35,
-      max_tokens: 120,
-      messages: buildOpenAIMessages(session, userText)
-    })
+  return generateGeminiReply({
+    systemPrompt: session.systemPrompt,
+    transcript: session.transcript,
+    userText
   });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => '');
-    throw new Error(`OpenAI request failed (${response.status}): ${errorText || response.statusText}`);
-  }
-
-  const payload = await response.json();
-  const text = String(payload?.choices?.[0]?.message?.content || '').trim();
-  if (!text) {
-    throw new Error('OpenAI returned an empty response');
-  }
-
-  return text;
 }
 
 function scriptedReply(session) {
