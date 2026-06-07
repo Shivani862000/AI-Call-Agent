@@ -1,13 +1,7 @@
-type FollowupParams = {
-  clientName?: string;
-  donorName?: string;
-  greeting?: string;
-};
-
-export function buildThreeMonthFollowupPrompt({
+function buildThreeMonthFollowupPrompt({
   clientName = "Apna Blood Centre",
   donorName = "Donor",
-}: FollowupParams = {}) {
+} = {}) {
   return `
 You are Priya, calling on behalf of ${clientName}.
 
@@ -66,13 +60,18 @@ Rules:
 `.trim();
 }
 
-export function buildThreeMonthFollowupOpeningPrompt({
+function buildThreeMonthFollowupOpeningPrompt({
   clientName = "Apna Blood Centre",
   donorName = "Donor",
   greeting = "Good morning",
-}: FollowupParams = {}) {
+} = {}) {
   return `
 Sirf yeh exact opening natural phone tone me boliye:
 "${greeting}. Main ${clientName}, Palwal se baat kar rahi hoon. Kya main ${donorName} ji se baat kar rahi hoon?"
 `.trim();
 }
+
+module.exports = {
+  buildThreeMonthFollowupPrompt,
+  buildThreeMonthFollowupOpeningPrompt
+};

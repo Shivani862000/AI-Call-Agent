@@ -230,8 +230,13 @@ async function findRecentOutboundCallContextByPhone(phoneValue) {
 }
 
 async function hydrateIcallMateSessionContext(session, message = {}, extraParams = {}) {
-  if (session.contextHydrated || session.contextHydrating) {
+  if (session.contextHydrated) {
     return;
+  }
+
+  // If hydration is already in progress, return the existing promise so callers can await it
+  if (session._hydrationPromise) {
+    return session._hydrationPromise;
   }
 
   if (extraParams.callDirection) {
@@ -244,29 +249,33 @@ async function hydrateIcallMateSessionContext(session, message = {}, extraParams
   }
 
   session.contextHydrating = true;
-  try {
-    const context = await findRecentOutboundCallContextByPhone(message.callerId || session.callerId);
-    if (!context) {
-      return;
+  session._hydrationPromise = (async () => {
+    try {
+      const context = await findRecentOutboundCallContextByPhone(message.callerId || session.callerId);
+      if (!context) {
+        return;
+      }
+
+      session.contextHydrated = true;
+      session.callDirection = 'outbound';
+      session.customerName = context.customer.name || session.customerName || process.env.CUSTOMER_NAME || 'Customer';
+      session.clientName = context.call.agent_client_name || session.clientName || CLIENT_NAME;
+      session.customerId = context.customer.id;
+      session.callId = context.call.id;
+      session.providerCallId = context.call.provider_call_id || '';
+      session.callType = normalizeOutboundCallType(context.call.call_type || context.customer.call_type);
+
+      console.log(
+        `[ICALLMATE] Hydrated outbound context streamId=${message.streamId || session.streamId || ''} ` +
+        `phone=${message.callerId || session.callerId || ''} customerId=${session.customerId} ` +
+        `callId=${session.callId} callType=${session.callType}`
+      );
+    } finally {
+      session.contextHydrating = false;
     }
+  })();
 
-    session.contextHydrated = true;
-    session.callDirection = 'outbound';
-    session.customerName = context.customer.name || session.customerName || process.env.CUSTOMER_NAME || 'Customer';
-    session.clientName = context.call.agent_client_name || session.clientName || CLIENT_NAME;
-    session.customerId = context.customer.id;
-    session.callId = context.call.id;
-    session.providerCallId = context.call.provider_call_id || '';
-    session.callType = normalizeOutboundCallType(context.call.call_type || context.customer.call_type);
-
-    console.log(
-      `[ICALLMATE] Hydrated outbound context streamId=${message.streamId || session.streamId || ''} ` +
-      `phone=${message.callerId || session.callerId || ''} customerId=${session.customerId} ` +
-      `callId=${session.callId} callType=${session.callType}`
-    );
-  } finally {
-    session.contextHydrating = false;
-  }
+  return session._hydrationPromise;
 }
 
 async function getCustomerCallHistory(customerId, limit = 20) {

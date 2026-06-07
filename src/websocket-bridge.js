@@ -438,6 +438,12 @@ module.exports = function setupWebSocketBridge(server) {
 
       geminiLiveConnecting = true;
       try {
+        // Wait for any in-progress session hydration to complete
+        // so we read the correct callType for the system prompt
+        if (session._hydrationPromise) {
+          await session._hydrationPromise;
+        }
+
         const { GoogleGenAI, Modality } = await import('@google/genai');
         const ai = new GoogleGenAI({
           apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY

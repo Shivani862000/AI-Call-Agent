@@ -64,7 +64,14 @@ function buildMasterPostPayload(customerPhone, leadId, options = {}) {
     fieldpairs: [
       {
         Phone_No: phoneNo,
-        wsurl
+        wsurl,
+        extraparam: JSON.stringify({
+          callDirection: 'outbound',
+          customerId: options.customerId || null,
+          customerName: options.customerName || '',
+          clientName: options.clientName || '',
+          callType: options.callType || 'REVIEW_CALL'
+        })
       }
     ]
   };
