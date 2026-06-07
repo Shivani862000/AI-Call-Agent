@@ -60,8 +60,8 @@ module.exports = function startServer(server) {
       });
     }
 
-    server.listen(PORT, '127.0.0.1', () => {
-      console.log(`[SERVER] Running on http://localhost:${PORT}`);
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`[SERVER] Running on port ${PORT} (0.0.0.0)`);
       console.log(`[SERVER] Public base URL: ${PUBLIC_BASE_URL}`);
       console.log(`[SERVER] Call mode: ${CALL_MODE}`);
       console.log(`[SERVER] Voice pipeline: ${VOICE_PIPELINE}`);
