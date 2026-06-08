@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { dbRun, dbGet, dbAll } = require('../db');
 const { initiateCall } = require('../services/icallmate');
+const { createMediaToken } = require('../src/auth');
 
 // Initiate call to a customer
 router.post('/initiate/:customerId', async (req, res) => {
@@ -23,7 +24,7 @@ router.post('/initiate/:customerId', async (req, res) => {
       {
         baseUrl,
         callType: customer.call_type || 'REVIEW_CALL',
-        wsurl: `${baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:')}/icallmate/media`,
+        wsurl: `${baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:')}/icallmate/media?token=${createMediaToken()}`,
         callbackapi: `${baseUrl}/api/icallmate/callback`
       }
     );

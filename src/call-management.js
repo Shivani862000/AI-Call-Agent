@@ -25,6 +25,7 @@ const {
   getIncomingCallKey,
   normalizeIcallTimestamp
 } = require('./helpers');
+const { createMediaToken } = require('./auth');
 
 // ── Call Initiation ────────────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ async function placeRealtimeCall({ customerPhone, customerName, customerId, clie
     clientName,
     agentId,
     callType: normalizeOutboundCallType(callType),
-    wsurl: toWssUrl(PUBLIC_BASE_URL, '/icallmate/media'),
+    wsurl: toWssUrl(PUBLIC_BASE_URL, `/icallmate/media?token=${createMediaToken()}`),
     callbackapi: `${PUBLIC_BASE_URL}/api/icallmate/callback`
   });
 }

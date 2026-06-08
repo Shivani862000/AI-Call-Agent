@@ -4,7 +4,20 @@ const { dbRun, dbGet, dbAll } = require('../db');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+    files: 1
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are allowed'));
+    }
+  }
+});
 const PHONE_PATTERN = /^\+\d{10,15}$/;
 const SLOT_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const ALLOWED_CALL_TYPES = new Set(['REVIEW_CALL', 'THREE_MONTH_FOLLOWUP']);
@@ -267,6 +280,10 @@ router.post('/csv', upload.single('file'), async (req, res) => {
       skip_empty_lines: true,
       trim: true
     });
+
+    if (records.length > 5000) {
+      return res.status(400).json({ error: 'CSV file exceeds maximum row limit of 5000' });
+    }
 
     let successCount = 0;
     let errorCount = 0;

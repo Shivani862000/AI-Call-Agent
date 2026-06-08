@@ -6,6 +6,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const bcrypt = require('bcrypt');
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -19,11 +20,18 @@ const PROTECTED_HTML_PATHS = new Set([
   '/reports.html'
 ]);
 
-const ADMIN_USERNAME = 'admin';
-const ADMIN_PASSWORD = '1234';
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || '$2b$10$fV3M.H2Uv7yv5T3/d.kK/uqjU7tq7B1H5Qz9Q8E4Nq6q1B5I8Uv9e';
 const AUTH_COOKIE_NAME = 'feedback_admin_session';
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const AUTH_SIGNING_SECRET = process.env.AUTH_SIGNING_SECRET || process.env.SESSION_SECRET || process.env.ICALLMATE_UKEY || 'feedback-admin-auth-secret';
+
+if (process.env.NODE_ENV === 'production') {
+  if (!AUTH_SIGNING_SECRET || AUTH_SIGNING_SECRET.length < 16) {
+    console.error('FATAL ERROR: AUTH_SIGNING_SECRET is missing or too short for production environment. Must be at least 16 characters.');
+    process.exit(1);
+  }
+}
 
 // ── Cookie parsing ─────────────────────────────────────────────────────────────
 
@@ -153,6 +161,23 @@ function clearAuthCookie(req, res) {
 
 // ── Middleware ──────────────────────────────────────────────────────────────────
 
+const validMediaTokens = new Set();
+
+function createMediaToken() {
+  const token = crypto.randomBytes(16).toString('hex');
+  validMediaTokens.add(token);
+  setTimeout(() => validMediaTokens.delete(token), 3600000);
+  return token;
+}
+
+function validateMediaToken(token) {
+  if (validMediaTokens.has(token)) {
+    validMediaTokens.delete(token);
+    return true;
+  }
+  return false;
+}
+
 function requireAdminAuth(req, res, next) {
   const session = readAuthSession(req);
   if (session) {
@@ -167,11 +192,15 @@ function requireAdminAuth(req, res, next) {
   return res.redirect('/login.html');
 }
 
+function verifyCredentials(username, password) {
+  return username === ADMIN_USERNAME && bcrypt.compareSync(password, ADMIN_PASSWORD_HASH);
+}
+
 function basicAuth(req, res, next) {
   const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
   const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
 
-  if (login === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+  if (verifyCredentials(login, password)) {
     return next();
   }
 
@@ -182,12 +211,14 @@ function basicAuth(req, res, next) {
 module.exports = {
   PROTECTED_HTML_PATHS,
   ADMIN_USERNAME,
-  ADMIN_PASSWORD,
   parseCookies,
   createAuthToken,
   readAuthSession,
   setAuthCookie,
   clearAuthCookie,
   requireAdminAuth,
-  basicAuth
+  basicAuth,
+  verifyCredentials,
+  createMediaToken,
+  validateMediaToken
 };

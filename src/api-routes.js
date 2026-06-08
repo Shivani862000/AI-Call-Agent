@@ -35,7 +35,7 @@ const {
   clearAuthCookie,
   createAuthToken,
   ADMIN_USERNAME,
-  ADMIN_PASSWORD
+  verifyCredentials
 } = require('./auth');
 
 const {
@@ -115,7 +115,7 @@ module.exports = function mountApiRoutes(app) {
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
 
-    if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
+    if (!verifyCredentials(username, password)) {
       clearAuthCookie(req, res);
       return res.status(401).json({ error: 'Invalid username or password' });
     }
@@ -561,8 +561,9 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/icallmate/config', async (req, res) => {
     const requestBaseUrl = getRequestPublicBaseUrl(req);
+    const token = createMediaToken();
     res.json({
-      websocket_url: `${toWssUrl(requestBaseUrl, '/icallmate/media')}`,
+      websocket_url: `${toWssUrl(requestBaseUrl, `/icallmate/media?token=${token}`)}`,
       did: process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID,
       test_number: process.env.ICALLMATE_TEST_NUMBER || ICALLMATE_DEFAULT_TEST_NUMBER,
       incoming_api_endpoint: process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in',
@@ -579,6 +580,13 @@ module.exports = function mountApiRoutes(app) {
 
   app.post('/api/icallmate/callback', async (req, res) => {
     try {
+      if (process.env.WEBHOOK_SECRET) {
+        const providedSecret = req.headers['x-webhook-secret'] || req.query.secret || req.body.secret;
+        if (providedSecret !== process.env.WEBHOOK_SECRET) {
+          return res.status(401).json({ error: 'Invalid webhook secret' });
+        }
+      }
+
       const payload = req.body || {};
       const key = String(payload.ref_no || payload.leadid || payload.phoneno || `${Date.now()}`);
       const callType = String(payload.call_type || '').toLowerCase();
@@ -690,7 +698,8 @@ module.exports = function mountApiRoutes(app) {
       }
 
       const endpoint = `${String(process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in').replace(/\/+$/, '')}/Test_WSS/setMacroDnis`;
-      const websocketUrl = req.body.wsurl || req.body.websocket_url || `${toWssUrl(requestBaseUrl, '/icallmate/media')}`;
+      const token = createMediaToken();
+      const websocketUrl = req.body.wsurl || req.body.websocket_url || `${toWssUrl(requestBaseUrl, `/icallmate/media?token=${token}`)}`;
       const callbackUrl = req.body.callbackapi || req.body.callback_url || `${requestBaseUrl}/api/icallmate/callback`;
       const macros = [
         { dnisNo, macroName: 'llm_wssurl', macroValue: websocketUrl },

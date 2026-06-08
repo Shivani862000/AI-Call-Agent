@@ -59,6 +59,8 @@ const {
   upsertIcallMateCallFromMedia
 } = require('./call-management');
 
+const { validateMediaToken } = require('./auth');
+
 function createDeepgramListenUrl() {
   const url = new URL('wss://api.deepgram.com/v1/listen');
   url.searchParams.set('model', 'nova-2');
@@ -85,10 +87,26 @@ module.exports = function setupWebSocketBridge(server) {
   const icallMateWss = new WebSocket.Server({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {
-    const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+    const urlObj = new URL(req.url || '/', 'http://localhost');
+    let pathname = decodeURIComponent(urlObj.pathname);
+    let token = urlObj.searchParams.get('token');
+
+    // Handle iCallMate bug where the '?' is URL-encoded into the path
+    if (pathname.includes('/icallmate/media?token=')) {
+      token = pathname.split('?token=')[1];
+      pathname = '/icallmate/media';
+    }
+
     console.log(`[WS UPGRADE] path=${pathname} host=${req.headers.host || ''} origin=${req.headers.origin || ''} upgrade=${req.headers.upgrade || ''} remote=${req.socket.remoteAddress || 'unknown'}`);
 
     if (pathname === '/icallmate/media') {
+      if (!token || !validateMediaToken(token)) {
+        console.warn(`[WS UPGRADE] Rejected invalid or missing token for /icallmate/media`);
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
       icallMateWss.handleUpgrade(req, socket, head, (ws) => {
         icallMateWss.emit('connection', ws, req);
       });
