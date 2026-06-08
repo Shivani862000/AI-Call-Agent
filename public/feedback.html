@@ -23,7 +23,7 @@
           <a href="/incoming-calls.html" class="nav-link">Incoming Calls</a>
           <a href="/customers.html" class="nav-link">Outbound Calls</a>
           <a href="/feedback.html" class="nav-link active">Feedback</a>
-          <a href="/reports.html" class="nav-link">Reports</a>
+          <a href="/reports.html" class="nav-link" style="display: none;">Reports</a>
         </nav>
       </div>
     </aside>
@@ -200,6 +200,7 @@
                   <th>Rating</th>
                   <th>Summary</th>
                   <th>Date</th>
+                  <th>Recording</th>
                 </tr>
               </thead>
               <tbody id="feedbackTableBody"></tbody>
@@ -220,7 +221,7 @@
     <a href="/incoming-calls.html" class="mobile-dock-link">Calls</a>
     <a href="/customers.html" class="mobile-dock-link">Outbound</a>
     <a href="/feedback.html" class="mobile-dock-link active">Feedback</a>
-    <a href="/reports.html" class="mobile-dock-link">Reports</a>
+    <a href="/reports.html" class="mobile-dock-link" style="display: none;">Reports</a>
   </nav>
 
   <div id="manualFeedbackModal" class="modal-backdrop" aria-hidden="true">
@@ -656,6 +657,8 @@
 
       tableBody.innerHTML = paged.items.map((item) => {
         const sentiment = feedbackSentiment(item);
+        const call = item.call_id ? recentCallsCache.find(c => c.id === item.call_id) : null;
+        const audioPlayer = call ? `<audio controls src="${AppShell.API_BASE}/calls/${call.id}/recording" preload="none" style="height: 32px; width: 160px;"></audio>` : '<span class="muted">No recording</span>';
         return `
           <tr>
             <td>
@@ -666,12 +669,15 @@
             <td>${Number(item.stars || 0) ? `${item.stars}/5` : ''}</td>
             <td class="summary-cell">${AppShell.escapeHtml(item.review_text || '')}</td>
             <td>${AppShell.formatDateTime(item.submitted_at)}</td>
+            <td>${audioPlayer}</td>
           </tr>
         `;
       }).join('');
 
       mobileList.innerHTML = feedback.map((item) => {
         const sentiment = feedbackSentiment(item);
+        const call = item.call_id ? recentCallsCache.find(c => c.id === item.call_id) : null;
+        const audioPlayer = call ? `<audio controls src="${AppShell.API_BASE}/calls/${call.id}/recording" preload="none" style="height: 32px; width: 100%; margin-top: 8px;"></audio>` : '';
         return `
           <article class="mobile-feedback-card">
             <div class="mobile-feedback-head">
@@ -683,6 +689,7 @@
             </div>
             ${item.review_text ? `<div class="mobile-subtext" style="margin-top:10px;">${AppShell.escapeHtml(item.review_text)}</div>` : ''}
             ${Number(item.stars || 0) ? `<div class="mobile-subtext" style="margin-top:8px;">Rating: ${item.stars}/5</div>` : ''}
+            ${audioPlayer}
           </article>
         `;
       }).join('');
