@@ -21,7 +21,8 @@ const {
   GEMINI_LIVE_SILENCE_DURATION_MS,
   GEMINI_LIVE_DIRECT_AUDIO,
   DEEPGRAM_TTS_MODEL,
-  FINAL_AUDIO_GRACE_MS
+  FINAL_AUDIO_GRACE_MS,
+  DEEPGRAM_ENDPOINTING_MS
 } = require('./config');
 
 const {
@@ -177,8 +178,29 @@ module.exports = function setupWebSocketBridge(server) {
 
           if (!session.firstChunkSentAt) {
             session.firstChunkSentAt = Date.now();
-            const queueLatency = session.geminiLiveFirstAudioAt ? session.firstChunkSentAt - session.geminiLiveFirstAudioAt : 'unknown';
-            console.log(`[STAGE 7: Audio Stream] First chunk sent to Caller. queueLatencyMs=${queueLatency}`);
+            
+            // Calculate latencies
+            const sttProducedAt = session.sttProducedAt || session.firstChunkSentAt;
+            const llmFirstAudioAt = session.geminiLiveFirstAudioAt || session.firstChunkSentAt;
+            
+            // In Gemini Live Direct Audio, LLM hears speech directly and STT runs in parallel.
+            // STT Latency is roughly the endpointing time (which is known), but we track when the final text was emitted.
+            const sttLatencyMs = DEEPGRAM_ENDPOINTING_MS;
+            // LLM Latency: from STT being produced (or user finishing speaking) to first audio chunk from LLM
+            const llmLatencyMs = Math.max(0, llmFirstAudioAt - sttProducedAt);
+            // TTS Latency: from first audio chunk from LLM to sending to the caller
+            const ttsLatencyMs = Math.max(0, session.firstChunkSentAt - llmFirstAudioAt);
+            // E2E Latency: from user finishing speaking (approximated by STT event minus endpointing) to audio sent
+            const estimatedUserSpeechEndAt = sttProducedAt - DEEPGRAM_ENDPOINTING_MS;
+            const e2eLatencyMs = Math.max(0, session.firstChunkSentAt - estimatedUserSpeechEndAt);
+            
+            console.log(`[LATENCY TRACKING] 
+  STT Latency: ~${sttLatencyMs}ms (endpointing)
+  LLM Latency: ${llmLatencyMs}ms
+  TTS Latency: ${ttsLatencyMs}ms
+  End-to-End Latency: ${e2eLatencyMs}ms
+`);
+            console.log(`[STAGE 7: Audio Stream] First chunk sent to Caller. e2eLatencyMs=${e2eLatencyMs}`);
           }
 
           sendIcallMateJson(ws, {
@@ -209,6 +231,17 @@ module.exports = function setupWebSocketBridge(server) {
             source: 'ai',
             payload: tail.toString('base64')
           });
+          
+          // Clear latency tracking for next turn
+          session.firstChunkSentAt = null;
+          session.geminiLiveFirstAudioAt = null;
+          session.sttProducedAt = null;
+        } else if (session.turnComplete && session.audioBuffer.length === 0) {
+          session.turnComplete = false;
+          // Clear latency tracking for next turn
+          session.firstChunkSentAt = null;
+          session.geminiLiveFirstAudioAt = null;
+          session.sttProducedAt = null;
         }
       }, 20); // Match ~8kHz chunk rate
     }
@@ -659,6 +692,9 @@ module.exports = function setupWebSocketBridge(server) {
                   `pendingAudioBytes=${pendingBytes} pendingAudioMs=${Math.round(pendingBytes / 2 / 8000 * 1000)}`
                 );
                 sendReverseMediaStop(ws, session);
+                session.firstChunkSentAt = null;
+                session.geminiLiveFirstAudioAt = null;
+                session.sttProducedAt = null;
               }
             },
             onerror: (error) => {
@@ -785,6 +821,7 @@ module.exports = function setupWebSocketBridge(server) {
           const merged = finalTranscriptBuffer.join(' ').replace(/\s+/g, ' ').trim();
           finalTranscriptBuffer = [];
           if (merged) {
+            session.sttProducedAt = Date.now();
             console.log(`[STAGE 3: Transcript] STT produced text (Outbound): ${merged}`);
             pushTranscriptTurn(transcript, 'CUSTOMER', merged);
             const turnText = isOutboundSession()
@@ -814,6 +851,7 @@ module.exports = function setupWebSocketBridge(server) {
           .trim();
         finalTranscriptBuffer = [];
         if (merged) {
+          session.sttProducedAt = Date.now();
           console.log(`[STAGE 3: Transcript] STT produced text (Inbound): ${merged}`);
           pushTranscriptTurn(transcript, 'CUSTOMER', merged);
           const turnText = `Caller said: ${merged}\nRespond naturally in Hindi/Hinglish based on the system prompt instructions.`;
