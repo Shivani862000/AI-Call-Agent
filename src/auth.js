@@ -167,6 +167,18 @@ function requireAdminAuth(req, res, next) {
   return res.redirect('/login.html');
 }
 
+function basicAuth(req, res, next) {
+  const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
+  const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
+
+  if (login === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    return next();
+  }
+
+  res.setHeader('WWW-Authenticate', 'Basic realm="Restricted Area"');
+  res.status(401).send('Authentication required');
+}
+
 module.exports = {
   PROTECTED_HTML_PATHS,
   ADMIN_USERNAME,
@@ -176,5 +188,6 @@ module.exports = {
   readAuthSession,
   setAuthCookie,
   clearAuthCookie,
-  requireAdminAuth
+  requireAdminAuth,
+  basicAuth
 };

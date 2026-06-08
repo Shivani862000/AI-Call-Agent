@@ -11,7 +11,7 @@ const path = require('path');
 
 // Import modular components
 const { PORT } = require('./src/config');
-const { PROTECTED_HTML_PATHS, requireAdminAuth } = require('./src/auth');
+const { PROTECTED_HTML_PATHS, requireAdminAuth, basicAuth } = require('./src/auth');
 const mountApiRoutes = require('./src/api-routes');
 const setupWebSocketBridge = require('./src/websocket-bridge');
 const startServer = require('./src/server');
@@ -33,15 +33,17 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res, next) => {
+  if (req.path === '/login.html' || req.path.startsWith('/api/auth/')) {
+    return next();
+  }
+
   if (
-    req.path === '/login.html'
-    || req.path.startsWith('/api/auth/')
-    || req.path === '/api/icallmate/callback'
+    req.path === '/api/icallmate/callback'
     || req.path === '/api/icallmate/config'
     || req.path === '/icallmate/health'
     || req.path === '/icallmate/media'
   ) {
-    return next();
+    return basicAuth(req, res, next);
   }
 
   if (PROTECTED_HTML_PATHS.has(req.path) || req.path.startsWith('/api/')) {
