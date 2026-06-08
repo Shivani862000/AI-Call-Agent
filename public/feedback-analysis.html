@@ -85,6 +85,13 @@
       color: #fff;
     }
 
+    .analysis-button[disabled],
+    .analysis-button[disabled="true"] {
+      opacity: 0.5;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
     .analysis-hero {
       display: grid;
       grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.7fr);
@@ -399,38 +406,53 @@
     }
 
     .transcript-list {
-      display: grid;
-      gap: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
       max-height: 620px;
-      overflow: auto;
-      padding-right: 4px;
+      overflow-y: auto;
+      padding: 16px;
+      background: #f6f8fb;
+      border: 1px solid var(--analysis-line);
+      border-radius: 12px;
     }
 
     .transcript-turn {
-      display: grid;
-      grid-template-columns: 86px minmax(0, 1fr);
-      gap: 12px;
-      padding: 13px;
+      display: flex;
+      flex-direction: column;
+      max-width: 85%;
+      padding: 12px 16px;
       border: 1px solid var(--analysis-line);
-      border-radius: 8px;
-      background: #fff;
+      border-radius: 14px;
+      clear: both;
     }
 
     .transcript-turn.ai {
-      background: #f4f8ff;
+      align-self: flex-start;
+      background: #eaf2ff;
       border-color: #cfe0ff;
+      border-bottom-left-radius: 4px;
+    }
+
+    .transcript-turn.patient {
+      align-self: flex-end;
+      background: #ffffff;
+      border-bottom-right-radius: 4px;
     }
 
     .turn-role {
       color: var(--analysis-muted);
-      font-size: 12px;
-      font-weight: 900;
+      font-size: 11px;
+      font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.04em;
+      margin-bottom: 4px;
     }
 
     .turn-text {
+      color: var(--analysis-ink);
       line-height: 1.55;
+      font-size: 15px;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
     }
@@ -574,10 +596,7 @@
       <button id="analysisPageBackButton" class="analysis-back" type="button">Back</button>
       <div class="analysis-actions">
         <button id="rerunAnalysisButton" class="analysis-button" type="button">Re-run Analysis</button>
-        <button id="copySummaryButton" class="analysis-button" type="button">Copy Summary</button>
-        <a id="downloadTranscriptButton" class="analysis-button" href="#">Download Transcript</a>
         <a id="downloadRecordingButton" class="analysis-button" href="#">Download Recording</a>
-        <a id="exportPdfButton" class="analysis-button primary" href="#">Export PDF Report</a>
       </div>
     </div>
 
@@ -608,72 +627,25 @@
         </div>
       </article>
 
-      <aside id="qualitySection" class="analysis-card analysis-score-card" hidden>
-        <div>
-          <div class="analysis-section-header">
-            <div>
-              <h2 class="analysis-section-title">AI Quality Score</h2>
-              <p class="analysis-section-subtitle">Execution quality for this call</p>
-            </div>
-          </div>
-          <div id="qualityRing" class="analysis-score-ring" style="--score-angle: 0deg;"><div id="qualityScoreValue">--</div></div>
-        </div>
-        <div id="qualityChecks" class="quality-checks"></div>
-      </aside>
     </section>
 
-    <section class="analysis-section-grid">
-      <div class="analysis-stack">
-        <section id="recordingSection" class="analysis-card analysis-section" hidden>
-          <div class="analysis-section-header">
-            <div>
-              <h2 class="analysis-section-title">Recording</h2>
-              <p class="analysis-section-subtitle">Playback and download</p>
+    <section class="analysis-stack" style="margin-top: 16px;">
+      <!-- SECTION 2: AI Insights -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+        <aside id="qualitySection" class="analysis-card analysis-score-card">
+          <div>
+            <div class="analysis-section-header">
+              <div>
+                <h2 class="analysis-section-title">AI Quality Score</h2>
+                <p class="analysis-section-subtitle">Execution quality for this call</p>
+              </div>
             </div>
-            <span id="recordingQualityValue" class="analysis-status">Checking</span>
+            <div id="qualityRing" class="analysis-score-ring" style="--score-angle: 0deg;"><div id="qualityScoreValue">--</div></div>
           </div>
-          <div id="recordingContainer"></div>
-        </section>
+          <div id="qualityChecks" class="quality-checks"></div>
+        </aside>
 
-        <section id="summarySection" class="analysis-card analysis-section" hidden>
-          <div class="analysis-section-header">
-            <div>
-              <h2 class="analysis-section-title">AI Generated Summary</h2>
-              <p class="analysis-section-subtitle">What happened in the call</p>
-            </div>
-          </div>
-          <p id="summaryValue" class="summary-text">Loading summary...</p>
-        </section>
-
-        <section id="outcomesSection" class="analysis-card analysis-section" hidden>
-          <div class="analysis-section-header">
-            <div>
-              <h2 class="analysis-section-title">Key Outcomes</h2>
-              <p class="analysis-section-subtitle">Automatically extracted answers</p>
-            </div>
-          </div>
-          <div id="outcomeCards" class="outcome-grid"></div>
-        </section>
-
-        <section id="transcriptSection" class="analysis-card analysis-section" hidden>
-          <div class="analysis-section-header">
-            <div>
-              <h2 class="analysis-section-title">Full Transcript</h2>
-              <p class="analysis-section-subtitle">Speaker-separated, searchable transcript</p>
-            </div>
-          </div>
-          <div class="transcript-toolbar">
-            <input id="transcriptSearch" class="transcript-search" type="search" placeholder="Search transcript">
-            <button id="copyTranscriptButton" class="analysis-button" type="button">Copy Transcript</button>
-            <a id="viewTranscriptButton" class="analysis-button" href="#">View Transcript</a>
-            <button id="clearSearchButton" class="analysis-button" type="button">Clear</button>
-          </div>
-          <div id="transcriptList" class="transcript-list" style="margin-top: 14px;"></div>
-        </section>
-      </div>
-
-      <aside class="analysis-stack">
-        <section id="sentimentSection" class="analysis-card analysis-section" hidden>
+        <section id="sentimentSection" class="analysis-card analysis-section">
           <div class="analysis-section-header">
             <div>
               <h2 class="analysis-section-title">Sentiment Analysis</h2>
@@ -689,40 +661,90 @@
           </div>
         </section>
 
-        <section id="timelineSection" class="analysis-card analysis-section" hidden>
+        <section id="outcomesSection" class="analysis-card analysis-section">
           <div class="analysis-section-header">
             <div>
-              <h2 class="analysis-section-title">Conversation Timeline</h2>
-              <p class="analysis-section-subtitle">Call progress at a glance</p>
+              <h2 class="analysis-section-title">Key Outcomes</h2>
+              <p class="analysis-section-subtitle">Automatically extracted answers</p>
             </div>
           </div>
-          <div id="timelineList" class="timeline"></div>
+          <div id="outcomeCards" class="outcome-grid"></div>
         </section>
+      </div>
 
-        <section id="metricsSection" class="analysis-card analysis-section" hidden>
-          <div class="analysis-section-header">
-            <div>
-              <h2 class="analysis-section-title">Call Metrics</h2>
-              <p class="analysis-section-subtitle">Operational conversation metrics</p>
-            </div>
+      <!-- SECTION 3: AI Generated Summary -->
+      <section id="summarySection" class="analysis-card analysis-section">
+        <div class="analysis-section-header">
+          <div>
+            <h2 class="analysis-section-title">AI Generated Summary</h2>
+            <p class="analysis-section-subtitle">What happened in the call</p>
           </div>
-          <div id="metricsGrid" class="metric-grid"></div>
-        </section>
+        </div>
+        <p id="summaryValue" class="summary-text">Loading summary...</p>
+      </section>
 
-        <section id="exportSection" class="analysis-card analysis-section" hidden>
-          <div class="analysis-section-header">
-            <div>
-              <h2 class="analysis-section-title">Export Actions</h2>
-              <p class="analysis-section-subtitle">Share or archive this call</p>
-            </div>
+      <!-- SECTION 4: Conversation Timeline -->
+      <details id="timelineSection" class="analysis-card analysis-section">
+        <summary class="analysis-section-header" style="cursor: pointer; list-style: none;">
+          <div>
+            <h2 class="analysis-section-title">Conversation Timeline (Click to expand)</h2>
+            <p class="analysis-section-subtitle">Call progress at a glance</p>
           </div>
-          <div class="analysis-actions" style="justify-content: flex-start;">
-            <a id="exportPdfButtonSecondary" class="analysis-button primary" href="#">Export PDF Report</a>
-            <button id="copySummaryButtonSecondary" class="analysis-button" type="button">Copy Summary</button>
-            <a id="downloadTranscriptButtonSecondary" class="analysis-button" href="#">Download Transcript</a>
+        </summary>
+        <div id="timelineList" class="timeline" style="margin-top: 14px;"></div>
+      </details>
+
+      <section id="recordingSection" class="analysis-card analysis-section" hidden>
+        <div class="analysis-section-header">
+          <div>
+            <h2 class="analysis-section-title">Recording</h2>
+            <p class="analysis-section-subtitle">Playback and audio analysis</p>
           </div>
-        </section>
-      </aside>
+          <span id="recordingQualityValue" class="analysis-status">Checking</span>
+        </div>
+        <div id="recordingContainer"></div>
+      </section>
+
+      <section id="metricsSection" class="analysis-card analysis-section" hidden>
+        <div class="analysis-section-header">
+          <div>
+            <h2 class="analysis-section-title">Call Metrics</h2>
+            <p class="analysis-section-subtitle">Operational conversation metrics</p>
+          </div>
+        </div>
+        <div id="metricsGrid" class="metric-grid"></div>
+      </section>
+
+      <!-- SECTION 5: Transcript -->
+      <section id="transcriptSection" class="analysis-card analysis-section">
+        <div class="analysis-section-header">
+          <div>
+            <h2 class="analysis-section-title">Full Transcript</h2>
+            <p class="analysis-section-subtitle">Speaker-separated, searchable transcript</p>
+          </div>
+        </div>
+        <div class="transcript-toolbar">
+          <input id="transcriptSearch" class="transcript-search" type="search" placeholder="Search transcript">
+          <a id="viewTranscriptButton" class="analysis-button" href="#" target="_blank">View Raw</a>
+          <button id="copyTranscriptButton" class="analysis-button" type="button">Copy Transcript</button>
+          <button id="clearSearchButton" class="analysis-button" type="button">Clear</button>
+        </div>
+        <div id="transcriptList" class="transcript-list" style="margin-top: 14px;"></div>
+      </section>
+
+      <section id="exportSection" class="analysis-card analysis-section">
+        <div class="analysis-section-header">
+          <div>
+            <h2 class="analysis-section-title">Export Actions</h2>
+            <p class="analysis-section-subtitle">Share or archive this call</p>
+          </div>
+        </div>
+        <div class="analysis-actions" style="justify-content: flex-start;">
+          <a id="exportPdfButton" class="analysis-button primary" href="#">Export PDF Report</a>
+          <a id="downloadTranscriptButton" class="analysis-button" href="#">Download Transcript</a>
+          <button id="copySummaryButton" class="analysis-button" type="button">Copy Summary</button>
+        </div>
+      </section>
     </section>
   </main>
 
@@ -756,16 +778,45 @@
     }
 
     function parseTurnsFromText(text) {
+      if (!text) return [];
+      
+      const turns = [];
+      const blocks = String(text).split(/---+/).map(b => b.trim()).filter(Boolean);
+
+      if (blocks.length > 1) {
+        for (const block of blocks) {
+          const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+          if (!lines.length) continue;
+          
+          let role = 'NOTE';
+          let content = block;
+          
+          const firstLineUpper = lines[0].toUpperCase();
+          if (['AGENT', 'AI', 'BOT', 'SYSTEM'].includes(firstLineUpper)) {
+            role = 'AI';
+            content = lines.slice(1).join('\n');
+          } else if (['CUSTOMER', 'PATIENT', 'USER'].includes(firstLineUpper)) {
+            role = 'PATIENT';
+            content = lines.slice(1).join('\n');
+          }
+
+          if (content.trim()) {
+            turns.push({ role, text: content.trim() });
+          }
+        }
+        if (turns.length) return turns;
+      }
+
       return String(text || '')
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean)
         .map((line) => {
-          const match = line.match(/^\[?([A-Z]+)\]?\s*:\s*(.*)$/);
+          const match = line.match(/^\[?([a-zA-Z_]+)\]?\s*:\s*(.*)$/);
           if (!match) return { role: 'NOTE', text: line };
-          const rawRole = match[1];
+          const rawRole = match[1].toUpperCase();
           return {
-            role: rawRole === 'AGENT' || rawRole === 'AI' ? 'AI' : rawRole === 'CUSTOMER' || rawRole === 'PATIENT' ? 'PATIENT' : rawRole,
+            role: ['AGENT', 'AI', 'BOT'].includes(rawRole) ? 'AI' : ['CUSTOMER', 'PATIENT', 'USER'].includes(rawRole) ? 'PATIENT' : rawRole,
             text: match[2] || ''
           };
         });
@@ -815,8 +866,18 @@
     function renderRecording(call) {
       const container = document.getElementById('recordingContainer');
       const hasRecording = call.recording_url || call.recording_sid || String(call.recording_status || '').toLowerCase() === 'completed';
+      
+      const recordingBtn = document.getElementById('downloadRecordingButton');
+      if (hasRecording) {
+        recordingBtn.removeAttribute('disabled');
+        recordingBtn.href = `${AppShell.API_BASE}/calls/${call.id}/recording`;
+        recordingBtn.download = `call-${call.id}-recording.mp3`;
+      } else {
+        recordingBtn.setAttribute('disabled', 'true');
+        recordingBtn.removeAttribute('href');
+      }
+
       setSectionVisible('recordingSection', Boolean(hasRecording));
-      document.getElementById('downloadRecordingButton').hidden = !hasRecording;
       document.getElementById('recordingQualityValue').textContent = hasRecording ? 'Available' : 'Unavailable';
       document.getElementById('recordingQualityValue').className = `analysis-status ${hasRecording ? 'completed' : 'failed'}`;
 
@@ -891,8 +952,8 @@
 
     function renderSummary(call) {
       const summary = call.summary || call.analysis_summary || call.analysis?.summary || '';
-      setSectionVisible('summarySection', hasText(summary));
-      document.getElementById('summaryValue').textContent = summary;
+      setSectionVisible('summarySection', true);
+      document.getElementById('summaryValue').textContent = hasText(summary) ? summary : 'Analysis not generated yet.';
     }
 
     function renderOutcomes(call) {
@@ -934,9 +995,14 @@
         ? transcriptTurns.filter((turn) => `${turn.role} ${turn.text}`.toLowerCase().includes(needle))
         : transcriptTurns;
 
-      setSectionVisible('transcriptSection', transcriptTurns.length > 0);
+      setSectionVisible('transcriptSection', true);
+      if (!transcriptTurns.length) {
+        container.innerHTML = '<div class="empty-state">No transcript available.</div>';
+        return;
+      }
+      
       if (!visibleTurns.length) {
-        container.innerHTML = '';
+        container.innerHTML = '<div class="empty-state">No matching lines found.</div>';
         return;
       }
 
@@ -1007,30 +1073,44 @@
 
     function updateActionLinks(call) {
       const transcriptUrl = `${AppShell.API_BASE}/calls/${call.id}/transcript?raw=1`;
-      const recordingUrl = `${AppShell.API_BASE}/calls/${call.id}/recording`;
       const pdfUrl = `${AppShell.API_BASE}/calls/${call.id}/analysis-pdf`;
       const hasTranscript = transcriptTurns.length > 0;
       const hasSummary = hasText(call.summary || call.analysis_summary || call.analysis?.summary);
-      const hasRecording = call.recording_url || call.recording_sid || String(call.recording_status || '').toLowerCase() === 'completed';
-      setSectionVisible('exportSection', hasTranscript || hasSummary || hasRecording);
-      ['downloadTranscriptButton', 'downloadTranscriptButtonSecondary'].forEach((id) => {
-        const link = document.getElementById(id);
-        link.href = transcriptUrl;
-        link.download = `call-${call.id}-transcript.txt`;
-        link.hidden = !hasTranscript;
-      });
-      document.getElementById('viewTranscriptButton').href = `${AppShell.API_BASE}/calls/${call.id}/transcript`;
-      document.getElementById('viewTranscriptButton').hidden = !hasTranscript;
-      document.getElementById('downloadRecordingButton').href = recordingUrl;
-      document.getElementById('downloadRecordingButton').download = `call-${call.id}-recording.mp3`;
-      document.getElementById('downloadRecordingButton').hidden = !hasRecording;
-      ['exportPdfButton', 'exportPdfButtonSecondary'].forEach((id) => {
-        document.getElementById(id).href = pdfUrl;
-        document.getElementById(id).hidden = !(hasTranscript || hasSummary);
-      });
-      ['copySummaryButton', 'copySummaryButtonSecondary'].forEach((id) => {
-        document.getElementById(id).hidden = !hasSummary;
-      });
+      
+      const transcriptBtn = document.getElementById('downloadTranscriptButton');
+      if (hasTranscript) {
+        transcriptBtn.href = transcriptUrl;
+        transcriptBtn.download = `call-${call.id}-transcript.txt`;
+        transcriptBtn.removeAttribute('disabled');
+      } else {
+        transcriptBtn.removeAttribute('href');
+        transcriptBtn.setAttribute('disabled', 'true');
+      }
+
+      const viewBtn = document.getElementById('viewTranscriptButton');
+      if (hasTranscript) {
+        viewBtn.href = `${AppShell.API_BASE}/calls/${call.id}/transcript`;
+        viewBtn.removeAttribute('disabled');
+      } else {
+        viewBtn.removeAttribute('href');
+        viewBtn.setAttribute('disabled', 'true');
+      }
+
+      const pdfBtn = document.getElementById('exportPdfButton');
+      if (hasTranscript || hasSummary) {
+        pdfBtn.href = pdfUrl;
+        pdfBtn.removeAttribute('disabled');
+      } else {
+        pdfBtn.removeAttribute('href');
+        pdfBtn.setAttribute('disabled', 'true');
+      }
+
+      const copyBtn = document.getElementById('copySummaryButton');
+      if (hasSummary) {
+        copyBtn.removeAttribute('disabled');
+      } else {
+        copyBtn.setAttribute('disabled', 'true');
+      }
     }
 
     function renderCall(call) {
@@ -1096,7 +1176,6 @@
       });
       document.getElementById('copyTranscriptButton').addEventListener('click', () => copyText(rawTranscriptText(), 'Transcript copied'));
       document.getElementById('copySummaryButton').addEventListener('click', () => copyText(document.getElementById('summaryValue').textContent, 'Summary copied'));
-      document.getElementById('copySummaryButtonSecondary').addEventListener('click', () => copyText(document.getElementById('summaryValue').textContent, 'Summary copied'));
       document.getElementById('rerunAnalysisButton').addEventListener('click', rerunAnalysis);
 
       try {

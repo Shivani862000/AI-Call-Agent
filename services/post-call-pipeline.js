@@ -119,6 +119,12 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     return { ok: false, reason: 'call_not_found' };
   }
 
+  // Idempotency guard: skip if analysis already completed (prevents duplicate processing
+  // when multiple completion paths trigger the pipeline, e.g. hangup + ws close)
+  if (callRecord.analysis_status === 'completed') {
+    return { ok: false, reason: 'already_processed' };
+  }
+
   await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['processing', 'processing', callRecord.id]);
 
   let recordingLocalPath = callRecord.recording_local_path || null;

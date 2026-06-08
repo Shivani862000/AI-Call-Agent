@@ -626,6 +626,52 @@ module.exports = function mountApiRoutes(app) {
           ended_at: payload.call_end_time ? normalizeIcallTimestamp(payload.call_end_time) : null,
           notes: payload.recording_filename ? 'Callback received with recording' : 'Callback received'
         });
+      } else {
+        const phone = payload.phoneno || payload.customer_number || '';
+        const mappedOutcome = status === 'completed' ? 'completed' : 'no_answer';
+
+        if (phone) {
+          const cleanPhone = phone.replace(/^\\+91/, '').slice(-10);
+          const callRecord = await dbGet(`
+            SELECT calls.* FROM calls
+            JOIN customers ON customers.id = calls.customer_id
+            WHERE customers.phone LIKE '%' || ? AND calls.call_direction = 'outbound'
+            ORDER BY calls.id DESC LIMIT 1
+          `, [cleanPhone]);
+
+          if (callRecord) {
+            await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ? WHERE id = ?', [
+              mappedOutcome,
+              payload.call_status || 'callback',
+              callRecord.id
+            ]);
+
+            if (mappedOutcome === 'completed' && payload.recording_filename) {
+              setTimeout(() => {
+                runInBackground('POST CALL PIPELINE ERROR', async () => {
+                  const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: callRecord.provider_call_id });
+                  if (result.ok) {
+                    console.log(`[POST CALL PIPELINE] Processed call ${callRecord.provider_call_id} with feedback ${result.feedbackId}`);
+                  } else {
+                    console.log(`[POST CALL PIPELINE] Skipped call ${callRecord.provider_call_id}: ${result.reason}`);
+                  }
+                });
+              }, 1500);
+            }
+
+            const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+            if (customer) {
+              await applyCallOutcomeWorkflow({
+                dbGet,
+                dbRun,
+                callRecord: { ...callRecord, outcome: mappedOutcome },
+                customer,
+                providerStatus: payload.call_status || mappedOutcome,
+                inferredOutcome: mappedOutcome
+              });
+            }
+          }
+        }
       }
 
       res.json({ success: true });
@@ -1246,6 +1292,17 @@ module.exports = function mountApiRoutes(app) {
     } catch (error) {
       console.error('[RECORDING PROXY ERROR]', error.message);
       res.status(500).json({ error: 'Failed to stream recording' });
+    }
+  });
+
+  app.delete('/api/calls/bulk', async (req, res) => {
+    try {
+      await dbRun('DELETE FROM call_supervisor_events');
+      await dbRun('DELETE FROM calls');
+      res.json({ message: 'All call history deleted successfully' });
+    } catch (error) {
+      console.error('Error in calls bulk delete:', error);
+      res.status(500).json({ error: error.message });
     }
   });
 

@@ -99,6 +99,25 @@
   }
 
   function formatStatusLabel(status) {
+    const rawStatus = String(status || '').toLowerCase();
+    const statusMap = {
+      called: 'Calling...',
+      retry_scheduled: 'Scheduled',
+      callback_scheduled: 'Scheduled',
+      no_answer: 'No Answer',
+      busy: 'Busy',
+      failed: 'Failed',
+      completed: 'Completed',
+      pending: 'Pending',
+      hot_lead: 'Hot Lead',
+      churn_watch: 'Churn Watch',
+      admin_review: 'Review Needed'
+    };
+
+    if (statusMap[rawStatus]) {
+      return statusMap[rawStatus];
+    }
+
     return String(status || '')
       .replace(/_/g, ' ')
       .replace(/\b\w/g, (match) => match.toUpperCase()) || 'Unknown';

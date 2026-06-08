@@ -9,6 +9,7 @@ const PHONE_PATTERN = /^\+\d{10,15}$/;
 const SLOT_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const ALLOWED_CALL_TYPES = new Set(['REVIEW_CALL', 'THREE_MONTH_FOLLOWUP']);
 const RESCHEDULABLE_STATUSES = new Set([
+  'scheduled',
   'called',
   'no_answer',
   'busy',
@@ -17,7 +18,7 @@ const RESCHEDULABLE_STATUSES = new Set([
   'retry_scheduled',
   'callback_scheduled'
 ]);
-const ACTIVE_CUSTOMER_STATUSES = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
+const ACTIVE_CUSTOMER_STATUSES = new Set(['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled']);
 const ACTIVE_CALL_OUTCOMES = new Set(['initiated', 'scheduled_initiated', 'active']);
 
 function toBooleanFlag(value) {
@@ -198,6 +199,7 @@ function handleSqliteError(error, res) {
 }
 
 async function saveCustomer(payload) {
+  const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
   return dbRun(
     `INSERT INTO customers (
       name, phone, preferred_slot, status, customer_value, urgency_level,
@@ -209,7 +211,7 @@ async function saveCustomer(payload) {
       payload.name,
       payload.phone,
       payload.preferred_slot,
-      'pending',
+      initialStatus,
       payload.customer_value,
       payload.urgency_level,
       payload.preferred_language,
@@ -474,6 +476,20 @@ router.post('/:id/retry', async (req, res) => {
     res.json({ message: 'Retry scheduled successfully', retry_at: retryAt });
   } catch (error) {
     console.error('Error scheduling retry:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete all customers and their data
+router.delete('/bulk', async (req, res) => {
+  try {
+    await dbRun('DELETE FROM feedback');
+    await dbRun('DELETE FROM call_supervisor_events');
+    await dbRun('DELETE FROM calls');
+    await dbRun('DELETE FROM customers');
+    res.json({ message: 'All patients and call history deleted successfully' });
+  } catch (error) {
+    console.error('Error in bulk delete:', error);
     res.status(500).json({ error: error.message });
   }
 });

@@ -322,6 +322,15 @@ module.exports = function setupWebSocketBridge(server) {
           );
         }
 
+        // Update customer status so UI badge changes from "Calling..." to "Completed"
+        if (session.customerId) {
+          await dbRun(
+            'UPDATE customers SET status = ?, last_called_at = ? WHERE id = ?',
+            ['completed', nowIso, session.customerId]
+          );
+          console.log(`[CALL STATUS] Calling -> Completed (customerId=${session.customerId})`);
+        }
+
         if (session.providerCallId && transcript.length) {
           await saveCallFeedbackFromTranscript({
             dbGet,
@@ -994,6 +1003,11 @@ module.exports = function setupWebSocketBridge(server) {
 
         // Gate Deepgram STT while AI is speaking to prevent echo / self-interruption
         if (session.aiSpeakingUntil && Date.now() < session.aiSpeakingUntil) {
+          if (deepgramReady && deepgramWs?.readyState === WebSocket.OPEN) {
+            const audioBuffer = Buffer.from(payload, 'base64');
+            const silence = Buffer.alloc(audioBuffer.length);
+            deepgramWs.send(silence);
+          }
           return;
         }
 
@@ -1032,6 +1046,12 @@ module.exports = function setupWebSocketBridge(server) {
             console.error('[ICALLMATE][GEMINI LIVE CLOSE ERROR]', error.message);
           }
         }
+      },
+      getTranscriptText() {
+        return toPlainTranscript();
+      },
+      async persistCompletion(reason) {
+        await persistConversationCompletion(reason || 'external_hangup');
       }
     };
   }
@@ -1155,6 +1175,52 @@ module.exports = function setupWebSocketBridge(server) {
           ended_at: normalizeIcallTimestamp(message.timestamp),
           notes: session.answered ? 'Call disconnected' : 'Call missed'
         });
+        // Persist transcript + update customer status before closing
+        if (session.answered) {
+          try {
+            await aiBridge.persistCompletion('hangup_call_event');
+          } catch (e) { console.error('[HANGUP PERSIST ERROR]', e.message); }
+
+          // Fallback: save transcript directly if persistCompletion didn't run (e.g. incoming calls)
+          if (session.callId) {
+            const transcriptText = aiBridge.getTranscriptText();
+            if (transcriptText) {
+              try {
+                await dbRun(
+                  `UPDATE calls SET outcome = 'completed', transcript_text = COALESCE(NULLIF(?, ''), transcript_text), transcript_status = COALESCE(NULLIF(transcript_status, 'pending'), 'completed'), ended_at = COALESCE(ended_at, ?) WHERE id = ?`,
+                  [transcriptText, new Date().toISOString(), session.callId]
+                );
+                console.log(`[TRANSCRIPT] Saved from hangup-call (callId=${session.callId}, length=${transcriptText.length})`);
+              } catch (e) { console.error('[TRANSCRIPT SAVE ERROR]', e.message); }
+            }
+          }
+
+          // Update customer status
+          if (session.customerId) {
+            try {
+              await dbRun('UPDATE customers SET status = ?, last_called_at = ? WHERE id = ?',
+                ['completed', new Date().toISOString(), session.customerId]);
+              console.log(`[CALL STATUS] Calling -> Completed (hangup-call, customerId=${session.customerId})`);
+            } catch (e) { console.error('[CALL STATUS UPDATE ERROR]', e.message); }
+          }
+
+          // Trigger post-call pipeline
+          if (session.providerCallId) {
+            runInBackground('HANGUP POST CALL PIPELINE', async () => {
+              try {
+                const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: session.providerCallId });
+                if (result.ok) {
+                  console.log(`[POST CALL PIPELINE] Processed hangup call ${session.providerCallId} feedbackId=${result.feedbackId}`);
+                  console.log(`[TRANSCRIPT] Generated successfully`);
+                  console.log(`[SUMMARY] Generated successfully`);
+                  console.log(`[ANALYSIS] Generated successfully`);
+                } else {
+                  console.log(`[POST CALL PIPELINE] Skipped hangup call ${session.providerCallId}: ${result.reason}`);
+                }
+              } catch (e) { console.error('[HANGUP POST CALL PIPELINE ERROR]', e.message); }
+            });
+          }
+        }
         sendReverseMediaStop(ws, session);
         aiBridge.close();
         ws.close();
@@ -1173,17 +1239,59 @@ module.exports = function setupWebSocketBridge(server) {
       console.log('[ICALLMATE] Media stream closed');
       aiBridge.close();
       if (session.streamId) {
+        const closeTimestamp = new Date().toISOString();
         upsertIcallMateCallFromMedia({
           streamId: session.streamId,
           callerId: session.callerId,
           did: session.did,
           event: 'hangup-call',
-          timestamp: new Date().toISOString()
+          timestamp: closeTimestamp
         }, session, {
           status: session.answered ? 'completed' : 'missed',
-          ended_at: new Date().toISOString(),
+          ended_at: closeTimestamp,
           notes: session.answered ? 'Call disconnected' : 'Call closed'
-        });
+        }).then(async () => {
+          // Safety net: save transcript if not already saved
+          if (session.callId && session.answered) {
+            const transcriptText = aiBridge.getTranscriptText();
+            if (transcriptText) {
+              try {
+                await dbRun(
+                  `UPDATE calls SET outcome = 'completed', transcript_text = COALESCE(NULLIF(?, ''), transcript_text), transcript_status = COALESCE(NULLIF(transcript_status, 'pending'), 'completed'), ended_at = COALESCE(ended_at, ?) WHERE id = ?`,
+                  [transcriptText, closeTimestamp, session.callId]
+                );
+                console.log(`[TRANSCRIPT] Saved from ws close (callId=${session.callId}, length=${transcriptText.length})`);
+              } catch (e) { console.error('[TRANSCRIPT SAVE ERROR ws close]', e.message); }
+            }
+          }
+          // Safety net: update customer status if still 'called'
+          if (session.customerId && session.answered) {
+            try {
+              await dbRun(
+                `UPDATE customers SET status = CASE WHEN status = 'called' THEN 'completed' ELSE status END, last_called_at = ? WHERE id = ?`,
+                [closeTimestamp, session.customerId]
+              );
+              console.log(`[CALL STATUS] Calling -> Completed (ws close, customerId=${session.customerId})`);
+            } catch (e) { console.error('[CALL STATUS UPDATE ERROR ws close]', e.message); }
+          }
+          // Safety net: trigger post-call pipeline if not already triggered
+          if (session.providerCallId && session.answered) {
+            runInBackground('WS CLOSE POST CALL PIPELINE', async () => {
+              try {
+                const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: session.providerCallId });
+                if (result.ok) {
+                  console.log(`[POST CALL PIPELINE] Processed ws-close call ${session.providerCallId} feedbackId=${result.feedbackId}`);
+                  console.log(`[TRANSCRIPT] Generated successfully`);
+                  console.log(`[SUMMARY] Generated successfully`);
+                  console.log(`[ANALYSIS] Generated successfully`);
+                  console.log(`[UI] Analysis enabled`);
+                } else {
+                  console.log(`[POST CALL PIPELINE] Skipped ws-close call ${session.providerCallId}: ${result.reason}`);
+                }
+              } catch (e) { console.error('[WS CLOSE POST CALL PIPELINE ERROR]', e.message); }
+            });
+          }
+        }).catch((e) => console.error('[WS CLOSE UPSERT ERROR]', e.message));
       }
     });
 

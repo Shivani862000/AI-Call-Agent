@@ -44,6 +44,7 @@
           <div class="page-subtitle">Calls placed from the lab or AI assistant to customers for feedback and follow-up.</div>
         </div>
         <div class="header-actions">
+          <button id="deleteAllCustomersButton" class="danger desktop-only" type="button" style="background-color: var(--color-danger); color: white; margin-right: 8px;">Delete All Records</button>
           <button id="newCallButton" class="primary" type="button">New Call</button>
           <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
@@ -723,7 +724,8 @@
       const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
       const completedCalls = recentCallsCache.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
 
-      const scheduledCount = customerCache.filter((customer) => isToday(customer.created_at) || isToday(customer.updated_at)).length;
+      const isScheduled = (c) => ['scheduled', 'retry_scheduled', 'callback_scheduled'].includes(String(c.status || '').toLowerCase());
+      const scheduledCount = customerCache.filter((customer) => isScheduled(customer) && (isToday(customer.next_retry_at) || isToday(customer.created_at))).length;
       const pendingCount = customerCache.filter((customer) => pendingStatuses.has(String(customer.status || '').toLowerCase())).length;
       const completedCount = completedCalls.length;
       const failedCount = recentCallsCache.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
@@ -846,7 +848,7 @@
             <td>${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</td>
             <td>${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))}</td>
             <td>${AppShell.escapeHtml(customer.preferred_slot || '--:--')}</td>
-            <td><span class="status-badge ${AppShell.escapeHtml(String(customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(customer.status || 'pending')}</span></td>
+            <td><span class="status-badge ${AppShell.escapeHtml(String((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span></td>
             <td>
               <div class="table-actions">
                 <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
@@ -885,7 +887,7 @@
                 <strong>${AppShell.escapeHtml(customer.name || 'Patient')}</strong>
                 <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</div>
               </div>
-              <span class="status-badge ${AppShell.escapeHtml(String(customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(customer.status || 'pending')}</span>
+              <span class="status-badge ${AppShell.escapeHtml(String((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span>
             </div>
             <div class="mobile-subtext">${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))} · ${latestCall ? AppShell.formatDateTime(latestCall.called_at) : 'No call history yet'}</div>
             <div class="mobile-call-actions">
@@ -930,6 +932,16 @@
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('newCallButton').addEventListener('click', () => openNewCallModal());
+      document.getElementById('deleteAllCustomersButton').addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to delete all patient and call records? This action cannot be undone.')) return;
+        try {
+          await AppShell.fetchJson(`${AppShell.API_BASE}/customers/bulk`, { method: 'DELETE' });
+          AppShell.showAlert('All records deleted successfully');
+          await loadPageData();
+        } catch (error) {
+          AppShell.showAlert(error.message, 'error');
+        }
+      });
       document.getElementById('mobileFloatingNewCallButton').addEventListener('click', () => openNewCallModal(null, { mode: 'customer' }));
       document.getElementById('mobileHeaderMenuButton').addEventListener('click', openMobileMenuSheet);
       document.getElementById('mobileFilterButton').addEventListener('click', openMobileFilterSheet);

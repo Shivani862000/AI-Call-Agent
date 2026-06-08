@@ -47,6 +47,7 @@
           <div class="page-subtitle">Incoming calls are customer-to-lab. Outbound calls are lab-to-customer follow-ups.</div>
         </div>
         <div class="header-actions">
+          <button id="deleteAllAdminButton" class="danger desktop-only" type="button" style="background-color: var(--color-danger); color: white; margin-right: 8px;">Delete All Records</button>
           <button id="desktopOverviewNewCallButton" class="primary" type="button">Schedule New Call</button>
           <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
@@ -700,7 +701,8 @@
 
       const scheduledStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
       const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
-      const scheduledToday = customers.filter((customer) => isToday(customer.created_at) || isToday(customer.updated_at)).length;
+      const isScheduled = (c) => ['scheduled', 'retry_scheduled', 'callback_scheduled'].includes(String(c.status || '').toLowerCase());
+      const scheduledToday = customers.filter((customer) => isScheduled(customer) && (isToday(customer.next_retry_at) || isToday(customer.created_at))).length;
       const completedCalls = recentCalls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
       const completedToday = completedCalls.filter((call) => isToday(call.called_at)).length;
       const pendingCalls = customers.filter((customer) => scheduledStatuses.has(String(customer.status || '').toLowerCase())).length;
@@ -744,6 +746,16 @@
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('desktopOverviewNewCallButton').addEventListener('click', openOverviewNewCallModal);
+      document.getElementById('deleteAllAdminButton').addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to delete all patient and call records? This action cannot be undone.')) return;
+        try {
+          await AppShell.fetchJson(`${AppShell.API_BASE}/customers/bulk`, { method: 'DELETE' });
+          AppShell.showAlert('All records deleted successfully');
+          await loadOverview();
+        } catch (error) {
+          AppShell.showAlert(error.message, 'error');
+        }
+      });
       document.getElementById('desktopQuickNewCallButton').addEventListener('click', openOverviewNewCallModal);
       document.getElementById('mobileOverviewFloatingCta').addEventListener('click', openOverviewNewCallModal);
       document.getElementById('mobileOverviewMenuButton').addEventListener('click', () => openOverviewSheet('overviewMobileMenuSheet'));
