@@ -76,89 +76,89 @@
       this.shouldListen = false;
     }
 
-    mount() {
-      if (document.querySelector('[data-test-ai-call-widget]')) {
-        return;
-      }
+    // mount() {
+    //   if (document.querySelector('[data-test-ai-call-widget]')) {
+    //     return;
+    //   }
 
-      this.root = createElementFromHtml(`
-        <section class="test-call-widget test-ai-call-widget" data-test-ai-call-widget>
-          <button class="test-call-fab test-ai-call-fab" type="button" aria-expanded="false" aria-controls="testAiCallPanel">
-            <span class="test-call-fab-icon" aria-hidden="true"></span>
-            <span class="test-call-fab-label">Test AI Call</span>
-          </button>
+    //   this.root = createElementFromHtml(`
+    //     <section class="test-call-widget test-ai-call-widget" data-test-ai-call-widget>
+    //       <button class="test-call-fab test-ai-call-fab" type="button" aria-expanded="false" aria-controls="testAiCallPanel">
+    //         <span class="test-call-fab-icon" aria-hidden="true"></span>
+    //         <span class="test-call-fab-label">Test AI Call</span>
+    //       </button>
 
-          <div class="test-call-backdrop" hidden></div>
-          <aside class="test-call-panel test-ai-call-panel" id="testAiCallPanel" aria-label="Browser AI voice call test" aria-hidden="true">
-            <div class="test-call-panel-header">
-              <div>
-                <span class="test-call-kicker">Browser Voice Test</span>
-                <h2>Test AI Call</h2>
-              </div>
-              <div class="test-call-header-actions">
-                <button class="test-call-icon-button" type="button" data-action="minimize" aria-label="Minimize test AI call">
-                  <span aria-hidden="true">-</span>
-                </button>
-                <button class="test-call-icon-button" type="button" data-action="close" aria-label="Close test AI call">
-                  <span aria-hidden="true">x</span>
-                </button>
-              </div>
-            </div>
+    //       <div class="test-call-backdrop" hidden></div>
+    //       <aside class="test-call-panel test-ai-call-panel" id="testAiCallPanel" aria-label="Browser AI voice call test" aria-hidden="true">
+    //         <div class="test-call-panel-header">
+    //           <div>
+    //             <span class="test-call-kicker">Browser Voice Test</span>
+    //             <h2>Test AI Call</h2>
+    //           </div>
+    //           <div class="test-call-header-actions">
+    //             <button class="test-call-icon-button" type="button" data-action="minimize" aria-label="Minimize test AI call">
+    //               <span aria-hidden="true">-</span>
+    //             </button>
+    //             <button class="test-call-icon-button" type="button" data-action="close" aria-label="Close test AI call">
+    //               <span aria-hidden="true">x</span>
+    //             </button>
+    //           </div>
+    //         </div>
 
-            <div class="test-call-status-row">
-              <span class="test-call-status-dot"></span>
-              <strong data-role="statusText">Ready</strong>
-              <span data-role="callTimer">00:00</span>
-            </div>
+    //         <div class="test-call-status-row">
+    //           <span class="test-call-status-dot"></span>
+    //           <strong data-role="statusText">Ready</strong>
+    //           <span data-role="callTimer">00:00</span>
+    //         </div>
 
-            <div class="test-ai-call-stage">
-              <div class="test-ai-avatar" aria-hidden="true">
-                <span class="test-ai-phone-icon"></span>
-              </div>
-              <div class="voice-wave-animation" aria-hidden="true">
-                <span></span><span></span><span></span><span></span><span></span>
-              </div>
-              <h3 data-role="stageTitle">Ready for a browser AI call</h3>
-              <p data-role="stageText">Click Start Call and allow microphone access. The AI will speak first.</p>
-            </div>
+    //         <div class="test-ai-call-stage">
+    //           <div class="test-ai-avatar" aria-hidden="true">
+    //             <span class="test-ai-phone-icon"></span>
+    //           </div>
+    //           <div class="voice-wave-animation" aria-hidden="true">
+    //             <span></span><span></span><span></span><span></span><span></span>
+    //           </div>
+    //           <h3 data-role="stageTitle">Ready for a browser AI call</h3>
+    //           <p data-role="stageText">Click Start Call and allow microphone access. The AI will speak first.</p>
+    //         </div>
 
-            <div class="test-ai-permission" data-role="permissionScreen">
-              <button class="test-call-primary test-ai-start" type="button" data-action="start">
-                Start Call
-              </button>
-              <div class="test-call-error" data-role="error" hidden></div>
-            </div>
+    //         <div class="test-ai-permission" data-role="permissionScreen">
+    //           <button class="test-call-primary test-ai-start" type="button" data-action="start">
+    //             Start Call
+    //           </button>
+    //           <div class="test-call-error" data-role="error" hidden></div>
+    //         </div>
 
-            <div class="test-ai-live" data-role="liveScreen" hidden>
-              <div class="test-ai-last-turn" data-role="lastTurn">Waiting for audio...</div>
-              <div class="test-ai-controls">
-                <button class="test-ai-control" type="button" data-action="mute">
-                  <span data-role="muteText">Mute</span>
-                </button>
-                <button class="test-ai-end" type="button" data-action="end">End Call</button>
-                <button class="test-ai-control" type="button" data-action="transcript">
-                  Show Transcript
-                </button>
-              </div>
-            </div>
+    //         <div class="test-ai-live" data-role="liveScreen" hidden>
+    //           <div class="test-ai-last-turn" data-role="lastTurn">Waiting for audio...</div>
+    //           <div class="test-ai-controls">
+    //             <button class="test-ai-control" type="button" data-action="mute">
+    //               <span data-role="muteText">Mute</span>
+    //             </button>
+    //             <button class="test-ai-end" type="button" data-action="end">End Call</button>
+    //             <button class="test-ai-control" type="button" data-action="transcript">
+    //               Show Transcript
+    //             </button>
+    //           </div>
+    //         </div>
 
-            <div class="call-summary-card" data-role="summaryCard" hidden></div>
+    //         <div class="call-summary-card" data-role="summaryCard" hidden></div>
 
-            <div class="transcript-drawer" data-role="transcriptDrawer" hidden>
-              <div class="transcript-drawer-header">
-                <strong>Transcript</strong>
-                <button type="button" data-action="transcript">Hide</button>
-              </div>
-              <div class="test-call-transcript" data-role="transcript" aria-live="polite"></div>
-            </div>
-          </aside>
-        </section>
-      `);
+    //         <div class="transcript-drawer" data-role="transcriptDrawer" hidden>
+    //           <div class="transcript-drawer-header">
+    //             <strong>Transcript</strong>
+    //             <button type="button" data-action="transcript">Hide</button>
+    //           </div>
+    //           <div class="test-call-transcript" data-role="transcript" aria-live="polite"></div>
+    //         </div>
+    //       </aside>
+    //     </section>
+    //   `);
 
-      document.body.appendChild(this.root);
-      this.bindEvents();
-      this.render();
-    }
+    //   document.body.appendChild(this.root);
+    //   this.bindEvents();
+    //   this.render();
+    // }
 
     bindEvents() {
       this.root.querySelector('.test-call-fab').addEventListener('click', () => this.open());

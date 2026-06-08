@@ -614,7 +614,7 @@ body.poc-page .header-actions .button-link {
   gap: 8px;
 }
 
-.overview-page .header-actions > * {
+.overview-page .header-actions>* {
   min-height: 40px;
 }
 
@@ -2699,7 +2699,7 @@ body.poc-page .search-row .table-filter.desktop-only {
     margin-top: 18px;
   }
 
-  .overview-modal-actions > * {
+  .overview-modal-actions>* {
     flex: 1 1 0;
   }
 
@@ -3674,11 +3674,13 @@ th {
 }
 
 @keyframes testVoiceWave {
+
   0%,
   100% {
     height: 12px;
     opacity: 0.58;
   }
+
   50% {
     height: 36px;
     opacity: 1;
@@ -3879,7 +3881,7 @@ th {
     flex: 0 0 auto;
   }
 
-  .header-actions > * {
+  .header-actions>* {
     flex: 0 0 auto;
     min-height: 36px;
     padding: 9px 12px;
@@ -3953,10 +3955,10 @@ th {
     font-size: 18px;
   }
 
-  .toolbar-group > * ,
-  .button-row > * ,
-  .report-actions > * ,
-  .action-buttons > * {
+  .toolbar-group>*,
+  .button-row>*,
+  .report-actions>*,
+  .action-buttons>* {
     flex: 1 1 100%;
   }
 
@@ -3985,7 +3987,7 @@ th {
     backdrop-filter: blur(12px);
   }
 
-.mobile-tabbar-inner {
+  .mobile-tabbar-inner {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
@@ -4024,7 +4026,7 @@ th {
 
 .segmented-control {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -4103,11 +4105,11 @@ th {
   transition: transform 0.18s ease;
 }
 
-.toggle-switch input:checked + .toggle-slider {
+.toggle-switch input:checked+.toggle-slider {
   background: linear-gradient(135deg, #2d6df6 0%, #1747ba 100%);
 }
 
-.toggle-switch input:checked + .toggle-slider::after {
+.toggle-switch input:checked+.toggle-slider::after {
   transform: translateX(21px);
 }
 
@@ -4167,8 +4169,8 @@ th {
   flex-wrap: wrap;
 }
 
-.queue-actions > button,
-.queue-actions > .queue-overflow {
+.queue-actions>button,
+.queue-actions>.queue-overflow {
   flex: 1 1 0;
 }
 
@@ -4490,7 +4492,7 @@ th {
     font-size: 34px;
   }
 
-table {
+  table {
     min-width: 100%;
   }
 }
