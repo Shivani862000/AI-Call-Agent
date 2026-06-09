@@ -1,10 +1,9 @@
 (function () {
   const API_BASE = `${window.location.origin}/api`;
   const NAV_ITEMS = [
-    { href: '/admin.html', label: 'Overview', shortLabel: 'Home' },
+    { href: '/admin.html', label: 'Overview', shortLabel: 'Overview' },
     { href: '/customers.html', label: 'Outbound Calls', shortLabel: 'Outbound' },
-    { href: '/feedback.html', label: 'Feedback', shortLabel: 'Feedback' },
-    { href: '/reports.html', label: 'Reports', shortLabel: 'Reports' }
+    { href: '/feedback.html', label: 'Feedback', shortLabel: 'Feedback' }
   ];
 
   function redirectToLogin() {
@@ -186,7 +185,27 @@
     }
   }
 
+  async function loadSharedNewCallModal() {
+    if (document.getElementById('newCallModal')) return;
+    try {
+      const response = await fetch('/components/new-call-modal.html');
+      if (response.ok) {
+        const html = await response.text();
+        document.body.insertAdjacentHTML('beforeend', html);
+        const script = document.createElement('script');
+        script.src = '/components/new-call-modal.js';
+        script.onload = () => {
+          if (window.SharedCallModal) window.SharedCallModal.init();
+        };
+        document.body.appendChild(script);
+      }
+    } catch (err) {
+      console.error('Failed to load shared new call modal', err);
+    }
+  }
+
   function loadTestCallWidgetScript() {
+    loadSharedNewCallModal();
     if (window.TestCallWidget || document.querySelector('script[data-test-call-widget-script]')) {
       initializeShellChrome();
       return;

@@ -66,16 +66,7 @@ function buildMasterPostPayload(customerPhone, leadId, options = {}) {
         Phone_No: phoneNo,
         wsurl,
         Customer_Name: options.customerName || '',
-        Customer_ID: options.customerId || '',
-        iscallbackapi: String(options.iscallbackapi ?? process.env.ICALLMATE_IS_CALLBACK_API ?? '1'),
-        callbackapi: options.callbackapi || '',
-        extraparam: JSON.stringify({
-          callDirection: 'outbound',
-          customerId: options.customerId || null,
-          customerName: options.customerName || '',
-          clientName: options.clientName || '',
-          callType: options.callType || 'REVIEW_CALL'
-        })
+        Customer_ID: options.customerId || ''
       }
     ]
   };

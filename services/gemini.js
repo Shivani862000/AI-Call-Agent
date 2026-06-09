@@ -208,8 +208,40 @@ RATING SCALE GUIDELINES:
   }
 }
 
-async function transcribeAudioFile() {
-  return null;
+const fs = require('fs');
+
+async function transcribeAudioFile(filePath, options = {}) {
+  try {
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+    const audioData = fs.readFileSync(filePath);
+    
+    if (process.env.DEEPGRAM_API_KEY) {
+      const url = `https://api.deepgram.com/v1/listen?smart_format=true&language=${options.language || 'hi'}&model=nova-2&diarize=true`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Token ${process.env.DEEPGRAM_API_KEY}`,
+          'Content-Type': 'audio/mpeg' // fallback content type
+        },
+        body: audioData
+      });
+      if (response.ok) {
+        const result = await response.json();
+        const paragraphs = result?.results?.channels?.[0]?.alternatives?.[0]?.paragraphs?.transcript;
+        if (paragraphs) return paragraphs;
+        return result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || null;
+      }
+      const errText = await response.text();
+      console.error('[DEEPGRAM TRANSCRIBE ERROR]', response.status, errText);
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('[TRANSCRIBE AUDIO ERROR]', error.message);
+    return null;
+  }
 }
 
 module.exports = {

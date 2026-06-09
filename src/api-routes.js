@@ -619,7 +619,7 @@ module.exports = function mountApiRoutes(app) {
           last_event: 'callback',
           answered_at: payload.call_ansd_time ? normalizeIcallTimestamp(payload.call_ansd_time) : null,
           ended_at: payload.call_end_time ? normalizeIcallTimestamp(payload.call_end_time) : null,
-          recording_url: payload.recording_filename || '',
+          recording_url: payload.recording_filename ? `https://crm.icallmate.in/Recordings/${payload.recording_filename}` : '',
           talktime: payload.talktime || ''
         });
 
@@ -668,7 +668,7 @@ module.exports = function mountApiRoutes(app) {
               payload.call_status || 'callback',
               talkTimeSecs,
               fallbackReason,
-              payload.recording_filename || '',
+              payload.recording_filename ? `https://crm.icallmate.in/Recordings/${payload.recording_filename}` : '',
               callRecord.id
             ]);
 

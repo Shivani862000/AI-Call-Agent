@@ -174,143 +174,7 @@
     <a href="/reports.html" class="mobile-dock-link" style="display: none;">Reports</a>
   </nav>
 
-  <div id="newCallModal" class="modal-backdrop" aria-hidden="true">
-    <div class="saas-modal-panel" role="dialog" aria-modal="true" aria-labelledby="newCallModalTitle">
-      <div class="saas-modal-header">
-        <div>
-          <h3 id="newCallModalTitle" class="saas-modal-title">📞 Schedule New Call</h3>
-          <div class="saas-modal-subtitle">Create and schedule an AI-powered call.</div>
-        </div>
-        <button id="closeNewCallModal" class="saas-modal-close" type="button" aria-label="Close">
-          <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
-        </button>
-      </div>
 
-      <input id="editingCustomerId" type="hidden">
-
-      <div class="saas-modal-body">
-        
-        <!-- Section 1: Customer Info -->
-        <div>
-          <div class="saas-section-title">Customer Information</div>
-          <div class="saas-grid-2">
-            <div class="saas-field">
-              <label for="callCustomerName">Patient Name</label>
-              <input id="callCustomerName" type="text" maxlength="100" placeholder="e.g. Rahul Sharma">
-            </div>
-            <div class="saas-field">
-              <label for="callCustomerPhone">Phone Number</label>
-              <input id="callCustomerPhone" type="tel" placeholder="+91 98765 43210">
-            </div>
-          </div>
-        </div>
-
-        <!-- Section 2: Call Scheduling -->
-        <div>
-          <div class="saas-section-title">Call Scheduling</div>
-          <div class="saas-grid-2">
-            <div class="saas-field">
-              <label for="callCustomerDate">Call Date</label>
-              <input id="callCustomerDate" type="date">
-            </div>
-            <div class="saas-field">
-              <label for="callCustomerTime">Call Time</label>
-              <input id="callCustomerTime" type="time">
-            </div>
-          </div>
-        </div>
-
-        <!-- Section 3: Campaign Type -->
-        <div>
-          <div class="saas-section-title">Call Campaign Type</div>
-          <div class="saas-campaign-cards">
-            <div class="saas-campaign-card selected" data-value="REVIEW_CALL">
-              <strong>Review Call</strong>
-              <span>Collect feedback after donation</span>
-            </div>
-            <div class="saas-campaign-card" data-value="THREE_MONTH_FOLLOWUP">
-              <strong>3-Month Follow-up</strong>
-              <span>Schedule next donation</span>
-            </div>
-          </div>
-          <!-- Hidden inputs for legacy JS compatibility -->
-          <input type="hidden" id="hiddenCallType" value="REVIEW_CALL">
-          <input type="hidden" id="hiddenVideoSent" value="false">
-        </div>
-
-        <!-- Section 4: Additional Context -->
-        <div id="additionalContextSection">
-          <div class="saas-section-title">Additional Context</div>
-          
-          <div id="reviewCallContext">
-            <div class="saas-toggle-row">
-              <div class="saas-toggle-info">
-                <strong>Video Sent?</strong>
-                <span>Ask the patient about the video sent</span>
-              </div>
-              <label class="saas-toggle">
-                <input type="checkbox" id="videoSentToggle">
-                <span class="saas-toggle-slider"></span>
-              </label>
-            </div>
-          </div>
-
-          <div id="followUpContext" style="display: none;">
-            <div class="saas-grid-2">
-              <div class="saas-field">
-                <label for="careLastVisit">Previous Donation Date</label>
-                <input id="careLastVisit" type="date">
-              </div>
-              <div class="saas-field">
-                <label for="customNotes">Optional Notes</label>
-                <input id="customNotes" type="text" placeholder="e.g. Needs transport">
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Section 5: AI Preview Card -->
-        <div>
-          <div class="saas-section-title">AI Preview</div>
-          <div class="saas-ai-preview">
-            <div class="saas-ai-preview-badge">AI Will Say</div>
-            <p class="saas-ai-preview-text" id="aiPreviewText">Good Morning.<br>Main Apna Blood Centre se baat kar rahi hoon.<br>Kya main <strong>...</strong> ji se baat kar rahi hoon?</p>
-          </div>
-        </div>
-
-        <!-- Section 6: Advanced Settings -->
-        <details class="saas-accordion">
-          <summary>Advanced Settings</summary>
-          <div class="saas-accordion-content">
-            <div class="saas-grid-2">
-              <div class="saas-field">
-                <label for="careDob">Date of Birth</label>
-                <input id="careDob" type="date">
-              </div>
-              <div class="saas-field">
-                <label for="careTreatment">Treatment Type</label>
-                <input id="careTreatment" type="text" placeholder="e.g. Blood test">
-              </div>
-              <div class="saas-field">
-                <label>Retry Attempts</label>
-                <input type="number" value="2" min="1" max="5">
-              </div>
-              <div class="saas-field">
-                <label>Preferred Language</label>
-                <input type="text" value="Hindi" disabled>
-              </div>
-            </div>
-          </div>
-        </details>
-
-      </div>
-
-      <div class="saas-modal-footer">
-        <button id="cancelNewCallModal" class="btn-ghost-saas" type="button">Cancel</button>
-        <button id="scheduleCallSubmit" class="btn-primary-saas" type="button" disabled>Schedule Call</button>
-      </div>
-    </div>
-  </div>
 
   <div id="analysisModal" class="modal-backdrop" aria-hidden="true">
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle">
@@ -546,175 +410,17 @@
       // Errors handled differently in SaaS form, kept for compatibility
     }
 
-    function getNewCallPayload() {
-      const toggle = document.getElementById('videoSentToggle');
-      const videoSent = toggle ? toggle.checked : false;
-      
-      const timeVal = document.getElementById('callCustomerTime')?.value.trim() || '';
-      const dateVal = document.getElementById('callCustomerDate')?.value.trim() || '';
-      
-      return {
-        name: document.getElementById('callCustomerName')?.value.trim() || '',
-        phone: normalizePhoneForApi(document.getElementById('callCustomerPhone')?.value || ''),
-        preferred_slot: timeVal,
-        callType: getSelectedCallType(),
-        video_sent: videoSent,
-        last_visit_date: document.getElementById('careLastVisit')?.value || ''
-      };
-    }
-
-    function getCarePayload(customerPayload) {
-      return {
-        name: customerPayload.name,
-        phone: customerPayload.phone,
-        date_of_birth: document.getElementById('careDob')?.value || '',
-        last_visit_date: document.getElementById('careLastVisit')?.value || '',
-        treatment_type: document.getElementById('careTreatment')?.value.trim() || '',
-        annual_reminder_enabled: 1,
-        annual_reminder_slot: customerPayload.preferred_slot || '10:00',
-        notes: document.getElementById('customNotes')?.value.trim() || '',
-        status: 'active'
-      };
-    }
-
-    function validateNewCall(payload) {
-      const fieldErrors = {};
-      if (!payload.name || payload.name.length < 2) fieldErrors.callCustomerName = 'Patient name is required';
-      if (!/^\+\d{12}$/.test(payload.phone)) fieldErrors.callCustomerPhone = 'Use a valid Indian mobile number';
-      if (!payload.preferred_slot) fieldErrors.callCustomerTime = 'Call time is required';
-      return fieldErrors;
-    }
-
-    function validateCareDetails(payload) {
-      const hasAny = payload.date_of_birth || payload.last_visit_date || payload.treatment_type;
-      if (!hasAny) return {};
-      const fieldErrors = {};
-      if (!payload.last_visit_date) fieldErrors.careLastVisit = 'Last visit is required when adding care details';
-      if (!payload.treatment_type) fieldErrors.careTreatment = 'Treatment type is required when adding care details';
-      return fieldErrors;
-    }
-
-    function resetNewCallForm(mode = 'call') {
-      const editingInput = document.getElementById('editingCustomerId');
-      if (editingInput) editingInput.value = '';
-      
-      const title = document.getElementById('newCallModalTitle');
-      if (title) title.textContent = mode === 'customer' ? 'Add Customer' : '📞 Schedule New Call';
-      
-      const submit = document.getElementById('scheduleCallSubmit');
-      if (submit) submit.textContent = mode === 'customer' ? 'Add Customer' : 'Schedule Call';
-      
-      ['callCustomerName', 'callCustomerPhone', 'callCustomerTime', 'callCustomerDate', 'careDob', 'careLastVisit', 'careTreatment', 'customNotes'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.value = '';
-      });
-      
-      const videoToggle = document.getElementById('videoSentToggle');
-      if (videoToggle) videoToggle.checked = false;
-      
-      const accordion = document.querySelector('.saas-accordion');
-      if (accordion) accordion.open = false;
-      
-      setCallTypeSelection('REVIEW_CALL');
-      clearFormErrors();
-      updateAiPreview();
-      validateNewCallForm();
-    }
-
     function openNewCallModal(customerId = null, options = {}) {
-      const mode = options.mode === 'customer' ? 'customer' : 'call';
-      resetNewCallForm(mode);
-      if (customerId) {
-        const customer = customerCache.find((item) => Number(item.id) === Number(customerId));
-        const client = customer ? getClientByPhone(customer.phone) : null;
-        if (customer) {
-          document.getElementById('editingCustomerId').value = customer.id;
-          document.getElementById('newCallModalTitle').textContent = 'Edit Scheduled Call';
-          document.getElementById('scheduleCallSubmit').textContent = 'Save Changes';
-          document.getElementById('callCustomerName').value = customer.name || '';
-          document.getElementById('callCustomerPhone').value = formatPhoneForInput(customer.phone || '');
-          document.getElementById('callCustomerTime').value = customer.preferred_slot || '';
-          setCallTypeSelection(customer.call_type || 'REVIEW_CALL');
+      if (!window.SharedCallModal) return;
+      const customer = customerId ? customerCache.find(c => Number(c.id) === Number(customerId)) : null;
+      const client = customer ? getClientByPhone(customer.phone) : null;
+      window.SharedCallModal.open(customer, client, {
+        onSuccess: loadPageData,
+        getClientIdByPhone: (phone) => {
+          const c = getClientByPhone(phone);
+          return c ? c.id : null;
         }
-        if (client) {
-          const acc = document.querySelector('.saas-accordion');
-          if (acc) acc.open = true;
-          document.getElementById('careDob').value = client.date_of_birth || '';
-          document.getElementById('careLastVisit').value = client.last_visit_date || '';
-          document.getElementById('careTreatment').value = client.treatment_type || '';
-        }
-      }
-      const modal = document.getElementById('newCallModal');
-      if (modal) {
-        modal.classList.add('open');
-        modal.setAttribute('aria-hidden', 'false');
-      }
-      updateAiPreview();
-      validateNewCallForm();
-    }
-
-    function closeNewCallModal() {
-      const modal = document.getElementById('newCallModal');
-      if (modal) {
-        modal.classList.remove('open');
-        modal.setAttribute('aria-hidden', 'true');
-      }
-    }
-
-    async function saveClientRecord(payload) {
-      const existingClient = getClientByPhone(payload.phone);
-      const endpoint = existingClient ? `${AppShell.API_BASE}/clients/${existingClient.id}` : `${AppShell.API_BASE}/clients`;
-      const method = existingClient ? 'PUT' : 'POST';
-      await AppShell.fetchJson(endpoint, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
       });
-    }
-
-    async function submitNewCall() {
-      clearFormErrors();
-      const payload = getNewCallPayload();
-      const carePayload = getCarePayload(payload);
-      const fieldErrors = {
-        ...validateNewCall(payload),
-        ...validateCareDetails(carePayload)
-      };
-
-      if (Object.keys(fieldErrors).length) {
-        AppShell.applyFieldErrors(fieldErrors);
-        AppShell.showAlert('Please fix the highlighted fields', 'error');
-        return;
-      }
-
-      const customerId = document.getElementById('editingCustomerId').value;
-      const endpoint = customerId ? `${AppShell.API_BASE}/customers/${customerId}` : `${AppShell.API_BASE}/customers`;
-      const method = customerId ? 'PUT' : 'POST';
-
-      try {
-        await AppShell.fetchJson(endpoint, {
-          method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (carePayload.last_visit_date || carePayload.treatment_type || carePayload.date_of_birth) {
-          await saveClientRecord(carePayload);
-        }
-
-        AppShell.showAlert(customerId ? 'Call updated successfully' : 'Call scheduled successfully');
-        closeNewCallModal();
-        await loadPageData();
-      } catch (error) {
-        if (error.fieldErrors) {
-          AppShell.applyFieldErrors(error.fieldErrors, {
-            phone: 'callCustomerPhone',
-            name: 'callCustomerName',
-            preferred_slot: 'callCustomerTime'
-          });
-        }
-        AppShell.showAlert(error.message, 'error');
-      }
     }
 
     async function triggerCallNow(customerId) {
@@ -1099,8 +805,6 @@
         closeMobileActionSheet();
         if (callId) openAnalysisPage(callId);
       });
-      document.getElementById('closeNewCallModal').addEventListener('click', closeNewCallModal);
-      document.getElementById('scheduleCallSubmit').addEventListener('click', submitNewCall);
       document.getElementById('analysisModalClose').addEventListener('click', closeAnalysisModal);
       document.getElementById('customerSearch').addEventListener('input', () => {
         currentQueuePage = 1;
@@ -1116,21 +820,6 @@
         currentQueuePage = 1;
         renderQueue();
       });
-      document.querySelectorAll('.saas-campaign-card').forEach((card) => {
-        card.addEventListener('click', () => {
-          setCallTypeSelection(card.dataset.value);
-        });
-      });
-      document.getElementById('cancelNewCallModal')?.addEventListener('click', closeNewCallModal);
-      ['callCustomerName', 'callCustomerPhone', 'callCustomerTime'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-          el.addEventListener('input', () => {
-            if (id === 'callCustomerName') updateAiPreview();
-            validateNewCallForm();
-          });
-        }
-      });
       document.querySelectorAll('.mobile-filter-option').forEach((button) => {
         button.addEventListener('click', () => {
           if (button.dataset.callTypeValue !== undefined) {
@@ -1143,12 +832,6 @@
           closeMobileFilterSheet();
           renderQueue();
         });
-      });
-      document.getElementById('callCustomerPhone').addEventListener('input', (event) => {
-        event.target.value = formatPhoneForInput(event.target.value);
-      });
-      document.getElementById('newCallModal').addEventListener('click', (event) => {
-        if (event.target.id === 'newCallModal') closeNewCallModal();
       });
       document.getElementById('analysisModal').addEventListener('click', (event) => {
         if (event.target.id === 'analysisModal') closeAnalysisModal();
