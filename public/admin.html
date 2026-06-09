@@ -20,7 +20,7 @@
 
         <nav class="nav-list">
           <a href="/admin.html" class="nav-link active">Overview</a>
-          <a href="/incoming-calls.html" class="nav-link">Incoming Calls</a>
+          <!-- <a href="/incoming-calls.html" class="nav-link">Incoming Calls</a> -->
           <a href="/customers.html" class="nav-link">Outbound Calls</a>
           <a href="/feedback.html" class="nav-link">Feedback</a>
           <a href="/reports.html" class="nav-link" style="display: none;">Reports</a>
@@ -68,10 +68,12 @@
           <span class="desktop-filter-count" id="desktopMetricCompleted">0</span>
           <span class="desktop-filter-label">Completed</span>
         </button>
+        <!--
         <button class="desktop-filter-pill" type="button" data-overview-filter="inbound" aria-pressed="false">
           <span class="desktop-filter-count" id="desktopMetricInbound">0</span>
           <span class="desktop-filter-label">Inbound</span>
         </button>
+        -->
         <button class="desktop-filter-pill" type="button" data-overview-filter="outbound" aria-pressed="false">
           <span class="desktop-filter-count" id="desktopMetricOutbound">0</span>
           <span class="desktop-filter-label">Outbound</span>
@@ -103,10 +105,12 @@
           <span class="mobile-stat-count" id="mobileMetricCompleted">0</span>
           <span class="mobile-stat-label">Completed</span>
         </button>
+        <!--
         <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="inbound" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricInbound">0</span>
           <span class="mobile-stat-label">Inbound</span>
         </button>
+        -->
         <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="outbound" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricOutbound">0</span>
           <span class="mobile-stat-label">Outbound</span>
@@ -212,7 +216,7 @@
 
   <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
     <a href="/admin.html" class="mobile-dock-link active">Overview</a>
-    <a href="/incoming-calls.html" class="mobile-dock-link">Calls</a>
+    <!-- <a href="/incoming-calls.html" class="mobile-dock-link">Calls</a> -->
     <a href="/customers.html" class="mobile-dock-link">Outbound</a>
     <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
     <a href="/reports.html" class="mobile-dock-link" style="display: none;">Reports</a>
@@ -718,7 +722,7 @@
       document.getElementById('desktopMetricScheduled').textContent = pendingCalls;
       document.getElementById('desktopMetricCompleted').textContent = completedCalls.length;
       document.getElementById('desktopMetricFeedback').textContent = feedback.length;
-      document.getElementById('desktopMetricInbound').textContent = callMetrics.inbound?.total || 0;
+      // document.getElementById('desktopMetricInbound').textContent = callMetrics.inbound?.total || 0;
       document.getElementById('desktopMetricOutbound').textContent = callMetrics.outbound?.total || 0;
       document.getElementById('desktopMetricPositiveFeedback').textContent = positiveFeedback;
       document.getElementById('desktopMetricNegativeFeedback').textContent = negativeFeedback;
@@ -726,7 +730,7 @@
       document.getElementById('mobileMetricScheduled').textContent = pendingCalls;
       document.getElementById('mobileMetricCompleted').textContent = completedCalls.length;
       document.getElementById('mobileMetricFeedback').textContent = feedback.length;
-      document.getElementById('mobileMetricInbound').textContent = callMetrics.inbound?.total || 0;
+      // document.getElementById('mobileMetricInbound').textContent = callMetrics.inbound?.total || 0;
       document.getElementById('mobileMetricOutbound').textContent = callMetrics.outbound?.total || 0;
       document.getElementById('mobileMetricPositiveFeedback').textContent = positiveFeedback;
       document.getElementById('mobileMetricNegativeFeedback').textContent = negativeFeedback;

@@ -152,7 +152,7 @@ async function analyzeCallTranscript(transcriptText, context = {}) {
   "summary": "1-2 sentences summarizing the call",
   "sentiment": "positive", "neutral", or "negative",
   "rating": integer from 1 to 5,
-  "review_text": "The patient's actual feedback or review excerpt",
+  "review_text": "EXACT quote or concise summary of the patient's feedback on their experience (e.g., 'experience bhot acha tha'). Must not be empty if rating is >3 or <3.",
   "language": "en" or "hi",
   "report_excerpt": "1 sentence high-level excerpt"
 }

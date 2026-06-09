@@ -660,13 +660,15 @@ module.exports = function mountApiRoutes(app) {
               SET outcome = ?, 
                   outcome_detail = ?,
                   call_duration = CASE WHEN call_duration = 0 THEN ? ELSE call_duration END,
-                  call_end_reason = CASE WHEN call_end_reason IS NULL THEN ? ELSE call_end_reason END
+                  call_end_reason = CASE WHEN call_end_reason IS NULL THEN ? ELSE call_end_reason END,
+                  recording_url = COALESCE(NULLIF(?, ''), recording_url)
               WHERE id = ?
             `, [
               mappedOutcome,
               payload.call_status || 'callback',
               talkTimeSecs,
               fallbackReason,
+              payload.recording_filename || '',
               callRecord.id
             ]);
 

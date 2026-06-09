@@ -20,7 +20,7 @@
 
         <nav class="nav-list">
           <a href="/admin.html" class="nav-link">Overview</a>
-          <a href="/incoming-calls.html" class="nav-link">Incoming Calls</a>
+          <!-- <a href="/incoming-calls.html" class="nav-link">Incoming Calls</a> -->
           <a href="/customers.html" class="nav-link active">Outbound Calls</a>
           <a href="/feedback.html" class="nav-link">Feedback</a>
           <a href="/reports.html" class="nav-link" style="display: none;">Reports</a>
@@ -168,7 +168,7 @@
 
   <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
     <a href="/admin.html" class="mobile-dock-link">Overview</a>
-    <a href="/incoming-calls.html" class="mobile-dock-link">Calls</a>
+    <!-- <a href="/incoming-calls.html" class="mobile-dock-link">Calls</a> -->
     <a href="/customers.html" class="mobile-dock-link active">Outbound</a>
     <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
     <a href="/reports.html" class="mobile-dock-link" style="display: none;">Reports</a>
@@ -978,7 +978,7 @@
             <td>${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))}</td>
             <td>
               <div class="row-title">${customer.preferred_slot ? AppShell.escapeHtml(customer.preferred_slot) : 'Pending'}</div>
-              <div class="row-subtitle">Created: ${AppShell.escapeHtml(new Date(customer.created_at).toLocaleDateString())}</div>
+                <div class="row-subtitle">Created: ${AppShell.escapeHtml(AppShell.formatDateTime(customer.created_at))}</div>
             </td>
             <td><span class="status-badge ${AppShell.escapeHtml(String(customer.last_call_outcome || customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(customer.last_call_outcome || customer.status || 'pending')}</span></td>
             <td>
