@@ -22,7 +22,8 @@ const {
   GEMINI_LIVE_DIRECT_AUDIO,
   DEEPGRAM_TTS_MODEL,
   FINAL_AUDIO_GRACE_MS,
-  DEEPGRAM_ENDPOINTING_MS
+  DEEPGRAM_ENDPOINTING_MS,
+  MAX_CALL_DURATION_SECONDS
 } = require('./config');
 
 const {
@@ -286,6 +287,9 @@ module.exports = function setupWebSocketBridge(server) {
     let completionPersisted = false;
     let finalResponseInProgress = false;
     let activeResponseId = null;
+    let callDurationInterval = null;
+    let callDurationSeconds = 0;
+    let durationWarningSent = false;
     const transcript = [];
     const outboundDemoState = {
       step: 'intro',
@@ -367,10 +371,16 @@ module.exports = function setupWebSocketBridge(server) {
               transcriptText ? 'live_stream' : null,
               nowIso,
               'ai-completed',
-              'AI conversation completed and auto hangup requested',
+              reason === 'max_duration_reached' ? 'Max duration reached, forcing hangup' : 'AI conversation completed and auto hangup requested',
               session.callId
             ]
           );
+          
+          await dbRun('UPDATE calls SET call_duration = ?, call_end_reason = ? WHERE id = ?', [
+            callDurationSeconds,
+            reason || 'workflow_completed',
+            session.callId
+          ]);
         }
 
         // Update customer status so UI badge changes from "Calling..." to "Completed"
@@ -817,6 +827,7 @@ module.exports = function setupWebSocketBridge(server) {
         streamId: session.streamId,
         reason
       });
+      console.log(`[ICALLMATE][VOICE] Executing final hangup sequence and disconnecting socket...`);
       bridgeClosed = true;
       setTimeout(() => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -1035,6 +1046,33 @@ module.exports = function setupWebSocketBridge(server) {
           connectOpenAI();
         }
         connectDeepgram();
+
+        if (!callDurationInterval) {
+          callDurationInterval = setInterval(() => {
+            if (bridgeClosed || pendingHangup) {
+              clearInterval(callDurationInterval);
+              return;
+            }
+            callDurationSeconds++;
+            
+            const maxDuration = MAX_CALL_DURATION_SECONDS || 80;
+            if (callDurationSeconds >= maxDuration) {
+              console.log(`[ICALLMATE] Max call duration reached (${maxDuration}s) streamId=${getSessionLabel()}. Hanging up.`);
+              clearInterval(callDurationInterval);
+              requestCallHangup('max_duration_reached');
+              sendDeepgramTtsText("Dhanyavaad sir. Aapka samay dene ke liye dhanyavaad. Aapka din shubh ho.");
+              scheduleFinalizeCallHangup('max_duration_reached');
+            } else if (callDurationSeconds >= maxDuration - 20 && !durationWarningSent) {
+              durationWarningSent = true;
+              console.log(`[ICALLMATE] Warning threshold reached (${callDurationSeconds}s) streamId=${getSessionLabel()}. Instructing AI to skip optional questions.`);
+              
+              const warningMsg = "SYSTEM WARNING: Time is running out. Skip all remaining optional questions and move directly to the closing message immediately.";
+              if (useGeminiLive() && geminiLiveSession && geminiLiveReady) {
+                geminiLiveSession.sendClientContent({ turns: [{ role: 'user', parts: [{ text: warningMsg }] }], turnComplete: true });
+              }
+            }
+          }, 1000);
+        }
       },
       sendCallerAudio(payload) {
         if (bridgeClosed || pendingHangup || !payload) {
@@ -1078,6 +1116,7 @@ module.exports = function setupWebSocketBridge(server) {
       close() {
         if (llmWatchdogInterval) clearInterval(llmWatchdogInterval);
         if (session.audioInterval) clearInterval(session.audioInterval);
+        if (callDurationInterval) clearInterval(callDurationInterval);
         bridgeClosed = true;
         if (hangupFinalizeTimer) {
           clearTimeout(hangupFinalizeTimer);

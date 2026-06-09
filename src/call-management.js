@@ -6,6 +6,7 @@
 'use strict';
 
 const { dbGet, dbRun, dbAll } = require('../db');
+const crypto = require('crypto');
 const { initiateCall } = require('../services/icallmate');
 const {
   buildPreCallIntelligence,
@@ -436,8 +437,8 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
         `INSERT INTO calls (
           customer_id, outcome, provider_call_id, called_at, call_direction, call_source,
           did, answered_at, ended_at, media_packets, last_event, notes,
-          transcript_status, analysis_status, provider_payload_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          transcript_status, analysis_status, provider_payload_json, uuid
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           outcome,
@@ -453,7 +454,8 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
           row.notes || null,
           'live_stream',
           'pending',
-          providerPayload
+          providerPayload,
+          crypto.randomUUID()
         ]
       );
     }

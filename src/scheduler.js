@@ -6,6 +6,7 @@
 'use strict';
 
 const { dbGet, dbRun, dbAll } = require('../db');
+const crypto = require('crypto');
 const { CLIENT_NAME, CALL_TYPES } = require('./config');
 const {
   shouldTriggerOwnerDigest,
@@ -91,7 +92,7 @@ async function triggerScheduledCalls() {
        AND COALESCE(c.consent_status, 'unknown') != 'denied'
        AND COALESCE(c.status, 'pending') != 'calling'
        AND (
-         (c.status = 'pending' AND COALESCE(c.best_call_slot, c.preferred_slot) <= ?)
+         (c.status IN ('pending', 'scheduled') AND COALESCE(c.best_call_slot, c.preferred_slot) <= ?)
          OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND c.next_retry_at IS NOT NULL AND DATETIME(c.next_retry_at) <= DATETIME('now'))
        )
        AND (
@@ -146,7 +147,7 @@ async function triggerScheduledCalls() {
             SET status = ?,
                 last_called_at = ?
           WHERE id = ?
-            AND COALESCE(status, 'pending') IN ('pending', 'retry_scheduled', 'callback_scheduled')`,
+            AND COALESCE(status, 'pending') IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')`,
         ['calling', new Date().toISOString(), customer.id]
       );
 
@@ -167,8 +168,8 @@ async function triggerScheduledCalls() {
       await dbRun(
         `INSERT INTO calls (
           customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type, uuid
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           agentConfig?.id || null,
@@ -181,7 +182,8 @@ async function triggerScheduledCalls() {
           'normal',
           'outbound',
           'icallmate',
-          normalizeOutboundCallType(customer.call_type)
+          normalizeOutboundCallType(customer.call_type),
+          crypto.randomUUID()
         ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
@@ -250,7 +252,7 @@ async function triggerAnnualClientReminderCalls() {
             SET status = ?,
                 last_called_at = ?
           WHERE id = ?
-            AND COALESCE(status, 'pending') IN ('pending', 'retry_scheduled', 'callback_scheduled', 'called', 'completed')`,
+            AND COALESCE(status, 'pending') IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled', 'called', 'completed')`,
         ['calling', new Date().toISOString(), hydratedCustomer.id]
       );
 
@@ -271,8 +273,8 @@ async function triggerAnnualClientReminderCalls() {
       await dbRun(
         `INSERT INTO calls (
           customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type, uuid
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           hydratedCustomer.id,
           agentConfig?.id || null,
@@ -285,7 +287,8 @@ async function triggerAnnualClientReminderCalls() {
           'normal',
           'outbound',
           'icallmate',
-          CALL_TYPES.THREE_MONTH_FOLLOWUP
+          CALL_TYPES.THREE_MONTH_FOLLOWUP,
+          crypto.randomUUID()
         ]
       );
 

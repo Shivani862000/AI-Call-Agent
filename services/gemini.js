@@ -66,7 +66,8 @@ async function generateGeminiReply({
   transcript = [],
   userText = '',
   model = DEFAULT_GEMINI_MODEL,
-  apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+  apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+  responseMimeType = null
 } = {}) {
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is not configured');
@@ -89,7 +90,8 @@ async function generateGeminiReply({
         maxOutputTokens: Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || process.env.LIVE_MAX_RESPONSE_TOKENS || 60),
         thinkingConfig: {
           thinkingBudget: Number(process.env.GEMINI_THINKING_BUDGET || 0)
-        }
+        },
+        ...(responseMimeType ? { responseMimeType } : {})
       }
     })
   });
@@ -144,35 +146,66 @@ function categorizeFeedback(reviewText = '', stars) {
   return { category: 'average', reason: 'Mixed or neutral feedback' };
 }
 
-function analyzeCallTranscript(transcriptText, context = {}) {
-  const normalized = String(transcriptText || '').toLowerCase();
-  const positiveSignals = ['achha', 'accha', 'good', 'great', 'helpful', 'clean', 'theek', 'satisfied'];
-  const negativeSignals = ['bad', 'poor', 'slow', 'issue', 'problem', 'rude', 'dirty', 'wait'];
-  const positiveCount = positiveSignals.filter((word) => normalized.includes(word)).length;
-  const negativeCount = negativeSignals.filter((word) => normalized.includes(word)).length;
-  const sentiment = positiveCount > negativeCount ? 'positive' : negativeCount > positiveCount ? 'negative' : 'neutral';
+async function analyzeCallTranscript(transcriptText, context = {}) {
+  const systemPrompt = `You are an expert patient care call analyst. Analyze the following call transcript and generate a JSON response strictly following this schema:
+{
+  "summary": "1-2 sentences summarizing the call",
+  "sentiment": "positive", "neutral", or "negative",
+  "rating": integer from 1 to 5,
+  "review_text": "The patient's actual feedback or review excerpt",
+  "language": "en" or "hi",
+  "report_excerpt": "1 sentence high-level excerpt"
+}
 
-  const summary = sentiment === 'positive'
-    ? `Customer shared mostly positive feedback about ${context.clientName || process.env.CLIENT_NAME || 'the service'}.`
-    : sentiment === 'negative'
-      ? `Customer shared concerns about ${context.clientName || process.env.CLIENT_NAME || 'the service'}.`
-      : 'Customer shared mixed or limited feedback during the call.';
+RATING SCALE GUIDELINES:
+1/5: Customer very unhappy, explicit complaint, strong negative sentiment (e.g. "Bahut bura experience tha")
+2/5: Poor experience, minor issue, negative tone (e.g. "Problem hui thi")
+3/5: Neutral, experience was okay, no complaint but no strong praise (e.g. "Theek tha", "Experience acha tha")
+4/5: Very good experience, positive feedback (e.g. "Bahut acha tha", "Experience kaafi acha tha", "Staff supportive tha")
+5/5: Excellent experience, strong recommendation, highly satisfied (e.g. "Excellent", "Outstanding", "Bahut hi badhiya")`;
 
-  return {
-    summary,
-    key_points: [],
-    customer_sentiment: sentiment,
-    rating: null,
-    consent: null,
-    language: /\b(hindi|haan|ji|achha|theek)\b/.test(normalized) ? 'hi' : /\b(english|staff|process|waiting)\b/.test(normalized) ? 'en' : null,
-    review_text: '',
-    improvement_suggestions: [],
-    report_excerpt: sentiment === 'positive'
-      ? 'Mostly positive call feedback.'
-      : sentiment === 'negative'
-        ? 'Call included service concerns.'
-        : 'Mixed call feedback.'
-  };
+  try {
+    const rawAiResponse = await generateGeminiReply({
+      systemPrompt,
+      userText: transcriptText || '(No transcript provided)',
+      responseMimeType: 'application/json',
+      model: 'gemini-2.5-flash'
+    });
+
+    const analysis = JSON.parse(rawAiResponse);
+    return {
+      summary: analysis.summary || 'Customer shared feedback during the call.',
+      customer_sentiment: analysis.sentiment || 'neutral',
+      rating: analysis.rating || null,
+      consent: null,
+      language: analysis.language || 'en',
+      review_text: analysis.review_text || '',
+      report_excerpt: analysis.report_excerpt || 'Call completed.',
+      key_points: [],
+      improvement_suggestions: []
+    };
+  } catch (err) {
+    console.error('[AI ANALYSIS ERROR]', err.message);
+    // Fallback to basic heuristics if API fails or isn't configured
+    const normalized = String(transcriptText || '').toLowerCase();
+    const positiveSignals = ['achha', 'accha', 'good', 'great', 'helpful', 'clean', 'theek', 'satisfied'];
+    const negativeSignals = ['bad', 'poor', 'slow', 'issue', 'problem', 'rude', 'dirty', 'wait'];
+    const positiveCount = positiveSignals.filter((word) => normalized.includes(word)).length;
+    const negativeCount = negativeSignals.filter((word) => normalized.includes(word)).length;
+    const sentiment = positiveCount > negativeCount ? 'positive' : negativeCount > positiveCount ? 'negative' : 'neutral';
+    
+    return {
+      summary: sentiment === 'positive' ? 'Customer shared mostly positive feedback.' : sentiment === 'negative' ? 'Customer shared concerns.' : 'Customer shared mixed feedback.',
+      key_points: [],
+      customer_sentiment: sentiment,
+      rating: sentiment === 'positive' ? 4 : sentiment === 'negative' ? 2 : 3,
+      consent: null,
+      language: /\b(hindi|haan|ji|achha|theek)\b/.test(normalized) ? 'hi' : 'en',
+      review_text: '',
+      improvement_suggestions: [],
+      report_excerpt: sentiment === 'positive' ? 'Mostly positive call feedback.' : sentiment === 'negative' ? 'Call included service concerns.' : 'Mixed call feedback.'
+    };
+  }
 }
 
 async function transcribeAudioFile() {

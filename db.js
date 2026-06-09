@@ -61,6 +61,34 @@ function runMigrations() {
     await run(`UPDATE calls SET provider_call_id = ${legacyColumnName} WHERE provider_call_id IS NULL AND ${legacyColumnName} IS NOT NULL`);
   };
 
+  const removeCustomersUniquePhone = async () => {
+    const tableInfo = await new Promise((resolve, reject) => {
+      db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='customers'", (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (tableInfo && tableInfo.sql.includes('UNIQUE')) {
+      console.log('Migrating customers table to remove UNIQUE constraint on phone...');
+      let newSql = tableInfo.sql.replace('phone VARCHAR(20) NOT NULL UNIQUE', 'phone VARCHAR(20) NOT NULL');
+      newSql = newSql.replace('CREATE TABLE customers', 'CREATE TABLE customers_new');
+      await run(newSql);
+      
+      const columns = await new Promise((resolve, reject) => {
+        db.all("PRAGMA table_info(customers)", (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        });
+      });
+      const colNames = columns.map(c => c.name).join(', ');
+      
+      await run(`INSERT INTO customers_new (${colNames}) SELECT ${colNames} FROM customers`);
+      await run(`DROP TABLE customers`);
+      await run(`ALTER TABLE customers_new RENAME TO customers`);
+    }
+  };
+
   return (async () => {
     await run(`
       CREATE TABLE IF NOT EXISTS customers (
@@ -72,6 +100,8 @@ function runMigrations() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    await removeCustomersUniquePhone();
 
     await run(`
       CREATE TABLE IF NOT EXISTS calls (
@@ -255,6 +285,7 @@ function runMigrations() {
     await addColumnIfMissing('calls', 'sentiment', 'VARCHAR(20)');
     await addColumnIfMissing('calls', 'sentiment_score', 'REAL');
     await addColumnIfMissing('calls', 'call_duration', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('calls', 'call_end_reason', 'VARCHAR(50)');
     await addColumnIfMissing('calls', 'ai_talk_time', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('calls', 'patient_talk_time', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('calls', 'quality_score', 'INTEGER DEFAULT 0');
@@ -263,6 +294,7 @@ function runMigrations() {
     await addColumnIfMissing('calls', 'hot_lead_score', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('calls', 'next_action_at', 'TIMESTAMP');
     await addColumnIfMissing('calls', 'follow_up_task', 'TEXT');
+    await addColumnIfMissing('calls', 'uuid', 'VARCHAR(36)');
     await addColumnIfMissing('calls', 'recording_download_status', "VARCHAR(30) DEFAULT 'pending'");
     await addColumnIfMissing('calls', 'crm_sync_status', "VARCHAR(30) DEFAULT 'pending'");
     await addColumnIfMissing('calls', 'revenue_attribution_status', "VARCHAR(30) DEFAULT 'pending'");

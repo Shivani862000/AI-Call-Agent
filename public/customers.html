@@ -146,9 +146,9 @@
               <tr>
                 <th>Patient</th>
                 <th>Phone</th>
-                <th>Call Type</th>
+                <th>Campaign</th>
                 <th>Call Time</th>
-                <th>Status</th>
+                <th>Outcome</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -976,8 +976,11 @@
             </td>
             <td>${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</td>
             <td>${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))}</td>
-            <td>${AppShell.escapeHtml(customer.preferred_slot || '--:--')}</td>
-            <td><span class="status-badge ${AppShell.escapeHtml(String((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span></td>
+            <td>
+              <div class="row-title">${customer.preferred_slot ? AppShell.escapeHtml(customer.preferred_slot) : 'Pending'}</div>
+              <div class="row-subtitle">Created: ${AppShell.escapeHtml(new Date(customer.created_at).toLocaleDateString())}</div>
+            </td>
+            <td><span class="status-badge ${AppShell.escapeHtml(String(customer.last_call_outcome || customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(customer.last_call_outcome || customer.status || 'pending')}</span></td>
             <td>
               <div class="table-actions">
                 <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
@@ -1016,9 +1019,9 @@
                 <strong>${AppShell.escapeHtml(customer.name || 'Patient')}</strong>
                 <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</div>
               </div>
-              <span class="status-badge ${AppShell.escapeHtml(String((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span>
+              <span class="status-badge ${AppShell.escapeHtml(String(customer.last_call_outcome || customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(customer.last_call_outcome || customer.status || 'pending')}</span>
             </div>
-            <div class="mobile-subtext">${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))} · ${latestCall ? AppShell.formatDateTime(latestCall.called_at) : 'No call history yet'}</div>
+            <div class="mobile-subtext">${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))} · Scheduled: ${customer.preferred_slot ? AppShell.escapeHtml(customer.preferred_slot) : 'Pending'}</div>
             <div class="mobile-call-actions">
               <button class="warning mobile-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
               ${actionButton}

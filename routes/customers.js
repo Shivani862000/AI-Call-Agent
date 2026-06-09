@@ -174,31 +174,9 @@ async function findCustomerByNormalizedPhone(phone, excludeCustomerId = null) {
   }) || null;
 }
 
-async function getDuplicateScheduleMessage(phone, excludeCustomerId = null) {
-  const existingCustomer = await findCustomerByNormalizedPhone(phone, excludeCustomerId);
-  if (!existingCustomer) {
-    return null;
-  }
-
-  const activeCall = await dbGet(
-    `SELECT calls.id, calls.outcome
-       FROM calls
-      WHERE calls.customer_id = ?
-        AND COALESCE(calls.outcome, '') IN ('initiated', 'scheduled_initiated', 'active')
-      ORDER BY calls.id DESC
-      LIMIT 1`,
-    [existingCustomer.id]
-  );
-
-  if (activeCall && ACTIVE_CALL_OUTCOMES.has(String(activeCall.outcome || '').toLowerCase())) {
-    return 'An active call already exists for this phone number.';
-  }
-
-  if (ACTIVE_CUSTOMER_STATUSES.has(String(existingCustomer.status || '').toLowerCase())) {
-    return 'This patient already has a scheduled call.';
-  }
-
-  return 'A patient with this phone number already exists.';
+function getDuplicateScheduleMessage(phone, excludeCustomerId = null) {
+  // We no longer block duplicate phones. Every schedule creates a new call job.
+  return null;
 }
 
 function handleSqliteError(error, res) {
@@ -256,24 +234,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
-    const existingCustomer = await findCustomerByNormalizedPhone(payload.phone);
-    if (existingCustomer) {
-      const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
-      const nextRetryAt = payload.preferred_slot ? getNextIsoForPreferredSlot(payload.preferred_slot) : null;
-      await dbRun(
-        `UPDATE customers
-            SET name = ?,
-                preferred_slot = ?,
-                status = ?,
-                call_type = ?,
-                video_sent = ?,
-                last_visit_date = COALESCE(?, last_visit_date),
-                next_retry_at = COALESCE(?, next_retry_at)
-          WHERE id = ?`,
-        [payload.name, payload.preferred_slot, initialStatus, payload.call_type, payload.video_sent, payload.last_visit_date, nextRetryAt, existingCustomer.id]
-      );
-      return res.json({ id: existingCustomer.id, message: 'Customer call scheduled successfully' });
-    }
+    // We no longer update existing customers. Every scheduled call creates a new record.
 
     const result = await saveCustomer(payload);
     res.json({ id: result.lastID, message: 'Customer added successfully' });
@@ -315,25 +276,9 @@ router.post('/csv', upload.single('file'), async (req, res) => {
       }
 
       try {
-        const existingCustomer = await findCustomerByNormalizedPhone(payload.phone);
-        if (existingCustomer) {
-          const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
-          const nextRetryAt = payload.preferred_slot ? getNextIsoForPreferredSlot(payload.preferred_slot) : null;
-          await dbRun(
-            `UPDATE customers
-                SET name = ?,
-                    preferred_slot = ?,
-                    status = ?,
-                    call_type = ?,
-                    next_retry_at = COALESCE(?, next_retry_at)
-              WHERE id = ?`,
-            [payload.name, payload.preferred_slot, initialStatus, payload.call_type, nextRetryAt, existingCustomer.id]
-          );
-          successCount += 1;
-        } else {
-          await saveCustomer(payload);
-          successCount += 1;
-        }
+        // Always insert a new customer row for bulk uploads so each is an independent call
+        await saveCustomer(payload);
+        successCount += 1;
       } catch (err) {
         errorCount += 1;
         errors.push({ row: index + 2, error: err.message });
@@ -356,7 +301,14 @@ router.post('/csv', upload.single('file'), async (req, res) => {
 // List all customers
 router.get('/', async (req, res) => {
   try {
-    const customers = await dbAll('SELECT * FROM customers ORDER BY COALESCE(priority_score, 0) DESC, created_at DESC');
+    const customers = await dbAll(`
+      SELECT customers.*, 
+             calls.outcome AS last_call_outcome,
+             calls.uuid AS call_uuid
+      FROM customers
+      LEFT JOIN calls ON calls.customer_id = customers.id
+      ORDER BY COALESCE(customers.priority_score, 0) DESC, customers.created_at DESC
+    `);
     res.json(customers);
   } catch (error) {
     console.error('Error fetching customers:', error);

@@ -5,6 +5,8 @@
 
 'use strict';
 
+const crypto = require('crypto');
+const fs = require('fs');
 const fetch = require('node-fetch');
 const customersRouter = require('../routes/customers');
 const clientsRouter = require('../routes/clients');
@@ -196,8 +198,8 @@ module.exports = function mountApiRoutes(app) {
       const result = await dbRun(
         `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type, uuid
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           agentConfig?.id || null,
@@ -210,7 +212,8 @@ module.exports = function mountApiRoutes(app) {
           'normal',
           'outbound',
           'icallmate',
-          callType
+          callType,
+          crypto.randomUUID()
         ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
@@ -416,8 +419,8 @@ module.exports = function mountApiRoutes(app) {
       const result = await dbRun(
         `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type, uuid
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           agentConfig?.id || null,
@@ -430,7 +433,8 @@ module.exports = function mountApiRoutes(app) {
           'normal',
           'outbound',
           'icallmate',
-          callType
+          callType,
+          crypto.randomUUID()
         ]
       );
 
@@ -648,9 +652,21 @@ module.exports = function mountApiRoutes(app) {
           `, [cleanPhone]);
 
           if (callRecord) {
-            await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ? WHERE id = ?', [
+            const talkTimeSecs = Number(payload.talktime) || 0;
+            const fallbackReason = mappedOutcome === 'completed' ? 'customer_hangup' : mappedOutcome;
+            
+            await dbRun(`
+              UPDATE calls 
+              SET outcome = ?, 
+                  outcome_detail = ?,
+                  call_duration = CASE WHEN call_duration = 0 THEN ? ELSE call_duration END,
+                  call_end_reason = CASE WHEN call_end_reason IS NULL THEN ? ELSE call_end_reason END
+              WHERE id = ?
+            `, [
               mappedOutcome,
               payload.call_status || 'callback',
+              talkTimeSecs,
+              fallbackReason,
               callRecord.id
             ]);
 
@@ -740,66 +756,6 @@ module.exports = function mountApiRoutes(app) {
     }
   });
 
-  // app.post('/api/icallmate/outbound-campaign', async (req, res) => {
-  //   try {
-  //     const requestBaseUrl = getRequestPublicBaseUrl(req);
-  //     const endpoint = `${String(process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in').replace(/\/+$/, '')}/OBDAPI/webresources/CreateOBDCampaignPost`;
-  //     const msisdnlist = Array.isArray(req.body.msisdnlist) ? req.body.msisdnlist : [];
-  //     if (!msisdnlist.length) {
-  //       return res.status(400).json({ error: 'msisdnlist is required' });
-  //     }
-
-  //     const payload = {
-  //       sourcetype: String(req.body.sourcetype || '0'),
-  //       customivr: req.body.customivr ?? true,
-  //       campaigntype: String(req.body.campaigntype || '4'),
-  //       filetype: String(req.body.filetype || '2'),
-  //       ukey: req.body.ukey || process.env.ICALLMATE_UKEY || '',
-  //       serviceno: req.body.serviceno || process.env.ICALLMATE_SERVICE_NO || '',
-  //       ivrtemplateid: req.body.ivrtemplateid || process.env.ICALLMATE_IVR_TEMPLATE_ID || '',
-  //       maxTalkTimeInSec: Number(req.body.maxTalkTimeInSec || 0),
-  //       retryatmpt: String(req.body.retryatmpt || '2'),
-  //       sendnow: String(req.body.sendnow || '0'),
-  //       schddate: req.body.schddate || '',
-  //       retryduration: String(req.body.retryduration || '5'),
-  //       s_unique: req.body.s_unique || '',
-  //       msisdnlist: msisdnlist.map((item) => ({
-  //         ...item,
-  //         wsurl: item.wsurl || `${toWssUrl(requestBaseUrl, '/icallmate/media')}`,
-  //         agentid: String(item.agentid || process.env.ICALLMATE_AGENT_ID || '0'),
-  //         iscallbackapi: String(item.iscallbackapi ?? '0'),
-  //         callbackapi: item.callbackapi || `${requestBaseUrl}/api/icallmate/callback`
-  //       }))
-  //     };
-
-  //     if (String(req.body.dryRun || '').toLowerCase() === 'true') {
-  //       return res.json({ endpoint, payload, dryRun: true });
-  //     }
-
-  //     const response = await fetch(endpoint, {
-  //       method: 'POST',
-  //       headers: { 'Content-Type': 'application/json' },
-  //       body: JSON.stringify(payload)
-  //     });
-  //     const text = await response.text();
-  //     let parsed = {};
-  //     try {
-  //       parsed = text ? JSON.parse(text) : {};
-  //     } catch (error) {
-  //       parsed = { rawText: text };
-  //     }
-  //     const providerSuccess = response.ok && String(parsed.status || '').toLowerCase() !== 'failure';
-
-  //     res.status(providerSuccess ? 200 : (response.ok ? 502 : response.status)).json({
-  //       success: providerSuccess,
-  //       endpoint,
-  //       response: text
-  //     });
-  //   } catch (error) {
-  //     console.error('[ICALLMATE OUTBOUND CAMPAIGN ERROR]', error.message);
-  //     res.status(500).json({ error: error.message });
-  //   }
-  // });
 
   app.post('/api/icallmate/outgoing-call', async (req, res) => {
     let customer = null;
@@ -860,8 +816,8 @@ module.exports = function mountApiRoutes(app) {
         `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
         consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source,
-        provider_payload_json, call_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        provider_payload_json, call_type, uuid
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           agentConfig?.id || null,
@@ -875,7 +831,8 @@ module.exports = function mountApiRoutes(app) {
           'outbound',
           'icallmate-masterpost',
           JSON.stringify(payload),
-          callType
+          callType,
+          crypto.randomUUID()
         ]
       );
 
@@ -1278,9 +1235,20 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId/recording', async (req, res) => {
     try {
-      const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status FROM calls WHERE id = ?', [req.params.callId]);
+      const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status, recording_local_path FROM calls WHERE id = ?', [req.params.callId]);
 
-      if (!call?.recording_url && !call?.provider_call_id) {
+      if (!call) {
+        return res.status(404).json({ error: 'Call not found' });
+      }
+
+      if (call.recording_local_path && fs.existsSync(call.recording_local_path)) {
+        res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Cache-Control', 'private, max-age=300');
+        const stream = fs.createReadStream(call.recording_local_path);
+        return stream.pipe(res);
+      }
+
+      if (!call.recording_url && !call.provider_call_id) {
         return res.status(404).json({ error: 'Recording not available yet' });
       }
 
