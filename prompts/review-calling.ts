@@ -1,4 +1,5 @@
-function buildReviewCallingPrompt({ clientName = 'Apna Blood Centre' } = {}) {
+function buildReviewCallingPrompt({ clientName = 'Apna Blood Centre', videoSent = false, lastVisitDate = '' } = {}) {
+  const dateStr = lastVisitDate || 'kal';
   return `
 You are Priya, calling on behalf of ${clientName || 'Apna Blood Centre'}.
 
@@ -10,7 +11,7 @@ Conversation Flow:
 Start:
 "[GREETING] .
 Main ${clientName || 'Apna Blood Centre'} se baat kar rahi hoon.
-Aapne kal hamare blood centre mein blood donate kiya tha.
+Aapne ${dateStr} hamare blood centre mein blood donate kiya tha.
 Iske liye aapka bahut-bahut dhanyavaad."
 
 Question 1:
@@ -32,9 +33,8 @@ Main aapki baat sambandhit adhikari tak pahucha dungi.
 Agli baar hum aur dhyan rakhenge."
 
 Then continue:
-"Hamne aapko ek video bheja hai.
-Kripya use like, comment aur subscribe karein."
-
+${videoSent ? `"Hamne aapko ek video bheja hai.
+Kripya use like, comment aur subscribe karein."\n` : ''}
 "Hamara Facebook aur Google page bhi hai.
 Kripya like, share aur review zarur karein."
 
@@ -57,12 +57,13 @@ Rules:
 `.trim();
 }
 
-function buildReviewCallingOpeningPrompt({ clientName = 'Apna Blood Centre', greeting = 'Good morning' } = {}) {
+function buildReviewCallingOpeningPrompt({ clientName = 'Apna Blood Centre', greeting = 'Good morning', lastVisitDate = '' } = {}) {
   // The backend/system must supply `greeting`. This function accepts a fallback for tests.
   const g = greeting;
+  const dateStr = lastVisitDate || 'kal';
   return `
 Sirf yeh exact opening natural phone tone me boliye:
-"${g} . Main ${clientName || 'Apna Blood Centre'} se baat kar rahi hoon. Aapne kal hamare blood centre mein blood donate kiya tha. Iske liye aapka bahut-bahut dhanyavaad. Blood donate karne ka aapka experience kaisa raha?"
+"${g} . Main ${clientName || 'Apna Blood Centre'} se baat kar rahi hoon. Aapne ${dateStr} hamare blood centre mein blood donate kiya tha. Iske liye aapka bahut-bahut dhanyavaad. Blood donate karne ka aapka experience kaisa raha?"
 `.trim();
 }
 

@@ -300,8 +300,8 @@ module.exports = function setupWebSocketBridge(server) {
     const getSessionClientName = () => session.clientName || CLIENT_NAME;
     const getSessionCustomerName = () => session.customerName || process.env.CUSTOMER_NAME || 'sir/maam';
     const getSessionCallType = () => normalizeOutboundCallType(session.callType);
-    const getSystemPrompt = () => buildAgentSystemPrompt(getSessionClientName(), getSessionCustomerName(), null, getSessionCallType());
-    const getOpeningPrompt = () => buildOpeningPrompt(getSessionClientName(), getSessionCustomerName(), null, getSessionCallType());
+    const getSystemPrompt = () => buildAgentSystemPrompt(getSessionClientName(), getSessionCustomerName(), null, getSessionCallType(), { videoSent: session.videoSent, lastVisitDate: session.lastVisitDate });
+    const getOpeningPrompt = () => buildOpeningPrompt(getSessionClientName(), getSessionCustomerName(), null, getSessionCallType(), { videoSent: session.videoSent, lastVisitDate: session.lastVisitDate });
     const openingInstruction = `System Instruction: This is an active voice call over WebSockets. Please start the conversation immediately by speaking this opening text naturally:\n"${getOpeningPrompt()}"`;
     const useGemini = () => AI_PROVIDER === 'gemini';
     const useGeminiLive = () => AI_PROVIDER === 'gemini-live';

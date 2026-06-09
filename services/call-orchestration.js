@@ -281,10 +281,17 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
     customerUpdates.admin_review_required = 1;
     customerUpdates.do_not_call = 1;
   } else if (normalized === 'busy') {
-    customerUpdates.status = 'busy';
-    customerUpdates.next_retry_at = getSmartRetryIso('busy');
     customerUpdates.retry_count = (Number(customer?.retry_count) || 0) + 1;
-    callUpdates.next_action_at = customerUpdates.next_retry_at;
+    if (customerUpdates.retry_count >= 2) {
+      customerUpdates.status = 'failed';
+      customerUpdates.next_retry_at = null;
+      callUpdates.outcome = 'failed';
+      callUpdates.outcome_detail = 'max_retries_reached';
+    } else {
+      customerUpdates.status = 'busy';
+      customerUpdates.next_retry_at = getSmartRetryIso('busy');
+      callUpdates.next_action_at = customerUpdates.next_retry_at;
+    }
     if (customer) {
       try {
         const sent = await maybeSendBusyFallback({ customer, callId: callRecord?.id });
@@ -294,12 +301,19 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
       }
     }
   } else if (normalized === 'no_answer' || normalized === 'failed') {
-    customerUpdates.status = 'retry_scheduled';
-    customerUpdates.next_retry_at = getSmartRetryIso('no_answer');
     customerUpdates.retry_count = (Number(customer?.retry_count) || 0) + 1;
-    callUpdates.next_action_at = customerUpdates.next_retry_at;
-    callUpdates.outcome = 'no_answer';
-    callUpdates.outcome_detail = normalized;
+    if (customerUpdates.retry_count >= 2) {
+      customerUpdates.status = 'failed';
+      customerUpdates.next_retry_at = null;
+      callUpdates.outcome = 'failed';
+      callUpdates.outcome_detail = 'max_retries_reached';
+    } else {
+      customerUpdates.status = 'retry_scheduled';
+      customerUpdates.next_retry_at = getSmartRetryIso('no_answer');
+      callUpdates.next_action_at = customerUpdates.next_retry_at;
+      callUpdates.outcome = 'no_answer';
+      callUpdates.outcome_detail = normalized;
+    }
   } else if (normalized === 'callback') {
     customerUpdates.status = 'callback_scheduled';
     customerUpdates.callback_requested_at = nowIso;

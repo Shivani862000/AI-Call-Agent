@@ -53,6 +53,10 @@
       <div id="alertContainer" class="alert-stack"></div>
 
       <section class="desktop-filter-strip desktop-only" aria-label="Outbound call filters">
+        <button class="desktop-filter-pill" type="button" data-customer-filter="completed" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopCompletedMetric">0</span>
+          <span class="desktop-filter-label">Completed</span>
+        </button>
         <button class="desktop-filter-pill active" type="button" data-customer-filter="scheduled" aria-pressed="true">
           <span class="desktop-filter-count" id="desktopScheduledMetric">0</span>
           <span class="desktop-filter-label">Scheduled</span>
@@ -61,10 +65,6 @@
           <span class="desktop-filter-count" id="desktopPendingMetric">0</span>
           <span class="desktop-filter-label">Pending</span>
         </button>
-        <button class="desktop-filter-pill" type="button" data-customer-filter="completed" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopCompletedMetric">0</span>
-          <span class="desktop-filter-label">Completed</span>
-        </button>
         <button class="desktop-filter-pill" type="button" data-customer-filter="failed" aria-pressed="false">
           <span class="desktop-filter-count" id="desktopFailedMetric">0</span>
           <span class="desktop-filter-label">Failed</span>
@@ -72,6 +72,10 @@
       </section>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Call stats">
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="completed" aria-pressed="false">
+          <span class="mobile-stat-count" id="mobileCompletedMetric">0</span>
+          <span class="mobile-stat-label">Completed</span>
+        </button>
         <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-customer-filter="scheduled" aria-pressed="true">
           <span class="mobile-stat-count" id="mobileScheduledMetric">0</span>
           <span class="mobile-stat-label">Scheduled</span>
@@ -79,10 +83,6 @@
         <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="pending" aria-pressed="false">
           <span class="mobile-stat-count" id="mobilePendingMetric">0</span>
           <span class="mobile-stat-label">Pending</span>
-        </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="completed" aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileCompletedMetric">0</span>
-          <span class="mobile-stat-label">Completed</span>
         </button>
         <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="failed" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileFailedMetric">0</span>
@@ -92,6 +92,11 @@
 
       <section class="poc-metrics-grid">
         <article class="metric-card">
+          <div class="metric-label">Completed Calls</div>
+          <div class="metric-value" id="completedCallsMetric">0</div>
+          <div class="metric-note">Calls completed with a recorded outcome.</div>
+        </article>
+        <article class="metric-card">
           <div class="metric-label">Scheduled Today</div>
           <div class="metric-value" id="scheduledTodayMetric">0</div>
           <div class="metric-note">Patients prepared for today's calling schedule.</div>
@@ -100,11 +105,6 @@
           <div class="metric-label">Pending Calls</div>
           <div class="metric-value" id="pendingCallsMetric">0</div>
           <div class="metric-note">Still waiting for the first call or a retry.</div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-label">Completed Calls</div>
-          <div class="metric-value" id="completedCallsMetric">0</div>
-          <div class="metric-note">Calls completed with a recorded outcome.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Failed Calls</div>
@@ -214,6 +214,20 @@
           <label class="segment-button">
             <input type="radio" name="callType" value="THREE_MONTH_FOLLOWUP">
             3 Month Follow-up
+          </label>
+        </div>
+      </div>
+
+      <div class="form-field-block">
+        <div class="field-label">Video Sent?</div>
+        <div class="segmented-control" role="radiogroup" aria-label="Video Sent">
+          <label class="segment-button active">
+            <input type="radio" name="videoSent" value="false" checked>
+            No
+          </label>
+          <label class="segment-button">
+            <input type="radio" name="videoSent" value="true">
+            Yes
           </label>
         </div>
       </div>
@@ -437,11 +451,14 @@
     }
 
     function getNewCallPayload() {
+      const videoSent = document.querySelector('input[name="videoSent"]:checked')?.value === 'true';
       return {
         name: document.getElementById('callCustomerName').value.trim(),
         phone: normalizePhoneForApi(document.getElementById('callCustomerPhone').value),
         preferred_slot: document.getElementById('callCustomerTime').value.trim(),
-        callType: getSelectedCallType()
+        callType: getSelectedCallType(),
+        video_sent: videoSent,
+        last_visit_date: document.getElementById('careLastVisit').value || ''
       };
     }
 
@@ -465,16 +482,6 @@
       if (!/^\+\d{12}$/.test(payload.phone)) fieldErrors.callCustomerPhone = 'Use a valid Indian mobile number';
       if (!payload.preferred_slot) fieldErrors.callCustomerTime = 'Call time is required';
       const editingId = Number(document.getElementById('editingCustomerId').value || 0);
-      const duplicateCustomer = customerCache.find((customer) => (
-        Number(customer.id) !== editingId
-        && normalizePhoneForApi(customer.phone) === payload.phone
-      ));
-      if (duplicateCustomer) {
-        const activeStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
-        fieldErrors.callCustomerPhone = activeStatuses.has(String(duplicateCustomer.status || '').toLowerCase())
-          ? 'This patient already has a scheduled call.'
-          : 'A patient with this phone number already exists.';
-      }
       return fieldErrors;
     }
 
@@ -498,6 +505,10 @@
       document.getElementById('careLastVisit').value = '';
       document.getElementById('careTreatment').value = '';
       setCallTypeSelection('REVIEW_CALL');
+      document.querySelectorAll('input[name="videoSent"]').forEach((input) => {
+        input.checked = input.value === 'false';
+        input.closest('.segment-button')?.classList.toggle('active', input.checked);
+      });
       document.getElementById('careDetailsToggle').open = false;
       clearFormErrors();
     }
@@ -764,7 +775,8 @@
         let matchesMetricFilter = true;
 
         if (activeCustomerMetricFilter === 'scheduled') {
-          matchesMetricFilter = isToday(customer.created_at) || isToday(customer.updated_at);
+          const isScheduled = ['scheduled', 'retry_scheduled', 'callback_scheduled'].includes(String(customer.status || '').toLowerCase());
+          matchesMetricFilter = isScheduled && (isToday(customer.next_retry_at) || isToday(customer.created_at));
         } else if (activeCustomerMetricFilter === 'pending') {
           matchesMetricFilter = pendingStatuses.has(String(customer.status || '').toLowerCase());
         } else if (activeCustomerMetricFilter === 'completed') {
@@ -986,6 +998,14 @@
       });
       document.querySelectorAll('input[name="callType"]').forEach((input) => {
         input.addEventListener('change', () => setCallTypeSelection(input.value));
+      });
+      document.querySelectorAll('input[name="videoSent"]').forEach((input) => {
+        input.addEventListener('change', () => {
+          document.querySelectorAll('input[name="videoSent"]').forEach((i) => {
+            i.checked = i.value === input.value;
+            i.closest('.segment-button')?.classList.toggle('active', i.checked);
+          });
+        });
       });
       document.querySelectorAll('.mobile-filter-option').forEach((button) => {
         button.addEventListener('click', () => {

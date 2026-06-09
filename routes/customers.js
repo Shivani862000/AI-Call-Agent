@@ -103,7 +103,9 @@ function normalizeCustomerPayload(payload = {}) {
     revenue_stage: String(payload.revenue_stage || 'unassigned').trim().toLowerCase() || 'unassigned',
     revenue_estimate: Number(payload.revenue_estimate || 0) || 0,
     campaign_name: String(payload.campaign_name || '').trim(),
-    service_interest: String(payload.service_interest || '').trim()
+    service_interest: String(payload.service_interest || '').trim(),
+    video_sent: toBooleanFlag(payload.video_sent),
+    last_visit_date: String(payload.last_visit_date || '').trim() || null
   };
 }
 
@@ -218,8 +220,8 @@ async function saveCustomer(payload) {
       name, phone, preferred_slot, status, customer_value, urgency_level,
       preferred_language, preferred_dialect, do_not_call, consent_status,
       outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
-      campaign_name, service_interest, call_type
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      campaign_name, service_interest, call_type, video_sent, last_visit_date
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       payload.name,
       payload.phone,
@@ -237,7 +239,9 @@ async function saveCustomer(payload) {
       payload.revenue_estimate,
       payload.campaign_name || null,
       payload.service_interest || null,
-      payload.call_type
+      payload.call_type,
+      payload.video_sent,
+      payload.last_visit_date
     ]
   );
 }
@@ -252,12 +256,23 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
-    const duplicateMessage = await getDuplicateScheduleMessage(payload.phone);
-    if (duplicateMessage) {
-      return res.status(409).json({
-        error: duplicateMessage,
-        fieldErrors: { phone: duplicateMessage }
-      });
+    const existingCustomer = await findCustomerByNormalizedPhone(payload.phone);
+    if (existingCustomer) {
+      const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
+      const nextRetryAt = payload.preferred_slot ? getNextIsoForPreferredSlot(payload.preferred_slot) : null;
+      await dbRun(
+        `UPDATE customers
+            SET name = ?,
+                preferred_slot = ?,
+                status = ?,
+                call_type = ?,
+                video_sent = ?,
+                last_visit_date = COALESCE(?, last_visit_date),
+                next_retry_at = COALESCE(?, next_retry_at)
+          WHERE id = ?`,
+        [payload.name, payload.preferred_slot, initialStatus, payload.call_type, payload.video_sent, payload.last_visit_date, nextRetryAt, existingCustomer.id]
+      );
+      return res.json({ id: existingCustomer.id, message: 'Customer call scheduled successfully' });
     }
 
     const result = await saveCustomer(payload);
@@ -300,14 +315,25 @@ router.post('/csv', upload.single('file'), async (req, res) => {
       }
 
       try {
-        const duplicateMessage = await getDuplicateScheduleMessage(payload.phone);
-        if (duplicateMessage) {
-          errorCount += 1;
-          errors.push({ row: index + 2, error: duplicateMessage });
-          continue;
+        const existingCustomer = await findCustomerByNormalizedPhone(payload.phone);
+        if (existingCustomer) {
+          const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
+          const nextRetryAt = payload.preferred_slot ? getNextIsoForPreferredSlot(payload.preferred_slot) : null;
+          await dbRun(
+            `UPDATE customers
+                SET name = ?,
+                    preferred_slot = ?,
+                    status = ?,
+                    call_type = ?,
+                    next_retry_at = COALESCE(?, next_retry_at)
+              WHERE id = ?`,
+            [payload.name, payload.preferred_slot, initialStatus, payload.call_type, nextRetryAt, existingCustomer.id]
+          );
+          successCount += 1;
+        } else {
+          await saveCustomer(payload);
+          successCount += 1;
         }
-        await saveCustomer(payload);
-        successCount += 1;
       } catch (err) {
         errorCount += 1;
         errors.push({ row: index + 2, error: err.message });

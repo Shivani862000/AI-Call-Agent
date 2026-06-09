@@ -265,6 +265,8 @@ async function hydrateIcallMateSessionContext(session, message = {}, extraParams
       session.callId = context.call.id;
       session.providerCallId = context.call.provider_call_id || '';
       session.callType = normalizeOutboundCallType(context.call.call_type || context.customer.call_type);
+      session.videoSent = context.customer.video_sent === 1;
+      session.lastVisitDate = context.customer.last_visit_date || 'kal';
 
       console.log(
         `[ICALLMATE] Hydrated outbound context streamId=${message.streamId || session.streamId || ''} ` +

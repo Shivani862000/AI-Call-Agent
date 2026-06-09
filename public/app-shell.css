@@ -4621,3 +4621,7 @@ th {
     max-height: min(260px, calc(100vh - 430px));
   }
 }
+
+a[href="/incoming-calls.html"] {
+  display: none !important;
+}

@@ -206,6 +206,8 @@ function runMigrations() {
     await addColumnIfMissing('customers', 'data_retention_until', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'dnd_checked_at', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'default_agent_id', 'INTEGER');
+    await addColumnIfMissing('customers', 'video_sent', 'INTEGER DEFAULT 0');
+    await addColumnIfMissing('customers', 'last_visit_date', 'DATE');
     await addColumnIfMissing('clients', 'date_of_birth', 'DATE');
     await addColumnIfMissing('clients', 'annual_reminder_enabled', 'INTEGER DEFAULT 1');
     await addColumnIfMissing('clients', 'annual_reminder_slot', "VARCHAR(10) DEFAULT '10:00'");

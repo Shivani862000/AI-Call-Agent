@@ -12,7 +12,7 @@ const { CALL_TYPES } = require('./config');
 const { normalizeOutboundCallType, applyAgentTemplate } = require('./helpers');
 const { dbGet } = require('../db');
 
-function buildCallTypeSystemPrompt(callType, clientName, customerName) {
+function buildCallTypeSystemPrompt(callType, clientName, customerName, extraOptions = {}) {
   const normalizedCallType = normalizeOutboundCallType(callType);
   const promptClientName = process.env.CALL_PROMPT_CLIENT_NAME || 'Apna Blood Centre';
   const greeting = getGreeting();
@@ -24,11 +24,13 @@ function buildCallTypeSystemPrompt(callType, clientName, customerName) {
   }
 
   return buildReviewCallingPrompt({
-    clientName: promptClientName
+    clientName: promptClientName,
+    videoSent: extraOptions.videoSent,
+    lastVisitDate: extraOptions.lastVisitDate
   }).replace(/\[GREETING\]/g, greeting);
 }
 
-function buildCallTypeOpeningPrompt(callType, clientName, customerName) {
+function buildCallTypeOpeningPrompt(callType, clientName, customerName, extraOptions = {}) {
   const normalizedCallType = normalizeOutboundCallType(callType);
   const promptClientName = process.env.CALL_PROMPT_CLIENT_NAME || 'Apna Blood Centre';
   const greeting = getGreeting();
@@ -42,18 +44,19 @@ function buildCallTypeOpeningPrompt(callType, clientName, customerName) {
 
   return buildReviewCallingOpeningPrompt({
     clientName: promptClientName,
-    greeting
+    greeting,
+    lastVisitDate: extraOptions.lastVisitDate
   });
 }
 
-function buildAgentSystemPrompt(clientName, customerName, agentConfig = null, callType = CALL_TYPES.REVIEW_CALL) {
+function buildAgentSystemPrompt(clientName, customerName, agentConfig = null, callType = CALL_TYPES.REVIEW_CALL, extraOptions = {}) {
   const normalizedCallType = normalizeOutboundCallType(callType);
-  return buildCallTypeSystemPrompt(normalizedCallType, clientName, customerName);
+  return buildCallTypeSystemPrompt(normalizedCallType, clientName, customerName, extraOptions);
 }
 
-function buildOpeningPrompt(clientName, customerName, agentConfig = null, callType = CALL_TYPES.REVIEW_CALL) {
+function buildOpeningPrompt(clientName, customerName, agentConfig = null, callType = CALL_TYPES.REVIEW_CALL, extraOptions = {}) {
   const normalizedCallType = normalizeOutboundCallType(callType);
-  return buildCallTypeOpeningPrompt(normalizedCallType, clientName, customerName);
+  return buildCallTypeOpeningPrompt(normalizedCallType, clientName, customerName, extraOptions);
 }
 
 async function getAgentConfigById(agentId) {
