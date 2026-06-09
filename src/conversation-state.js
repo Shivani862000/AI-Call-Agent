@@ -220,7 +220,10 @@ function buildOutboundDemoTurnInstruction(callerText, state, clientName, custome
     'Do not repeat the full greeting or restart the call.',
     `Max response tokens: ${LIVE_MAX_RESPONSE_TOKENS}.`,
     'When all required answers are captured, say the final thank-you only once and internally set END_CALL=true.',
-    'Never say "end_call" or "END_CALL=true" aloud.'
+    'Never say "end_call" or "END_CALL=true" aloud.',
+    'CRITICAL: After saying "Dhanyavaad sir. Aapka din shubh ho." The conversation is finished.',
+    'Do not answer any further customer speech. Do not repeat closing messages.',
+    'Do not continue talking. Do not provide additional information. Immediately end the call.'
   ];
 
   const instruction = normalizeOutboundCallType(callType) === CALL_TYPES.THREE_MONTH_FOLLOWUP

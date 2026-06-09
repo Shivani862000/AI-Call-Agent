@@ -40,7 +40,7 @@ const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
 const DISABLE_SCHEDULER = String(process.env.DISABLE_SCHEDULER || '').toLowerCase() === 'true';
 const DISABLE_OWNER_DIGEST = String(process.env.DISABLE_OWNER_DIGEST || '').toLowerCase() === 'true';
-const MAX_CALL_DURATION_SECONDS = Math.max(Number(process.env.MAX_CALL_DURATION_SECONDS || 80) || 80, 10);
+const MAX_CALL_DURATION_SECONDS = Math.max(Number(process.env.MAX_CALL_DURATION_SECONDS || 60) || 60, 10);
 
 // ── In-memory state maps (shared across modules) ──────────────────────────────
 

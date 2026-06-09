@@ -674,10 +674,12 @@ module.exports = function setupWebSocketBridge(server) {
                   finalResponseInProgress = true;
                   scheduleFinalizeCallHangup('gemini_live_end_call_marker', cleanTranscript);
                 }
-                if (outboundDemoState.endCallAfterNextReply && shouldAutoHangupAfterAgentTurn(cleanTranscript)) {
-                  requestCallHangup('gemini_live_state_completed');
+                if (shouldAutoHangupAfterAgentTurn(cleanTranscript)) {
+                  outboundDemoState.conversationEnded = true;
+                  console.log(`[ICALLMATE] Auto-hangup closing message detected. Ignoring further audio.`);
+                  requestCallHangup('conversation_completed');
                   finalResponseInProgress = true;
-                  scheduleFinalizeCallHangup('gemini_live_state_completed', cleanTranscript);
+                  scheduleFinalizeCallHangup('conversation_completed', cleanTranscript);
                 }
               }
 
@@ -1048,6 +1050,15 @@ module.exports = function setupWebSocketBridge(server) {
         connectDeepgram();
 
         if (!callDurationInterval) {
+          // Hard absolute timeout regardless of STT/TTS state
+          setTimeout(() => {
+            if (!bridgeClosed && !pendingHangup) {
+              console.log(`[ICALLMATE] HARD TIMEOUT REACHED (${MAX_CALL_DURATION_SECONDS}s) streamId=${getSessionLabel()}. Forcing hangup.`);
+              requestCallHangup('max_duration');
+              scheduleFinalizeCallHangup('max_duration');
+            }
+          }, MAX_CALL_DURATION_SECONDS * 1000);
+
           callDurationInterval = setInterval(() => {
             if (bridgeClosed || pendingHangup) {
               clearInterval(callDurationInterval);
@@ -1055,14 +1066,13 @@ module.exports = function setupWebSocketBridge(server) {
             }
             callDurationSeconds++;
             
-            const maxDuration = MAX_CALL_DURATION_SECONDS || 80;
+            const maxDuration = MAX_CALL_DURATION_SECONDS || 60;
             if (callDurationSeconds >= maxDuration) {
               console.log(`[ICALLMATE] Max call duration reached (${maxDuration}s) streamId=${getSessionLabel()}. Hanging up.`);
               clearInterval(callDurationInterval);
               requestCallHangup('max_duration_reached');
-              sendDeepgramTtsText("Dhanyavaad sir. Aapka samay dene ke liye dhanyavaad. Aapka din shubh ho.");
               scheduleFinalizeCallHangup('max_duration_reached');
-            } else if (callDurationSeconds >= maxDuration - 20 && !durationWarningSent) {
+            } else if (callDurationSeconds >= maxDuration - 15 && !durationWarningSent) {
               durationWarningSent = true;
               console.log(`[ICALLMATE] Warning threshold reached (${callDurationSeconds}s) streamId=${getSessionLabel()}. Instructing AI to skip optional questions.`);
               
@@ -1075,7 +1085,7 @@ module.exports = function setupWebSocketBridge(server) {
         }
       },
       sendCallerAudio(payload) {
-        if (bridgeClosed || pendingHangup || !payload) {
+        if (bridgeClosed || pendingHangup || outboundDemoState.conversationEnded || !payload) {
           return;
         }
 

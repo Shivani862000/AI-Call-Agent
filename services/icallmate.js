@@ -64,6 +64,8 @@ function buildMasterPostPayload(customerPhone, leadId, options = {}) {
     fieldpairs: [
       {
         Phone_No: phoneNo,
+        Mobile_No: phoneNo,
+        Moblie_No: phoneNo,
         wsurl,
         Customer_Name: options.customerName || '',
         Customer_ID: options.customerId || ''

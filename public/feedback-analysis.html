@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -16,8 +17,7 @@
       --analysis-green: #15945b;
       --analysis-red: #d92d20;
       --analysis-amber: #b86b00;
-      --analysis-plum: #7c3aed;
-      --analysis-shadow: 0 18px 42px rgba(28, 40, 64, 0.09);
+      --analysis-shadow: 0 4px 12px rgba(28, 40, 64, 0.04);
     }
 
     body.feedback-analysis-page {
@@ -26,11 +26,15 @@
     }
 
     .analysis-shell {
-      width: min(1440px, 100%);
+      width: min(1000px, 100%);
       margin: 0 auto;
-      padding: 18px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
     }
 
+    /* 1. Header Row */
     .analysis-topbar {
       position: sticky;
       top: 0;
@@ -38,717 +42,460 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 14px;
-      margin: -18px -18px 18px;
-      padding: 14px 18px;
-      background: rgba(246, 248, 251, 0.92);
-      border-bottom: 1px solid var(--analysis-line);
-      backdrop-filter: blur(16px);
+      gap: 12px;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 12px;
+      border: 1px solid var(--analysis-line);
+      box-shadow: var(--analysis-shadow);
+      backdrop-filter: blur(8px);
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
 
     .analysis-back {
       border: 1px solid var(--analysis-line);
-      background: #fff;
+      background: transparent;
       color: var(--analysis-ink);
-      border-radius: 10px;
-      padding: 10px 13px;
-      font-weight: 800;
-      cursor: pointer;
-    }
-
-    .analysis-actions {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-    }
-
-    .analysis-button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      min-height: 40px;
-      padding: 10px 14px;
-      border: 1px solid var(--analysis-line);
-      border-radius: 10px;
-      background: #fff;
-      color: var(--analysis-ink);
-      font-weight: 800;
-      text-decoration: none;
-      cursor: pointer;
-    }
-
-    .analysis-button.primary {
-      border-color: var(--analysis-blue);
-      background: var(--analysis-blue);
-      color: #fff;
-    }
-
-    .analysis-button[disabled],
-    .analysis-button[disabled="true"] {
-      opacity: 0.5;
-      cursor: not-allowed;
-      pointer-events: none;
-    }
-
-    .analysis-hero {
-      display: grid;
-      grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.7fr);
-      gap: 16px;
-      margin-bottom: 16px;
-    }
-
-    .analysis-card {
-      background: var(--analysis-panel);
-      border: 1px solid var(--analysis-line);
       border-radius: 8px;
-      box-shadow: var(--analysis-shadow);
+      padding: 6px 12px;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
     }
 
-    .analysis-overview {
-      padding: 22px;
-    }
-
-    .analysis-status-row {
+    .header-info {
       display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 16px;
-      margin-bottom: 20px;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    #analysisPageTitle {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+
+    .header-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--analysis-muted);
     }
 
     .analysis-status {
       display: inline-flex;
       align-items: center;
-      gap: 9px;
-      padding: 8px 11px;
+      gap: 6px;
+      padding: 4px 8px;
       border-radius: 999px;
       background: #eef4ff;
       color: var(--analysis-blue);
-      font-size: 13px;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
-    .analysis-status.completed { background: #eaf7ef; color: var(--analysis-green); }
-    .analysis-status.failed,
-    .analysis-status.busy,
-    .analysis-status.no_answer { background: #fff0ed; color: var(--analysis-red); }
-
-    .analysis-dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 999px;
-      background: currentColor;
-    }
-
-    .analysis-title h1 {
-      margin: 0;
-      font-size: clamp(28px, 5vw, 44px);
-      line-height: 1;
-      letter-spacing: -0.03em;
-    }
-
-    .analysis-title p {
-      margin: 10px 0 0;
-      color: var(--analysis-muted);
-      font-size: 15px;
-    }
-
-    .analysis-overview-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(130px, 1fr));
-      gap: 10px;
-    }
-
-    .analysis-fact {
-      min-width: 0;
-      padding: 13px;
-      border: 1px solid var(--analysis-line);
-      border-radius: 8px;
-      background: #fbfcfe;
-    }
-
-    .analysis-fact span {
-      display: block;
-      margin-bottom: 6px;
-      color: var(--analysis-muted);
-      font-size: 12px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
-    .analysis-fact strong {
-      display: block;
-      font-size: 15px;
-      line-height: 1.25;
-      overflow-wrap: anywhere;
-    }
-
-    .analysis-score-card {
-      padding: 22px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      gap: 18px;
-    }
-
-    .analysis-score-ring {
-      width: 148px;
-      aspect-ratio: 1;
-      border-radius: 50%;
-      display: grid;
-      place-items: center;
-      margin: 0 auto;
-      background: conic-gradient(var(--analysis-green) var(--score-angle, 0deg), #edf1f6 0);
-    }
-
-    .analysis-score-ring > div {
-      width: 112px;
-      aspect-ratio: 1;
-      border-radius: 50%;
-      display: grid;
-      place-items: center;
-      background: #fff;
-      font-size: 30px;
-      font-weight: 900;
-    }
-
-    .analysis-section-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr);
-      gap: 16px;
-      align-items: start;
-    }
-
-    .analysis-stack {
-      display: grid;
-      gap: 16px;
-      min-width: 0;
-    }
-
-    .analysis-section {
-      padding: 18px;
-    }
-
-    .analysis-section-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 14px;
-    }
-
-    .analysis-section-title {
-      margin: 0;
-      font-size: 18px;
-      line-height: 1.2;
-    }
-
-    .analysis-section-subtitle {
-      margin: 4px 0 0;
-      color: var(--analysis-muted);
-      font-size: 13px;
-    }
-
-    .recording-player {
-      display: grid;
-      gap: 14px;
-    }
-
-    .recording-controls {
-      display: grid;
-      grid-template-columns: auto auto auto minmax(120px, 1fr);
-      gap: 10px;
-      align-items: center;
-    }
-
-    .control-button {
-      min-width: 64px;
-      height: 42px;
-      border-radius: 10px;
-      border: 1px solid var(--analysis-line);
-      background: #fff;
-      color: var(--analysis-ink);
-      font-weight: 900;
-      cursor: pointer;
-    }
-
-    .progress-wrap {
-      display: grid;
-      gap: 8px;
-    }
-
-    .progress-bar {
-      width: 100%;
-      accent-color: var(--analysis-blue);
-    }
-
-    .time-row,
-    .recording-meta {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      color: var(--analysis-muted);
-      font-size: 13px;
-      flex-wrap: wrap;
-    }
-
-    .volume-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      color: var(--analysis-muted);
-      font-size: 13px;
-    }
-
-    .volume-row input {
-      width: 130px;
-      accent-color: var(--analysis-blue);
-    }
-
-    .empty-state {
-      padding: 18px;
-      border: 1px dashed #ccd6e3;
-      border-radius: 8px;
-      background: #fbfcfe;
-      color: var(--analysis-muted);
-    }
-
-    .summary-text {
-      margin: 0;
-      color: #243047;
-      line-height: 1.7;
-      font-size: 16px;
-    }
-
-    .outcome-grid,
-    .metric-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-    }
-
-    .outcome-card,
-    .metric-card {
-      min-width: 0;
-      padding: 14px;
-      border: 1px solid var(--analysis-line);
-      border-radius: 8px;
-      background: #fbfcfe;
-    }
-
-    .outcome-card span,
-    .metric-card span {
-      display: block;
-      margin-bottom: 8px;
-      color: var(--analysis-muted);
-      font-size: 12px;
-      font-weight: 800;
-      text-transform: uppercase;
-    }
-
-    .outcome-card strong,
-    .metric-card strong {
-      display: block;
-      font-size: 17px;
-      overflow-wrap: anywhere;
-    }
-
-    .outcome-card.positive strong { color: var(--analysis-green); }
-    .outcome-card.negative strong { color: var(--analysis-red); }
-
-    .sentiment-panel {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
-      gap: 16px;
-      align-items: center;
-    }
-
-    .sentiment-mark {
-      width: 58px;
-      height: 58px;
-      border-radius: 999px;
-      display: grid;
-      place-items: center;
-      background: #eef4ff;
-      color: var(--analysis-blue);
-      font-size: 24px;
-      font-weight: 900;
-    }
-
-    .sentiment-copy strong {
-      display: block;
-      font-size: 22px;
-    }
-
-    .sentiment-copy span {
-      color: var(--analysis-muted);
-    }
-
-    .transcript-toolbar {
-      display: grid;
-      grid-template-columns: minmax(160px, 1fr) auto auto auto;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .transcript-search {
-      width: 100%;
-      min-height: 40px;
-      border: 1px solid var(--analysis-line);
-      border-radius: 10px;
-      padding: 0 12px;
-      font: inherit;
-    }
-
-    .transcript-list {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      max-height: 620px;
-      overflow-y: auto;
-      padding: 16px;
-      background: #f6f8fb;
-      border: 1px solid var(--analysis-line);
-      border-radius: 12px;
-    }
-
-    .transcript-turn {
-      display: flex;
-      flex-direction: column;
-      max-width: 85%;
-      padding: 12px 16px;
-      border: 1px solid var(--analysis-line);
-      border-radius: 14px;
-      clear: both;
-    }
-
-    .transcript-turn.ai {
-      align-self: flex-start;
-      background: #eaf2ff;
-      border-color: #cfe0ff;
-      border-bottom-left-radius: 4px;
-    }
-
-    .transcript-turn.patient {
-      align-self: flex-end;
-      background: #ffffff;
-      border-bottom-right-radius: 4px;
-    }
-
-    .turn-role {
-      color: var(--analysis-muted);
       font-size: 11px;
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0.04em;
-      margin-bottom: 4px;
     }
 
-    .turn-text {
+    .analysis-status.completed {
+      background: #eaf7ef;
+      color: var(--analysis-green);
+    }
+
+    .analysis-status.failed,
+    .analysis-status.no_answer {
+      background: #fff0ed;
+      color: var(--analysis-red);
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 12px;
+      border: 1px solid var(--analysis-line);
+      border-radius: 8px;
+      background: #fff;
       color: var(--analysis-ink);
-      line-height: 1.55;
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .icon-btn[disabled] {
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    /* 2. AI Summary */
+    .summary-card {
+      background: #fff;
+      border: 1px solid var(--analysis-line);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: var(--analysis-shadow);
       font-size: 15px;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
+      line-height: 1.6;
+      color: #243047;
+      font-weight: 500;
     }
 
-    .timeline {
-      display: grid;
-      gap: 0;
+    /* 3. KPI Insights */
+    .kpi-row {
+      display: flex;
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+      /* Firefox */
     }
 
-    .timeline-item {
-      position: relative;
-      display: grid;
-      grid-template-columns: 72px minmax(0, 1fr);
-      gap: 14px;
-      padding: 0 0 18px;
-    }
-
-    .timeline-item::before {
-      content: "";
-      position: absolute;
-      left: 82px;
-      top: 18px;
-      bottom: -2px;
-      width: 1px;
-      background: var(--analysis-line);
-    }
-
-    .timeline-item:last-child::before {
+    .kpi-row::-webkit-scrollbar {
       display: none;
     }
 
-    .timeline-time {
-      color: var(--analysis-muted);
-      font-size: 12px;
-      font-weight: 800;
-    }
-
-    .timeline-label {
-      position: relative;
-      min-width: 0;
-      padding-left: 20px;
-      font-weight: 800;
-    }
-
-    .timeline-label::before {
-      content: "";
-      position: absolute;
-      left: -1px;
-      top: 4px;
-      width: 10px;
-      height: 10px;
-      border-radius: 999px;
-      background: var(--analysis-green);
-      box-shadow: 0 0 0 4px #eaf7ef;
-    }
-
-    .quality-checks {
-      display: grid;
-      gap: 9px;
-    }
-
-    .quality-check {
+    .kpi-card {
+      flex: 1 0 140px;
+      background: #fff;
+      border: 1px solid var(--analysis-line);
+      border-radius: 12px;
+      padding: 14px;
       display: flex;
+      flex-direction: column;
+      gap: 6px;
+      box-shadow: var(--analysis-shadow);
+    }
+
+    .kpi-card span {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--analysis-muted);
+      text-transform: uppercase;
+    }
+
+    .kpi-card strong {
+      font-size: 18px;
+      color: var(--analysis-ink);
+    }
+
+    /* 4. Key Outcomes Chips */
+    .outcomes-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .outcome-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: #fff;
+      border: 1px solid var(--analysis-line);
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--analysis-ink);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    }
+
+    .outcome-chip.positive {
+      border-color: #a7f3d0;
+      background: #ecfdf5;
+      color: var(--analysis-green);
+    }
+
+    .outcome-chip.negative {
+      border-color: #fecaca;
+      background: #fef2f2;
+      color: var(--analysis-red);
+    }
+
+    /* 5. Chat Transcript */
+    .chat-card {
+      background: #fff;
+      border: 1px solid var(--analysis-line);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      height: 500px;
+      box-shadow: var(--analysis-shadow);
+      overflow: hidden;
+    }
+
+    .chat-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--analysis-line);
+      display: flex;
+      align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 10px 0;
-      border-bottom: 1px solid var(--analysis-line);
+      background: #fbfcfe;
+    }
+
+    .chat-search {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid var(--analysis-line);
+      border-radius: 8px;
+      font-size: 13px;
+      outline: none;
+    }
+
+    .chat-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      background: #f8fafc;
+    }
+
+    .chat-bubble-wrap {
+      display: flex;
+      flex-direction: column;
+      max-width: 80%;
+    }
+
+    .chat-bubble-wrap.ai {
+      align-self: flex-start;
+      align-items: flex-start;
+    }
+
+    .chat-bubble-wrap.patient {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+
+    .chat-role {
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--analysis-muted);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+    }
+
+    .chat-bubble {
+      padding: 12px 16px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .chat-bubble-wrap.ai .chat-bubble {
+      background: #fff;
+      border: 1px solid var(--analysis-line);
+      border-bottom-left-radius: 4px;
+      color: var(--analysis-ink);
+    }
+
+    .chat-bubble-wrap.patient .chat-bubble {
+      background: var(--analysis-blue);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+
+    .empty-chat {
+      text-align: center;
+      color: var(--analysis-muted);
+      margin: auto;
+      font-size: 14px;
+    }
+
+    /* 6. Advanced Details */
+    .advanced-accordion {
+      background: #fff;
+      border: 1px solid var(--analysis-line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .advanced-accordion summary {
+      padding: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      list-style: none;
+      background: #fbfcfe;
+      border-bottom: 1px solid transparent;
+    }
+
+    .advanced-accordion[open] summary {
+      border-bottom-color: var(--analysis-line);
+    }
+
+    .advanced-content {
+      padding: 16px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 12px;
+    }
+
+    .metric-card {
+      padding: 12px;
+      background: #f8fafc;
+      border-radius: 8px;
+      border: 1px solid var(--analysis-line);
+      font-size: 13px;
+    }
+
+    .metric-card span {
+      display: block;
+      color: var(--analysis-muted);
+      margin-bottom: 4px;
       font-weight: 700;
     }
 
-    .quality-check:last-child {
-      border-bottom: 0;
+    .metric-card strong {
+      font-size: 15px;
     }
 
-    .check-pass { color: var(--analysis-green); }
-    .check-fail { color: var(--analysis-red); }
-
-    @media (max-width: 1060px) {
-      .analysis-hero,
-      .analysis-section-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .analysis-overview-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
+    /* Recording controls within advanced */
+    .recording-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #f8fafc;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid var(--analysis-line);
     }
 
-    @media (max-width: 720px) {
+    @media (max-width: 600px) {
       .analysis-shell {
         padding: 12px;
       }
 
-      .analysis-topbar {
-        margin: -12px -12px 12px;
-        align-items: stretch;
-        flex-direction: column;
+      .chat-bubble-wrap {
+        max-width: 90%;
       }
 
-      .analysis-actions {
-        justify-content: stretch;
+      .header-meta span:not(#callStatusBadge) {
+        display: none;
       }
 
-      .analysis-button {
-        flex: 1 1 auto;
-      }
-
-      .analysis-status-row,
-      .analysis-section-header {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-
-      .analysis-overview-grid,
-      .outcome-grid,
-      .metric-grid,
-      .recording-controls,
-      .transcript-toolbar {
-        grid-template-columns: 1fr;
-      }
-
-      .control-button {
-        width: 100%;
-        border-radius: 10px;
-      }
-
-      .transcript-turn,
-      .timeline-item {
-        grid-template-columns: 1fr;
-      }
-
-      .timeline-item::before {
-        left: 5px;
+      .chat-card {
+        height: 60vh;
       }
     }
   </style>
 </head>
-<body class="poc-page feedback-analysis-page">
+
+<body class="feedback-analysis-page">
   <main class="analysis-shell">
+    <!-- ROW 1: HEADER -->
     <div class="analysis-topbar">
-      <button id="analysisPageBackButton" class="analysis-back" type="button">Back</button>
-      <div class="analysis-actions">
-        <button id="rerunAnalysisButton" class="analysis-button" type="button">Re-run Analysis</button>
-        <a id="downloadRecordingButton" class="analysis-button" href="#">Download Recording</a>
+      <div class="header-left">
+        <button id="analysisPageBackButton" class="analysis-back" type="button">&larr; Back</button>
+        <div class="header-info">
+          <h1 id="analysisPageTitle">Loading...</h1>
+          <div class="header-meta">
+            <span id="callStatusBadge" class="analysis-status">Loading</span>
+            <span id="analysisPageSubtitle">--</span>
+            <span>&middot;</span>
+            <span id="durationValue">--</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <a id="exportPdfButton" class="icon-btn" href="#">PDF</a>
+        <a id="downloadTranscriptButton" class="icon-btn" href="#">TXT</a>
+        <button id="rerunAnalysisButton" class="icon-btn" style="display: none;">Re-run</button>
       </div>
     </div>
 
     <div id="alertContainer" class="alert-stack"></div>
 
-    <section class="analysis-hero">
-      <article class="analysis-card analysis-overview">
-        <div class="analysis-status-row">
-          <div class="analysis-title">
-            <span id="callStatusBadge" class="analysis-status"><i class="analysis-dot"></i><span>Loading</span></span>
-            <h1 id="analysisPageTitle">Call Analysis</h1>
-            <p id="analysisPageSubtitle">Loading call details...</p>
-          </div>
-          <div class="analysis-fact">
-            <span>Overall Outcome</span>
-            <strong id="overallOutcomeValue">--</strong>
-          </div>
-        </div>
-        <div class="analysis-overview-grid">
-          <div class="analysis-fact"><span>Call Type</span><strong id="callTypeValue">--</strong></div>
-          <div class="analysis-fact"><span>Patient Name</span><strong id="patientNameValue">--</strong></div>
-          <div class="analysis-fact"><span>Phone Number</span><strong id="phoneValue">--</strong></div>
-          <div class="analysis-fact"><span>Call Date & Time</span><strong id="calledAtValue">--</strong></div>
-          <div class="analysis-fact"><span>Call Duration</span><strong id="durationValue">--</strong></div>
-          <div class="analysis-fact"><span>Agent Used</span><strong id="agentValue">--</strong></div>
-          <div class="analysis-fact"><span>Transcript</span><strong id="transcriptStatusValue">--</strong></div>
-          <div class="analysis-fact"><span>Analysis</span><strong id="analysisStatusValue">--</strong></div>
-        </div>
-      </article>
-
+    <!-- ROW 2: SUMMARY -->
+    <section id="summarySection" class="summary-card">
+      <div id="summaryValue">Loading summary...</div>
     </section>
 
-    <section class="analysis-stack" style="margin-top: 16px;">
-      <!-- SECTION 2: AI Insights -->
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
-        <aside id="qualitySection" class="analysis-card analysis-score-card">
-          <div>
-            <div class="analysis-section-header">
-              <div>
-                <h2 class="analysis-section-title">AI Quality Score</h2>
-                <p class="analysis-section-subtitle">Execution quality for this call</p>
-              </div>
-            </div>
-            <div id="qualityRing" class="analysis-score-ring" style="--score-angle: 0deg;"><div id="qualityScoreValue">--</div></div>
-          </div>
-          <div id="qualityChecks" class="quality-checks"></div>
-        </aside>
+    <!-- ROW 3: KPI INSIGHTS -->
+    <section class="kpi-row">
+      <div class="kpi-card"><span>Quality</span><strong id="kpiQualityScore">--</strong></div>
+      <div class="kpi-card"><span>Sentiment</span><strong id="sentimentValue">--</strong></div>
+      <div class="kpi-card"><span>Duration</span><strong id="kpiDuration">--</strong></div>
+      <div class="kpi-card"><span>Outcome</span><strong id="overallOutcomeValue">--</strong></div>
+      <div class="kpi-card"><span>Q's Answered</span><strong id="kpiQuestions">--</strong></div>
+    </section>
 
-        <section id="sentimentSection" class="analysis-card analysis-section">
-          <div class="analysis-section-header">
-            <div>
-              <h2 class="analysis-section-title">Sentiment Analysis</h2>
-              <p class="analysis-section-subtitle">Patient tone and confidence</p>
-            </div>
-          </div>
-          <div class="sentiment-panel">
-            <div id="sentimentMark" class="sentiment-mark">--</div>
-            <div class="sentiment-copy">
-              <strong id="sentimentValue">--</strong>
-              <span id="sentimentConfidenceValue">-- Confidence</span>
-            </div>
-          </div>
-        </section>
+    <!-- ROW 4: KEY OUTCOMES -->
+    <section id="outcomesSection" class="outcomes-wrap">
+      <div id="outcomeCards" style="display: contents;"></div>
+    </section>
 
-        <section id="outcomesSection" class="analysis-card analysis-section">
-          <div class="analysis-section-header">
-            <div>
-              <h2 class="analysis-section-title">Key Outcomes</h2>
-              <p class="analysis-section-subtitle">Automatically extracted answers</p>
-            </div>
-          </div>
-          <div id="outcomeCards" class="outcome-grid"></div>
-        </section>
+    <!-- ROW 5: TRANSCRIPT -->
+    <section id="transcriptSection" class="chat-card">
+      <div class="chat-header">
+        <input id="transcriptSearch" class="chat-search" type="search" placeholder="Search transcript...">
+        <button id="copyTranscriptButton" class="icon-btn" type="button">Copy</button>
       </div>
-
-      <!-- SECTION 3: AI Generated Summary -->
-      <section id="summarySection" class="analysis-card analysis-section">
-        <div class="analysis-section-header">
-          <div>
-            <h2 class="analysis-section-title">AI Generated Summary</h2>
-            <p class="analysis-section-subtitle">What happened in the call</p>
-          </div>
-        </div>
-        <p id="summaryValue" class="summary-text">Loading summary...</p>
-      </section>
-
-      <!-- SECTION 4: Conversation Timeline -->
-      <details id="timelineSection" class="analysis-card analysis-section">
-        <summary class="analysis-section-header" style="cursor: pointer; list-style: none;">
-          <div>
-            <h2 class="analysis-section-title">Conversation Timeline (Click to expand)</h2>
-            <p class="analysis-section-subtitle">Call progress at a glance</p>
-          </div>
-        </summary>
-        <div id="timelineList" class="timeline" style="margin-top: 14px;"></div>
-      </details>
-
-      <section id="recordingSection" class="analysis-card analysis-section">
-        <div class="analysis-section-header">
-          <div>
-            <h2 class="analysis-section-title">Recording</h2>
-            <p class="analysis-section-subtitle">Playback and audio analysis</p>
-          </div>
-          <span id="recordingQualityValue" class="analysis-status">Checking</span>
-        </div>
-        <div id="recordingContainer"></div>
-      </section>
-
-      <!-- SECTION 5: Advanced Details -->
-      <details id="advancedDetailsSection" class="saas-accordion analysis-card analysis-section">
-        <summary class="analysis-section-header" style="list-style: none;">
-          <div>
-            <h2 class="analysis-section-title">Advanced Details</h2>
-            <p class="analysis-section-subtitle">Technical metrics and raw data</p>
-          </div>
-        </summary>
-        <div class="saas-accordion-content">
-          <div id="metricsGrid" class="metric-grid"></div>
-        </div>
-      </details>
-
-      <!-- SECTION 5: Transcript -->
-      <section id="transcriptSection" class="analysis-card analysis-section">
-        <div class="analysis-section-header">
-          <div>
-            <h2 class="analysis-section-title">Full Transcript</h2>
-            <p class="analysis-section-subtitle">Speaker-separated, searchable transcript</p>
-          </div>
-        </div>
-        <div class="transcript-toolbar">
-          <input id="transcriptSearch" class="transcript-search" type="search" placeholder="Search transcript">
-          <a id="viewTranscriptButton" class="analysis-button" href="#" target="_blank">View Raw</a>
-          <button id="copyTranscriptButton" class="analysis-button" type="button">Copy Transcript</button>
-          <button id="clearSearchButton" class="analysis-button" type="button">Clear</button>
-        </div>
-        <div id="transcriptList" class="transcript-list" style="margin-top: 14px;"></div>
-      </section>
-
-      <section id="exportSection" class="analysis-card analysis-section">
-        <div class="analysis-section-header">
-          <div>
-            <h2 class="analysis-section-title">Export Actions</h2>
-            <p class="analysis-section-subtitle">Share or archive this call</p>
-          </div>
-        </div>
-        <div class="analysis-actions" style="justify-content: flex-start;">
-          <a id="exportPdfButton" class="analysis-button primary" href="#">Export PDF Report</a>
-          <a id="downloadTranscriptButton" class="analysis-button" href="#">Download Transcript</a>
-          <button id="copySummaryButton" class="analysis-button" type="button">Copy Summary</button>
-        </div>
-      </section>
+      <div id="transcriptList" class="chat-body">
+        <div class="empty-chat">Loading transcript...</div>
+      </div>
     </section>
+
+    <!-- ROW 6: ADVANCED DETAILS -->
+    <details id="advancedDetailsSection" class="advanced-accordion">
+      <summary>Advanced Details</summary>
+      <div class="advanced-content">
+        <!-- Recording (hidden if none) -->
+        <div id="recordingSection" style="display: none;">
+          <strong style="display: block; margin-bottom: 8px; font-size: 13px;">Call Recording</strong>
+          <div id="recordingContainer"></div>
+          <a id="downloadRecordingButton" href="#" style="display: none;">Download</a>
+          <span id="recordingQualityValue" style="display: none;"></span>
+        </div>
+
+        <!-- Metrics Grid -->
+        <strong style="display: block; font-size: 13px;">Technical Metrics</strong>
+        <div id="metricsGrid" class="metric-grid"></div>
+
+        <!-- Timeline (hidden if none) -->
+        <div id="timelineSection" style="display: none;">
+          <strong style="display: block; font-size: 13px; margin-bottom: 8px;">Timeline</strong>
+          <div id="timelineList" style="font-size: 13px;"></div>
+        </div>
+
+        <div style="display:none;">
+          <!-- Hidden elements to satisfy existing JS cleanly without breaking -->
+          <span id="callTypeValue"></span>
+          <span id="patientNameValue"></span>
+          <span id="phoneValue"></span>
+          <span id="calledAtValue"></span>
+          <span id="agentValue"></span>
+          <span id="transcriptStatusValue"></span>
+          <span id="analysisStatusValue"></span>
+          <span id="qualityScoreValue"></span>
+          <div id="qualityRing"></div>
+          <div id="qualityChecks"></div>
+          <span id="sentimentMark"></span>
+          <span id="sentimentConfidenceValue"></span>
+          <a id="viewTranscriptButton"></a>
+          <button id="clearSearchButton"></button>
+          <button id="copySummaryButton"></button>
+          <div id="qualitySection"></div>
+        </div>
+      </div>
+    </details>
   </main>
 
   <script src="/app-shell.js"></script>
@@ -782,7 +529,7 @@
 
     function parseTurnsFromText(text) {
       if (!text) return [];
-      
+
       const turns = [];
       const blocks = String(text).split(/---+/).map(b => b.trim()).filter(Boolean);
 
@@ -790,10 +537,10 @@
         for (const block of blocks) {
           const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
           if (!lines.length) continue;
-          
+
           let role = 'NOTE';
           let content = block;
-          
+
           const firstLineUpper = lines[0].toUpperCase();
           if (['AGENT', 'AI', 'BOT', 'SYSTEM'].includes(firstLineUpper)) {
             role = 'AI';
@@ -836,7 +583,7 @@
 
     function setSectionVisible(id, isVisible) {
       const section = document.getElementById(id);
-      if (section) section.hidden = !isVisible;
+      if (section) section.style.display = isVisible ? '' : 'none';
     }
 
     function hasText(value) {
@@ -852,15 +599,22 @@
 
     function renderOverview(call) {
       const analysis = call.analysis || {};
-      document.getElementById('analysisPageTitle').textContent = call.customer_name || 'Patient';
-      document.getElementById('analysisPageSubtitle').textContent = `${formatCallType(call.call_type)} · ${AppShell.formatDateTime(call.called_at)}`;
+      setText('analysisPageTitle', call.customer_name || 'Patient');
+      setText('analysisPageSubtitle', `${formatCallType(call.call_type)} · ${AppShell.formatDateTime(call.called_at)}`);
       renderStatus(call);
-      setText('overallOutcomeValue', String(call.outcome || '').toLowerCase() === 'completed' ? 'Successful' : AppShell.formatStatusLabel(call.outcome || 'Pending'));
+
+      const isComplete = String(call.outcome || '').toLowerCase() === 'completed';
+      setText('overallOutcomeValue', isComplete ? 'Successful' : AppShell.formatStatusLabel(call.outcome || 'Pending'));
+
+      const dur = formatDuration(call.call_duration || analysis.metrics?.total_duration || 0);
+      setText('durationValue', dur);
+      setText('kpiDuration', dur);
+
+      // Hidden defaults
       setText('callTypeValue', formatCallType(call.call_type));
       setText('patientNameValue', call.customer_name || 'Patient');
       setText('phoneValue', call.customer_phone || '--');
       setText('calledAtValue', AppShell.formatDateTime(call.called_at));
-      setText('durationValue', formatDuration(call.call_duration || analysis.metrics?.total_duration || 0));
       setText('agentValue', call.agent_name || 'Default AI Agent');
       setText('transcriptStatusValue', AppShell.formatStatusLabel(call.transcript_status || 'pending'));
       setText('analysisStatusValue', AppShell.formatStatusLabel(call.analysis_status || 'pending'));
@@ -869,99 +623,24 @@
     function renderRecording(call) {
       const container = document.getElementById('recordingContainer');
       const hasRecording = call.recording_url || call.recording_sid || String(call.recording_status || '').toLowerCase() === 'completed';
-      
-      const recordingBtn = document.getElementById('downloadRecordingButton');
-      if (hasRecording) {
-        recordingBtn.removeAttribute('disabled');
-        recordingBtn.href = `${AppShell.API_BASE}/calls/${call.id}/recording`;
-        recordingBtn.download = `call-${call.id}-recording.mp3`;
-      } else {
-        recordingBtn.setAttribute('disabled', 'true');
-        recordingBtn.removeAttribute('href');
-      }
 
-      document.getElementById('recordingQualityValue').textContent = hasRecording ? 'Available' : 'Unavailable';
-      document.getElementById('recordingQualityValue').className = `analysis-status ${hasRecording ? 'completed' : 'failed'}`;
+      setSectionVisible('recordingSection', hasRecording);
 
       if (!hasRecording) {
-        container.innerHTML = `
-          <div class="saas-audio-error">No recording available</div>
-          <div class="recording-player" style="opacity: 0.5; pointer-events: none; margin-top: 12px;">
-            <div class="recording-controls">
-              <button class="control-button" type="button" disabled>Play</button>
-              <button class="control-button" type="button" disabled>Stop</button>
-              <button class="control-button" type="button" disabled>Vol</button>
-              <div class="progress-wrap">
-                <input class="progress-bar" type="range" min="0" max="100" value="0" disabled>
-                <div class="time-row"><span>0s</span><span>${formatDuration(call.call_duration || 0)}</span></div>
-              </div>
-            </div>
-          </div>
-        `;
+        container.innerHTML = '';
         return;
       }
 
       const recordingUrl = `${AppShell.API_BASE}/calls/${call.id}/recording`;
       container.innerHTML = `
-        <div class="saas-audio-player">
-          <audio id="analysisAudio" preload="metadata" src="${recordingUrl}"></audio>
-          <div class="recording-controls" style="flex: 1; width: 100%;">
-            <button id="playPauseButton" class="control-button" type="button" title="Play or pause">Play</button>
-            <button id="stopButton" class="control-button" type="button" title="Stop">Stop</button>
-            <button id="muteButton" class="control-button" type="button" title="Mute">Vol</button>
-            <div class="progress-wrap">
-              <input id="audioProgress" class="progress-bar" type="range" min="0" max="100" value="0">
-              <div class="time-row"><span id="audioCurrentTime">0s</span><span id="audioTotalTime">${formatDuration(call.call_duration || 0)}</span></div>
-            </div>
-          </div>
+        <div class="recording-controls">
+          <audio id="analysisAudio" controls preload="metadata" src="${recordingUrl}" style="width:100%; height:32px;"></audio>
         </div>
       `;
-
-      audioEl = document.getElementById('analysisAudio');
-      const playPause = document.getElementById('playPauseButton');
-      const stop = document.getElementById('stopButton');
-      const mute = document.getElementById('muteButton');
-      const progress = document.getElementById('audioProgress');
-      const volume = document.getElementById('volumeControl');
-
-      playPause.addEventListener('click', async () => {
-        if (audioEl.paused) {
-          await audioEl.play();
-        } else {
-          audioEl.pause();
-        }
-      });
-      stop.addEventListener('click', () => {
-        audioEl.pause();
-        audioEl.currentTime = 0;
-      });
-      mute.addEventListener('click', () => {
-        audioEl.muted = !audioEl.muted;
-        mute.textContent = audioEl.muted ? 'Mute' : 'Vol';
-      });
-      if (volume) {
-        volume.addEventListener('input', () => {
-          audioEl.volume = Number(volume.value);
-        });
-      }
-      progress.addEventListener('input', () => {
-        if (audioEl.duration) audioEl.currentTime = (Number(progress.value) / 100) * audioEl.duration;
-      });
-      audioEl.addEventListener('loadedmetadata', () => {
-        document.getElementById('audioTotalTime').textContent = formatDuration(audioEl.duration || call.call_duration || 0);
-      });
-      audioEl.addEventListener('timeupdate', () => {
-        const pct = audioEl.duration ? (audioEl.currentTime / audioEl.duration) * 100 : 0;
-        progress.value = String(pct);
-        document.getElementById('audioCurrentTime').textContent = formatDuration(audioEl.currentTime);
-      });
-      audioEl.addEventListener('play', () => { playPause.textContent = 'Pause'; });
-      audioEl.addEventListener('pause', () => { playPause.textContent = 'Play'; });
     }
 
     function renderSummary(call) {
       const summary = call.summary || call.analysis_summary || call.analysis?.summary || '';
-      setSectionVisible('summarySection', true);
       document.getElementById('summaryValue').textContent = hasText(summary) ? summary : 'Analysis not generated yet.';
     }
 
@@ -972,16 +651,13 @@
       });
       const container = document.getElementById('outcomeCards');
       if (!cards.length) {
-        setSectionVisible('outcomesSection', false);
         container.innerHTML = '';
         return;
       }
-      setSectionVisible('outcomesSection', true);
       container.innerHTML = cards.map((card) => `
-        <article class="outcome-card ${AppShell.escapeHtml(card.tone || '')}">
-          <span>${AppShell.escapeHtml(card.label)}</span>
-          <strong>${AppShell.escapeHtml(card.value || '')}</strong>
-        </article>
+        <div class="outcome-chip ${AppShell.escapeHtml(card.tone || '')}">
+          ✓ ${AppShell.escapeHtml(card.label)}: ${AppShell.escapeHtml(card.value || '')}
+        </div>
       `).join('');
     }
 
@@ -989,12 +665,8 @@
       const sentiment = String(call.sentiment || call.sentiment_label || call.analysis?.sentiment || 'neutral').toLowerCase();
       const confidence = Math.round(Number(call.sentiment_score || call.analysis?.sentiment_score || 0) * 100);
       const hasSentiment = hasText(sentiment) && confidence > 0;
-      setSectionVisible('sentimentSection', hasSentiment);
-      if (!hasSentiment) return;
-      const letter = sentiment === 'positive' ? '+' : sentiment === 'negative' ? '-' : '=';
-      document.getElementById('sentimentMark').textContent = letter;
-      document.getElementById('sentimentValue').textContent = AppShell.formatStatusLabel(sentiment);
-      document.getElementById('sentimentConfidenceValue').textContent = `${confidence || 0}% Confidence`;
+
+      setText('sentimentValue', hasSentiment ? AppShell.formatStatusLabel(sentiment) : '--');
     }
 
     function renderTranscript(filter = '') {
@@ -1004,23 +676,27 @@
         ? transcriptTurns.filter((turn) => `${turn.role} ${turn.text}`.toLowerCase().includes(needle))
         : transcriptTurns;
 
-      setSectionVisible('transcriptSection', true);
       if (!transcriptTurns.length) {
-        container.innerHTML = '<div class="empty-state">No transcript available.</div>';
+        container.innerHTML = '<div class="empty-chat">No transcript available.</div>';
         return;
       }
-      
+
       if (!visibleTurns.length) {
-        container.innerHTML = '<div class="empty-state">No matching lines found.</div>';
+        container.innerHTML = '<div class="empty-chat">No matching lines found.</div>';
         return;
       }
 
       container.innerHTML = visibleTurns.map((turn) => `
-        <div class="transcript-turn ${turn.role === 'AI' ? 'ai' : 'patient'}">
-          <div class="turn-role">${turn.role === 'PATIENT' ? 'Patient' : AppShell.escapeHtml(turn.role)}</div>
-          <div class="turn-text">${AppShell.escapeHtml(turn.text)}</div>
+        <div class="chat-bubble-wrap ${turn.role === 'AI' ? 'ai' : 'patient'}">
+          <div class="chat-role">${turn.role === 'PATIENT' ? 'Patient' : AppShell.escapeHtml(turn.role)}</div>
+          <div class="chat-bubble">${AppShell.escapeHtml(turn.text)}</div>
         </div>
       `).join('');
+
+      // Auto-scroll to bottom only if not filtering
+      if (!filter) {
+        container.scrollTop = container.scrollHeight;
+      }
     }
 
     function renderTimeline(call) {
@@ -1033,9 +709,9 @@
       }
       setSectionVisible('timelineSection', true);
       container.innerHTML = events.map((event) => `
-        <div class="timeline-item">
-          <div class="timeline-time">${formatClock(event.at)}</div>
-          <div class="timeline-label">${AppShell.escapeHtml(event.label || '')}</div>
+        <div style="display:flex; gap:12px; margin-bottom:8px;">
+          <span style="color:var(--analysis-muted); min-width:60px;">${formatClock(event.at)}</span>
+          <span>${AppShell.escapeHtml(event.label || '')}</span>
         </div>
       `).join('');
     }
@@ -1044,12 +720,10 @@
       const metrics = call.analysis?.metrics || {};
       const endReasonRaw = call.call_end_reason || call.outcome_detail || '';
       const endReasonFormatted = endReasonRaw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-      const hasMetrics = Object.values(metrics).some((value) => Number(value || 0) > 0) || call.call_duration > 0 || endReasonRaw;
-      setSectionVisible('advancedDetailsSection', hasMetrics);
-      if (!hasMetrics) {
-        document.getElementById('metricsGrid').innerHTML = '';
-        return;
-      }
+
+      // Populate Top KPI for Questions Answered
+      setText('kpiQuestions', String(metrics.questions_answered || 0));
+
       const rows = [
         ['Total Duration', formatDuration(call.call_duration || metrics.total_duration || 0)],
         ['End Reason', endReasonFormatted],
@@ -1058,29 +732,17 @@
         ['Silence Duration', formatDuration(metrics.silence_duration || 0)],
         ['Interruptions', String(metrics.interruptions || 0)],
         ['Questions Asked', String(metrics.questions_asked || 0)],
-        ['Questions Answered', String(metrics.questions_answered || 0)],
         ['Avg Response Time', metrics.average_response_time_ms ? `${metrics.average_response_time_ms}ms` : '']
       ].filter(([, value]) => String(value || '').trim() && value !== '0s' && value !== '0');
+
       document.getElementById('metricsGrid').innerHTML = rows.map(([label, value]) => `
-        <article class="metric-card"><span>${label}</span><strong>${value}</strong></article>
+        <div class="metric-card"><span>${label}</span><strong>${value}</strong></div>
       `).join('');
     }
 
     function renderQuality(call) {
       const score = Number(call.quality_score || call.analysis?.quality_score || 0);
-      setSectionVisible('qualitySection', score > 0);
-      if (score <= 0) return;
-      const ring = document.getElementById('qualityRing');
-      ring.style.setProperty('--score-angle', `${Math.min(100, Math.max(0, score)) * 3.6}deg`);
-      document.getElementById('qualityScoreValue').textContent = `${score || 0}%`;
-
-      const checks = call.analysis?.quality_checks || [];
-      document.getElementById('qualityChecks').innerHTML = checks.map((check) => `
-        <div class="quality-check">
-          <span>${AppShell.escapeHtml(check.label)}</span>
-          <strong class="${check.passed ? 'check-pass' : 'check-fail'}">${check.passed ? 'Yes' : 'No'}</strong>
-        </div>
-      `).join('');
+      setText('kpiQualityScore', score > 0 ? `${score}%` : '--');
     }
 
     function updateActionLinks(call) {
@@ -1088,7 +750,7 @@
       const pdfUrl = `${AppShell.API_BASE}/calls/${call.id}/analysis-pdf`;
       const hasTranscript = transcriptTurns.length > 0;
       const hasSummary = hasText(call.summary || call.analysis_summary || call.analysis?.summary);
-      
+
       const transcriptBtn = document.getElementById('downloadTranscriptButton');
       if (hasTranscript) {
         transcriptBtn.href = transcriptUrl;
@@ -1099,15 +761,6 @@
         transcriptBtn.setAttribute('disabled', 'true');
       }
 
-      const viewBtn = document.getElementById('viewTranscriptButton');
-      if (hasTranscript) {
-        viewBtn.href = `${AppShell.API_BASE}/calls/${call.id}/transcript`;
-        viewBtn.removeAttribute('disabled');
-      } else {
-        viewBtn.removeAttribute('href');
-        viewBtn.setAttribute('disabled', 'true');
-      }
-
       const pdfBtn = document.getElementById('exportPdfButton');
       if (hasTranscript || hasSummary) {
         pdfBtn.href = pdfUrl;
@@ -1115,13 +768,6 @@
       } else {
         pdfBtn.removeAttribute('href');
         pdfBtn.setAttribute('disabled', 'true');
-      }
-
-      const copyBtn = document.getElementById('copySummaryButton');
-      if (hasSummary) {
-        copyBtn.removeAttribute('disabled');
-      } else {
-        copyBtn.setAttribute('disabled', 'true');
       }
     }
 
@@ -1174,7 +820,7 @@
         AppShell.showAlert('Analysis updated successfully');
       } finally {
         button.disabled = false;
-        button.textContent = 'Re-run Analysis';
+        button.textContent = 'Re-run';
       }
     }
 
@@ -1182,13 +828,10 @@
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('analysisPageBackButton').addEventListener('click', goBackToFeedback);
       document.getElementById('transcriptSearch').addEventListener('input', (event) => renderTranscript(event.target.value));
-      document.getElementById('clearSearchButton').addEventListener('click', () => {
-        document.getElementById('transcriptSearch').value = '';
-        renderTranscript();
-      });
       document.getElementById('copyTranscriptButton').addEventListener('click', () => copyText(rawTranscriptText(), 'Transcript copied'));
-      document.getElementById('copySummaryButton').addEventListener('click', () => copyText(document.getElementById('summaryValue').textContent, 'Summary copied'));
-      document.getElementById('rerunAnalysisButton').addEventListener('click', rerunAnalysis);
+
+      const rerunBtn = document.getElementById('rerunAnalysisButton');
+      if (rerunBtn) rerunBtn.addEventListener('click', rerunAnalysis);
 
       try {
         await loadAnalysisPage();
@@ -1199,4 +842,5 @@
     });
   </script>
 </body>
+
 </html>
