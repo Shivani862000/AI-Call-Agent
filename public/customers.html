@@ -175,88 +175,139 @@
   </nav>
 
   <div id="newCallModal" class="modal-backdrop" aria-hidden="true">
-    <div class="modal-panel modal-panel--narrow" role="dialog" aria-modal="true" aria-labelledby="newCallModalTitle">
-      <div class="mobile-sheet-handle mobile-only"></div>
-      <div class="poc-card-header modal-sheet-header">
+    <div class="saas-modal-panel" role="dialog" aria-modal="true" aria-labelledby="newCallModalTitle">
+      <div class="saas-modal-header">
         <div>
-          <h3 id="newCallModalTitle" class="poc-card-title">Schedule New Call</h3>
+          <h3 id="newCallModalTitle" class="saas-modal-title">📞 Schedule New Call</h3>
+          <div class="saas-modal-subtitle">Create and schedule an AI-powered call.</div>
         </div>
-        <button id="closeNewCallModal" class="secondary modal-close" type="button">Close</button>
+        <button id="closeNewCallModal" class="saas-modal-close" type="button" aria-label="Close">
+          <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
       </div>
 
       <input id="editingCustomerId" type="hidden">
 
-      <div class="poc-form-grid">
-        <label class="span-2">
-          Patient Name
-          <input id="callCustomerName" type="text" maxlength="100" placeholder="e.g. Rahul Sharma">
-          <span class="error-text" id="callCustomerNameError"></span>
-        </label>
-        <label>
-          Phone Number
-          <input id="callCustomerPhone" type="tel" placeholder="+91 98765 43210">
-          <span class="error-text" id="callCustomerPhoneError"></span>
-        </label>
-        <label>
-          Call Time
-          <input id="callCustomerTime" type="time">
-          <span class="error-text" id="callCustomerTimeError"></span>
-        </label>
-      </div>
-
-      <div class="form-field-block">
-        <div class="field-label">Call Type</div>
-        <div class="segmented-control call-type-control" role="radiogroup" aria-label="Call type">
-          <label class="segment-button active">
-            <input type="radio" name="callType" value="REVIEW_CALL" checked>
-            Review Calling
-          </label>
-          <label class="segment-button">
-            <input type="radio" name="callType" value="THREE_MONTH_FOLLOWUP">
-            3 Month Follow-up
-          </label>
-        </div>
-      </div>
-
-      <div class="form-field-block">
-        <div class="field-label">Video Sent?</div>
-        <div class="segmented-control" role="radiogroup" aria-label="Video Sent">
-          <label class="segment-button active">
-            <input type="radio" name="videoSent" value="false" checked>
-            No
-          </label>
-          <label class="segment-button">
-            <input type="radio" name="videoSent" value="true">
-            Yes
-          </label>
-        </div>
-      </div>
-
-      <details id="careDetailsToggle" class="details-toggle">
-        <summary>Additional Care Details</summary>
-        <div class="details-content">
-          <div class="poc-form-grid">
-            <label>
-              DOB
-              <input id="careDob" type="date">
-              <span class="error-text" id="careDobError"></span>
-            </label>
-            <label>
-              Last Visit
-              <input id="careLastVisit" type="date">
-              <span class="error-text" id="careLastVisitError"></span>
-            </label>
-            <label class="span-2">
-              Treatment Type
-              <input id="careTreatment" type="text" placeholder="e.g. Blood test">
-              <span class="error-text" id="careTreatmentError"></span>
-            </label>
+      <div class="saas-modal-body">
+        
+        <!-- Section 1: Customer Info -->
+        <div>
+          <div class="saas-section-title">Customer Information</div>
+          <div class="saas-grid-2">
+            <div class="saas-field">
+              <label for="callCustomerName">Patient Name</label>
+              <input id="callCustomerName" type="text" maxlength="100" placeholder="e.g. Rahul Sharma">
+            </div>
+            <div class="saas-field">
+              <label for="callCustomerPhone">Phone Number</label>
+              <input id="callCustomerPhone" type="tel" placeholder="+91 98765 43210">
+            </div>
           </div>
         </div>
-      </details>
 
-      <div class="button-row" style="margin-top: 18px;">
-        <button id="scheduleCallSubmit" class="primary" type="button">Schedule Call</button>
+        <!-- Section 2: Call Scheduling -->
+        <div>
+          <div class="saas-section-title">Call Scheduling</div>
+          <div class="saas-grid-2">
+            <div class="saas-field">
+              <label for="callCustomerDate">Call Date</label>
+              <input id="callCustomerDate" type="date">
+            </div>
+            <div class="saas-field">
+              <label for="callCustomerTime">Call Time</label>
+              <input id="callCustomerTime" type="time">
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: Campaign Type -->
+        <div>
+          <div class="saas-section-title">Call Campaign Type</div>
+          <div class="saas-campaign-cards">
+            <div class="saas-campaign-card selected" data-value="REVIEW_CALL">
+              <strong>Review Call</strong>
+              <span>Collect feedback after donation</span>
+            </div>
+            <div class="saas-campaign-card" data-value="THREE_MONTH_FOLLOWUP">
+              <strong>3-Month Follow-up</strong>
+              <span>Schedule next donation</span>
+            </div>
+          </div>
+          <!-- Hidden inputs for legacy JS compatibility -->
+          <input type="hidden" id="hiddenCallType" value="REVIEW_CALL">
+          <input type="hidden" id="hiddenVideoSent" value="false">
+        </div>
+
+        <!-- Section 4: Additional Context -->
+        <div id="additionalContextSection">
+          <div class="saas-section-title">Additional Context</div>
+          
+          <div id="reviewCallContext">
+            <div class="saas-toggle-row">
+              <div class="saas-toggle-info">
+                <strong>Video Sent?</strong>
+                <span>Ask the patient about the video sent</span>
+              </div>
+              <label class="saas-toggle">
+                <input type="checkbox" id="videoSentToggle">
+                <span class="saas-toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div id="followUpContext" style="display: none;">
+            <div class="saas-grid-2">
+              <div class="saas-field">
+                <label for="careLastVisit">Previous Donation Date</label>
+                <input id="careLastVisit" type="date">
+              </div>
+              <div class="saas-field">
+                <label for="customNotes">Optional Notes</label>
+                <input id="customNotes" type="text" placeholder="e.g. Needs transport">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 5: AI Preview Card -->
+        <div>
+          <div class="saas-section-title">AI Preview</div>
+          <div class="saas-ai-preview">
+            <div class="saas-ai-preview-badge">AI Will Say</div>
+            <p class="saas-ai-preview-text" id="aiPreviewText">Good Morning.<br>Main Apna Blood Centre se baat kar rahi hoon.<br>Kya main <strong>...</strong> ji se baat kar rahi hoon?</p>
+          </div>
+        </div>
+
+        <!-- Section 6: Advanced Settings -->
+        <details class="saas-accordion">
+          <summary>Advanced Settings</summary>
+          <div class="saas-accordion-content">
+            <div class="saas-grid-2">
+              <div class="saas-field">
+                <label for="careDob">Date of Birth</label>
+                <input id="careDob" type="date">
+              </div>
+              <div class="saas-field">
+                <label for="careTreatment">Treatment Type</label>
+                <input id="careTreatment" type="text" placeholder="e.g. Blood test">
+              </div>
+              <div class="saas-field">
+                <label>Retry Attempts</label>
+                <input type="number" value="2" min="1" max="5">
+              </div>
+              <div class="saas-field">
+                <label>Preferred Language</label>
+                <input type="text" value="Hindi" disabled>
+              </div>
+            </div>
+          </div>
+        </details>
+
+      </div>
+
+      <div class="saas-modal-footer">
+        <button id="cancelNewCallModal" class="btn-ghost-saas" type="button">Cancel</button>
+        <button id="scheduleCallSubmit" class="btn-primary-saas" type="button" disabled>Schedule Call</button>
       </div>
     </div>
   </div>
@@ -402,14 +453,66 @@
 
     function setCallTypeSelection(value) {
       const normalized = normalizeCallType(value);
-      document.querySelectorAll('input[name="callType"]').forEach((input) => {
-        input.checked = input.value === normalized;
-        input.closest('.segment-button')?.classList.toggle('active', input.checked);
+      const hiddenInput = document.getElementById('hiddenCallType');
+      if (hiddenInput) hiddenInput.value = normalized;
+      
+      document.querySelectorAll('.saas-campaign-card').forEach((card) => {
+        if (card.dataset.value === normalized) {
+          card.classList.add('selected');
+        } else {
+          card.classList.remove('selected');
+        }
       });
+      
+      const reviewContext = document.getElementById('reviewCallContext');
+      const followUpContext = document.getElementById('followUpContext');
+      
+      if (reviewContext && followUpContext) {
+        if (normalized === 'REVIEW_CALL') {
+          reviewContext.style.display = 'block';
+          followUpContext.style.display = 'none';
+        } else {
+          reviewContext.style.display = 'none';
+          followUpContext.style.display = 'block';
+        }
+      }
+      updateAiPreview();
+      validateNewCallForm();
     }
 
     function getSelectedCallType() {
-      return document.querySelector('input[name="callType"]:checked')?.value || 'REVIEW_CALL';
+      const hiddenInput = document.getElementById('hiddenCallType');
+      return hiddenInput ? hiddenInput.value : 'REVIEW_CALL';
+    }
+    
+    function updateAiPreview() {
+      const nameInput = document.getElementById('callCustomerName');
+      const name = nameInput ? nameInput.value.trim() || '...' : '...';
+      const callType = getSelectedCallType();
+      const previewText = document.getElementById('aiPreviewText');
+      
+      if (!previewText) return;
+      
+      if (callType === 'REVIEW_CALL') {
+        previewText.innerHTML = `Good Morning.<br>Main Apna Blood Centre se baat kar rahi hoon.<br>Kya main <strong>${AppShell.escapeHtml(name)}</strong> ji se baat kar rahi hoon?`;
+      } else {
+        previewText.innerHTML = `Good Morning.<br>Main Apna Blood Centre se baat kar rahi hoon.<br><strong>${AppShell.escapeHtml(name)}</strong> ji, aapko blood donate kiye huye 3 mahine ho chuke hain.`;
+      }
+    }
+
+    function validateNewCallForm() {
+      const name = document.getElementById('callCustomerName')?.value.trim() || '';
+      const phone = document.getElementById('callCustomerPhone')?.value.trim() || '';
+      const time = document.getElementById('callCustomerTime')?.value.trim() || '';
+      const btn = document.getElementById('scheduleCallSubmit');
+      
+      if (btn) {
+        if (name.length >= 2 && phone.length >= 10 && time) {
+          btn.disabled = false;
+        } else {
+          btn.disabled = true;
+        }
+      }
     }
 
     function isToday(value) {
@@ -440,25 +543,23 @@
     }
 
     function clearFormErrors() {
-      AppShell.clearFieldErrors([
-        'callCustomerName',
-        'callCustomerPhone',
-        'callCustomerTime',
-        'careDob',
-        'careLastVisit',
-        'careTreatment'
-      ]);
+      // Errors handled differently in SaaS form, kept for compatibility
     }
 
     function getNewCallPayload() {
-      const videoSent = document.querySelector('input[name="videoSent"]:checked')?.value === 'true';
+      const toggle = document.getElementById('videoSentToggle');
+      const videoSent = toggle ? toggle.checked : false;
+      
+      const timeVal = document.getElementById('callCustomerTime')?.value.trim() || '';
+      const dateVal = document.getElementById('callCustomerDate')?.value.trim() || '';
+      
       return {
-        name: document.getElementById('callCustomerName').value.trim(),
-        phone: normalizePhoneForApi(document.getElementById('callCustomerPhone').value),
-        preferred_slot: document.getElementById('callCustomerTime').value.trim(),
+        name: document.getElementById('callCustomerName')?.value.trim() || '',
+        phone: normalizePhoneForApi(document.getElementById('callCustomerPhone')?.value || ''),
+        preferred_slot: timeVal,
         callType: getSelectedCallType(),
         video_sent: videoSent,
-        last_visit_date: document.getElementById('careLastVisit').value || ''
+        last_visit_date: document.getElementById('careLastVisit')?.value || ''
       };
     }
 
@@ -466,12 +567,12 @@
       return {
         name: customerPayload.name,
         phone: customerPayload.phone,
-        date_of_birth: document.getElementById('careDob').value || '',
-        last_visit_date: document.getElementById('careLastVisit').value || '',
-        treatment_type: document.getElementById('careTreatment').value.trim(),
+        date_of_birth: document.getElementById('careDob')?.value || '',
+        last_visit_date: document.getElementById('careLastVisit')?.value || '',
+        treatment_type: document.getElementById('careTreatment')?.value.trim() || '',
         annual_reminder_enabled: 1,
         annual_reminder_slot: customerPayload.preferred_slot || '10:00',
-        notes: '',
+        notes: document.getElementById('customNotes')?.value.trim() || '',
         status: 'active'
       };
     }
@@ -481,7 +582,6 @@
       if (!payload.name || payload.name.length < 2) fieldErrors.callCustomerName = 'Patient name is required';
       if (!/^\+\d{12}$/.test(payload.phone)) fieldErrors.callCustomerPhone = 'Use a valid Indian mobile number';
       if (!payload.preferred_slot) fieldErrors.callCustomerTime = 'Call time is required';
-      const editingId = Number(document.getElementById('editingCustomerId').value || 0);
       return fieldErrors;
     }
 
@@ -495,22 +595,30 @@
     }
 
     function resetNewCallForm(mode = 'call') {
-      document.getElementById('editingCustomerId').value = '';
-      document.getElementById('newCallModalTitle').textContent = mode === 'customer' ? 'Add Customer' : 'Schedule New Call';
-      document.getElementById('scheduleCallSubmit').textContent = mode === 'customer' ? 'Add Customer' : 'Schedule Call';
-      document.getElementById('callCustomerName').value = '';
-      document.getElementById('callCustomerPhone').value = '';
-      document.getElementById('callCustomerTime').value = '';
-      document.getElementById('careDob').value = '';
-      document.getElementById('careLastVisit').value = '';
-      document.getElementById('careTreatment').value = '';
-      setCallTypeSelection('REVIEW_CALL');
-      document.querySelectorAll('input[name="videoSent"]').forEach((input) => {
-        input.checked = input.value === 'false';
-        input.closest('.segment-button')?.classList.toggle('active', input.checked);
+      const editingInput = document.getElementById('editingCustomerId');
+      if (editingInput) editingInput.value = '';
+      
+      const title = document.getElementById('newCallModalTitle');
+      if (title) title.textContent = mode === 'customer' ? 'Add Customer' : '📞 Schedule New Call';
+      
+      const submit = document.getElementById('scheduleCallSubmit');
+      if (submit) submit.textContent = mode === 'customer' ? 'Add Customer' : 'Schedule Call';
+      
+      ['callCustomerName', 'callCustomerPhone', 'callCustomerTime', 'callCustomerDate', 'careDob', 'careLastVisit', 'careTreatment', 'customNotes'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
       });
-      document.getElementById('careDetailsToggle').open = false;
+      
+      const videoToggle = document.getElementById('videoSentToggle');
+      if (videoToggle) videoToggle.checked = false;
+      
+      const accordion = document.querySelector('.saas-accordion');
+      if (accordion) accordion.open = false;
+      
+      setCallTypeSelection('REVIEW_CALL');
       clearFormErrors();
+      updateAiPreview();
+      validateNewCallForm();
     }
 
     function openNewCallModal(customerId = null, options = {}) {
@@ -529,19 +637,28 @@
           setCallTypeSelection(customer.call_type || 'REVIEW_CALL');
         }
         if (client) {
-          document.getElementById('careDetailsToggle').open = true;
+          const acc = document.querySelector('.saas-accordion');
+          if (acc) acc.open = true;
           document.getElementById('careDob').value = client.date_of_birth || '';
           document.getElementById('careLastVisit').value = client.last_visit_date || '';
           document.getElementById('careTreatment').value = client.treatment_type || '';
         }
       }
-      document.getElementById('newCallModal').classList.add('open');
-      document.getElementById('newCallModal').setAttribute('aria-hidden', 'false');
+      const modal = document.getElementById('newCallModal');
+      if (modal) {
+        modal.classList.add('open');
+        modal.setAttribute('aria-hidden', 'false');
+      }
+      updateAiPreview();
+      validateNewCallForm();
     }
 
     function closeNewCallModal() {
-      document.getElementById('newCallModal').classList.remove('open');
-      document.getElementById('newCallModal').setAttribute('aria-hidden', 'true');
+      const modal = document.getElementById('newCallModal');
+      if (modal) {
+        modal.classList.remove('open');
+        modal.setAttribute('aria-hidden', 'true');
+      }
     }
 
     async function saveClientRecord(payload) {
@@ -996,16 +1113,20 @@
         currentQueuePage = 1;
         renderQueue();
       });
-      document.querySelectorAll('input[name="callType"]').forEach((input) => {
-        input.addEventListener('change', () => setCallTypeSelection(input.value));
-      });
-      document.querySelectorAll('input[name="videoSent"]').forEach((input) => {
-        input.addEventListener('change', () => {
-          document.querySelectorAll('input[name="videoSent"]').forEach((i) => {
-            i.checked = i.value === input.value;
-            i.closest('.segment-button')?.classList.toggle('active', i.checked);
-          });
+      document.querySelectorAll('.saas-campaign-card').forEach((card) => {
+        card.addEventListener('click', () => {
+          setCallTypeSelection(card.dataset.value);
         });
+      });
+      document.getElementById('cancelNewCallModal')?.addEventListener('click', closeNewCallModal);
+      ['callCustomerName', 'callCustomerPhone', 'callCustomerTime'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.addEventListener('input', () => {
+            if (id === 'callCustomerName') updateAiPreview();
+            validateNewCallForm();
+          });
+        }
       });
       document.querySelectorAll('.mobile-filter-option').forEach((button) => {
         button.addEventListener('click', () => {
