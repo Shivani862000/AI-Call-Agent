@@ -457,9 +457,9 @@ module.exports = function setupWebSocketBridge(server) {
         console.log(`[STAGE 5: Gemini LLM] Generated text: ${aiText}`);
         sendDeepgramTtsText(aiText);
 
-        if (outboundDemoState.endCallAfterNextReply || shouldAutoHangupAfterAgentTurn(aiText)) {
-          requestCallHangup('gemini_closing_detected');
-          scheduleFinalizeCallHangup('gemini_closing_detected', aiText);
+        if (outboundDemoState.endCallAfterNextReply) {
+          outboundDemoState.conversationEnded = true;
+          console.log(`[ICALLMATE] Auto-hangup closing message detected but auto-hangup is disabled.`);
         }
       } catch (error) {
         console.error('[ICALLMATE][GEMINI ERROR]', error.message);
@@ -562,20 +562,7 @@ module.exports = function setupWebSocketBridge(server) {
               lastLlmResponseAt = Date.now();
               console.log(`[ICALLMATE][GEMINI LIVE] Connected streamId=${getSessionLabel()}`);
 
-              if (!llmWatchdogInterval) {
-                llmWatchdogInterval = setInterval(() => {
-                  if (bridgeClosed) {
-                    clearInterval(llmWatchdogInterval);
-                    return;
-                  }
-                  if (Date.now() - lastLlmResponseAt > 12000) {
-                    console.warn(`[ICALLMATE] LLM watchdog timeout streamId=${getSessionLabel()}`);
-                    requestCallHangup('llm_watchdog_timeout');
-                    scheduleFinalizeCallHangup('llm_watchdog_timeout', transcript[transcript.length - 1]?.text || '');
-                    clearInterval(llmWatchdogInterval);
-                  }
-                }, 2000);
-              }
+              // LLM watchdog interval removed
             },
             onmessage: (message) => {
               if (bridgeClosed) {
@@ -670,16 +657,7 @@ module.exports = function setupWebSocketBridge(server) {
                   }
                 }
                 if (/\bend_call\b|END_CALL\s*=\s*true/i.test(String(outputTranscript))) {
-                  requestCallHangup('gemini_live_end_call_marker');
-                  finalResponseInProgress = true;
-                  scheduleFinalizeCallHangup('gemini_live_end_call_marker', cleanTranscript);
-                }
-                if (shouldAutoHangupAfterAgentTurn(cleanTranscript)) {
-                  outboundDemoState.conversationEnded = true;
-                  console.log(`[ICALLMATE] Auto-hangup closing message detected. Ignoring further audio.`);
-                  requestCallHangup('conversation_completed');
-                  finalResponseInProgress = true;
-                  scheduleFinalizeCallHangup('conversation_completed', cleanTranscript);
+                  console.log(`[ICALLMATE] End call marker detected, but auto-hangup is disabled.`);
                 }
               }
 
@@ -706,12 +684,7 @@ module.exports = function setupWebSocketBridge(server) {
                 const pendingAudioMs = ((session.audioBuffer?.length || 0) / 2 / 8000) * 1000;
                 const hangupDelay = pendingAudioMs + 1500; // wait for audio + 1.5s grace
 
-                if (pendingHangup || finalResponseInProgress || outboundDemoState.endCallAfterNextReply) {
-                  setTimeout(() => {
-                    requestCallHangup('gemini_live_turn_complete');
-                    scheduleFinalizeCallHangup('gemini_live_turn_complete', transcript[transcript.length - 1]?.text || '');
-                  }, hangupDelay);
-                }
+                // Turn complete hangup logic removed
                 finalResponseInProgress = false;
               }
 
@@ -1049,40 +1022,7 @@ module.exports = function setupWebSocketBridge(server) {
         }
         connectDeepgram();
 
-        if (!callDurationInterval) {
-          // Hard absolute timeout regardless of STT/TTS state
-          setTimeout(() => {
-            if (!bridgeClosed && !pendingHangup) {
-              console.log(`[ICALLMATE] HARD TIMEOUT REACHED (${MAX_CALL_DURATION_SECONDS}s) streamId=${getSessionLabel()}. Forcing hangup.`);
-              requestCallHangup('max_duration');
-              scheduleFinalizeCallHangup('max_duration');
-            }
-          }, MAX_CALL_DURATION_SECONDS * 1000);
-
-          callDurationInterval = setInterval(() => {
-            if (bridgeClosed || pendingHangup) {
-              clearInterval(callDurationInterval);
-              return;
-            }
-            callDurationSeconds++;
-            
-            const maxDuration = MAX_CALL_DURATION_SECONDS || 60;
-            if (callDurationSeconds >= maxDuration) {
-              console.log(`[ICALLMATE] Max call duration reached (${maxDuration}s) streamId=${getSessionLabel()}. Hanging up.`);
-              clearInterval(callDurationInterval);
-              requestCallHangup('max_duration_reached');
-              scheduleFinalizeCallHangup('max_duration_reached');
-            } else if (callDurationSeconds >= maxDuration - 15 && !durationWarningSent) {
-              durationWarningSent = true;
-              console.log(`[ICALLMATE] Warning threshold reached (${callDurationSeconds}s) streamId=${getSessionLabel()}. Instructing AI to skip optional questions.`);
-              
-              const warningMsg = "SYSTEM WARNING: Time is running out. Skip all remaining optional questions and move directly to the closing message immediately.";
-              if (useGeminiLive() && geminiLiveSession && geminiLiveReady) {
-                geminiLiveSession.sendClientContent({ turns: [{ role: 'user', parts: [{ text: warningMsg }] }], turnComplete: true });
-              }
-            }
-          }, 1000);
-        }
+        // Call duration hard timeout and interval removed
       },
       sendCallerAudio(payload) {
         if (bridgeClosed || pendingHangup || outboundDemoState.conversationEnded || !payload) {

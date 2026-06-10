@@ -57,7 +57,17 @@ function buildMasterPostPayload(customerPhone, leadId, options = {}) {
     throw new Error('Customer phone is required for iCallMate master-post call');
   }
 
-  const wsurl = options.wsurl || process.env.ICALLMATE_MASTER_POST_WSURL || '';
+  let wsurl = options.wsurl || process.env.ICALLMATE_MASTER_POST_WSURL || '';
+  if (!wsurl && process.env.APP_BASE_URL) {
+    wsurl = process.env.APP_BASE_URL.replace(/^http/, 'ws') + '/icallmate/media';
+  }
+  // Fallback: forcefully update wsurl if the current one has an old tunnel URL
+  if (process.env.APP_BASE_URL && wsurl.includes('.lhr.life')) {
+    const baseHost = new URL(process.env.APP_BASE_URL).host;
+    if (!wsurl.includes(baseHost)) {
+      wsurl = process.env.APP_BASE_URL.replace(/^http/, 'ws') + '/icallmate/media';
+    }
+  }
   return {
     campid: String(options.campid || process.env.ICALLMATE_MASTER_POST_CAMP_ID || '54'),
     leadid: String(leadId || options.leadid || process.env.ICALLMATE_MASTER_POST_LEAD_ID || '1031'),

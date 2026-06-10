@@ -235,7 +235,7 @@ function buildOutboundDemoTurnInstruction(callerText, state, clientName, custome
 
 module.exports = {
   evaluateLiveSentimentLabel,
-  shouldAutoHangupAfterAgentTurn,
+  // shouldAutoHangupAfterAgentTurn,
   estimateHangupDelayMs,
   normalizeHindiEnglishText,
   isGreetingOnly,
