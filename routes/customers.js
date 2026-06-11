@@ -192,36 +192,56 @@ function handleSqliteError(error, res) {
 }
 
 async function saveCustomer(payload) {
+  // Deduplicate: Find existing by phone
+  let customerId;
+  const existing = await findCustomerByNormalizedPhone(payload.phone);
+  if (existing) {
+    customerId = existing.id;
+    // We could update customer fields here if needed, but for now we just use the ID
+  } else {
+    const res = await dbRun(
+      `INSERT INTO customers (
+        name, phone, preferred_slot, status, customer_value, urgency_level,
+        preferred_language, preferred_dialect, do_not_call, consent_status,
+        outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
+        campaign_name, service_interest, call_type, video_sent, last_visit_date
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        payload.name,
+        payload.phone,
+        payload.preferred_slot,
+        'scheduled',
+        payload.customer_value,
+        payload.urgency_level,
+        payload.preferred_language,
+        payload.preferred_dialect || null,
+        payload.do_not_call,
+        payload.consent_status,
+        payload.outstanding_issues || null,
+        payload.pending_follow_ups || null,
+        payload.revenue_stage,
+        payload.revenue_estimate,
+        payload.campaign_name || null,
+        payload.service_interest || null,
+        payload.call_type,
+        payload.video_sent,
+        payload.last_visit_date
+      ]
+    );
+    customerId = res.lastID;
+  }
+
+  // Always create a new call_history row for the schedule
   const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
-  return dbRun(
-    `INSERT INTO customers (
-      name, phone, preferred_slot, status, customer_value, urgency_level,
-      preferred_language, preferred_dialect, do_not_call, consent_status,
-      outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
-      campaign_name, service_interest, call_type, video_sent, last_visit_date
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      payload.name,
-      payload.phone,
-      payload.preferred_slot,
-      initialStatus,
-      payload.customer_value,
-      payload.urgency_level,
-      payload.preferred_language,
-      payload.preferred_dialect || null,
-      payload.do_not_call,
-      payload.consent_status,
-      payload.outstanding_issues || null,
-      payload.pending_follow_ups || null,
-      payload.revenue_stage,
-      payload.revenue_estimate,
-      payload.campaign_name || null,
-      payload.service_interest || null,
-      payload.call_type,
-      payload.video_sent,
-      payload.last_visit_date
-    ]
+  const scheduledAt = payload.preferred_slot ? getNextIsoForPreferredSlot(payload.preferred_slot) : new Date().toISOString();
+
+  const callRes = await dbRun(
+    `INSERT INTO calls (customer_id, call_type, status, scheduled_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [customerId, payload.call_type, initialStatus, scheduledAt, new Date().toISOString(), new Date().toISOString()]
   );
+
+  return { customerId, callId: callRes.lastID };
 }
 
 // Add single customer
@@ -234,10 +254,8 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
-    // We no longer update existing customers. Every scheduled call creates a new record.
-
     const result = await saveCustomer(payload);
-    res.json({ id: result.lastID, message: 'Customer added successfully' });
+    res.json({ id: result.customerId, callId: result.callId, message: 'Customer added successfully' });
   } catch (error) {
     return handleSqliteError(error, res);
   }
@@ -298,7 +316,7 @@ router.post('/csv', upload.single('file'), async (req, res) => {
   }
 });
 
-// List all customers
+// List all customers (Patients)
 router.get('/', async (req, res) => {
   try {
     const customers = await dbAll(`
@@ -309,9 +327,39 @@ router.get('/', async (req, res) => {
       LEFT JOIN calls ON calls.customer_id = customers.id
       ORDER BY COALESCE(customers.priority_score, 0) DESC, customers.created_at DESC
     `);
-    res.json(customers);
+    
+    // Deduplicate by customer id for the endpoint
+    const unique = [];
+    const seen = new Set();
+    for (const c of customers) {
+      if (!seen.has(c.id)) {
+        seen.add(c.id);
+        unique.push(c);
+      }
+    }
+    
+    res.json(unique);
   } catch (error) {
     console.error('Error fetching customers:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// List all calls (Outbound Queue)
+router.get('/queue', async (req, res) => {
+  try {
+    const calls = await dbAll(`
+      SELECT calls.*,
+             customers.name as customer_name,
+             customers.phone as customer_phone,
+             customers.preferred_slot as customer_preferred_slot
+      FROM calls
+      JOIN customers ON calls.customer_id = customers.id
+      ORDER BY calls.created_at DESC
+    `);
+    res.json(calls);
+  } catch (error) {
+    console.error('Error fetching calls:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -354,20 +402,11 @@ router.put('/:id', async (req, res) => {
       });
     }
 
-    const slotChanged = payload.preferred_slot !== (existing.preferred_slot || '10:00');
-    const existingStatus = String(existing.status || '').toLowerCase();
-    const shouldRescheduleStatus = slotChanged && RESCHEDULABLE_STATUSES.has(existingStatus);
-    const nextRetryAt = shouldRescheduleStatus
-      ? getNextIsoForPreferredSlot(payload.preferred_slot)
-      : existing.next_retry_at;
-    const nextStatus = shouldRescheduleStatus ? 'retry_scheduled' : existing.status;
-
     await dbRun(
       `UPDATE customers
           SET name = ?,
               phone = ?,
               preferred_slot = ?,
-              status = ?,
               customer_value = ?,
               urgency_level = ?,
               preferred_language = ?,
@@ -376,7 +415,6 @@ router.put('/:id', async (req, res) => {
               consent_status = ?,
               outstanding_issues = ?,
               pending_follow_ups = ?,
-              next_retry_at = ?,
               revenue_stage = ?,
               revenue_estimate = ?,
               campaign_name = ?,
@@ -387,7 +425,6 @@ router.put('/:id', async (req, res) => {
         payload.name,
         payload.phone,
         payload.preferred_slot,
-        nextStatus,
         payload.customer_value,
         payload.urgency_level,
         payload.preferred_language,
@@ -396,7 +433,6 @@ router.put('/:id', async (req, res) => {
         payload.consent_status,
         payload.outstanding_issues || null,
         payload.pending_follow_ups || null,
-        nextRetryAt,
         payload.revenue_stage,
         payload.revenue_estimate,
         payload.campaign_name || null,
@@ -405,6 +441,26 @@ router.put('/:id', async (req, res) => {
         req.params.id
       ]
     );
+
+    // Update pending call or create a new one
+    const pendingCall = await dbGet(`SELECT id, created_at FROM calls WHERE customer_id = ? AND outcome IS NULL AND status IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled') ORDER BY created_at DESC LIMIT 1`, [req.params.id]);
+    const scheduledAt = payload.preferred_slot ? getNextIsoForPreferredSlot(payload.preferred_slot) : new Date().toISOString();
+    const newStatus = payload.preferred_slot ? 'scheduled' : 'pending';
+
+    if (pendingCall) {
+      // Edit existing scheduled call
+      await dbRun(
+        `UPDATE calls SET scheduled_at = ?, updated_at = ?, call_type = ?, status = ? WHERE id = ?`,
+        [scheduledAt, new Date().toISOString(), payload.call_type, newStatus, pendingCall.id]
+      );
+    } else {
+      // Create new call record
+      await dbRun(
+        `INSERT INTO calls (customer_id, call_type, status, scheduled_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [req.params.id, payload.call_type, newStatus, scheduledAt, new Date().toISOString(), new Date().toISOString()]
+      );
+    }
 
     res.json({ message: 'Customer updated successfully' });
   } catch (error) {

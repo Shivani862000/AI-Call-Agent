@@ -61,7 +61,7 @@ function runMigrations() {
     await run(`UPDATE calls SET provider_call_id = ${legacyColumnName} WHERE provider_call_id IS NULL AND ${legacyColumnName} IS NOT NULL`);
   };
 
-  const removeCustomersUniquePhone = async () => {
+  const enforceCustomersUniquePhone = async () => {
     const tableInfo = await new Promise((resolve, reject) => {
       db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='customers'", (err, row) => {
         if (err) reject(err);
@@ -69,10 +69,27 @@ function runMigrations() {
       });
     });
 
-    if (tableInfo && tableInfo.sql.includes('UNIQUE')) {
-      console.log('Migrating customers table to remove UNIQUE constraint on phone...');
-      let newSql = tableInfo.sql.replace('phone VARCHAR(20) NOT NULL UNIQUE', 'phone VARCHAR(20) NOT NULL');
-      newSql = newSql.replace('CREATE TABLE customers', 'CREATE TABLE customers_new');
+    if (tableInfo && !tableInfo.sql.includes('UNIQUE')) {
+      console.log('Migrating customers table to enforce UNIQUE constraint on phone...');
+      
+      // Merge duplicate customers
+      const duplicates = await new Promise((resolve, reject) => {
+        db.all("SELECT phone, MIN(id) as keep_id FROM customers GROUP BY phone HAVING COUNT(*) > 1", (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        });
+      });
+
+      for (const dup of duplicates) {
+        await run(`UPDATE calls SET customer_id = ${dup.keep_id} WHERE customer_id IN (SELECT id FROM customers WHERE phone = '${dup.phone}' AND id != ${dup.keep_id})`);
+        await run(`UPDATE feedback SET customer_id = ${dup.keep_id} WHERE customer_id IN (SELECT id FROM customers WHERE phone = '${dup.phone}' AND id != ${dup.keep_id})`);
+        await run(`DELETE FROM customers WHERE phone = '${dup.phone}' AND id != ${dup.keep_id}`);
+      }
+
+      let newSql = tableInfo.sql.replace(/phone VARCHAR\(20\) NOT NULL/i, 'phone VARCHAR(20) NOT NULL UNIQUE');
+      newSql = newSql.replace(/CREATE TABLE "?customers"?/i, 'CREATE TABLE customers_new');
+      
+      await run(`DROP TABLE IF EXISTS customers_new`);
       await run(newSql);
       
       const columns = await new Promise((resolve, reject) => {
@@ -101,7 +118,7 @@ function runMigrations() {
       )
     `);
 
-    await removeCustomersUniquePhone();
+    await enforceCustomersUniquePhone();
 
     await run(`
       CREATE TABLE IF NOT EXISTS calls (
@@ -247,9 +264,12 @@ function runMigrations() {
     await addColumnIfMissing('clients', 'notes', 'TEXT');
     await addColumnIfMissing('clients', 'linked_customer_id', 'INTEGER');
     await addColumnIfMissing('clients', 'status', "VARCHAR(20) DEFAULT 'active'");
-    await addColumnIfMissing('clients', 'updated_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP');
+    await addColumnIfMissing('clients', 'updated_at', 'TIMESTAMP');
 
     await addColumnIfMissing('calls', 'provider_call_id', 'VARCHAR(100)');
+    await addColumnIfMissing('calls', 'status', "VARCHAR(30) DEFAULT 'pending'");
+    await addColumnIfMissing('calls', 'scheduled_at', 'TIMESTAMP');
+    await addColumnIfMissing('calls', 'updated_at', 'TIMESTAMP');
     await copyLegacyCallIdsToProviderCallId();
     await addColumnIfMissing('calls', 'call_direction', "VARCHAR(20) DEFAULT 'outbound'");
     await addColumnIfMissing('calls', 'call_source', "VARCHAR(40) DEFAULT 'icallmate'");

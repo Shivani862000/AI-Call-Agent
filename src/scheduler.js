@@ -80,35 +80,34 @@ async function triggerScheduledCalls() {
   const now = new Date();
   const currentSlot = getCurrentSlotLabel(now);
 
-  const dueCustomers = await dbAll(
-    `SELECT c.*
-     FROM customers c
-     LEFT JOIN calls recent_call
-       ON recent_call.customer_id = c.id
-      AND DATETIME(recent_call.called_at) >= DATETIME('now', '-45 minutes')
+  const dueCalls = await dbAll(
+    `SELECT c.*, 
+            calls.id AS call_id, 
+            calls.status AS call_status, 
+            calls.call_type AS call_record_type
+     FROM calls
+     JOIN customers c ON calls.customer_id = c.id
      WHERE COALESCE(c.do_not_call, 0) = 0
        AND COALESCE(c.wrong_number_flag, 0) = 0
        AND COALESCE(c.admin_review_required, 0) = 0
        AND COALESCE(c.consent_status, 'unknown') != 'denied'
-       AND COALESCE(c.status, 'pending') != 'calling'
+       AND COALESCE(c.status, '') != 'calling'
+       AND calls.status IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')
        AND (
-         (c.status IN ('pending', 'scheduled') AND COALESCE(c.best_call_slot, c.preferred_slot) <= ?)
-         OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND c.next_retry_at IS NOT NULL AND DATETIME(c.next_retry_at) <= DATETIME('now'))
-       )
-       AND (
-         c.status IN ('retry_scheduled', 'callback_scheduled')
-         OR recent_call.id IS NULL
+         calls.scheduled_at IS NULL 
+         OR DATETIME(calls.scheduled_at) <= DATETIME('now')
+         OR COALESCE(c.best_call_slot, c.preferred_slot) <= ?
        )`,
     [currentSlot]
   );
 
-  if (!dueCustomers.length) {
+  if (!dueCalls.length) {
     return;
   }
 
   const uniqueByPhone = new Map();
-  for (const customer of dueCustomers) {
-    const phoneKey = normalizePhoneLookupValue(customer.phone) || String(customer.phone || '').trim();
+  for (const callRow of dueCalls) {
+    const phoneKey = normalizePhoneLookupValue(callRow.phone) || String(callRow.phone || '').trim();
     if (!phoneKey) {
       continue;
     }
@@ -116,90 +115,93 @@ async function triggerScheduledCalls() {
     if (uniqueByPhone.has(phoneKey)) {
       const existing = uniqueByPhone.get(phoneKey);
       console.log(
-        `[SCHEDULER] Skipping duplicate customer row id=${customer.id} phone=${customer.phone} ` +
-        `because row id=${existing.id} already queued`
+        `[SCHEDULER] Skipping duplicate call row id=${callRow.call_id} phone=${callRow.phone} ` +
+        `because call id=${existing.call_id} already queued for this number`
       );
       continue;
     }
 
-    uniqueByPhone.set(phoneKey, customer);
+    uniqueByPhone.set(phoneKey, callRow);
   }
 
-  const hydratedCustomers = [];
-  for (const customer of uniqueByPhone.values()) {
-    hydratedCustomers.push(await hydratePreCallIntelligence(customer));
+  const hydratedCalls = [];
+  for (const callRow of uniqueByPhone.values()) {
+    const hydratedCustomer = await hydratePreCallIntelligence(callRow);
+    hydratedCalls.push({ ...hydratedCustomer, call_id: callRow.call_id, call_record_type: callRow.call_record_type });
   }
 
-  hydratedCustomers.sort((a, b) => (Number(b.priority_score) || 0) - (Number(a.priority_score) || 0));
-  console.log(`[SCHEDULER] Found ${hydratedCustomers.length} eligible customer(s) due at ${currentSlot}`);
+  hydratedCalls.sort((a, b) => (Number(b.priority_score) || 0) - (Number(a.priority_score) || 0));
+  console.log(`[SCHEDULER] Found ${hydratedCalls.length} eligible call(s) due at ${currentSlot}`);
 
-  for (const customer of hydratedCustomers) {
+  for (const callRecord of hydratedCalls) {
     try {
-      const agentConfig = customer.default_agent_id ? await getAgentConfigById(customer.default_agent_id) : await getDefaultAgentConfig();
-      const blockedReason = shouldBlockCustomerCall(customer);
+      const agentConfig = callRecord.default_agent_id ? await getAgentConfigById(callRecord.default_agent_id) : await getDefaultAgentConfig();
+      const blockedReason = shouldBlockCustomerCall(callRecord);
       if (blockedReason) {
-        console.log(`[SCHEDULER] Skipping ${customer.name}: ${blockedReason}`);
+        console.log(`[SCHEDULER] Skipping ${callRecord.name}: ${blockedReason}`);
         continue;
       }
 
       const claimResult = await dbRun(
-        `UPDATE customers
-            SET status = ?,
-                last_called_at = ?
+        `UPDATE calls
+            SET status = ?
           WHERE id = ?
-            AND COALESCE(status, 'pending') IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')`,
-        ['calling', new Date().toISOString(), customer.id]
+            AND status IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')`,
+        ['calling', callRecord.call_id]
       );
 
       if (!claimResult.changes) {
-        console.log(`[SCHEDULER] Skipping ${customer.name}: already claimed by another run`);
+        console.log(`[SCHEDULER] Skipping ${callRecord.name}: call already claimed by another run`);
         continue;
       }
 
       const call = await placeRealtimeCall({
-        customerPhone: customer.phone,
-        customerName: customer.name,
-        customerId: customer.id,
+        customerPhone: callRecord.phone,
+        customerName: callRecord.name,
+        customerId: callRecord.id,
         clientName: agentConfig?.client_name || CLIENT_NAME,
         agentId: agentConfig?.id || null,
-        callType: customer.call_type
+        callType: callRecord.call_record_type || callRecord.call_type
       });
 
       await dbRun(
-        `INSERT INTO calls (
-          customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type, uuid
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `UPDATE calls SET
+          agent_id = ?, outcome = ?, provider_call_id = ?, called_at = ?, hot_lead_score = ?,
+          consent_message_played = ?, call_script_version = ?, supervisor_alert_level = ?, call_direction = ?, call_source = ?, uuid = ?, status = ?
+         WHERE id = ?`,
         [
-          customer.id,
           agentConfig?.id || null,
           'scheduled_initiated',
           call.sid,
           new Date().toISOString(),
-          customer.priority_score || computePriorityScore(customer),
+          callRecord.priority_score || computePriorityScore(callRecord),
           1,
           agentConfig?.slug || 'hindi-feedback-v1',
           'normal',
           'outbound',
           'icallmate',
-          normalizeOutboundCallType(customer.call_type),
-          crypto.randomUUID()
+          crypto.randomUUID(),
+          'called',
+          callRecord.call_id
         ]
       );
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
-      console.log(`[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`);
+      // We update customer.status to 'calling' to lock concurrent calls for this patient
+      await dbRun("UPDATE customers SET status = 'calling', last_called_at = ? WHERE id = ?", [new Date().toISOString(), callRecord.id]);
+      
+      console.log(`[SCHEDULER] Scheduled call started for ${callRecord.name} (${call.sid})`);
     } catch (error) {
-      console.error(`[SCHEDULER] Failed to call ${customer.name}:`, error.message);
+      console.error(`[SCHEDULER] Failed to call ${callRecord.name}:`, error.message);
       try {
         await dbRun(
-          `UPDATE customers
+          `UPDATE calls
               SET status = ?
             WHERE id = ?
               AND status = 'calling'`,
-          [customer.status || 'pending', customer.id]
+          ['pending', callRecord.call_id]
         );
+        await dbRun("UPDATE customers SET status = 'pending' WHERE id = ? AND status = 'calling'", [callRecord.id]);
       } catch (rollbackError) {
-        console.error(`[SCHEDULER] Failed to roll back customer ${customer.id}:`, rollbackError.message);
+        console.error(`[SCHEDULER] Failed to roll back call ${callRecord.call_id}:`, rollbackError.message);
       }
     }
   }

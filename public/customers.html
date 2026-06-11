@@ -145,10 +145,10 @@
             <thead>
               <tr>
                 <th>Patient</th>
-                <th>Phone</th>
                 <th>Campaign</th>
-                <th>Call Time</th>
-                <th>Outcome</th>
+                <th>Status</th>
+                <th>Scheduled For</th>
+                <th>Last Activity</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -437,6 +437,7 @@
       }
     }
 
+
     async function scheduleRetry(customerId) {
       try {
         const result = await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}/retry`, { method: 'POST' });
@@ -559,8 +560,8 @@
       const completedCalls = recentCallsCache.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
 
       const isScheduled = (c) => ['scheduled', 'retry_scheduled', 'callback_scheduled'].includes(String(c.status || '').toLowerCase());
-      const scheduledCount = customerCache.filter((customer) => isScheduled(customer) && (isToday(customer.next_retry_at) || isToday(customer.created_at))).length;
-      const pendingCount = customerCache.filter((customer) => pendingStatuses.has(String(customer.status || '').toLowerCase())).length;
+      const scheduledCount = customerCache.filter((customer) => isScheduled(customer) && (isToday(customer.scheduled_at) || isToday(customer.created_at))).length;
+      const pendingCount = customerCache.filter((customer) => pendingStatuses.has(String(customer.status || '').toLowerCase()) && String(customer.outcome || '').toLowerCase() !== 'completed').length;
       const completedCount = completedCalls.length;
       const failedCount = recentCallsCache.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
 
@@ -599,13 +600,13 @@
 
         if (activeCustomerMetricFilter === 'scheduled') {
           const isScheduled = ['scheduled', 'retry_scheduled', 'callback_scheduled'].includes(String(customer.status || '').toLowerCase());
-          matchesMetricFilter = isScheduled && (isToday(customer.next_retry_at) || isToday(customer.created_at));
+          matchesMetricFilter = isScheduled && (isToday(customer.scheduled_at) || isToday(customer.created_at));
         } else if (activeCustomerMetricFilter === 'pending') {
-          matchesMetricFilter = pendingStatuses.has(String(customer.status || '').toLowerCase());
+          matchesMetricFilter = pendingStatuses.has(String(customer.status || '').toLowerCase()) && String(customer.outcome || '').toLowerCase() !== 'completed';
         } else if (activeCustomerMetricFilter === 'completed') {
-          matchesMetricFilter = Boolean(getLatestCompletedCall(customer.id));
+          matchesMetricFilter = String(customer.outcome || '').toLowerCase() === 'completed';
         } else if (activeCustomerMetricFilter === 'failed') {
-          matchesMetricFilter = hasFailedCall(customer.id);
+          matchesMetricFilter = ['failed', 'busy', 'no_answer'].includes(String(customer.outcome || '').toLowerCase());
         }
 
         return matchesSearch && matchesStatus && matchesCallType && matchesMetricFilter;
@@ -668,31 +669,35 @@
         return;
       }
 
-      tbody.innerHTML = customers.map((customer) => {
-        const completedCall = getLatestCompletedCall(customer.id);
+      tbody.innerHTML = customers.map((call) => {
+        const completedCall = String(call.outcome || '').toLowerCase() === 'completed' ? call : null;
         const contextButton = completedCall
           ? `<button class="secondary" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
-          : `<button class="secondary" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
+          : `<button class="secondary" type="button" onclick="scheduleRetry(${call.customer_id})">Retry</button>`;
+
+        const isRescheduled = new Date(call.updated_at).getTime() > new Date(call.created_at).getTime() + 1000;
+        const schedulePrefix = isRescheduled ? 'Rescheduled' : 'Scheduled';
+        const scheduleDisplay = call.scheduled_at ? `${schedulePrefix}: ${AppShell.formatDateTime(call.scheduled_at)}` : 'Pending';
 
         return `
           <tr>
             <td>
-              <div class="row-title">${AppShell.escapeHtml(customer.name || 'Patient')}</div>
-              <div class="row-subtitle">ID #${customer.id}</div>
+              <div class="row-title">${AppShell.escapeHtml(call.customer_name || 'Patient')}</div>
+              <div class="row-subtitle">${AppShell.escapeHtml(formatDisplayPhone(call.customer_phone))}</div>
             </td>
-            <td>${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</td>
-            <td>${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))}</td>
+            <td>${AppShell.escapeHtml(formatCallTypeLabel(call.call_type))}</td>
+            <td><span class="status-badge ${AppShell.escapeHtml(String(call.outcome || call.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || call.status || 'pending')}</span></td>
             <td>
-              <div class="row-title">${customer.preferred_slot ? AppShell.escapeHtml(customer.preferred_slot) : 'Pending'}</div>
-                <div class="row-subtitle">Created: ${AppShell.escapeHtml(AppShell.formatDateTime(customer.created_at))}</div>
+              <div class="row-title">${AppShell.escapeHtml(scheduleDisplay)}</div>
             </td>
-            <td><span class="status-badge ${AppShell.escapeHtml(String(customer.last_call_outcome || customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(customer.last_call_outcome || customer.status || 'pending')}</span></td>
+            <td>
+              <div class="row-title">${AppShell.formatDateTime(call.updated_at || call.created_at)}</div>
+            </td>
             <td>
               <div class="table-actions">
-                <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
+                <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${call.customer_id})">Call Now</button>
                 ${contextButton}
-                <button class="secondary desktop-action-button" type="button" onclick="openNewCallModal(${customer.id})">Edit</button>
-                <button class="danger desktop-action-button" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
+                <button class="danger desktop-action-button" type="button" onclick="deleteCustomer(${call.customer_id})">Delete</button>
               </div>
             </td>
           </tr>
@@ -712,26 +717,30 @@
         return;
       }
 
-      container.innerHTML = customers.map((customer) => {
-        const latestCall = getLatestCall(customer.id);
-        const completedCall = getLatestCompletedCall(customer.id);
+      container.innerHTML = customers.map((call) => {
+        const completedCall = String(call.outcome || '').toLowerCase() === 'completed' ? call : null;
         const actionButton = completedCall
           ? `<button class="secondary mobile-action-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
-          : `<button class="secondary mobile-action-button" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
+          : `<button class="secondary mobile-action-button" type="button" onclick="scheduleRetry(${call.customer_id})">Retry</button>`;
+
+        const isRescheduled = new Date(call.updated_at).getTime() > new Date(call.created_at).getTime() + 1000;
+        const schedulePrefix = isRescheduled ? 'Rescheduled' : 'Scheduled';
+        const scheduleDisplay = call.scheduled_at ? `${schedulePrefix}: ${AppShell.formatDateTime(call.scheduled_at)}` : 'Pending';
+
         return `
           <article class="mobile-call-card">
             <div class="mobile-call-head">
               <div>
-                <strong>${AppShell.escapeHtml(customer.name || 'Patient')}</strong>
-                <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</div>
+                <strong>${AppShell.escapeHtml(call.customer_name || 'Patient')}</strong>
+                <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(call.customer_phone))}</div>
               </div>
-              <span class="status-badge ${AppShell.escapeHtml(String(customer.last_call_outcome || customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(customer.last_call_outcome || customer.status || 'pending')}</span>
+              <span class="status-badge ${AppShell.escapeHtml(String(call.outcome || call.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || call.status || 'pending')}</span>
             </div>
-            <div class="mobile-subtext">${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))} · Scheduled: ${customer.preferred_slot ? AppShell.escapeHtml(customer.preferred_slot) : 'Pending'}</div>
+            <div class="mobile-subtext">${AppShell.escapeHtml(formatCallTypeLabel(call.call_type))} · ${scheduleDisplay}</div>
             <div class="mobile-call-actions">
-              <button class="warning mobile-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
+              <button class="warning mobile-action-button" type="button" onclick="triggerCallNow(${call.customer_id})">Call Now</button>
               ${actionButton}
-              <button class="secondary mobile-more-button" type="button" onclick="openMobileActionSheet(${customer.id}, ${completedCall ? completedCall.id : 'null'})">More</button>
+              <button class="secondary mobile-more-button" type="button" onclick="openMobileActionSheet(${call.customer_id}, ${completedCall ? completedCall.id : 'null'})">More</button>
             </div>
           </article>
         `;
@@ -756,7 +765,7 @@
 
     async function loadPageData() {
       let [customers, clients, recentCalls] = await Promise.all([
-        AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
+        AppShell.fetchJson(`${AppShell.API_BASE}/customers/queue`),
         AppShell.fetchJson(`${AppShell.API_BASE}/clients`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
       ]);

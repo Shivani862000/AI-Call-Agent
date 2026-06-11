@@ -132,7 +132,13 @@
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return String(value);
-    return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    
+    const day = date.getDate();
+    const month = date.toLocaleString('default', { month: 'short' });
+    const year = date.getFullYear();
+    const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }).toUpperCase();
+    
+    return `${day} ${month} ${year} • ${time}`;
   }
 
   function formatCurrencyInr(value) {
@@ -181,7 +187,9 @@
     buildMobileTabbar();
     if (window.TestCallWidget && !window.__testCallWidgetInstance) {
       window.__testCallWidgetInstance = new window.TestCallWidget();
-      window.__testCallWidgetInstance.mount();
+      if (typeof window.__testCallWidgetInstance.mount === 'function') {
+        window.__testCallWidgetInstance.mount();
+      }
     }
   }
 

@@ -119,6 +119,7 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
     `[ICALLMATE OUTBOUND] Initiating call to ${customerPhone} provider=masterpost endpoint=${endpoint} ` +
     `campid=${payload.campid} leadid=${payload.leadid}`
   );
+  console.log(`[ICALLMATE OUTBOUND REQUEST PAYLOAD]`, JSON.stringify(payload, null, 2));
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -126,6 +127,8 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
     body: JSON.stringify(payload)
   });
   const rawText = await response.text();
+  console.log(`[ICALLMATE OUTBOUND RESPONSE] HTTP ${response.status} Body:`, rawText);
+
   let parsed = {};
   try {
     parsed = rawText ? JSON.parse(rawText) : {};

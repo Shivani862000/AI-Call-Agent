@@ -226,29 +226,19 @@
     }
 
     function pendingReviewCalls() {
-      return recentCallsCache.filter((call) => {
-        const isCompleted = String(call.outcome || '').toLowerCase() === 'completed';
-        const needsTranscript = String(call.transcript_status || '').toLowerCase() !== 'completed';
-        const needsAnalysis = String(call.analysis_status || '').toLowerCase() !== 'completed';
-        const missingRating = !Number(call.extracted_rating || 0);
-        return isCompleted && (needsTranscript || needsAnalysis || missingRating);
-      });
+      return window.analyticsData?.lists?.needsReview || [];
     }
 
     function pendingAnalysisCalls() {
-      return recentCallsCache.filter((call) => String(call.analysis_status || '').toLowerCase() !== 'completed');
+      return window.analyticsData?.lists?.pendingAnalysis || [];
     }
 
     function positiveFeedbackEntries() {
-      const fb = feedbackCache.filter((item) => Number(item.stars || 0) >= 4);
-      const calls = recentCallsCache.filter((c) => Number(c.extracted_rating || 0) >= 4 && !feedbackCache.find(f => (f.call_id || f.id) === c.id));
-      return [...fb, ...calls];
+      return window.analyticsData?.lists?.positive || [];
     }
 
     function negativeFeedbackEntries() {
-      const fb = feedbackCache.filter((item) => Number(item.stars || 0) > 0 && Number(item.stars || 0) <= 2);
-      const calls = recentCallsCache.filter((c) => Number(c.extracted_rating || 0) > 0 && Number(c.extracted_rating || 0) <= 2 && !feedbackCache.find(f => (f.call_id || f.id) === c.id));
-      return [...fb, ...calls];
+      return window.analyticsData?.lists?.negative || [];
     }
 
     function parseRecordDate(value) {
@@ -437,12 +427,15 @@
       else if (activeFeedbackFilter === 'negative') itemsToRender = negativeFeedback;
       else if (activeFeedbackFilter === 'pending') itemsToRender = pendingAnalysis;
       else if (activeFeedbackFilter === 'needs_review') itemsToRender = needsReview;
-      else itemsToRender = [...feedbackCache, ...recentCallsCache].filter((item, index, self) => 
-        // deduplicate if same call appears in feedback and calls
-        index === self.findIndex((t) => (
-          (t.call_id || t.id) === (item.call_id || item.id)
-        ))
-      ).sort((a, b) => new Date(b.submitted_at || b.called_at) - new Date(a.submitted_at || a.called_at));
+      else {
+        itemsToRender = [...positiveFeedback, ...negativeFeedback, ...pendingAnalysis, ...needsReview]
+          .filter((item, index, self) => index === self.findIndex((t) => {
+            const tKey = t.call_id ? `call_${t.call_id}` : (t.review_text !== undefined ? `fb_${t.id}` : `call_${t.id}`);
+            const itemKey = item.call_id ? `call_${item.call_id}` : (item.review_text !== undefined ? `fb_${item.id}` : `call_${item.id}`);
+            return tKey === itemKey;
+          }))
+          .sort((a, b) => new Date(b.submitted_at || b.called_at || b.created_at) - new Date(a.submitted_at || a.called_at || a.created_at));
+      }
 
       const container = document.getElementById('feedbackListContainer');
 
@@ -607,58 +600,61 @@
     }
 
     async function loadPageData() {
-      let [customers, feedback, recentCalls] = await Promise.all([
+      let [customers, analyticsData, recentCalls] = await Promise.all([
         AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
+        AppShell.fetchJson(`${AppShell.API_BASE}/feedback/analytics`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
       ]);
       customerCache = customers;
-      feedbackCache = feedback;
       recentCallsCache = recentCalls;
+      
+      // We will store the full feedback arrays returned from the analytics endpoint
+      window.analyticsData = analyticsData;
+      
       populateCustomerSelect();
       renderMetrics();
     }
 
     document.addEventListener('DOMContentLoaded', async () => {
       await AppShell.ensureAuthenticatedSession();
-      document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
-      document.getElementById('openManualFeedbackButton').addEventListener('click', openManualFeedbackModal);
-      document.getElementById('mobileManualFeedbackFab').addEventListener('click', openManualFeedbackModal);
-      document.getElementById('mobileFeedbackMenuButton').addEventListener('click', () => openFeedbackSheet('feedbackMobileMenuSheet'));
+      document.getElementById('logoutButton')?.addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
+      document.getElementById('openManualFeedbackButton')?.addEventListener('click', openManualFeedbackModal);
+      document.getElementById('mobileManualFeedbackFab')?.addEventListener('click', openManualFeedbackModal);
+      document.getElementById('mobileFeedbackMenuButton')?.addEventListener('click', () => openFeedbackSheet('feedbackMobileMenuSheet'));
       document.querySelectorAll('[data-mobile-filter]').forEach((button) => {
         button.addEventListener('click', () => applyFeedbackFilter(button.dataset.mobileFilter));
       });
       document.querySelectorAll('[data-feedback-filter]').forEach((button) => {
         button.addEventListener('click', () => applyFeedbackFilter(button.dataset.feedbackFilter));
       });
-      document.getElementById('mobileDateFilter').addEventListener('change', () => {
+      document.getElementById('mobileDateFilter')?.addEventListener('change', () => {
         toggleCustomDateRange('mobile');
         currentFeedbackListPage = 1;
         currentFeedbackBoardPage = 1;
         renderMetrics();
       });
-      document.getElementById('desktopDateFilter').addEventListener('change', () => {
+      document.getElementById('desktopDateFilter')?.addEventListener('change', () => {
         toggleCustomDateRange('desktop');
         currentFeedbackListPage = 1;
         currentFeedbackBoardPage = 1;
         renderMetrics();
       });
-      document.getElementById('mobileStartDate').addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
-      document.getElementById('mobileEndDate').addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
-      document.getElementById('desktopStartDate').addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
-      document.getElementById('desktopEndDate').addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
-      document.getElementById('closeFeedbackMobileMenuSheet').addEventListener('click', () => closeFeedbackSheet('feedbackMobileMenuSheet'));
-      document.getElementById('feedbackMobileMenuLogout').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
-      document.getElementById('closeManualFeedbackModal').addEventListener('click', closeManualFeedbackModal);
-      document.getElementById('submitFeedbackButton').addEventListener('click', submitManualFeedback);
-      document.getElementById('analysisModalClose').addEventListener('click', closeAnalysisModal);
-      document.getElementById('manualFeedbackModal').addEventListener('click', (event) => {
+      document.getElementById('mobileStartDate')?.addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
+      document.getElementById('mobileEndDate')?.addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
+      document.getElementById('desktopStartDate')?.addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
+      document.getElementById('desktopEndDate')?.addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
+      document.getElementById('closeFeedbackMobileMenuSheet')?.addEventListener('click', () => closeFeedbackSheet('feedbackMobileMenuSheet'));
+      document.getElementById('feedbackMobileMenuLogout')?.addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
+      document.getElementById('closeManualFeedbackModal')?.addEventListener('click', closeManualFeedbackModal);
+      document.getElementById('submitFeedbackButton')?.addEventListener('click', submitManualFeedback);
+      document.getElementById('analysisModalClose')?.addEventListener('click', closeAnalysisModal);
+      document.getElementById('manualFeedbackModal')?.addEventListener('click', (event) => {
         if (event.target.id === 'manualFeedbackModal') closeManualFeedbackModal();
       });
-      document.getElementById('analysisModal').addEventListener('click', (event) => {
+      document.getElementById('analysisModal')?.addEventListener('click', (event) => {
         if (event.target.id === 'analysisModal') closeAnalysisModal();
       });
-      document.getElementById('feedbackMobileMenuSheet').addEventListener('click', (event) => {
+      document.getElementById('feedbackMobileMenuSheet')?.addEventListener('click', (event) => {
         if (event.target.id === 'feedbackMobileMenuSheet') closeFeedbackSheet('feedbackMobileMenuSheet');
       });
       document.addEventListener('keydown', (event) => {

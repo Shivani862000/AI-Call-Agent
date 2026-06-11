@@ -82,4 +82,61 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Analytics endpoint for unified feedback stats
+router.get('/analytics', async (req, res) => {
+  try {
+    const feedback = await dbAll(`
+      SELECT f.*, c.name as customer_name, c.phone as customer_phone
+      FROM feedback f
+      LEFT JOIN customers c ON f.customer_id = c.id
+    `);
+    const recentCalls = await dbAll(`
+      SELECT calls.*, c.name as customer_name, c.phone as customer_phone
+      FROM calls
+      LEFT JOIN customers c ON calls.customer_id = c.id
+      ORDER BY calls.created_at DESC LIMIT 500
+    `);
+
+    // Positive Feedback
+    const fbPositive = feedback.filter((item) => Number(item.stars || 0) >= 4);
+    const callsPositive = recentCalls.filter((c) => Number(c.extracted_rating || 0) >= 4 && !feedback.find(f => f.call_id === c.id));
+    const positiveFeedback = [...fbPositive, ...callsPositive];
+
+    // Negative Feedback
+    const fbNegative = feedback.filter((item) => Number(item.stars || 0) > 0 && Number(item.stars || 0) <= 2);
+    const callsNegative = recentCalls.filter((c) => Number(c.extracted_rating || 0) > 0 && Number(c.extracted_rating || 0) <= 2 && !feedback.find(f => f.call_id === c.id));
+    const negativeFeedback = [...fbNegative, ...callsNegative];
+
+    // Pending Analysis
+    const pendingAnalysis = recentCalls.filter((call) => String(call.analysis_status || '').toLowerCase() !== 'completed');
+
+    // Needs Review
+    const needsReview = recentCalls.filter((call) => {
+      const isCompleted = String(call.outcome || '').toLowerCase() === 'completed';
+      const needsTranscript = String(call.transcript_status || '').toLowerCase() !== 'completed';
+      const needsAnalysis = String(call.analysis_status || '').toLowerCase() !== 'completed';
+      const missingRating = !Number(call.extracted_rating || 0);
+      return isCompleted && (needsTranscript || needsAnalysis || missingRating);
+    });
+
+    res.json({
+      metrics: {
+        positive: positiveFeedback.length,
+        negative: negativeFeedback.length,
+        pendingAnalysis: pendingAnalysis.length,
+        needsReview: needsReview.length
+      },
+      lists: {
+        positive: positiveFeedback,
+        negative: negativeFeedback,
+        pendingAnalysis,
+        needsReview
+      }
+    });
+  } catch (error) {
+    console.error('Error computing feedback analytics:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

@@ -531,9 +531,11 @@ module.exports = function setupWebSocketBridge(server) {
           } : undefined,
           temperature: LIVE_TEMPERATURE,
           maxOutputTokens: GEMINI_LIVE_MAX_OUTPUT_TOKENS,
-          thinkingConfig: {
-            thinkingLevel: GEMINI_LIVE_THINKING_LEVEL
-          },
+          ...(GEMINI_LIVE_THINKING_LEVEL && GEMINI_LIVE_THINKING_LEVEL !== 'none' && {
+            thinkingConfig: {
+              thinkingLevel: GEMINI_LIVE_THINKING_LEVEL
+            }
+          }),
           realtimeInputConfig: {
             automaticActivityDetection: {
               disabled: false,

@@ -475,9 +475,9 @@
         }
 
     async function loadOverview() {
-          let [customers, feedback, recentCalls, clients, callMetrics] = await Promise.all([
+          let [customers, feedbackData, recentCalls, clients, callMetrics] = await Promise.all([
             AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
-            AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
+            AppShell.fetchJson(`${AppShell.API_BASE}/feedback/analytics`),
             AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`),
             AppShell.fetchJson(`${AppShell.API_BASE}/clients`),
             AppShell.fetchJson(`${AppShell.API_BASE}/calls/metrics`)
@@ -493,8 +493,10 @@
           const completedToday = completedCalls.filter((call) => isToday(call.called_at)).length;
           const pendingCalls = customers.filter((customer) => scheduledStatuses.has(String(customer.status || '').toLowerCase())).length;
           const failedCalls = recentCalls.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
-          const positiveFeedback = feedback.filter((item) => Number(item.stars || 0) >= 4).length;
-          const negativeFeedback = feedback.filter((item) => Number(item.stars || 0) > 0 && Number(item.stars || 0) <= 2).length;
+          
+          const positiveFeedback = feedbackData.metrics.positive || 0;
+          const negativeFeedback = feedbackData.metrics.negative || 0;
+          const feedback = [...feedbackData.lists.positive, ...feedbackData.lists.negative];
 
           const safeSetText = (id, text) => {
             const el = document.getElementById(id);
@@ -504,11 +506,11 @@
           safeSetText('metricCustomers', customers.length);
           safeSetText('metricScheduled', pendingCalls);
           safeSetText('metricCompleted', completedCalls.length);
-          safeSetText('metricFeedback', feedback.length);
+          safeSetText('metricFeedback', positiveFeedback + negativeFeedback);
           safeSetText('desktopMetricCustomers', customers.length);
           safeSetText('desktopMetricScheduled', pendingCalls);
           safeSetText('desktopMetricCompleted', completedCalls.length);
-          safeSetText('desktopMetricFeedback', feedback.length);
+          safeSetText('desktopMetricFeedback', positiveFeedback + negativeFeedback);
           safeSetText('desktopMetricOutbound', callMetrics.outbound?.total || 0);
           safeSetText('desktopMetricPositiveFeedback', positiveFeedback);
           safeSetText('desktopMetricNegativeFeedback', negativeFeedback);
