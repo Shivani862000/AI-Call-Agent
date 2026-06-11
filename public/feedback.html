@@ -367,7 +367,7 @@
         
         // Determine Rating
         const ratingVal = Number(item.stars || item.extracted_rating || 0);
-        const ratingDisplay = ratingVal > 0 ? '★'.repeat(ratingVal) + '☆'.repeat(5-ratingVal) : '--/5';
+        const ratingDisplay = ratingVal > 0 ? `${ratingVal}/5` : '--/5';
         
         // Determine Sentiment
         let sentiment = 'neutral';
@@ -381,10 +381,10 @@
           <div class="modern-feedback-card">
             <div class="fc-header">
               <div>
-                <div class="fc-patient">${AppShell.escapeHtml(name)} <span class="status-badge ${sentiment}">${AppShell.formatStatusLabel(sentiment)}</span></div>
+                <div class="fc-patient">${AppShell.escapeHtml(name)}</div>
                 <div class="fc-meta">${AppShell.formatDateTime(date)} · ${AppShell.formatStatusLabel(item.outcome || 'completed')}</div>
               </div>
-              <div class="fc-rating">${ratingDisplay}</div>
+              <div class="status-badge ${sentiment}" style="font-size: 14px; padding: 6px 12px;">${ratingDisplay}</div>
             </div>
             <div class="fc-text">${summary ? AppShell.escapeHtml(summary) : '<span style="color:#94a3b8; font-style:normal;">No review text available.</span>'}</div>
             <div class="fc-footer">

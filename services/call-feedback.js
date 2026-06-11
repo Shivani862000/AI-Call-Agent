@@ -358,7 +358,21 @@ function extractCallFeedback(transcript = []) {
   const customerTurns = getCustomerTurns(transcript);
   const exchanges = splitIntoExchanges(transcript);
   const reviewText = extractReviewText(exchanges);
-  const stars = extractRating(exchanges) ?? extractRatingFromTranscriptTurns(transcript);
+  let stars = extractRating(exchanges) ?? extractRatingFromTranscriptTurns(transcript);
+  
+  // Extract stars from text directly using explicit user-provided mapping
+  if (stars === null) {
+    const textsToCheck = [reviewText, ...customerTurns.map(t => t.text)].filter(Boolean);
+    for (const text of textsToCheck) {
+      const normalized = normalizeText(text);
+      if (/(excellent experience)/.test(normalized)) { stars = 5; break; }
+      else if (/(experience kaafi acha tha|bahut acha tha)/.test(normalized)) { stars = 4; break; }
+      else if (/(experience acha tha)/.test(normalized)) { stars = 3; break; }
+      else if (/(problem hui thi)/.test(normalized)) { stars = 2; break; }
+      else if (/(bahut bura experience tha|bahut bura experience)/.test(normalized)) { stars = 1; break; }
+    }
+  }
+
   const consentDetected = detectConsent(customerTurns);
   const language = detectLanguage(customerTurns);
 
