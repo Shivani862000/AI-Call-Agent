@@ -99,12 +99,16 @@ router.get('/analytics', async (req, res) => {
 
     // Positive Feedback
     const fbPositive = feedback.filter((item) => Number(item.stars || 0) >= 4);
-    const callsPositive = recentCalls.filter((c) => Number(c.extracted_rating || 0) >= 4 && !feedback.find(f => f.call_id === c.id));
+    const callsPositive = recentCalls
+      .filter((c) => Number(c.extracted_rating || 0) >= 4 && !feedback.find(f => f.call_id === c.id))
+      .map((c) => ({ ...c, stars: c.extracted_rating, review_text: c.extracted_review_text }));
     const positiveFeedback = [...fbPositive, ...callsPositive];
 
     // Negative Feedback
     const fbNegative = feedback.filter((item) => Number(item.stars || 0) > 0 && Number(item.stars || 0) <= 2);
-    const callsNegative = recentCalls.filter((c) => Number(c.extracted_rating || 0) > 0 && Number(c.extracted_rating || 0) <= 2 && !feedback.find(f => f.call_id === c.id));
+    const callsNegative = recentCalls
+      .filter((c) => Number(c.extracted_rating || 0) > 0 && Number(c.extracted_rating || 0) <= 2 && !feedback.find(f => f.call_id === c.id))
+      .map((c) => ({ ...c, stars: c.extracted_rating, review_text: c.extracted_review_text }));
     const negativeFeedback = [...fbNegative, ...callsNegative];
 
     // Pending Analysis

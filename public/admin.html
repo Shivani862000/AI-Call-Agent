@@ -475,12 +475,12 @@
         }
 
     async function loadOverview() {
-          let [customers, feedbackData, recentCalls, clients, callMetrics] = await Promise.all([
+          let [customers, recentCalls, clients, callMetrics, feedbackData] = await Promise.all([
             AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
-            AppShell.fetchJson(`${AppShell.API_BASE}/feedback/analytics`),
             AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`),
             AppShell.fetchJson(`${AppShell.API_BASE}/clients`),
-            AppShell.fetchJson(`${AppShell.API_BASE}/calls/metrics`)
+            AppShell.fetchJson(`${AppShell.API_BASE}/calls/metrics`),
+            AppShell.fetchJson(`${AppShell.API_BASE}/feedback/analytics`).catch(() => ({ metrics: { positive: 0, negative: 0 }, lists: { positive: [], negative: [] } }))
           ]);
           callMetrics = callMetrics || {};
           clientCache = clients;
