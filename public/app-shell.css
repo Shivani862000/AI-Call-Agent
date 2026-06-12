@@ -681,10 +681,6 @@ body.poc-page .header-actions .button-link {
   transform: translateY(-1px);
 }
 
-.overview-page #overviewNewCallModal .modal-panel--narrow {
-  width: min(620px, 100%);
-}
-
 .reports-page .page-header {
   margin-bottom: 16px;
 }
@@ -1533,6 +1529,15 @@ body.poc-page .search-row .table-filter.desktop-only {
 
 .modal-panel--narrow {
   width: min(560px, 100%);
+}
+
+.new-call-modal-panel {
+  width: min(760px, 100%);
+}
+
+.new-call-modal-actions {
+  margin-top: 18px;
+  justify-content: flex-end;
 }
 
 .modal-close {
@@ -2779,8 +2784,7 @@ body.poc-page .search-row .table-filter.desktop-only {
     padding: 18px 16px calc(24px + env(safe-area-inset-bottom));
   }
 
-  #newCallModal .modal-panel--narrow,
-  #overviewNewCallModal .modal-panel--narrow {
+  .new-call-modal-panel {
     min-height: 90vh;
   }
 }

@@ -220,78 +220,7 @@
     <a href="/reports.html" class="mobile-dock-link" style="display: none;">Reports</a>
   </nav>
 
-  <div id="overviewNewCallModal" class="modal-backdrop" aria-hidden="true">
-    <div class="modal-panel modal-panel--narrow" role="dialog" aria-modal="true" aria-labelledby="overviewNewCallTitle">
-      <div class="mobile-sheet-handle mobile-only"></div>
-      <div class="poc-card-header modal-sheet-header">
-        <div>
-          <h3 id="overviewNewCallTitle" class="poc-card-title">Schedule New Call</h3>
-        </div>
-        <button id="closeOverviewNewCallModal" class="secondary modal-close" type="button">Close</button>
-      </div>
-
-      <input id="overviewEditingCustomerId" type="hidden">
-
-      <div class="poc-form-grid">
-        <label class="span-2">
-          Patient Name
-          <input id="overviewCallCustomerName" type="text" maxlength="100" placeholder="e.g. Rahul Sharma">
-          <span class="error-text" id="overviewCallCustomerNameError"></span>
-        </label>
-        <label>
-          Phone Number
-          <input id="overviewCallCustomerPhone" type="tel" placeholder="+91 98765 43210">
-          <span class="error-text" id="overviewCallCustomerPhoneError"></span>
-        </label>
-        <label>
-          Call Time
-          <input id="overviewCallCustomerTime" type="time">
-          <span class="error-text" id="overviewCallCustomerTimeError"></span>
-        </label>
-      </div>
-
-      <div class="form-field-block">
-        <div class="field-label">Call Type</div>
-        <div class="segmented-control call-type-control" role="radiogroup" aria-label="Call type">
-          <label class="segment-button active">
-            <input type="radio" name="overviewCallType" value="REVIEW_CALL" checked>
-            Review Calling
-          </label>
-          <label class="segment-button">
-            <input type="radio" name="overviewCallType" value="THREE_MONTH_FOLLOWUP">
-            3 Month Follow-up
-          </label>
-        </div>
-      </div>
-
-      <details id="overviewCareDetailsToggle" class="details-toggle">
-        <summary>Additional Care Details</summary>
-        <div class="details-content">
-          <div class="poc-form-grid">
-            <label>
-              DOB
-              <input id="overviewCareDob" type="date">
-              <span class="error-text" id="overviewCareDobError"></span>
-            </label>
-            <label>
-              Last Visit
-              <input id="overviewCareLastVisit" type="date">
-              <span class="error-text" id="overviewCareLastVisitError"></span>
-            </label>
-            <label class="span-2">
-              Treatment Type
-              <input id="overviewCareTreatment" type="text" placeholder="e.g. Blood test">
-              <span class="error-text" id="overviewCareTreatmentError"></span>
-            </label>
-          </div>
-        </div>
-      </details>
-
-      <div class="button-row" style="margin-top: 18px;">
-        <button id="submitOverviewNewCall" class="primary" type="button">Schedule Call</button>
-      </div>
-    </div>
-  </div>
+  <div id="overviewNewCallModalMount"></div>
 
   <div id="overviewMobileMenuSheet" class="modal-backdrop mobile-sheet-backdrop" aria-hidden="true">
     <div class="modal-panel mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="overviewMobileMenuTitle">
@@ -308,8 +237,8 @@
 
   <script src="/app-shell.js"></script>
   <script>
-    let clientCache = [];
     let activeOverviewFilter = 'patients';
+    let overviewNewCallModal = null;
 
     function isToday(value) {
       if (!value) return false;
@@ -319,164 +248,9 @@
       return date.toDateString() === now.toDateString();
     }
 
-    function normalizePhoneForApi(value) {
-      const digits = String(value || '').replace(/\D/g, '');
-      if (!digits) return '';
-      if (digits.length === 10) return `+91${digits}`;
-      if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
-      if (digits.length > 12) return `+${digits.slice(-12)}`;
-      return `+${digits}`;
-    }
-
-    function formatPhoneForInput(value) {
-      const digits = String(value || '').replace(/\D/g, '').slice(-12);
-      const national = digits.startsWith('91') ? digits.slice(2) : digits;
-      if (national.length <= 5) return national ? `+91 ${national}` : '';
-      return `+91 ${national.slice(0, 5)} ${national.slice(5, 10)}`.trim();
-    }
-
-    function normalizeCallType(value) {
-      return String(value || 'REVIEW_CALL').toUpperCase() === 'THREE_MONTH_FOLLOWUP'
-        ? 'THREE_MONTH_FOLLOWUP'
-        : 'REVIEW_CALL';
-    }
-
-    function setOverviewCallTypeSelection(value) {
-      const normalized = normalizeCallType(value);
-      document.querySelectorAll('input[name="overviewCallType"]').forEach((input) => {
-        input.checked = input.value === normalized;
-        input.closest('.segment-button')?.classList.toggle('active', input.checked);
-      });
-    }
-
-    function getSelectedOverviewCallType() {
-      return document.querySelector('input[name="overviewCallType"]:checked')?.value || 'REVIEW_CALL';
-    }
-
-    function getClientByPhone(phone) {
-      const normalized = normalizePhoneForApi(phone);
-      return clientCache.find((client) => normalizePhoneForApi(client.phone) === normalized) || null;
-    }
-
-    function clearOverviewFormErrors() {
-      AppShell.clearFieldErrors([
-        'overviewCallCustomerName',
-        'overviewCallCustomerPhone',
-        'overviewCallCustomerTime',
-        'overviewCareDob',
-        'overviewCareLastVisit',
-        'overviewCareTreatment'
-      ]);
-    }
-
-    function getOverviewNewCallPayload() {
-      return {
-        name: document.getElementById('overviewCallCustomerName').value.trim(),
-        phone: normalizePhoneForApi(document.getElementById('overviewCallCustomerPhone').value),
-        preferred_slot: document.getElementById('overviewCallCustomerTime').value.trim(),
-        callType: getSelectedOverviewCallType()
-      };
-    }
-
-    function getOverviewCarePayload(customerPayload) {
-      return {
-        name: customerPayload.name,
-        phone: customerPayload.phone,
-        date_of_birth: document.getElementById('overviewCareDob').value || '',
-        last_visit_date: document.getElementById('overviewCareLastVisit').value || '',
-        treatment_type: document.getElementById('overviewCareTreatment').value.trim(),
-        annual_reminder_enabled: 1,
-        annual_reminder_slot: customerPayload.preferred_slot || '10:00',
-        notes: '',
-        status: 'active'
-      };
-    }
-
-    function validateOverviewNewCall(payload) {
-      const fieldErrors = {};
-      if (!payload.name || payload.name.length < 2) fieldErrors.overviewCallCustomerName = 'Patient name is required';
-      if (!/^\+\d{12}$/.test(payload.phone)) fieldErrors.overviewCallCustomerPhone = 'Use a valid Indian mobile number';
-      if (!payload.preferred_slot) fieldErrors.overviewCallCustomerTime = 'Call time is required';
-      return fieldErrors;
-    }
-
-    function validateOverviewCareDetails(payload) {
-      const hasAny = payload.date_of_birth || payload.last_visit_date || payload.treatment_type;
-      if (!hasAny) return {};
-      const fieldErrors = {};
-      if (!payload.last_visit_date) fieldErrors.overviewCareLastVisit = 'Last visit is required when adding care details';
-      if (!payload.treatment_type) fieldErrors.overviewCareTreatment = 'Treatment type is required when adding care details';
-      return fieldErrors;
-    }
-
-    function resetOverviewNewCallForm() {
-      document.getElementById('overviewEditingCustomerId').value = '';
-      document.getElementById('overviewCallCustomerName').value = '';
-      document.getElementById('overviewCallCustomerPhone').value = '';
-      document.getElementById('overviewCallCustomerTime').value = '';
-      document.getElementById('overviewCareDob').value = '';
-      document.getElementById('overviewCareLastVisit').value = '';
-      document.getElementById('overviewCareTreatment').value = '';
-      setOverviewCallTypeSelection('REVIEW_CALL');
-      document.getElementById('overviewCareDetailsToggle').open = false;
-      clearOverviewFormErrors();
-    }
-
     function openOverviewNewCallModal() {
-      resetOverviewNewCallForm();
-      document.getElementById('overviewNewCallModal').classList.add('open');
-      document.getElementById('overviewNewCallModal').setAttribute('aria-hidden', 'false');
-      window.requestAnimationFrame(() => document.getElementById('overviewCallCustomerName').focus());
-    }
-
-    function closeOverviewNewCallModal() {
-      document.getElementById('overviewNewCallModal').classList.remove('open');
-      document.getElementById('overviewNewCallModal').setAttribute('aria-hidden', 'true');
-    }
-
-    async function saveOverviewClientRecord(payload) {
-      const existingClient = getClientByPhone(payload.phone);
-      const endpoint = existingClient ? `${AppShell.API_BASE}/clients/${existingClient.id}` : `${AppShell.API_BASE}/clients`;
-      const method = existingClient ? 'PUT' : 'POST';
-      await AppShell.fetchJson(endpoint, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-    }
-
-    async function submitOverviewNewCall() {
-      clearOverviewFormErrors();
-      const payload = getOverviewNewCallPayload();
-      const carePayload = getOverviewCarePayload(payload);
-      const fieldErrors = {
-        ...validateOverviewNewCall(payload),
-        ...validateOverviewCareDetails(carePayload)
-      };
-
-      if (Object.keys(fieldErrors).length) {
-        AppShell.applyFieldErrors(fieldErrors);
-        AppShell.showAlert('Please fix the highlighted fields', 'error');
-        return;
-      }
-
-      try {
-        await AppShell.fetchJson(`${AppShell.API_BASE}/customers`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (carePayload.last_visit_date || carePayload.treatment_type || carePayload.date_of_birth) {
-          await saveOverviewClientRecord(carePayload);
-        }
-
-        AppShell.showAlert('Call scheduled successfully');
-        closeOverviewNewCallModal();
-        await loadOverview();
-      } catch (error) {
-        AppShell.showAlert(error.message, 'error');
-      }
+      if (!overviewNewCallModal) return;
+      overviewNewCallModal.open();
     }
 
     function openOverviewSheet(id) {
@@ -691,15 +465,13 @@
     }
 
     async function loadOverview() {
-      let [customers, feedback, recentCalls, clients, callMetrics] = await Promise.all([
+      let [customers, feedback, recentCalls, callMetrics] = await Promise.all([
         AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
         AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/clients`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/metrics`)
       ]);
       callMetrics = callMetrics || {};
-      clientCache = clients;
 
       const scheduledStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
       const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
@@ -746,6 +518,11 @@
 
     document.addEventListener('DOMContentLoaded', async () => {
       await AppShell.ensureAuthenticatedSession();
+      overviewNewCallModal = AppShell.NewCallModal({
+        mountId: 'overviewNewCallModalMount',
+        modalId: 'overviewSharedNewCallModal',
+        onSaved: loadOverview
+      });
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('desktopOverviewNewCallButton').addEventListener('click', openOverviewNewCallModal);
       document.getElementById('deleteAllAdminButton').addEventListener('click', async () => {
@@ -766,25 +543,11 @@
       });
       document.getElementById('closeOverviewMobileMenuSheet').addEventListener('click', () => closeOverviewSheet('overviewMobileMenuSheet'));
       document.getElementById('overviewMobileMenuLogout').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
-      document.getElementById('closeOverviewNewCallModal').addEventListener('click', closeOverviewNewCallModal);
-      document.getElementById('submitOverviewNewCall').addEventListener('click', submitOverviewNewCall);
-      document.querySelectorAll('input[name="overviewCallType"]').forEach((input) => {
-        input.addEventListener('change', () => setOverviewCallTypeSelection(input.value));
-      });
-      document.getElementById('overviewCallCustomerPhone').addEventListener('input', (event) => {
-        event.target.value = formatPhoneForInput(event.target.value);
-      });
-      document.getElementById('overviewNewCallModal').addEventListener('click', (event) => {
-        if (event.target.id === 'overviewNewCallModal') closeOverviewNewCallModal();
-      });
       document.getElementById('overviewMobileMenuSheet').addEventListener('click', (event) => {
         if (event.target.id === 'overviewMobileMenuSheet') closeOverviewSheet('overviewMobileMenuSheet');
       });
       document.addEventListener('keydown', (event) => {
         if (event.key !== 'Escape') return;
-        if (document.getElementById('overviewNewCallModal').classList.contains('open')) {
-          closeOverviewNewCallModal();
-        }
         if (document.getElementById('overviewMobileMenuSheet').classList.contains('open')) {
           closeOverviewSheet('overviewMobileMenuSheet');
         }
