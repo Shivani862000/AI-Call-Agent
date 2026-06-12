@@ -371,12 +371,22 @@ function extractCallFeedback(transcript = []) {
   };
 }
 
-async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, customerId, transcript, overwriteExisting = false }) {
-  if (!callSid || !Array.isArray(transcript) || transcript.length === 0) {
+async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, callId, customerId, transcript, overwriteExisting = false }) {
+  if ((!callSid && !callId) || !Array.isArray(transcript) || transcript.length === 0) {
     return { saved: false, reason: 'missing_call_or_transcript' };
   }
 
-  const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [callSid]);
+  const callRecord = await dbGet(
+    `SELECT *
+       FROM calls
+      WHERE ${callId ? 'id = ?' : 'provider_call_id = ?'}
+      ORDER BY
+        CASE WHEN COALESCE(transcript_text, '') != '' THEN 0 ELSE 1 END,
+        CASE WHEN outcome = 'completed' THEN 0 ELSE 1 END,
+        id DESC
+      LIMIT 1`,
+    [callId || callSid]
+  );
   const resolvedCustomerId = customerId || callRecord?.customer_id;
 
   if (!callRecord || !resolvedCustomerId) {

@@ -281,7 +281,7 @@ async function triggerScheduledCalls() {
         callType: customer.call_type
       });
 
-      await dbRun(
+      const insertResult = await dbRun(
         `INSERT INTO calls (
           customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
           consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
@@ -304,7 +304,7 @@ async function triggerScheduledCalls() {
         ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
-      const insertedCall = await dbGet('SELECT id FROM calls WHERE provider_call_id = ?', [call.sid]);
+      const insertedCall = { id: insertResult.lastID };
       const acceptedOnly = isProviderAcceptedOnly(call);
       logger.info(acceptedOnly ? 'CALL_PENDING' : 'CALL_STARTED', {
         callId: insertedCall?.id,

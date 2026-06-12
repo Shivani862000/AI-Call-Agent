@@ -385,7 +385,7 @@ module.exports = function setupWebSocketBridge(server) {
                   transcript_source = COALESCE(transcript_source, ?),
                   analysis_status = CASE
                     WHEN COALESCE(analysis_status, '') = 'completed' THEN analysis_status
-                    ELSE 'processing'
+                    ELSE COALESCE(analysis_status, 'pending')
                   END,
                   ended_at = COALESCE(ended_at, ?),
                   last_event = ?,
@@ -426,13 +426,14 @@ module.exports = function setupWebSocketBridge(server) {
             dbGet,
             dbRun,
             callSid: session.providerCallId,
+            callId: session.callId,
             customerId: session.customerId,
             transcript,
             overwriteExisting: true
           });
 
           runInBackground('POST CALL PIPELINE ERROR', async () => {
-            const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: session.providerCallId });
+            const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: session.providerCallId, callId: session.callId });
             if (result.ok) {
               console.log(`[POST CALL PIPELINE] Processed auto-completed call ${session.providerCallId} with feedback ${result.feedbackId}`);
             } else {
@@ -781,7 +782,6 @@ module.exports = function setupWebSocketBridge(server) {
             }
           }
         });
-        sendOpeningPrompt();
       } catch (error) {
         console.error('[ICALLMATE][GEMINI LIVE CONNECT ERROR]', error.message);
       } finally {
@@ -1101,8 +1101,17 @@ module.exports = function setupWebSocketBridge(server) {
           return;
         }
 
-        // In DIRECT_AUDIO mode, always forward caller audio to Gemini Live
-        // so its built-in VAD / turn-taking works properly even while AI speaks.
+        // Avoid echo-driven interruption and chopped playback while the agent is still speaking.
+        if (session.aiSpeakingUntil && Date.now() < session.aiSpeakingUntil) {
+          if (deepgramReady && deepgramWs?.readyState === WebSocket.OPEN) {
+            const audioBuffer = Buffer.from(payload, 'base64');
+            deepgramWs.send(Buffer.alloc(audioBuffer.length));
+          }
+          return;
+        }
+
+        // In DIRECT_AUDIO mode, forward caller audio after the agent finishes speaking
+        // so Gemini Live can do turn-taking without self-interrupting on echo.
         if (useGeminiLive() && GEMINI_LIVE_DIRECT_AUDIO) {
           if (geminiLiveSession && geminiLiveReady) {
             if (session.audioChunkCount % 100 === 0) {
@@ -1115,16 +1124,6 @@ module.exports = function setupWebSocketBridge(server) {
               }
             });
           }
-        }
-
-        // Gate Deepgram STT while AI is speaking to prevent echo / self-interruption
-        if (session.aiSpeakingUntil && Date.now() < session.aiSpeakingUntil) {
-          if (deepgramReady && deepgramWs?.readyState === WebSocket.OPEN) {
-            const audioBuffer = Buffer.from(payload, 'base64');
-            const silence = Buffer.alloc(audioBuffer.length);
-            deepgramWs.send(silence);
-          }
-          return;
         }
 
         if (!deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
@@ -1356,7 +1355,7 @@ module.exports = function setupWebSocketBridge(server) {
           if (session.providerCallId) {
             runInBackground('HANGUP POST CALL PIPELINE', async () => {
               try {
-                const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: session.providerCallId });
+                const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: session.providerCallId, callId: session.callId });
                 if (result.ok) {
                   console.log(`[POST CALL PIPELINE] Processed hangup call ${session.providerCallId} feedbackId=${result.feedbackId}`);
                   console.log(`[TRANSCRIPT] Generated successfully`);
@@ -1426,7 +1425,7 @@ module.exports = function setupWebSocketBridge(server) {
           if (session.providerCallId && session.answered) {
             runInBackground('WS CLOSE POST CALL PIPELINE', async () => {
               try {
-                const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: session.providerCallId });
+                const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: session.providerCallId, callId: session.callId });
                 if (result.ok) {
                   console.log(`[POST CALL PIPELINE] Processed ws-close call ${session.providerCallId} feedbackId=${result.feedbackId}`);
                   console.log(`[TRANSCRIPT] Generated successfully`);

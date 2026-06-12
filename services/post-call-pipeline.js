@@ -113,13 +113,18 @@ async function upsertFeedbackFromAnalysis({ dbGet, dbRun, callRecord, reviewText
   return { feedbackId: result.lastID, category: categorization.category, updated: false };
 }
 
-async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
+async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   const callRecord = await dbGet(
     `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone
      FROM calls
      LEFT JOIN customers ON customers.id = calls.customer_id
-     WHERE calls.provider_call_id = ?`,
-    [callSid]
+     WHERE ${callId ? 'calls.id = ?' : 'calls.provider_call_id = ?'}
+     ORDER BY
+       CASE WHEN COALESCE(calls.transcript_text, '') != '' THEN 0 ELSE 1 END,
+       CASE WHEN calls.outcome = 'completed' THEN 0 ELSE 1 END,
+       calls.id DESC
+     LIMIT 1`,
+    [callId || callSid]
   );
 
   if (!callRecord) {
@@ -132,7 +137,19 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     return { ok: false, reason: 'already_processed' };
   }
 
-  await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['processing', 'processing', callRecord.id]);
+  const claimResult = await dbRun(
+    `UPDATE calls
+        SET transcript_status = ?,
+            analysis_status = ?
+      WHERE id = ?
+        AND COALESCE(analysis_status, 'pending') NOT IN ('processing', 'completed')`,
+    ['processing', 'processing', callRecord.id]
+  );
+
+  if (!claimResult.changes) {
+    return { ok: false, reason: 'already_processing' };
+  }
+
   logger.info('FEEDBACK_ANALYSIS_STARTED', {
     callId: callRecord.id,
     customerId: callRecord.customer_id,
@@ -299,9 +316,11 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     callRecord.id
   ]);
 
-  const feedbackEvent = (Number(mergedRating || 0) >= 4 || String(sentimentLabel || '').toLowerCase() === 'positive')
+  const finalSentimentLabel = productAnalysis.sentiment || sentimentLabel || 'neutral';
+  const normalizedFinalSentiment = String(finalSentimentLabel || '').toLowerCase();
+  const feedbackEvent = (Number(mergedRating || 0) >= 4 || normalizedFinalSentiment === 'positive')
     ? 'FEEDBACK_POSITIVE'
-    : ((Number(mergedRating || 0) > 0 && Number(mergedRating || 0) <= 2) || String(sentimentLabel || '').toLowerCase() === 'negative')
+    : ((Number(mergedRating || 0) > 0 && Number(mergedRating || 0) <= 2) || normalizedFinalSentiment === 'negative')
       ? 'FEEDBACK_NEGATIVE'
       : 'FEEDBACK_PENDING';
   const feedbackDetails = {
@@ -309,7 +328,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     customerId: callRecord.customer_id,
     patient: callRecord.customer_name,
     phone: callRecord.customer_phone,
-    sentiment: productAnalysis.sentiment || sentimentLabel || 'neutral',
+    sentiment: finalSentimentLabel,
     rating: Number(mergedRating || 0) ? `${mergedRating}/5` : '',
     feedbackId: feedbackResult.feedbackId
   };

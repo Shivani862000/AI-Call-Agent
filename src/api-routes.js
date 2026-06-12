@@ -378,7 +378,7 @@ module.exports = function mountApiRoutes(app) {
         if (mappedOutcome === 'completed' && normalizedRecordingUrl) {
           setTimeout(() => {
             runInBackground('POST CALL PIPELINE ERROR', async () => {
-              const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: providerCallSid });
+              const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: providerCallSid, callId: callRecord.id });
               if (result.ok) {
                 console.log(`[POST CALL PIPELINE] Processed call ${providerCallSid} with feedback ${result.feedbackId}`);
               } else {
@@ -418,7 +418,7 @@ module.exports = function mountApiRoutes(app) {
 
       console.log(`[RECORDING STATUS] ${recordingStatus} | Call SID: ${callSid} | Recording SID: ${recordingSid}`);
 
-      const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [callSid]);
+      const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ? ORDER BY id DESC LIMIT 1', [callSid]);
       if (callRecord) {
         const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
         await dbRun(
@@ -433,7 +433,7 @@ module.exports = function mountApiRoutes(app) {
         if (recordingStatus === 'completed' && recordingUrl) {
           setTimeout(() => {
             runInBackground('POST CALL PIPELINE ERROR', async () => {
-              const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid });
+              const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid, callId: callRecord.id });
               if (result.ok) {
                 console.log(`[POST CALL PIPELINE] Processed call ${callSid} with feedback ${result.feedbackId}`);
               } else {
@@ -751,7 +751,7 @@ module.exports = function mountApiRoutes(app) {
             if (mappedOutcome === 'completed' && payload.recording_filename) {
               setTimeout(() => {
                 runInBackground('POST CALL PIPELINE ERROR', async () => {
-                  const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: callRecord.provider_call_id });
+                  const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: callRecord.provider_call_id, callId: callRecord.id });
                   if (result.ok) {
                     console.log(`[POST CALL PIPELINE] Processed call ${callRecord.provider_call_id} with feedback ${result.feedbackId}`);
                   } else {
