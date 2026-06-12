@@ -6,6 +6,7 @@
 'use strict';
 
 const fetch = require('node-fetch');
+const fs = require('fs');
 const customersRouter = require('../routes/customers');
 const clientsRouter = require('../routes/clients');
 const campaignsRouter = require('../routes/campaigns');
@@ -78,6 +79,7 @@ const { buildCallAnalysis, storeCallAnalysis } = require('../services/call-analy
 const { generateCallAnalysisPDF } = require('../services/pdf');
 const { initiateCall, buildMasterPostPayload } = require('../services/icallmate');
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
+const logger = require('../services/system-logger');
 
 module.exports = function mountApiRoutes(app) {
   app.get('/health', (req, res) => {
@@ -117,11 +119,13 @@ module.exports = function mountApiRoutes(app) {
 
     if (!verifyCredentials(username, password)) {
       clearAuthCookie(req, res);
+      logger.warn('USER_LOGIN', { user: username || 'unknown', status: 'failed' });
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
     const token = createAuthToken(username);
     setAuthCookie(req, res, token);
+    logger.info('USER_LOGIN', { user: username });
     return res.json({
       success: true,
       username
@@ -129,7 +133,9 @@ module.exports = function mountApiRoutes(app) {
   });
 
   app.post('/api/auth/logout', (req, res) => {
+    const session = readAuthSession(req);
     clearAuthCookie(req, res);
+    logger.info('USER_LOGOUT', { user: session?.username || req.adminSession?.username || 'admin' });
     return res.json({ success: true });
   });
 
@@ -141,6 +147,36 @@ module.exports = function mountApiRoutes(app) {
   app.use('/api/agents', agentsRouter);
   app.use('/api/test-call', testCallRouter);
   app.use('/api/test-ai-call', testAiCallRouter);
+
+  app.get('/api/logs', async (req, res) => {
+    try {
+      const filter = String(req.query.filter || 'all').toLowerCase();
+      const max = Math.min(Math.max(Number(req.query.limit || 200), 1), 1000);
+      if (!fs.existsSync(logger.LOG_FILE)) {
+        return res.json({ logs: [] });
+      }
+
+      const text = await fs.promises.readFile(logger.LOG_FILE, 'utf8');
+      const filters = {
+        calls: /\[(CALL_[A-Z_]+)\]/,
+        users: /\[(USER_[A-Z_]+)\]/,
+        feedback: /\[(FEEDBACK_[A-Z_]+)\]/,
+        errors: /\[ERROR\]/
+      };
+      const matcher = filters[filter] || null;
+      const logs = text
+        .split('\n')
+        .filter(Boolean)
+        .filter((line) => !matcher || matcher.test(line))
+        .slice(-max)
+        .reverse();
+
+      res.json({ logs });
+    } catch (error) {
+      logger.error('LOG_READ_FAILED', { reason: error.message });
+      res.status(500).json({ error: 'Failed to read logs' });
+    }
+  });
 
   app.post('/call/start', async (req, res) => {
     let customer = null;
@@ -196,8 +232,9 @@ module.exports = function mountApiRoutes(app) {
       const result = await dbRun(
         `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
+        provider_payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           agentConfig?.id || null,
@@ -210,10 +247,20 @@ module.exports = function mountApiRoutes(app) {
           'normal',
           'outbound',
           'icallmate',
-          callType
+          callType,
+          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
         ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      logger.info('CALL_STARTED', {
+        callId: result.lastID,
+        customerId: customer.id,
+        patient: customer.name || customerName,
+        phone: customer.phone || customerPhone,
+        type: logger.formatCallType(callType),
+        provider: 'icallmate',
+        providerCallId: call.sid
+      });
 
       schedulePendingCallDiagnostic(call.sid, {
         customerId: customer.id,
@@ -222,7 +269,6 @@ module.exports = function mountApiRoutes(app) {
         agentId: agentConfig?.id || null,
         trigger: '/call/start'
       });
-      console.log(`[CALL STARTED] SID: ${call.sid}`);
       res.json({ success: true, sid: call.sid, callId: result.lastID, customerId: customer.id, agentId: agentConfig?.id || null });
     } catch (error) {
       if (customer?.id) {
@@ -232,7 +278,12 @@ module.exports = function mountApiRoutes(app) {
           console.error('[CALL CLAIM RELEASE ERROR]', releaseError.message);
         }
       }
-      console.error('[ERROR starting call]', error.message);
+      logger.error('CALL_FAILED', {
+        customerId: customer?.id,
+        patient: customer?.name,
+        phone: customer?.phone || req.body.customerPhone,
+        reason: error.message
+      });
       res.status(500).json({ success: false, error: error.message });
     }
   });
@@ -274,6 +325,7 @@ module.exports = function mountApiRoutes(app) {
 
       const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [providerCallSid]);
       const customerId = req.query.customerId || callRecord?.customer_id;
+      const customer = customerId ? await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]) : null;
 
       if (callRecord) {
         let mappedOutcome = null;
@@ -304,6 +356,23 @@ module.exports = function mountApiRoutes(app) {
 
         if (mappedOutcome) {
           await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ? WHERE id = ?', [mappedOutcome, providerStatus, callRecord.id]);
+          const eventName = mappedOutcome === 'completed'
+            ? 'CALL_COMPLETED'
+            : (mappedOutcome === 'failed' || mappedOutcome === 'busy' || mappedOutcome === 'no_answer' ? 'CALL_FAILED' : 'CALL_PENDING');
+          const statusDetails = {
+            callId: callRecord.id,
+            customerId: customerId || callRecord.customer_id,
+            patient: customer?.name,
+            phone: customer?.phone,
+            status: mappedOutcome,
+            providerStatus,
+            duration: logger.formatDuration(callRecord.call_duration || 0)
+          };
+          if (eventName === 'CALL_FAILED') {
+            logger.warn(eventName, statusDetails);
+          } else {
+            logger.info(eventName, statusDetails);
+          }
         }
 
         if (mappedOutcome === 'completed' && normalizedRecordingUrl) {
@@ -320,7 +389,6 @@ module.exports = function mountApiRoutes(app) {
         }
 
         if (customerId) {
-          const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
           if (customer && mappedOutcome) {
             await applyCallOutcomeWorkflow({
               dbGet,
@@ -352,6 +420,7 @@ module.exports = function mountApiRoutes(app) {
 
       const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [callSid]);
       if (callRecord) {
+        const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
         await dbRun(
           `UPDATE calls
             SET recording_sid = ?,
@@ -372,6 +441,15 @@ module.exports = function mountApiRoutes(app) {
               }
             });
           }, 1500);
+        }
+        if (recordingStatus && recordingStatus !== 'completed') {
+          logger.info('CALL_PENDING', {
+            callId: callRecord.id,
+            customerId: callRecord.customer_id,
+            patient: customer?.name,
+            phone: customer?.phone,
+            status: recordingStatus
+          });
         }
       }
 
@@ -416,8 +494,9 @@ module.exports = function mountApiRoutes(app) {
       const result = await dbRun(
         `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
+        provider_payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           agentConfig?.id || null,
@@ -430,11 +509,21 @@ module.exports = function mountApiRoutes(app) {
           'normal',
           'outbound',
           'icallmate',
-          callType
+          callType,
+          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
         ]
       );
 
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      logger.info('CALL_STARTED', {
+        callId: result.lastID,
+        customerId: customer.id,
+        patient: customer.name,
+        phone: customer.phone,
+        type: logger.formatCallType(callType),
+        provider: 'icallmate',
+        providerCallId: call.sid
+      });
       schedulePendingCallDiagnostic(call.sid, {
         customerId: customer.id,
         customerPhone: customer.phone,
@@ -451,7 +540,12 @@ module.exports = function mountApiRoutes(app) {
           console.error('[API CALL CLAIM RELEASE ERROR]', releaseError.message);
         }
       }
-      console.error('[API CALL INITIATE ERROR]', error.message);
+      logger.error('CALL_FAILED', {
+        customerId: customer?.id,
+        patient: customer?.name,
+        phone: customer?.phone,
+        reason: error.message
+      });
       res.status(500).json({ error: error.message });
     }
   });
@@ -874,12 +968,21 @@ module.exports = function mountApiRoutes(app) {
           'normal',
           'outbound',
           'icallmate-masterpost',
-          JSON.stringify(payload),
+          JSON.stringify({ request: call.requestPayload || payload, response: call.raw || null }),
           callType
         ]
       );
 
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      logger.info('CALL_STARTED', {
+        callId: result.lastID,
+        customerId: customer.id,
+        patient: customer.name || customerName,
+        phone: customer.phone || phone,
+        type: logger.formatCallType(callType),
+        provider: 'icallmate-masterpost',
+        providerCallId: call.sid
+      });
       schedulePendingCallDiagnostic(call.sid, {
         customerId: customer.id,
         customerPhone: phone,
@@ -906,7 +1009,12 @@ module.exports = function mountApiRoutes(app) {
           console.error('[OUTGOING CALL CLAIM RELEASE ERROR]', releaseError.message);
         }
       }
-      console.error('[ICALLMATE OUTGOING CALL ERROR]', error.message);
+      logger.error('CALL_FAILED', {
+        customerId: customer?.id,
+        patient: customer?.name,
+        phone: customer?.phone || req.body.Phone_No || req.body.phone || req.body.customerPhone,
+        reason: error.message
+      });
       res.status(500).json({ error: error.message });
     }
   });
@@ -1125,9 +1233,26 @@ module.exports = function mountApiRoutes(app) {
         return res.status(404).json({ error: 'Call not found' });
       }
 
+      logger.info('FEEDBACK_ANALYSIS_STARTED', {
+        callId: call.id,
+        customerId: call.customer_id,
+        patient: call.customer_name,
+        phone: call.customer_phone,
+        source: 'manual_rerun'
+      });
       const analysis = buildCallAnalysis(call);
       await storeCallAnalysis({ dbRun, callId: call.id, analysis });
       const updatedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [call.id]);
+      const sentiment = updatedCall.sentiment || updatedCall.sentiment_label || analysis.sentiment || 'neutral';
+      const rating = Number(updatedCall.extracted_rating || 0);
+      logger.info('FEEDBACK_ANALYSIS_COMPLETED', {
+        callId: call.id,
+        customerId: call.customer_id,
+        patient: call.customer_name,
+        phone: call.customer_phone,
+        sentiment,
+        rating: rating ? `${rating}/5` : ''
+      });
       res.json({
         success: true,
         call: updatedCall,
@@ -1306,8 +1431,14 @@ module.exports = function mountApiRoutes(app) {
 
   app.delete('/api/calls/bulk', async (req, res) => {
     try {
+      const counts = await dbGet('SELECT COUNT(*) AS call_count FROM calls');
       await dbRun('DELETE FROM call_supervisor_events');
       await dbRun('DELETE FROM calls');
+      logger.warn('ALL_RECORDS_DELETED', {
+        deletedBy: req.adminSession?.username || 'admin',
+        calls: counts?.call_count || 0,
+        scope: 'call_history'
+      });
       res.json({ message: 'All call history deleted successfully' });
     } catch (error) {
       console.error('Error in calls bulk delete:', error);

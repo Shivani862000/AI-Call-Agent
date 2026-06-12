@@ -3,6 +3,7 @@ const router = express.Router();
 const { dbRun, dbGet, dbAll } = require('../db');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
+const logger = require('../services/system-logger');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -20,6 +21,7 @@ const upload = multer({
 });
 const PHONE_PATTERN = /^\+\d{10,15}$/;
 const SLOT_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ALLOWED_CALL_TYPES = new Set(['REVIEW_CALL', 'THREE_MONTH_FOLLOWUP']);
 const RESCHEDULABLE_STATUSES = new Set([
   'scheduled',
@@ -55,6 +57,39 @@ function getNextIsoForPreferredSlot(slot, now = new Date()) {
   return scheduled.toISOString();
 }
 
+function getLocalDateValue(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function buildScheduledDateTime(dateValue, timeValue) {
+  const datePart = String(dateValue || '').trim();
+  const timePart = String(timeValue || '').trim();
+  if (!DATE_PATTERN.test(datePart) || !SLOT_PATTERN.test(timePart)) {
+    return null;
+  }
+
+  const scheduled = new Date(`${datePart}T${timePart}:00`);
+  return Number.isNaN(scheduled.getTime()) ? null : scheduled;
+}
+
+function normalizeScheduledDate(payload = {}) {
+  const directDate = String(payload.scheduled_date || payload.call_date || payload.callDate || '').trim();
+  if (directDate) return directDate;
+
+  const scheduledDateTime = String(payload.scheduled_datetime || payload.scheduledDateTime || '').trim();
+  if (scheduledDateTime) {
+    const parsed = new Date(scheduledDateTime);
+    if (!Number.isNaN(parsed.getTime())) {
+      return getLocalDateValue(parsed);
+    }
+  }
+
+  return '';
+}
+
 function normalizeCallType(value) {
   const normalized = String(value || 'REVIEW_CALL').trim().toUpperCase();
   if (['REVIEW', 'REVIEW_CALLING'].includes(normalized)) return 'REVIEW_CALL';
@@ -72,7 +107,14 @@ function normalizePreferredSlot(payload = {}) {
 
   const callTime = String(payload.callTime || '').trim();
   if (!callTime) {
-    return '10:00';
+    const scheduledDateTime = String(payload.scheduled_datetime || payload.scheduledDateTime || '').trim();
+    if (scheduledDateTime) {
+      const parsed = new Date(scheduledDateTime);
+      if (!Number.isNaN(parsed.getTime())) {
+        return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
+      }
+    }
+    return '';
   }
 
   const parsed = new Date(callTime);
@@ -84,10 +126,15 @@ function normalizePreferredSlot(payload = {}) {
 }
 
 function normalizeCustomerPayload(payload = {}) {
+  const preferredSlot = normalizePreferredSlot(payload);
+  const scheduledDate = normalizeScheduledDate(payload);
+  const scheduled = buildScheduledDateTime(scheduledDate, preferredSlot);
   return {
     name: String(payload.name || payload.patientName || '').trim(),
     phone: String(payload.phone || payload.phoneNumber || '').trim(),
-    preferred_slot: normalizePreferredSlot(payload),
+    scheduled_date: scheduledDate,
+    preferred_slot: preferredSlot,
+    scheduled_datetime: scheduled ? scheduled.toISOString() : null,
     call_type: normalizeCallType(payload.call_type || payload.callType),
     customer_value: String(payload.customer_value || 'standard').trim().toLowerCase() || 'standard',
     urgency_level: String(payload.urgency_level || 'normal').trim().toLowerCase() || 'normal',
@@ -125,6 +172,23 @@ function validateCustomerPayload(payload) {
     errors.preferred_slot = 'Scheduled time is required';
   } else if (!SLOT_PATTERN.test(payload.preferred_slot)) {
     errors.preferred_slot = 'Scheduled time must be in HH:MM format';
+  }
+
+  if (!payload.scheduled_date) {
+    errors.scheduled_date = 'Scheduled date is required';
+  } else if (!DATE_PATTERN.test(payload.scheduled_date)) {
+    errors.scheduled_date = 'Scheduled date must be in YYYY-MM-DD format';
+  }
+
+  const scheduled = buildScheduledDateTime(payload.scheduled_date, payload.preferred_slot);
+  if (!errors.scheduled_date && !errors.preferred_slot && !scheduled) {
+    errors.scheduled_datetime = 'Scheduled date and time are invalid';
+  } else if (scheduled && scheduled.getTime() <= Date.now()) {
+    if (payload.scheduled_date === getLocalDateValue()) {
+      errors.preferred_slot = 'Choose a future time for today';
+    } else {
+      errors.scheduled_date = 'Choose today or a future date';
+    }
   }
 
   if (!['vip', 'high', 'standard', 'low'].includes(payload.customer_value)) {
@@ -166,15 +230,16 @@ async function saveCustomer(payload) {
   const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
   return dbRun(
     `INSERT INTO customers (
-      name, phone, preferred_slot, status, customer_value, urgency_level,
+      name, phone, preferred_slot, scheduled_datetime, status, customer_value, urgency_level,
       preferred_language, preferred_dialect, do_not_call, consent_status,
       outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
       campaign_name, service_interest, call_type
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       payload.name,
       payload.phone,
       payload.preferred_slot,
+      payload.scheduled_datetime,
       initialStatus,
       payload.customer_value,
       payload.urgency_level,
@@ -193,6 +258,17 @@ async function saveCustomer(payload) {
   );
 }
 
+function baseCustomerLogDetails(customer, extra = {}) {
+  return {
+    customerId: customer?.id,
+    patient: customer?.name,
+    phone: customer?.phone,
+    type: logger.formatCallType(customer?.call_type),
+    scheduledAt: logger.formatHumanDateTime(customer?.scheduled_datetime),
+    ...extra
+  };
+}
+
 // Add single customer
 router.post('/', async (req, res) => {
   try {
@@ -204,6 +280,10 @@ router.post('/', async (req, res) => {
     }
 
     const result = await saveCustomer(payload);
+    const customer = { ...payload, id: result.lastID };
+    logger.info('USER_CREATED_CALL', baseCustomerLogDetails(customer, { user: req.adminSession?.username || 'admin' }));
+    logger.info('CALL_CREATED', baseCustomerLogDetails(customer));
+    logger.info('CALL_PENDING', baseCustomerLogDetails(customer, { status: 'scheduled' }));
     res.json({ id: result.lastID, message: 'Customer added successfully' });
   } catch (error) {
     return handleSqliteError(error, res);
@@ -305,19 +385,21 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
-    const slotChanged = payload.preferred_slot !== (existing.preferred_slot || '10:00');
+    const slotChanged = payload.preferred_slot !== (existing.preferred_slot || '10:00')
+      || payload.scheduled_datetime !== (existing.scheduled_datetime || null);
     const existingStatus = String(existing.status || '').toLowerCase();
     const shouldRescheduleStatus = slotChanged && RESCHEDULABLE_STATUSES.has(existingStatus);
     const nextRetryAt = shouldRescheduleStatus
-      ? getNextIsoForPreferredSlot(payload.preferred_slot)
+      ? (payload.scheduled_datetime || getNextIsoForPreferredSlot(payload.preferred_slot))
       : existing.next_retry_at;
-    const nextStatus = shouldRescheduleStatus ? 'retry_scheduled' : existing.status;
+    const nextStatus = shouldRescheduleStatus ? 'scheduled' : existing.status;
 
     await dbRun(
       `UPDATE customers
           SET name = ?,
               phone = ?,
               preferred_slot = ?,
+              scheduled_datetime = ?,
               status = ?,
               customer_value = ?,
               urgency_level = ?,
@@ -338,6 +420,7 @@ router.put('/:id', async (req, res) => {
         payload.name,
         payload.phone,
         payload.preferred_slot,
+        payload.scheduled_datetime,
         nextStatus,
         payload.customer_value,
         payload.urgency_level,
@@ -357,6 +440,9 @@ router.put('/:id', async (req, res) => {
       ]
     );
 
+    const updatedCustomer = { ...existing, ...payload, id: existing.id };
+    logger.info('USER_EDITED_CALL', baseCustomerLogDetails(updatedCustomer, { user: req.adminSession?.username || 'admin' }));
+    logger.info('CALL_PENDING', baseCustomerLogDetails(updatedCustomer, { status: nextStatus }));
     res.json({ message: 'Customer updated successfully' });
   } catch (error) {
     return handleSqliteError(error, res);
@@ -419,6 +505,11 @@ router.post('/:id/retry', async (req, res) => {
       ['retry_scheduled', retryAt, req.params.id]
     );
 
+    logger.info('CALL_RETRY', baseCustomerLogDetails(existing, {
+      customerId: existing.id,
+      retryAt: logger.formatHumanDateTime(retryAt),
+      user: req.adminSession?.username || 'admin'
+    }));
     res.json({ message: 'Retry scheduled successfully', retry_at: retryAt });
   } catch (error) {
     console.error('Error scheduling retry:', error);
@@ -429,10 +520,22 @@ router.post('/:id/retry', async (req, res) => {
 // Delete all customers and their data
 router.delete('/bulk', async (req, res) => {
   try {
+    const counts = await dbGet(`
+      SELECT
+        (SELECT COUNT(*) FROM customers) AS customer_count,
+        (SELECT COUNT(*) FROM calls) AS call_count,
+        (SELECT COUNT(*) FROM feedback) AS feedback_count
+    `);
     await dbRun('DELETE FROM feedback');
     await dbRun('DELETE FROM call_supervisor_events');
     await dbRun('DELETE FROM calls');
     await dbRun('DELETE FROM customers');
+    logger.warn('ALL_RECORDS_DELETED', {
+      deletedBy: req.adminSession?.username || 'admin',
+      customers: counts?.customer_count || 0,
+      calls: counts?.call_count || 0,
+      feedback: counts?.feedback_count || 0
+    });
     res.json({ message: 'All patients and call history deleted successfully' });
   } catch (error) {
     console.error('Error in bulk delete:', error);
@@ -443,15 +546,24 @@ router.delete('/bulk', async (req, res) => {
 // Delete customer
 router.delete('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT id FROM customers WHERE id = ?', [req.params.id]);
+    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
     if (!existing) {
       return res.status(404).json({ error: 'Customer not found' });
     }
+    const latestCall = await dbGet('SELECT id, outcome FROM calls WHERE customer_id = ? ORDER BY id DESC LIMIT 1', [req.params.id]);
 
     await dbRun('DELETE FROM feedback WHERE customer_id = ?', [req.params.id]);
     await dbRun('DELETE FROM calls WHERE customer_id = ?', [req.params.id]);
     await dbRun('DELETE FROM customers WHERE id = ?', [req.params.id]);
 
+    logger.warn('USER_DELETED_CALL', baseCustomerLogDetails(existing, {
+      callId: latestCall?.id,
+      user: req.adminSession?.username || 'admin'
+    }));
+    logger.warn('CALL_DELETED', baseCustomerLogDetails(existing, {
+      callId: latestCall?.id,
+      deletedBy: req.adminSession?.username || 'admin'
+    }));
     res.json({ message: 'Customer deleted successfully' });
   } catch (error) {
     console.error('Error deleting customer:', error);

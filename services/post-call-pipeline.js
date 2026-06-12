@@ -3,6 +3,7 @@ const path = require('path');
 const { analyzeCallTranscript, transcribeAudioFile, categorizeFeedback } = require('./gemini');
 const { extractCallFeedback } = require('./call-feedback');
 const { buildCallAnalysis, storeCallAnalysis } = require('./call-analysis');
+const logger = require('./system-logger');
 const {
   detectConversationOutcome,
   detectObjectionsAndCompetitors,
@@ -132,6 +133,12 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
   }
 
   await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['processing', 'processing', callRecord.id]);
+  logger.info('FEEDBACK_ANALYSIS_STARTED', {
+    callId: callRecord.id,
+    customerId: callRecord.customer_id,
+    patient: callRecord.customer_name,
+    phone: callRecord.customer_phone
+  });
 
   let recordingLocalPath = callRecord.recording_local_path || null;
   if (!recordingLocalPath && callRecord.recording_url) {
@@ -160,6 +167,13 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
 
   if (!transcriptText) {
     await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['missing', 'blocked', callRecord.id]);
+    logger.warn('FEEDBACK_PENDING', {
+      callId: callRecord.id,
+      customerId: callRecord.customer_id,
+      patient: callRecord.customer_name,
+      phone: callRecord.customer_phone,
+      reason: 'no_transcript_available'
+    });
     return { ok: false, reason: 'no_transcript_available' };
   }
 
@@ -284,6 +298,23 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     'completed',
     callRecord.id
   ]);
+
+  const feedbackEvent = (Number(mergedRating || 0) >= 4 || String(sentimentLabel || '').toLowerCase() === 'positive')
+    ? 'FEEDBACK_POSITIVE'
+    : ((Number(mergedRating || 0) > 0 && Number(mergedRating || 0) <= 2) || String(sentimentLabel || '').toLowerCase() === 'negative')
+      ? 'FEEDBACK_NEGATIVE'
+      : 'FEEDBACK_PENDING';
+  const feedbackDetails = {
+    callId: callRecord.id,
+    customerId: callRecord.customer_id,
+    patient: callRecord.customer_name,
+    phone: callRecord.customer_phone,
+    sentiment: productAnalysis.sentiment || sentimentLabel || 'neutral',
+    rating: Number(mergedRating || 0) ? `${mergedRating}/5` : '',
+    feedbackId: feedbackResult.feedbackId
+  };
+  logger.info('FEEDBACK_ANALYSIS_COMPLETED', feedbackDetails);
+  logger.info(feedbackEvent, feedbackDetails);
 
   const refreshedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [callRecord.id]);
   const refreshedCustomer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);

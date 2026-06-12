@@ -598,7 +598,11 @@
       const scheduledStatuses = new Set(['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled']);
       const scheduledToday = customers.filter((customer) => (
         scheduledStatuses.has(String(customer.status || '').toLowerCase())
-        && (isToday(customer.next_retry_at) || isToday(customer.created_at))
+        && isToday(
+          ['retry_scheduled', 'callback_scheduled'].includes(String(customer.status || '').toLowerCase())
+            ? (customer.next_retry_at || customer.scheduled_datetime || customer.created_at)
+            : (customer.scheduled_datetime || customer.next_retry_at || customer.created_at)
+        )
       )).length;
       const completedRecords = customers.filter((customer) => String(customer.status || '').toLowerCase() === 'completed');
       const completedCount = completedRecords.length;

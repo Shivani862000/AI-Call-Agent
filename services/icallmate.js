@@ -58,19 +58,22 @@ function buildMasterPostPayload(customerPhone, leadId, options = {}) {
   }
 
   const wsurl = options.wsurl || process.env.ICALLMATE_MASTER_POST_WSURL || '';
+  const resolvedLeadId = String(leadId || options.leadid || options.leadId || `customer-${options.customerId || 'call'}-${Date.now()}`);
   return {
     campid: String(options.campid || process.env.ICALLMATE_MASTER_POST_CAMP_ID || '54'),
-    leadid: String(leadId || options.leadid || process.env.ICALLMATE_MASTER_POST_LEAD_ID || '1031'),
+    leadid: resolvedLeadId,
     fieldpairs: [
       {
         Phone_No: phoneNo,
+        Name: options.customerName || '',
         wsurl,
         extraparam: JSON.stringify({
           callDirection: 'outbound',
           customerId: options.customerId || null,
           customerName: options.customerName || '',
           clientName: options.clientName || '',
-          callType: options.callType || 'REVIEW_CALL'
+          callType: options.callType || 'REVIEW_CALL',
+          leadId: resolvedLeadId
         })
       }
     ]
@@ -102,7 +105,8 @@ function isFailurePayload(payload) {
 
 async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
   const endpoint = getMasterPostEndpoint();
-  const payload = buildMasterPostPayload(customerPhone, options.leadid || process.env.ICALLMATE_MASTER_POST_LEAD_ID, options);
+  const leadId = options.leadid || options.leadId || (process.env.ICALLMATE_MASTER_POST_LEAD_ID ? `${process.env.ICALLMATE_MASTER_POST_LEAD_ID}-${customerId || 'call'}-${Date.now()}` : null);
+  const payload = buildMasterPostPayload(customerPhone, leadId, { ...options, customerId });
 
   if (!payload.fieldpairs[0].wsurl) {
     throw new Error('Missing iCallMate master-post config: wsurl or ICALLMATE_MASTER_POST_WSURL is required.');
@@ -134,12 +138,13 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
     throw new Error(`iCallMate master-post call rejected: ${parsed.message || rawText || 'unknown failure'}`);
   }
 
-  const sid = extractCallSid(parsed, `icallmate-masterpost-${Date.now()}`);
+  const sid = extractCallSid(parsed, `icallmate-masterpost-${payload.leadid}`);
   console.log(`[ICALLMATE OUTBOUND] Call accepted sid=${sid}`);
   return {
     sid,
     status: 'queued',
-    raw: parsed
+    raw: parsed,
+    requestPayload: payload
   };
 }
 

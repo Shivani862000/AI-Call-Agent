@@ -149,6 +149,7 @@
                 <th>Patient</th>
                 <th>Phone</th>
                 <th>Call Type</th>
+                <th>Call Date</th>
                 <th>Call Time</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -319,6 +320,56 @@
       return normalizeCallType(value) === 'THREE_MONTH_FOLLOWUP' ? '3 Month Follow-up' : 'Review Calling';
     }
 
+    function getScheduledDate(customer) {
+      const status = String(customer.status || '').toLowerCase();
+      const scheduledValue = ['retry_scheduled', 'callback_scheduled'].includes(status)
+        ? (customer.next_retry_at || customer.scheduled_datetime)
+        : (customer.scheduled_datetime || customer.next_retry_at);
+      if (scheduledValue) {
+        const date = new Date(scheduledValue);
+        if (!Number.isNaN(date.getTime())) {
+          return date;
+        }
+      }
+
+      if (customer.preferred_slot) {
+        const today = new Date();
+        const [hours, minutes] = String(customer.preferred_slot).split(':');
+        today.setHours(Number(hours || 0), Number(minutes || 0), 0, 0);
+        return today;
+      }
+
+      return null;
+    }
+
+    function formatScheduledDate(customer) {
+      const date = getScheduledDate(customer);
+      if (!date) return '--';
+      return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    function formatScheduledTime(customer) {
+      const date = getScheduledDate(customer);
+      if (!date) return '--';
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function formatScheduledDateTime(customer) {
+      const date = getScheduledDate(customer);
+      if (!date) {
+      return '--';
+      }
+      return `${formatScheduledDate(customer)}, ${formatScheduledTime(customer)}`;
+    }
+
+    function getScheduleMetricDate(customer) {
+      const status = String(customer.status || '').toLowerCase();
+      if (['retry_scheduled', 'callback_scheduled'].includes(status)) {
+        return customer.next_retry_at || customer.scheduled_datetime || customer.created_at;
+      }
+      return customer.scheduled_datetime || customer.next_retry_at || customer.created_at;
+    }
+
     function isToday(value) {
       if (!value) return false;
       const date = new Date(value);
@@ -482,7 +533,10 @@
       const completedCalls = recentCallsCache.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
 
       const isScheduled = (c) => ['scheduled', 'retry_scheduled', 'callback_scheduled'].includes(String(c.status || '').toLowerCase());
-      const scheduledCount = customerCache.filter((customer) => isScheduled(customer) && (isToday(customer.next_retry_at) || isToday(customer.created_at))).length;
+      const scheduledCount = customerCache.filter((customer) => (
+        isScheduled(customer)
+        && isToday(getScheduleMetricDate(customer))
+      )).length;
       const pendingCount = customerCache.filter((customer) => pendingStatuses.has(String(customer.status || '').toLowerCase())).length;
       const completedCount = completedCalls.length;
       const failedCount = recentCallsCache.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
@@ -579,7 +633,7 @@
       if (!customers.length) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="6">
+            <td colspan="7">
               <div class="empty-state">
                 <strong>No scheduled calls found</strong>
                 <div class="supporting-text">Add a patient to schedule the next follow-up call.</div>
@@ -604,7 +658,8 @@
             </td>
             <td>${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</td>
             <td>${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))}</td>
-            <td>${AppShell.escapeHtml(customer.preferred_slot || '--:--')}</td>
+            <td>${AppShell.escapeHtml(formatScheduledDate(customer))}</td>
+            <td>${AppShell.escapeHtml(formatScheduledTime(customer))}</td>
             <td><span class="status-badge ${AppShell.escapeHtml(String((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span></td>
             <td>
               <div class="table-actions">
@@ -646,7 +701,9 @@
               </div>
               <span class="status-badge ${AppShell.escapeHtml(String((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span>
             </div>
-            <div class="mobile-subtext">${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))} · ${latestCall ? AppShell.formatDateTime(latestCall.called_at) : 'No call history yet'}</div>
+            <div class="mobile-subtext">${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))}</div>
+            <div class="mobile-subtext">Date: ${AppShell.escapeHtml(formatScheduledDate(customer))}</div>
+            <div class="mobile-subtext">Time: ${AppShell.escapeHtml(formatScheduledTime(customer))}</div>
             <div class="mobile-call-actions">
               <button class="warning mobile-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
               ${actionButton}

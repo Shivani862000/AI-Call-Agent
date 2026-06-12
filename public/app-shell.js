@@ -221,6 +221,7 @@
       editingId: `${fieldPrefix}EditingId`,
       name: `${fieldPrefix}Name`,
       phone: `${fieldPrefix}Phone`,
+      date: `${fieldPrefix}Date`,
       time: `${fieldPrefix}Time`,
       callType: `${fieldPrefix}CallType`,
       careToggle: `${fieldPrefix}CareToggle`,
@@ -254,23 +255,28 @@
               <span class="error-text" id="${ids.phone}Error"></span>
             </label>
             <label>
+              Call Date
+              <input id="${ids.date}" type="date">
+              <span class="error-text" id="${ids.date}Error"></span>
+            </label>
+            <label>
               Call Time
               <input id="${ids.time}" type="time">
               <span class="error-text" id="${ids.time}Error"></span>
             </label>
-          </div>
-
-          <div class="form-field-block">
-            <div class="field-label">Call Type</div>
-            <div class="segmented-control call-type-control" role="radiogroup" aria-label="Call type">
-              <label class="segment-button active">
-                <input type="radio" name="${ids.callType}" value="REVIEW_CALL" checked>
-                Review Calling
-              </label>
-              <label class="segment-button">
-                <input type="radio" name="${ids.callType}" value="THREE_MONTH_FOLLOWUP">
-                3 Month Follow-up
-              </label>
+            <div class="form-field-block">
+              <div class="field-label">Call Type</div>
+              <div class="segmented-control call-type-control" role="radiogroup" aria-label="Call type">
+                <label class="segment-button active">
+                  <input type="radio" name="${ids.callType}" value="REVIEW_CALL" checked>
+                  Review Calling
+                </label>
+                <label class="segment-button">
+                  <input type="radio" name="${ids.callType}" value="THREE_MONTH_FOLLOWUP">
+                  3 Month Follow-up
+                </label>
+              </div>
+              <span class="error-text" id="${ids.callType}Error"></span>
             </div>
           </div>
 
@@ -336,18 +342,57 @@
     }
 
     function allFieldIds() {
-      return [ids.name, ids.phone, ids.time, ids.dob, ids.lastVisit, ids.treatment];
+      return [ids.name, ids.phone, ids.date, ids.time, ids.callType, ids.dob, ids.lastVisit, ids.treatment];
     }
 
     function clearErrors() {
       clearFieldErrors(allFieldIds());
     }
 
+    function todayDateValue() {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function parseScheduledDateTime(dateValue, timeValue) {
+      if (!dateValue || !timeValue) return null;
+      const parsed = new Date(`${dateValue}T${timeValue}:00`);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function splitScheduledDateTime(customer = {}) {
+      const status = String(customer.status || '').toLowerCase();
+      const scheduledValue = ['retry_scheduled', 'callback_scheduled'].includes(status)
+        ? (customer.next_retry_at || customer.scheduled_datetime || '')
+        : (customer.scheduled_datetime || customer.next_retry_at || '');
+      const parsed = scheduledValue ? new Date(scheduledValue) : null;
+      if (parsed && !Number.isNaN(parsed.getTime())) {
+        return {
+          date: `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`,
+          time: `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`
+        };
+      }
+
+      return {
+        date: todayDateValue(),
+        time: customer.preferred_slot || ''
+      };
+    }
+
     function getPayload() {
+      const scheduledDate = getEl('date').value;
+      const scheduledTime = getEl('time').value.trim();
+      const scheduledDateTime = parseScheduledDateTime(scheduledDate, scheduledTime);
       return {
         name: getEl('name').value.trim(),
         phone: normalizePhoneForApi(getEl('phone').value),
-        preferred_slot: getEl('time').value.trim(),
+        scheduled_date: scheduledDate,
+        scheduled_time: scheduledTime,
+        preferred_slot: scheduledTime,
+        scheduled_datetime: scheduledDateTime ? scheduledDateTime.toISOString() : '',
         callType: getSelectedCallType()
       };
     }
@@ -370,7 +415,16 @@
       const fieldErrors = {};
       if (!payload.name || payload.name.length < 2) fieldErrors[ids.name] = 'Patient name is required';
       if (!/^\+\d{12}$/.test(payload.phone)) fieldErrors[ids.phone] = 'Use a valid Indian mobile number';
+      if (!payload.scheduled_date) fieldErrors[ids.date] = 'Call date is required';
       if (!payload.preferred_slot) fieldErrors[ids.time] = 'Call time is required';
+      const scheduled = parseScheduledDateTime(payload.scheduled_date, payload.preferred_slot);
+      if (payload.scheduled_date && payload.preferred_slot && (!scheduled || scheduled.getTime() <= Date.now())) {
+        if (payload.scheduled_date === todayDateValue()) {
+          fieldErrors[ids.time] = 'Choose a future time for today';
+        } else {
+          fieldErrors[ids.date] = 'Choose today or a future date';
+        }
+      }
 
       const hasCareDetails = carePayload.date_of_birth || carePayload.last_visit_date || carePayload.treatment_type;
       if (hasCareDetails) {
@@ -396,6 +450,8 @@
       getEl('submit').textContent = 'Schedule Call';
       getEl('name').value = '';
       getEl('phone').value = '';
+      getEl('date').value = todayDateValue();
+      getEl('date').min = todayDateValue();
       getEl('time').value = '';
       getEl('dob').value = '';
       getEl('lastVisit').value = '';
@@ -457,7 +513,10 @@
           applyFieldErrors(error.fieldErrors, {
             phone: ids.phone,
             name: ids.name,
-            preferred_slot: ids.time
+            preferred_slot: ids.time,
+            scheduled_date: ids.date,
+            scheduled_datetime: ids.date,
+            call_type: ids.callType
           });
         }
         showAlert(error.message, 'error');
@@ -476,7 +535,9 @@
           getEl('submit').textContent = 'Save Changes';
           getEl('name').value = customer.name || '';
           getEl('phone').value = formatPhoneForInput(customer.phone || '');
-          getEl('time').value = customer.preferred_slot || '';
+          const scheduledParts = splitScheduledDateTime(customer);
+          getEl('date').value = scheduledParts.date;
+          getEl('time').value = scheduledParts.time;
           setCallTypeSelection(customer.call_type || 'REVIEW_CALL');
 
           await ensureClientsLoaded();

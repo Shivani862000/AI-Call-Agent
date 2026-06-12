@@ -43,6 +43,7 @@ const { dbGet, dbRun } = require('../db');
 const { saveCallFeedbackFromTranscript } = require('../services/call-feedback');
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
 const { generateGeminiReply } = require('../services/gemini');
+const logger = require('../services/system-logger');
 const {
   resamplePcm16,
   parsePcmRate
@@ -60,6 +61,10 @@ const {
 } = require('./call-management');
 
 const { validateMediaToken } = require('./auth');
+
+function debugLog(message, details = {}) {
+  logger.debug('MEDIA_DEBUG', { message, ...details });
+}
 
 function createDeepgramListenUrl() {
   const url = new URL('wss://api.deepgram.com/v1/listen');
@@ -188,7 +193,7 @@ module.exports = function setupWebSocketBridge(server) {
           
           session.outChunkCount++;
           if (session.outChunkCount % 100 === 0) {
-            console.log(`[STAGE 7: Audio Stream] Sending TTS audio chunk ${session.outChunkCount} back to Caller`);
+            debugLog('Sending TTS audio chunk to caller', { count: session.outChunkCount, streamId: session.streamId });
           }
 
           const remainingMs = (session.audioBuffer.length / 2 / 8000) * 1000;
@@ -212,13 +217,13 @@ module.exports = function setupWebSocketBridge(server) {
             const estimatedUserSpeechEndAt = sttProducedAt - DEEPGRAM_ENDPOINTING_MS;
             const e2eLatencyMs = Math.max(0, session.firstChunkSentAt - estimatedUserSpeechEndAt);
             
-            console.log(`[LATENCY TRACKING] 
-  STT Latency: ~${sttLatencyMs}ms (endpointing)
-  LLM Latency: ${llmLatencyMs}ms
-  TTS Latency: ${ttsLatencyMs}ms
-  End-to-End Latency: ${e2eLatencyMs}ms
-`);
-            console.log(`[STAGE 7: Audio Stream] First chunk sent to Caller. e2eLatencyMs=${e2eLatencyMs}`);
+            debugLog('First audio chunk sent to caller', {
+              streamId: session.streamId,
+              sttLatencyMs,
+              llmLatencyMs,
+              ttsLatencyMs,
+              e2eLatencyMs
+            });
           }
 
           sendIcallMateJson(ws, {
@@ -309,7 +314,7 @@ module.exports = function setupWebSocketBridge(server) {
 
     function sendDeepgramTtsText(text) {
       if (bridgeClosed) return;
-      console.log(`[STAGE 6: TTS Stream] Sending text to Deepgram TTS: ${text}`);
+      debugLog('Sending text to Deepgram TTS', { streamId: getSessionLabel(), text });
       const safeText = String(text || '').replace(/\s+/g, ' ').trim();
       if (bridgeClosed || !safeText) {
         return;
@@ -379,7 +384,14 @@ module.exports = function setupWebSocketBridge(server) {
             'UPDATE customers SET status = ?, last_called_at = ? WHERE id = ?',
             ['completed', nowIso, session.customerId]
           );
-          console.log(`[CALL STATUS] Calling -> Completed (customerId=${session.customerId})`);
+          logger.info('CALL_COMPLETED', {
+            callId: session.callId,
+            customerId: session.customerId,
+            patient: session.customerName,
+            phone: session.callerId,
+            duration: logger.formatDuration(session.connectedAt ? (Date.now() - new Date(session.connectedAt).getTime()) / 1000 : 0),
+            reason
+          });
         }
 
         if (session.providerCallId && transcript.length) {
@@ -430,7 +442,7 @@ module.exports = function setupWebSocketBridge(server) {
       }
 
       try {
-        console.log(`[STAGE 4: Conversation Manager] Sending prompt to Gemini. streamId=${getSessionLabel()} model=${GEMINI_MODEL}`);
+        debugLog('Sending prompt to Gemini', { streamId: getSessionLabel(), model: GEMINI_MODEL });
         const aiText = await generateGeminiReply({
           systemPrompt: getSystemPrompt(),
           transcript,
@@ -444,7 +456,7 @@ module.exports = function setupWebSocketBridge(server) {
 
         transcript.push({ role: 'CUSTOMER', text: safeText, time: new Date().toISOString() });
         transcript.push({ role: 'AGENT', text: aiText, time: new Date().toISOString() });
-        console.log(`[STAGE 5: Gemini LLM] Generated text: ${aiText}`);
+        debugLog('Gemini generated text', { streamId: getSessionLabel(), text: aiText });
         sendDeepgramTtsText(aiText);
 
         if (outboundDemoState.endCallAfterNextReply || shouldAutoHangupAfterAgentTurn(aiText)) {
@@ -534,14 +546,14 @@ module.exports = function setupWebSocketBridge(server) {
           outputAudioTranscription: {}
         };
 
-        console.log(
-          `[ICALLMATE][GEMINI LIVE] Connecting streamId=${getSessionLabel()} ` +
-          `model=${GEMINI_MODEL} voice=${GEMINI_VOICE} thinking=${GEMINI_LIVE_THINKING_LEVEL} ` +
-          `silenceMs=${GEMINI_LIVE_SILENCE_DURATION_MS} ` +
-          `directAudio=${GEMINI_LIVE_DIRECT_AUDIO} ` +
-          `responseModalities=${JSON.stringify(config.responseModalities)} ` +
-          `hasSpeechConfig=${!!config.speechConfig}`
-        );
+        debugLog('Gemini Live connecting', {
+          streamId: getSessionLabel(),
+          model: GEMINI_MODEL,
+          voice: GEMINI_VOICE,
+          thinking: GEMINI_LIVE_THINKING_LEVEL,
+          silenceMs: GEMINI_LIVE_SILENCE_DURATION_MS,
+          directAudio: GEMINI_LIVE_DIRECT_AUDIO
+        });
 
         geminiLiveSession = await ai.live.connect({
           model: GEMINI_MODEL,
@@ -550,7 +562,7 @@ module.exports = function setupWebSocketBridge(server) {
             onopen: () => {
               geminiLiveReady = true;
               lastLlmResponseAt = Date.now();
-              console.log(`[ICALLMATE][GEMINI LIVE] Connected streamId=${getSessionLabel()}`);
+              debugLog('Gemini Live connected', { streamId: getSessionLabel() });
 
               if (!llmWatchdogInterval) {
                 llmWatchdogInterval = setInterval(() => {
@@ -595,24 +607,30 @@ module.exports = function setupWebSocketBridge(server) {
                 // Log first 20 parts, then every 50th
                 if (session._geminiDiag.audioParts + session._geminiDiag.textParts <= 20 ||
                   (session._geminiDiag.audioParts + session._geminiDiag.textParts) % 50 === 0) {
-                  console.log(
-                    `[GEMINI DIAG] msg#${session._geminiDiag.msgCount} part#${idx} ` +
-                    `hasText=${hasText}${hasText ? '(len=' + part.text.length + ')' : ''} ` +
-                    `hasAudio=${hasAudio}${hasAudio ? '(bytes=' + audioLen + ',mime=' + mime + ')' : ''} ` +
-                    `totals: audioParts=${session._geminiDiag.audioParts} textParts=${session._geminiDiag.textParts} ` +
-                    `totalAudioBytes=${session._geminiDiag.totalAudioBytes}`
-                  );
+                  debugLog('Gemini Live part diagnostic', {
+                    streamId: getSessionLabel(),
+                    messageCount: session._geminiDiag.msgCount,
+                    partIndex: idx,
+                    hasText,
+                    textLength: hasText ? part.text.length : 0,
+                    hasAudio,
+                    audioBytes: audioLen,
+                    mime,
+                    audioParts: session._geminiDiag.audioParts,
+                    textParts: session._geminiDiag.textParts,
+                    totalAudioBytes: session._geminiDiag.totalAudioBytes
+                  });
                 }
               });
 
               // If we got model turn parts but zero had audio, warn
               if (modelTurnParts.length > 0 && !modelTurnParts.some(p => (p.inlineData || p.inline_data)?.data)) {
                 if (session._geminiDiag.audioParts === 0 && session._geminiDiag.msgCount <= 10) {
-                  console.warn(
-                    `[GEMINI DIAG WARNING] ${session._geminiDiag.msgCount} messages received, ` +
-                    `0 audio parts so far! Gemini may be running in TEXT-ONLY mode. ` +
-                    `Check responseModalities config. GEMINI_LIVE_DIRECT_AUDIO=${GEMINI_LIVE_DIRECT_AUDIO}`
-                  );
+                  debugLog('Gemini Live text-only diagnostic warning', {
+                    streamId: getSessionLabel(),
+                    messages: session._geminiDiag.msgCount,
+                    directAudio: GEMINI_LIVE_DIRECT_AUDIO
+                  });
                 }
               }
 
@@ -629,10 +647,12 @@ module.exports = function setupWebSocketBridge(server) {
                 if (!session.geminiLiveFirstAudioAt) {
                   session.geminiLiveFirstAudioAt = Date.now();
                   const responseMs = geminiLivePromptSentAt ? session.geminiLiveFirstAudioAt - geminiLivePromptSentAt : null;
-                  console.log(
-                    `[ICALLMATE][GEMINI LIVE] First audio chunk streamId=${getSessionLabel()} ` +
-                    `responseMs=${responseMs ?? 'unknown'} sampleRate=${sampleRate} bytes=${pcm16.length}`
-                  );
+                  debugLog('Gemini Live first audio chunk', {
+                    streamId: getSessionLabel(),
+                    responseMs: responseMs ?? 'unknown',
+                    sampleRate,
+                    bytes: pcm16.length
+                  });
                 }
                 if (!session.geminiLiveRawBuffer) session.geminiLiveRawBuffer = Buffer.alloc(0);
                 session.geminiLiveRawBuffer = Buffer.concat([session.geminiLiveRawBuffer, pcm16]);
@@ -653,7 +673,7 @@ module.exports = function setupWebSocketBridge(server) {
                   .replace(/\bend_call\b/gi, '')
                   .trim();
                 if (cleanTranscript) {
-                  console.log(`[STAGE 5: Gemini LLM] Generated text: ${cleanTranscript}`);
+                  debugLog('Gemini Live generated text', { streamId: getSessionLabel(), text: cleanTranscript });
                   pushTranscriptTurn(transcript, 'AGENT', cleanTranscript);
                   if (!GEMINI_LIVE_DIRECT_AUDIO) {
                     sendDeepgramTtsText(cleanTranscript);
@@ -674,11 +694,15 @@ module.exports = function setupWebSocketBridge(server) {
               if (message?.serverContent?.turnComplete || message?.serverContent?.generationComplete) {
                 const d = session._geminiDiag || { audioParts: 0, textParts: 0, msgCount: 0, totalAudioBytes: 0 };
                 const queuedBytes = session.audioBuffer ? session.audioBuffer.length : 0;
-                console.log(
-                  `[GEMINI DIAG] turnComplete! msgs=${d.msgCount} audioParts=${d.audioParts} ` +
-                  `textParts=${d.textParts} totalAudioBytes=${d.totalAudioBytes} ` +
-                  `audioQueuePending=${queuedBytes} rawBufferPending=${session.geminiLiveRawBuffer?.length || 0}`
-                );
+                debugLog('Gemini Live turn complete', {
+                  streamId: getSessionLabel(),
+                  messages: d.msgCount,
+                  audioParts: d.audioParts,
+                  textParts: d.textParts,
+                  totalAudioBytes: d.totalAudioBytes,
+                  audioQueuePending: queuedBytes,
+                  rawBufferPending: session.geminiLiveRawBuffer?.length || 0
+                });
                 // Flush remaining raw buffer into audioBuffer
                 if (session.geminiLiveRawBuffer && session.geminiLiveRawBuffer.length > 0) {
                   const resampled = resamplePcm16(session.geminiLiveRawBuffer, 24000, 8000);
@@ -705,10 +729,11 @@ module.exports = function setupWebSocketBridge(server) {
 
               if (message?.serverContent?.interrupted) {
                 const pendingBytes = session.audioBuffer?.length || 0;
-                console.warn(
-                  `[GEMINI DIAG] Interrupted signal received! streamId=${getSessionLabel()} ` +
-                  `pendingAudioBytes=${pendingBytes} pendingAudioMs=${Math.round(pendingBytes / 2 / 8000 * 1000)}`
-                );
+                debugLog('Gemini Live interrupted signal', {
+                  streamId: getSessionLabel(),
+                  pendingAudioBytes: pendingBytes,
+                  pendingAudioMs: Math.round(pendingBytes / 2 / 8000 * 1000)
+                });
                 sendReverseMediaStop(ws, session);
                 session.firstChunkSentAt = null;
                 session.geminiLiveFirstAudioAt = null;
@@ -723,7 +748,7 @@ module.exports = function setupWebSocketBridge(server) {
             },
             onclose: (event) => {
               geminiLiveReady = false;
-              console.log(`[ICALLMATE][GEMINI LIVE] Closed streamId=${getSessionLabel()} reason=${event?.reason || 'n/a'}`);
+              debugLog('Gemini Live closed', { streamId: getSessionLabel(), reason: event?.reason || 'n/a' });
             }
           }
         });
@@ -741,8 +766,14 @@ module.exports = function setupWebSocketBridge(server) {
       }
 
       openingPromptSent = true;
-      console.log(`[ICALLMATE][${useGeminiLive() ? 'GEMINI LIVE' : 'GEMINI'}] Sending opening prompt streamId=${getSessionLabel()}`);
-      console.log(`[ICALLMATE][PROMPT] provider=${AI_PROVIDER} direction=${isOutboundSession() ? 'outbound' : 'incoming'} callType=${getSessionCallType()} client="${getSessionClientName()}" customer="${getSessionCustomerName()}" system="${getSystemPrompt().slice(0, 180)}" opening="${getOpeningPrompt()}"`);
+      debugLog('Sending opening prompt', {
+        streamId: getSessionLabel(),
+        provider: AI_PROVIDER,
+        direction: isOutboundSession() ? 'outbound' : 'incoming',
+        callType: getSessionCallType(),
+        client: getSessionClientName(),
+        customer: getSessionCustomerName()
+      });
 
       if (useGeminiLive()) {
         sendGeminiLiveText(getOpeningPrompt(), { interrupt: true });
@@ -764,7 +795,7 @@ module.exports = function setupWebSocketBridge(server) {
       outboundDemoState.conversationCompleted = true;
       outboundDemoState.endCall = true;
       stopListeningForCallerAudio();
-      console.log(`[ICALLMATE][VOICE] Hangup requested reason=${reason} streamId=${getSessionLabel()}`);
+      debugLog('Hangup requested', { streamId: getSessionLabel(), reason });
     }
 
     function scheduleFinalizeCallHangup(reason = 'model_requested_end_call', spokenText = '') {
@@ -778,10 +809,7 @@ module.exports = function setupWebSocketBridge(server) {
 
       const pendingMs = ((session.audioBuffer?.length || 0) / 2 / 8000) * 1000;
       const delayMs = Math.max(estimateHangupDelayMs(spokenText), FINAL_AUDIO_GRACE_MS, pendingMs + 1000);
-      console.log(
-        `[ICALLMATE][VOICE] Auto hangup scheduled streamId=${getSessionLabel()} ` +
-        `reason=${reason} delayMs=${delayMs}`
-      );
+      debugLog('Auto hangup scheduled', { streamId: getSessionLabel(), reason, delayMs });
       hangupFinalizeTimer = setTimeout(() => {
         finalizeCallHangup(reason);
       }, delayMs);
@@ -840,7 +868,7 @@ module.exports = function setupWebSocketBridge(server) {
           finalTranscriptBuffer = [];
           if (merged) {
             session.sttProducedAt = Date.now();
-            console.log(`[STAGE 3: Transcript] STT produced text (Outbound): ${merged}`);
+            debugLog('STT produced outbound text', { streamId: getSessionLabel(), text: merged });
             pushTranscriptTurn(transcript, 'CUSTOMER', merged);
             const turnText = isOutboundSession()
               ? buildOutboundDemoTurnInstruction(merged, outboundDemoState, getSessionClientName(), getSessionCustomerName(), getSessionCallType())
@@ -870,7 +898,7 @@ module.exports = function setupWebSocketBridge(server) {
         finalTranscriptBuffer = [];
         if (merged) {
           session.sttProducedAt = Date.now();
-          console.log(`[STAGE 3: Transcript] STT produced text (Inbound): ${merged}`);
+          debugLog('STT produced inbound text', { streamId: getSessionLabel(), text: merged });
           pushTranscriptTurn(transcript, 'CUSTOMER', merged);
           const turnText = `Caller said: ${merged}\nRespond naturally in Hindi/Hinglish based on the system prompt instructions.`;
           if (useGeminiLive()) {
@@ -1046,7 +1074,7 @@ module.exports = function setupWebSocketBridge(server) {
         if (useGeminiLive() && GEMINI_LIVE_DIRECT_AUDIO) {
           if (geminiLiveSession && geminiLiveReady) {
             if (session.audioChunkCount % 100 === 0) {
-              console.log(`[STAGE 2: Audio Stream] Sending chunk to Gemini Live Native Audio`);
+              debugLog('Sending audio chunk to Gemini Live Native Audio', { streamId: getSessionLabel(), count: session.audioChunkCount });
             }
             geminiLiveSession.sendRealtimeInput({
               audio: {
@@ -1113,9 +1141,12 @@ module.exports = function setupWebSocketBridge(server) {
   }
 
   icallMateWss.on('connection', (ws, req) => {
-    console.log('[ICALLMATE] Media stream connected');
-    console.log(`[ICALLMATE] Upgrade request from ${req.socket.remoteAddress || 'unknown'}`);
-    console.log(`[ICALLMATE] Request headers host=${req.headers.host || ''} ua=${req.headers['user-agent'] || ''} x-forwarded-for=${req.headers['x-forwarded-for'] || ''}`);
+    debugLog('Media stream connected', {
+      remote: req.socket.remoteAddress || 'unknown',
+      host: req.headers.host || '',
+      userAgent: req.headers['user-agent'] || '',
+      forwardedFor: req.headers['x-forwarded-for'] || ''
+    });
 
     const session = {
       streamId: '',
@@ -1149,13 +1180,21 @@ module.exports = function setupWebSocketBridge(server) {
       if (eventName === 'media') {
         session.mediaPacketsSeen += 1;
         if (session.mediaPacketsSeen <= 5 || session.mediaPacketsSeen % 50 === 0) {
-          console.log(
-            `[ICALLMATE] event=media count=${session.mediaPacketsSeen} ` +
-            `streamId=${message.streamId || session.streamId || ''} callerId=${message.callerId || session.callerId || ''} did=${message.did || session.did || ''}`
-          );
+          debugLog('Incoming media packet', {
+            count: session.mediaPacketsSeen,
+            streamId: message.streamId || session.streamId || '',
+            callerId: message.callerId || session.callerId || '',
+            did: message.did || session.did || ''
+          });
         }
       } else {
-        console.log(`[STAGE 1: Audio Stream] event=${eventName} count=${session.audioChunkCount || 0} streamId=${session.streamId || ''} callerId=${message.callerId || session.callerId || ''} did=${message.did || session.did || ''}`);
+        debugLog('WebSocket media event', {
+          event: eventName,
+          count: session.audioChunkCount || 0,
+          streamId: session.streamId || '',
+          callerId: message.callerId || session.callerId || '',
+          did: message.did || session.did || ''
+        });
       }
       if (message.streamId) session.streamId = message.streamId;
       if (message.callerId) session.callerId = message.callerId;
@@ -1358,4 +1397,3 @@ module.exports = function setupWebSocketBridge(server) {
 
   return icallMateWss;
 };
-

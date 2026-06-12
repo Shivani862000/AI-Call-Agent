@@ -23,6 +23,7 @@ const {
 const { getAgentConfigById, getDefaultAgentConfig } = require('./prompt-builder');
 const { computePriorityScore, getCurrentSlotLabel } = require('../services/call-orchestration');
 const { buildOwnerDashboardData } = require('../services/reporting');
+const logger = require('../services/system-logger');
 
 let ownerDigestRunning = false;
 let schedulerRunning = false;
@@ -91,7 +92,13 @@ async function triggerScheduledCalls() {
        AND COALESCE(c.consent_status, 'unknown') != 'denied'
        AND COALESCE(c.status, 'pending') != 'calling'
        AND (
-         (c.status = 'pending' AND COALESCE(c.best_call_slot, c.preferred_slot) <= ?)
+         (
+           c.status IN ('pending', 'scheduled')
+           AND (
+             (c.scheduled_datetime IS NOT NULL AND DATETIME(c.scheduled_datetime) <= DATETIME('now'))
+             OR (c.scheduled_datetime IS NULL AND COALESCE(c.best_call_slot, c.preferred_slot) <= ?)
+           )
+         )
          OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND c.next_retry_at IS NOT NULL AND DATETIME(c.next_retry_at) <= DATETIME('now'))
        )
        AND (
@@ -146,7 +153,7 @@ async function triggerScheduledCalls() {
             SET status = ?,
                 last_called_at = ?
           WHERE id = ?
-            AND COALESCE(status, 'pending') IN ('pending', 'retry_scheduled', 'callback_scheduled')`,
+            AND COALESCE(status, 'pending') IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')`,
         ['calling', new Date().toISOString(), customer.id]
       );
 
@@ -154,6 +161,14 @@ async function triggerScheduledCalls() {
         console.log(`[SCHEDULER] Skipping ${customer.name}: already claimed by another run`);
         continue;
       }
+      logger.info('CALL_PENDING', {
+        customerId: customer.id,
+        patient: customer.name,
+        phone: customer.phone,
+        type: logger.formatCallType(customer.call_type),
+        scheduledAt: logger.formatHumanDateTime(customer.scheduled_datetime || customer.next_retry_at),
+        status: 'scheduler_picked'
+      });
 
       const call = await placeRealtimeCall({
         customerPhone: customer.phone,
@@ -167,8 +182,9 @@ async function triggerScheduledCalls() {
       await dbRun(
         `INSERT INTO calls (
           customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
+          provider_payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           agentConfig?.id || null,
@@ -181,13 +197,30 @@ async function triggerScheduledCalls() {
           'normal',
           'outbound',
           'icallmate',
-          normalizeOutboundCallType(customer.call_type)
+          normalizeOutboundCallType(customer.call_type),
+          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
         ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      const insertedCall = await dbGet('SELECT id FROM calls WHERE provider_call_id = ?', [call.sid]);
+      logger.info('CALL_STARTED', {
+        callId: insertedCall?.id,
+        customerId: customer.id,
+        patient: customer.name,
+        phone: customer.phone,
+        type: logger.formatCallType(customer.call_type),
+        provider: 'icallmate',
+        providerCallId: call.sid
+      });
       console.log(`[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`);
     } catch (error) {
-      console.error(`[SCHEDULER] Failed to call ${customer.name}:`, error.message);
+      logger.error('CALL_FAILED', {
+        customerId: customer.id,
+        patient: customer.name,
+        phone: customer.phone,
+        type: logger.formatCallType(customer.call_type),
+        reason: error.message
+      });
       try {
         await dbRun(
           `UPDATE customers

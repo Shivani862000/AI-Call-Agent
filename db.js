@@ -239,6 +239,7 @@ function runMigrations() {
     await addColumnIfMissing('customers', 'do_not_call', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('customers', 'consent_status', "VARCHAR(20) DEFAULT 'unknown'");
     await addColumnIfMissing('customers', 'last_contact_outcome', 'VARCHAR(40)');
+    await addColumnIfMissing('customers', 'scheduled_datetime', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'next_retry_at', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'retry_count', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('customers', 'wrong_number_flag', 'INTEGER DEFAULT 0');
