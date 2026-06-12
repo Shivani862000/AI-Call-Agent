@@ -58,7 +58,7 @@ function buildMasterPostPayload(customerPhone, leadId, options = {}) {
   }
 
   const wsurl = options.wsurl || process.env.ICALLMATE_MASTER_POST_WSURL || '';
-  const resolvedLeadId = String(leadId || options.leadid || options.leadId || `customer-${options.customerId || 'call'}-${Date.now()}`);
+  const resolvedLeadId = String(leadId || options.leadid || options.leadId || process.env.ICALLMATE_MASTER_POST_LEAD_ID || '1031').replace(/\D/g, '') || '1031';
   return {
     campid: String(options.campid || process.env.ICALLMATE_MASTER_POST_CAMP_ID || '54'),
     leadid: resolvedLeadId,
@@ -105,7 +105,7 @@ function isFailurePayload(payload) {
 
 async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
   const endpoint = getMasterPostEndpoint();
-  const leadId = options.leadid || options.leadId || (process.env.ICALLMATE_MASTER_POST_LEAD_ID ? `${process.env.ICALLMATE_MASTER_POST_LEAD_ID}-${customerId || 'call'}-${Date.now()}` : null);
+  const leadId = options.leadid || options.leadId || process.env.ICALLMATE_MASTER_POST_LEAD_ID || '1031';
   const payload = buildMasterPostPayload(customerPhone, leadId, { ...options, customerId });
 
   if (!payload.fieldpairs[0].wsurl) {

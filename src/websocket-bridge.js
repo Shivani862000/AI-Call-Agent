@@ -478,7 +478,7 @@ module.exports = function setupWebSocketBridge(server) {
     function sendGeminiLiveText(text, options = {}) {
       const safeText = String(text || '').trim();
       if (bridgeClosed || !safeText || !geminiLiveSession || !geminiLiveReady) {
-        return;
+        return false;
       }
 
       if (options.interrupt) {
@@ -501,6 +501,7 @@ module.exports = function setupWebSocketBridge(server) {
         ],
         turnComplete: true
       });
+      return true;
     }
 
     async function connectGeminiLive() {
@@ -563,6 +564,7 @@ module.exports = function setupWebSocketBridge(server) {
               geminiLiveReady = true;
               lastLlmResponseAt = Date.now();
               debugLog('Gemini Live connected', { streamId: getSessionLabel() });
+              sendOpeningPrompt();
 
               if (!llmWatchdogInterval) {
                 llmWatchdogInterval = setInterval(() => {
@@ -765,7 +767,6 @@ module.exports = function setupWebSocketBridge(server) {
         return;
       }
 
-      openingPromptSent = true;
       debugLog('Sending opening prompt', {
         streamId: getSessionLabel(),
         provider: AI_PROVIDER,
@@ -776,11 +777,15 @@ module.exports = function setupWebSocketBridge(server) {
       });
 
       if (useGeminiLive()) {
-        sendGeminiLiveText(getOpeningPrompt(), { interrupt: true });
+        const sent = sendGeminiLiveText(getOpeningPrompt(), { interrupt: true });
+        if (sent) {
+          openingPromptSent = true;
+        }
         return;
       }
 
       if (useGemini()) {
+        openingPromptSent = true;
         sendGeminiClientTurn(getOpeningPrompt(), { interrupt: true });
       }
     }
@@ -1167,6 +1172,24 @@ module.exports = function setupWebSocketBridge(server) {
     };
     const aiBridge = createIcallMateAiBridge(ws, session);
 
+    function logRealCallStarted(status) {
+      if (session.callStartedLogged || !session.callId) {
+        return;
+      }
+
+      session.callStartedLogged = true;
+      logger.info('CALL_STARTED', {
+        callId: session.callId,
+        customerId: session.customerId,
+        patient: session.customerName,
+        phone: session.callerId,
+        type: logger.formatCallType(session.callType),
+        provider: 'icallmate',
+        providerCallId: session.providerCallId || session.streamId,
+        status
+      });
+    }
+
     ws.on('message', async (raw) => {
       let message;
       try {
@@ -1210,6 +1233,7 @@ module.exports = function setupWebSocketBridge(server) {
 
       if (eventName === 'connected') {
         await upsertIcallMateCallFromMedia(message, session, { status: 'active', notes: 'iCallMate connected' });
+        logRealCallStarted('media_connected');
         sendIcallMateMark(ws, message, 'connected-received');
         return;
       }
@@ -1227,6 +1251,7 @@ module.exports = function setupWebSocketBridge(server) {
           status: 'active',
           notes: isExpectedAudio ? 'iCallMate media stream started' : 'iCallMate media stream started with unexpected audio format'
         });
+        logRealCallStarted('media_started');
         sendIcallMateMark(ws, message, 'start-received');
 
         if (!session.answered) {
@@ -1249,6 +1274,7 @@ module.exports = function setupWebSocketBridge(server) {
           answered_at: normalizeIcallTimestamp(message.timestamp),
           notes: session.callDirection === 'outbound' ? 'Outbound call answered' : 'Incoming call answered'
         });
+        logRealCallStarted('answered');
         aiBridge.start();
         sendIcallMateMark(ws, message, 'answer-received');
         return;

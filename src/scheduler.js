@@ -28,6 +28,12 @@ const logger = require('../services/system-logger');
 let ownerDigestRunning = false;
 let schedulerRunning = false;
 
+function isProviderAcceptedOnly(call) {
+  const reason = String(call?.raw?.reason || call?.raw?.message || '');
+  return String(call?.status || '').toLowerCase() === 'queued'
+    || reason.includes('Total Records Being Inserted');
+}
+
 // ── Owner Digest ───────────────────────────────────────────────────────────────
 
 async function runOwnerDigestTick() {
@@ -83,9 +89,6 @@ async function triggerScheduledCalls() {
   const dueCustomers = await dbAll(
     `SELECT c.*
      FROM customers c
-     LEFT JOIN calls recent_call
-       ON recent_call.customer_id = c.id
-      AND DATETIME(recent_call.called_at) >= DATETIME('now', '-45 minutes')
      WHERE COALESCE(c.do_not_call, 0) = 0
        AND COALESCE(c.wrong_number_flag, 0) = 0
        AND COALESCE(c.admin_review_required, 0) = 0
@@ -103,7 +106,16 @@ async function triggerScheduledCalls() {
        )
        AND (
          c.status IN ('retry_scheduled', 'callback_scheduled')
-         OR recent_call.id IS NULL
+         OR NOT EXISTS (
+           SELECT 1
+           FROM calls recent_call
+           WHERE recent_call.customer_id = c.id
+             AND DATETIME(recent_call.called_at) >= DATETIME('now', '-45 minutes')
+             AND (
+               c.scheduled_datetime IS NULL
+               OR DATETIME(recent_call.called_at) >= DATETIME(c.scheduled_datetime)
+             )
+         )
        )`,
     [currentSlot]
   );
@@ -203,31 +215,41 @@ async function triggerScheduledCalls() {
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
       const insertedCall = await dbGet('SELECT id FROM calls WHERE provider_call_id = ?', [call.sid]);
-      logger.info('CALL_STARTED', {
+      const acceptedOnly = isProviderAcceptedOnly(call);
+      logger.info(acceptedOnly ? 'CALL_PENDING' : 'CALL_STARTED', {
         callId: insertedCall?.id,
         customerId: customer.id,
         patient: customer.name,
         phone: customer.phone,
         type: logger.formatCallType(customer.call_type),
         provider: 'icallmate',
-        providerCallId: call.sid
+        providerCallId: call.sid,
+        status: acceptedOnly ? 'provider_accepted_waiting_for_media' : 'started'
       });
-      console.log(`[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`);
+      console.log(
+        acceptedOnly
+          ? `[SCHEDULER] Scheduled call submitted for ${customer.name}; waiting for iCallMate media (${call.sid})`
+          : `[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`
+      );
     } catch (error) {
+      const retryAt = new Date(Date.now() + (5 * 60 * 1000)).toISOString();
       logger.error('CALL_FAILED', {
         customerId: customer.id,
         patient: customer.name,
         phone: customer.phone,
         type: logger.formatCallType(customer.call_type),
-        reason: error.message
+        reason: error.message,
+        retryAt: logger.formatHumanDateTime(retryAt)
       });
       try {
         await dbRun(
           `UPDATE customers
-              SET status = ?
+              SET status = ?,
+                  next_retry_at = ?,
+                  retry_count = COALESCE(retry_count, 0) + 1
             WHERE id = ?
               AND status = 'calling'`,
-          [customer.status || 'pending', customer.id]
+          ['retry_scheduled', retryAt, customer.id]
         );
       } catch (rollbackError) {
         console.error(`[SCHEDULER] Failed to roll back customer ${customer.id}:`, rollbackError.message);
