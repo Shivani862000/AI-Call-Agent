@@ -9,6 +9,7 @@
     // Reports page disabled.
     // { href: '/reports.html', label: 'Reports', shortLabel: 'Reports' }
   ];
+  const SHOW_TEST_AI_CALL_WIDGET = false;
 
   function redirectToLogin() {
     window.location.replace('/login.html');
@@ -522,6 +523,12 @@
 
   function initializeShellChrome() {
     buildMobileTabbar();
+    if (!SHOW_TEST_AI_CALL_WIDGET) {
+      document.querySelector('[data-test-ai-call-widget]')?.remove();
+      window.__testCallWidgetInstance = null;
+      return;
+    }
+
     if (window.TestCallWidget && !window.__testCallWidgetInstance) {
       window.__testCallWidgetInstance = new window.TestCallWidget();
       window.__testCallWidgetInstance.mount();

@@ -62,33 +62,17 @@
           <span class="desktop-filter-count" id="desktopMetricCustomers">0</span>
           <span class="desktop-filter-label">Patients</span>
         </button>
-        <button class="desktop-filter-pill" type="button" data-overview-filter="scheduled" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricScheduled">0</span>
-          <span class="desktop-filter-label">Scheduled</span>
-        </button>
         <button class="desktop-filter-pill" type="button" data-overview-filter="completed" aria-pressed="false">
           <span class="desktop-filter-count" id="desktopMetricCompleted">0</span>
           <span class="desktop-filter-label">Completed</span>
         </button>
-        <button class="desktop-filter-pill" type="button" data-overview-filter="inbound" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricInbound">0</span>
-          <span class="desktop-filter-label">Inbound</span>
-        </button>
-        <button class="desktop-filter-pill" type="button" data-overview-filter="outbound" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricOutbound">0</span>
-          <span class="desktop-filter-label">Outbound</span>
+        <button class="desktop-filter-pill" type="button" data-overview-filter="scheduled" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopMetricScheduled">0</span>
+          <span class="desktop-filter-label">Scheduled</span>
         </button>
         <button class="desktop-filter-pill" type="button" data-overview-filter="feedback" aria-pressed="false">
           <span class="desktop-filter-count" id="desktopMetricFeedback">0</span>
           <span class="desktop-filter-label">Feedback</span>
-        </button>
-        <button class="desktop-filter-pill" type="button" data-overview-filter="positive" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricPositiveFeedback">0</span>
-          <span class="desktop-filter-label">Positive</span>
-        </button>
-        <button class="desktop-filter-pill" type="button" data-overview-filter="negative" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricNegativeFeedback">0</span>
-          <span class="desktop-filter-label">Negative</span>
         </button>
       </section>
 
@@ -97,33 +81,17 @@
           <span class="mobile-stat-count" id="mobileMetricCustomers">0</span>
           <span class="mobile-stat-label">Patients</span>
         </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="scheduled" aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricScheduled">0</span>
-          <span class="mobile-stat-label">Scheduled</span>
-        </button>
         <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="completed" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricCompleted">0</span>
           <span class="mobile-stat-label">Completed</span>
         </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="inbound" aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricInbound">0</span>
-          <span class="mobile-stat-label">Inbound</span>
-        </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="outbound" aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricOutbound">0</span>
-          <span class="mobile-stat-label">Outbound</span>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="scheduled" aria-pressed="false">
+          <span class="mobile-stat-count" id="mobileMetricScheduled">0</span>
+          <span class="mobile-stat-label">Scheduled</span>
         </button>
         <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="feedback" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricFeedback">0</span>
           <span class="mobile-stat-label">Feedback</span>
-        </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="positive" aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricPositiveFeedback">0</span>
-          <span class="mobile-stat-label">Positive</span>
-        </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="negative" aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricNegativeFeedback">0</span>
-          <span class="mobile-stat-label">Negative</span>
         </button>
       </section>
 
@@ -131,12 +99,7 @@
         <article class="metric-card">
           <div class="metric-label">Total Patients</div>
           <div class="metric-value" id="metricCustomers">0</div>
-          <div class="metric-note">Active records in the follow-up queue.</div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-label">Calls Scheduled</div>
-          <div class="metric-value" id="metricScheduled">0</div>
-          <div class="metric-note">Customers waiting for outreach.</div>
+          <div class="metric-note">Unique patients by normalized phone number.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Calls Completed</div>
@@ -144,9 +107,14 @@
           <div class="metric-note">Finished calls with outcomes recorded.</div>
         </article>
         <article class="metric-card">
+          <div class="metric-label">Calls Scheduled</div>
+          <div class="metric-value" id="metricScheduled">0</div>
+          <div class="metric-note">Call records waiting for outreach.</div>
+        </article>
+        <article class="metric-card">
           <div class="metric-label">Feedback Captured</div>
           <div class="metric-value" id="metricFeedback">0</div>
-          <div class="metric-note">Feedback captured from calls and manual updates.</div>
+          <div class="metric-note">Feedback captured from completed call analysis.</div>
         </article>
       </section>
 
@@ -250,6 +218,67 @@
       return date.toDateString() === now.toDateString();
     }
 
+    function normalizePatientPhone(value) {
+      const digits = String(value || '').replace(/\D/g, '');
+      if (!digits) return '';
+      return digits.slice(-10);
+    }
+
+    function buildUniquePatientCount(customers = []) {
+      const phones = new Set();
+      customers.forEach((customer) => {
+        const normalized = normalizePatientPhone(customer.phone);
+        if (normalized) phones.add(normalized);
+      });
+      return phones.size;
+    }
+
+    function buildFeedbackSummary(feedbackItems = [], recentCalls = []) {
+      const callLinkedFeedbackItems = feedbackItems.filter((item) => (
+        Number(item.call_id || 0)
+        || ['call', 'analysis'].includes(String(item.source || '').toLowerCase())
+      ));
+      const feedbackByCallId = new Set(
+        callLinkedFeedbackItems
+          .map((item) => Number(item.call_id || 0))
+          .filter(Boolean)
+      );
+      const analysisFeedback = recentCalls
+        .filter((call) => (
+          String(call.outcome || '').toLowerCase() === 'completed'
+          && !feedbackByCallId.has(Number(call.id || 0))
+          && Number.isInteger(Number(call.extracted_rating))
+          && Number(call.extracted_rating) >= 1
+          && Number(call.extracted_rating) <= 5
+        ))
+        .map((call) => ({
+          id: `analysis-${call.id}`,
+          call_id: call.id,
+          customer_id: call.customer_id,
+          customer_name: call.customer_name,
+          review_text: call.extracted_review_text || call.analysis_summary || call.summary || 'Feedback captured from call analysis.',
+          stars: Number(call.extracted_rating),
+          submitted_at: call.ended_at || call.called_at,
+          source: 'analysis'
+        }));
+
+      const items = [...callLinkedFeedbackItems, ...analysisFeedback].filter((item) => {
+        const rating = Number(item.stars || 0);
+        return rating >= 1 && rating <= 5;
+      });
+      const positive = items.filter((item) => Number(item.stars || 0) >= 4).length;
+      const neutral = items.filter((item) => Number(item.stars || 0) === 3).length;
+      const negative = items.filter((item) => Number(item.stars || 0) <= 2).length;
+
+      return {
+        items,
+        positive,
+        neutral,
+        negative,
+        total: positive + neutral + negative
+      };
+    }
+
     function openOverviewNewCallModal() {
       if (!overviewNewCallModal) return;
       overviewNewCallModal.open();
@@ -277,57 +306,31 @@
       });
     }
 
-    function renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls, positiveFeedback, negativeFeedback, totalPatients, feedbackItems, callMetrics }) {
-      const inbound = callMetrics?.inbound || {};
-      const outbound = callMetrics?.outbound || {};
+    function renderActivityList({ scheduledToday, completedToday, pendingCalls, totalPatients, feedbackSummary }) {
       const activityCards = {
         patients: [
-          { label: 'Patients', value: totalPatients, note: 'Active records in the patient follow-up queue.' },
-          { label: 'Scheduled', value: scheduledToday, note: 'Patients added today or queued again for follow-up.' },
-          { label: 'Positive', value: positiveFeedback, note: 'Patients sharing a high-satisfaction experience.' },
-          { label: 'Negative', value: negativeFeedback, note: 'Patients who may need recovery or quick attention.' }
-        ],
-        scheduled: [
-          { label: 'Scheduled', value: scheduledToday, note: 'Patients added today or queued again for follow-up.' },
-          { label: 'Pending', value: pendingCalls, note: 'Patients still waiting for the first call or a retry.' },
-          { label: 'Outbound', value: outbound.total || 0, note: 'Total outbound iCallMate call records.' },
-          { label: 'Failed', value: failedCalls || outbound.failed || 0, note: 'Busy, no-answer, or failed calls that may need follow-up.' }
+          { label: 'Patients', value: totalPatients, note: 'Unique phone numbers in the patient follow-up queue.' },
+          { label: 'Completed', value: completedToday, note: 'Completed calls today.' },
+          { label: 'Scheduled', value: pendingCalls, note: 'Call records waiting for outreach.' },
+          { label: 'Feedback', value: feedbackSummary.total, note: 'Feedback captured from completed call analysis.' }
         ],
         completed: [
           { label: 'Completed', value: completedToday, note: 'Calls that ended with a recorded outcome today.' },
-          { label: 'Inbound Done', value: inbound.completed || 0, note: 'Inbound calls completed through iCallMate.' },
-          { label: 'Outbound Done', value: outbound.completed || 0, note: 'Outbound calls completed through iCallMate.' },
-          { label: 'Inbound Missed', value: inbound.missed || 0, note: 'Inbound callers who did not reach the assistant.' }
+          { label: 'Patients', value: totalPatients, note: 'Unique patients represented in the queue.' },
+          { label: 'Feedback', value: feedbackSummary.total, note: 'Feedback captured after completed calls.' },
+          { label: 'Scheduled', value: pendingCalls, note: 'Call records still waiting.' }
         ],
-        inbound: [
-          { label: 'Inbound', value: inbound.total || 0, note: 'All inbound iCallMate calls persisted in the system.' },
-          { label: 'Active', value: inbound.active || 0, note: 'Inbound calls currently active.' },
-          { label: 'Completed', value: inbound.completed || 0, note: 'Inbound calls completed after answer.' },
-          { label: 'Media Packets', value: inbound.media_packets || 0, note: 'Inbound audio packets received.' }
-        ],
-        outbound: [
-          { label: 'Outbound', value: outbound.total || 0, note: 'All outbound iCallMate call attempts.' },
-          { label: 'Today', value: outbound.today || 0, note: 'Outbound calls created today.' },
-          { label: 'Queued', value: outbound.initiated || 0, note: 'Outbound calls initiated or queued.' },
-          { label: 'Failed', value: outbound.failed || 0, note: 'Outbound calls needing follow-up.' }
+        scheduled: [
+          { label: 'Scheduled', value: pendingCalls, note: 'Call records waiting for first call or retry.' },
+          { label: 'Added Today', value: scheduledToday, note: 'Call records created or updated today.' },
+          { label: 'Patients', value: totalPatients, note: 'Unique patients in the follow-up queue.' },
+          { label: 'Completed', value: completedToday, note: 'Completed calls today.' }
         ],
         feedback: [
-          { label: 'Feedback', value: feedbackItems.length, note: 'Feedback captured from calls and manual updates.' },
-          { label: 'Positive', value: positiveFeedback, note: 'High-satisfaction reviews captured from recent calls.' },
-          { label: 'Negative', value: negativeFeedback, note: 'Completed calls that still need recovery handling.' },
-          { label: 'Completed', value: completedToday, note: 'Completed calls feeding into the feedback pipeline.' }
-        ],
-        positive: [
-          { label: 'Positive', value: positiveFeedback, note: 'High-satisfaction feedback entries captured so far.' },
-          { label: 'Completed', value: completedToday, note: 'Completed calls contributing to positive sentiment.' },
-          { label: 'Feedback', value: feedbackItems.length, note: 'Total feedback entries available for review.' },
-          { label: 'Patients', value: totalPatients, note: 'Total patients currently in the calling database.' }
-        ],
-        negative: [
-          { label: 'Negative', value: negativeFeedback, note: 'Patients who may need callback or service recovery.' },
-          { label: 'Failed', value: failedCalls, note: 'Failed call attempts that can add to dissatisfaction risk.' },
-          { label: 'Pending', value: pendingCalls, note: 'Pending customers still waiting for a successful call.' },
-          { label: 'Feedback', value: feedbackItems.length, note: 'Total feedback entries available for review.' }
+          { label: 'Feedback', value: feedbackSummary.total, note: 'Positive + neutral + negative feedback.' },
+          { label: 'Positive', value: feedbackSummary.positive, note: 'Ratings 4 or 5.' },
+          { label: 'Neutral', value: feedbackSummary.neutral, note: 'Rating 3.' },
+          { label: 'Negative', value: feedbackSummary.negative, note: 'Ratings 1 or 2.' }
         ]
       };
 
@@ -342,11 +345,9 @@
       updateOverviewFilterButtons();
     }
 
-    function renderRecentCalls(calls, feedbackItems = []) {
+    function renderRecentCalls(calls, feedbackSummary = { items: [] }) {
       const container = document.getElementById('recentCallActivity');
       const mobileContainer = document.getElementById('mobileRecentCallActivity');
-      const positiveFeedbackItems = feedbackItems.filter((item) => Number(item.stars || 0) >= 4);
-      const negativeFeedbackItems = feedbackItems.filter((item) => Number(item.stars || 0) > 0 && Number(item.stars || 0) <= 2);
       const scheduledStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
       let recent = calls.slice(0, 3);
 
@@ -354,14 +355,8 @@
         recent = calls.filter((call) => scheduledStatuses.has(String(call.outcome || '').toLowerCase())).slice(0, 3);
       } else if (activeOverviewFilter === 'completed') {
         recent = calls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed').slice(0, 3);
-      } else if (activeOverviewFilter === 'inbound') {
-        recent = calls.filter((call) => String(call.call_direction || '').toLowerCase() === 'incoming').slice(0, 3);
-      } else if (activeOverviewFilter === 'outbound') {
-        recent = calls.filter((call) => String(call.call_direction || 'outbound').toLowerCase() !== 'incoming').slice(0, 3);
-      } else if (activeOverviewFilter === 'positive' || activeOverviewFilter === 'feedback') {
-        const sourceItems = activeOverviewFilter === 'positive'
-          ? positiveFeedbackItems
-          : feedbackItems.slice(0, 3);
+      } else if (activeOverviewFilter === 'feedback') {
+        const sourceItems = feedbackSummary.items.slice(0, 3);
         if (!sourceItems.length) {
           const emptyMarkup = `
             <div class="empty-state">
@@ -403,34 +398,6 @@
         container.innerHTML = desktopFeedbackMarkup;
         mobileContainer.innerHTML = feedbackMarkup;
         return;
-      } else if (activeOverviewFilter === 'negative') {
-        if (negativeFeedbackItems.length) {
-          const feedbackMarkup = negativeFeedbackItems.slice(0, 3).map((item) => `
-            <article class="mobile-recent-call-card">
-              <div>
-                <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
-                <div class="mobile-subtext">${AppShell.escapeHtml(item.review_text || 'No review text available')}</div>
-              </div>
-              <span class="status-badge negative">${item.stars || '--'}/5</span>
-            </article>
-          `).join('');
-
-          const desktopFeedbackMarkup = negativeFeedbackItems.slice(0, 3).map((item) => `
-            <div class="simple-call-item">
-              <div>
-                <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
-                <span>${AppShell.escapeHtml(item.review_text || 'No review text available')}</span>
-              </div>
-              <span class="status-badge negative">${item.stars || '--'}/5</span>
-            </div>
-          `).join('');
-
-          container.innerHTML = desktopFeedbackMarkup;
-          mobileContainer.innerHTML = feedbackMarkup;
-          return;
-        }
-
-        recent = calls.filter((call) => ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase())).slice(0, 3);
       }
 
       if (!recent.length) {
@@ -467,48 +434,46 @@
     }
 
     async function loadOverview() {
-      let [customers, feedback, recentCalls, callMetrics] = await Promise.all([
+      let [customers, feedback, recentCalls] = await Promise.all([
         AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
         AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/calls/metrics`)
+        AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
       ]);
-      callMetrics = callMetrics || {};
+      customers = Array.isArray(customers) ? customers : [];
+      feedback = Array.isArray(feedback) ? feedback : [];
+      recentCalls = Array.isArray(recentCalls) ? recentCalls : [];
 
-      const scheduledStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
-      const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
-      const isScheduled = (c) => ['scheduled', 'retry_scheduled', 'callback_scheduled'].includes(String(c.status || '').toLowerCase());
-      const scheduledToday = customers.filter((customer) => isScheduled(customer) && (isToday(customer.next_retry_at) || isToday(customer.created_at))).length;
-      const completedCalls = recentCalls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
-      const completedToday = completedCalls.filter((call) => isToday(call.called_at)).length;
+      const scheduledStatuses = new Set(['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled']);
+      const scheduledToday = customers.filter((customer) => (
+        scheduledStatuses.has(String(customer.status || '').toLowerCase())
+        && (isToday(customer.next_retry_at) || isToday(customer.created_at))
+      )).length;
+      const completedRecords = customers.filter((customer) => String(customer.status || '').toLowerCase() === 'completed');
+      const completedCount = completedRecords.length;
+      const completedToday = completedRecords.filter((customer) => (
+        isToday(customer.last_called_at)
+        || isToday(customer.updated_at)
+        || isToday(customer.created_at)
+      )).length;
       const pendingCalls = customers.filter((customer) => scheduledStatuses.has(String(customer.status || '').toLowerCase())).length;
-      const failedCalls = recentCalls.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
-      const positiveFeedback = feedback.filter((item) => Number(item.stars || 0) >= 4).length;
-      const negativeFeedback = feedback.filter((item) => Number(item.stars || 0) > 0 && Number(item.stars || 0) <= 2).length;
+      const uniquePatientCount = buildUniquePatientCount(customers);
+      const feedbackSummary = buildFeedbackSummary(feedback, recentCalls);
 
-      document.getElementById('metricCustomers').textContent = customers.length;
+      document.getElementById('metricCustomers').textContent = uniquePatientCount;
       document.getElementById('metricScheduled').textContent = pendingCalls;
-      document.getElementById('metricCompleted').textContent = completedCalls.length;
-      document.getElementById('metricFeedback').textContent = feedback.length;
-      document.getElementById('desktopMetricCustomers').textContent = customers.length;
+      document.getElementById('metricCompleted').textContent = completedCount;
+      document.getElementById('metricFeedback').textContent = feedbackSummary.total;
+      document.getElementById('desktopMetricCustomers').textContent = uniquePatientCount;
       document.getElementById('desktopMetricScheduled').textContent = pendingCalls;
-      document.getElementById('desktopMetricCompleted').textContent = completedCalls.length;
-      document.getElementById('desktopMetricFeedback').textContent = feedback.length;
-      document.getElementById('desktopMetricInbound').textContent = callMetrics.inbound?.total || 0;
-      document.getElementById('desktopMetricOutbound').textContent = callMetrics.outbound?.total || 0;
-      document.getElementById('desktopMetricPositiveFeedback').textContent = positiveFeedback;
-      document.getElementById('desktopMetricNegativeFeedback').textContent = negativeFeedback;
-      document.getElementById('mobileMetricCustomers').textContent = customers.length;
+      document.getElementById('desktopMetricCompleted').textContent = completedCount;
+      document.getElementById('desktopMetricFeedback').textContent = feedbackSummary.total;
+      document.getElementById('mobileMetricCustomers').textContent = uniquePatientCount;
       document.getElementById('mobileMetricScheduled').textContent = pendingCalls;
-      document.getElementById('mobileMetricCompleted').textContent = completedCalls.length;
-      document.getElementById('mobileMetricFeedback').textContent = feedback.length;
-      document.getElementById('mobileMetricInbound').textContent = callMetrics.inbound?.total || 0;
-      document.getElementById('mobileMetricOutbound').textContent = callMetrics.outbound?.total || 0;
-      document.getElementById('mobileMetricPositiveFeedback').textContent = positiveFeedback;
-      document.getElementById('mobileMetricNegativeFeedback').textContent = negativeFeedback;
+      document.getElementById('mobileMetricCompleted').textContent = completedCount;
+      document.getElementById('mobileMetricFeedback').textContent = feedbackSummary.total;
 
-      renderActivityList({ scheduledToday, completedToday, pendingCalls, failedCalls, positiveFeedback, negativeFeedback, totalPatients: customers.length, feedbackItems: feedback, callMetrics });
-      renderRecentCalls(recentCalls, feedback);
+      renderActivityList({ scheduledToday, completedToday, pendingCalls, totalPatients: uniquePatientCount, feedbackSummary });
+      renderRecentCalls(recentCalls, feedbackSummary);
     }
 
     function applyOverviewFilter(filterName) {
