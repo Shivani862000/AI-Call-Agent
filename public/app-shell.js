@@ -5,8 +5,9 @@
     // Incoming Calls page disabled.
     // { href: '/incoming-calls.html', label: 'Incoming Calls', shortLabel: 'Calls' },
     { href: '/customers.html', label: 'Outbound Calls', shortLabel: 'Outbound' },
-    { href: '/feedback.html', label: 'Feedback', shortLabel: 'Feedback' },
-    { href: '/reports.html', label: 'Reports', shortLabel: 'Reports' }
+    { href: '/feedback.html', label: 'Feedback', shortLabel: 'Feedback' }
+    // Reports page disabled.
+    // { href: '/reports.html', label: 'Reports', shortLabel: 'Reports' }
   ];
 
   function redirectToLogin() {
