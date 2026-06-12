@@ -83,6 +83,10 @@ app.use((req, res, next) => {
   return next();
 });
 
+app.get('/incoming-calls.html', (req, res) => {
+  res.status(404).send('Incoming Calls page is disabled.');
+});
+
 // Static files
 app.use(express.static(path.join(__dirname, 'public')));
 
