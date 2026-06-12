@@ -71,7 +71,6 @@ app.use((req, res, next) => {
     req.path === '/api/icallmate/callback'
     || req.path === '/api/icallmate/config'
     || req.path === '/icallmate/health'
-    || req.path === '/icallmate/media'
   ) {
     return basicAuth(req, res, next);
   }

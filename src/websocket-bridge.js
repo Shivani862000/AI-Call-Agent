@@ -62,6 +62,8 @@ const {
 
 const { validateMediaToken } = require('./auth');
 
+const REQUIRE_MEDIA_TOKEN = /^(1|true|yes|on)$/i.test(String(process.env.ICALLMATE_REQUIRE_MEDIA_TOKEN || ''));
+
 function debugLog(message, details = {}) {
   logger.debug('MEDIA_DEBUG', { message, ...details });
 }
@@ -102,14 +104,34 @@ module.exports = function setupWebSocketBridge(server) {
       pathname = '/icallmate/media';
     }
 
-    console.log(`[WS UPGRADE] path=${pathname} host=${req.headers.host || ''} origin=${req.headers.origin || ''} upgrade=${req.headers.upgrade || ''} remote=${req.socket.remoteAddress || 'unknown'}`);
+    logger.info('ICALLMATE_MEDIA_UPGRADE', {
+      path: pathname,
+      host: req.headers.host || '',
+      origin: req.headers.origin || '',
+      upgrade: req.headers.upgrade || '',
+      remote: req.socket.remoteAddress || 'unknown',
+      hasToken: token ? 'yes' : 'no'
+    });
 
     if (pathname === '/icallmate/media') {
-      if (!token || !validateMediaToken(token)) {
-        console.warn(`[WS UPGRADE] Rejected invalid or missing token for /icallmate/media`);
+      const tokenValid = token && validateMediaToken(token);
+      if (!tokenValid && REQUIRE_MEDIA_TOKEN) {
+        logger.warn('ICALLMATE_MEDIA_REJECTED', {
+          reason: token ? 'invalid_token' : 'missing_token',
+          host: req.headers.host || '',
+          remote: req.socket.remoteAddress || 'unknown'
+        });
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;
+      }
+
+      if (!tokenValid) {
+        logger.warn('ICALLMATE_MEDIA_TOKEN_BYPASSED', {
+          reason: token ? 'invalid_token' : 'missing_token',
+          host: req.headers.host || '',
+          remote: req.socket.remoteAddress || 'unknown'
+        });
       }
 
       icallMateWss.handleUpgrade(req, socket, head, (ws) => {
@@ -118,7 +140,12 @@ module.exports = function setupWebSocketBridge(server) {
       return;
     }
 
-    console.warn(`[WS UPGRADE] Rejected unknown path=${pathname}`);
+    logger.warn('ICALLMATE_MEDIA_REJECTED', {
+      reason: 'unknown_path',
+      path: pathname,
+      host: req.headers.host || '',
+      remote: req.socket.remoteAddress || 'unknown'
+    });
     socket.destroy();
   });
 

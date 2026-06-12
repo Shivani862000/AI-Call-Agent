@@ -28,10 +28,98 @@ const logger = require('../services/system-logger');
 let ownerDigestRunning = false;
 let schedulerRunning = false;
 
+const SUBMITTED_CALL_GRACE_MS = Number(process.env.SUBMITTED_CALL_GRACE_MS || 2 * 60 * 1000);
+const SUBMITTED_CALL_RETRY_MS = Number(process.env.SUBMITTED_CALL_RETRY_MS || 5 * 60 * 60 * 1000);
+
 function isProviderAcceptedOnly(call) {
   const reason = String(call?.raw?.reason || call?.raw?.message || '');
   return String(call?.status || '').toLowerCase() === 'queued'
     || reason.includes('Total Records Being Inserted');
+}
+
+async function markSubmittedCallsWithoutMediaFailed() {
+  const cutoffIso = new Date(Date.now() - SUBMITTED_CALL_GRACE_MS).toISOString();
+  const retryAt = new Date(Date.now() + SUBMITTED_CALL_RETRY_MS).toISOString();
+  const nowIso = new Date().toISOString();
+  const staleCalls = await dbAll(
+    `SELECT calls.id AS call_id,
+            calls.customer_id,
+            calls.provider_call_id,
+            calls.called_at,
+            calls.call_type,
+            customers.name,
+            customers.phone,
+            customers.status AS customer_status
+       FROM calls
+       LEFT JOIN customers ON customers.id = calls.customer_id
+      WHERE calls.call_direction = 'outbound'
+        AND calls.outcome IN ('initiated', 'scheduled_initiated')
+        AND COALESCE(calls.media_packets, 0) = 0
+        AND DATETIME(calls.called_at) <= DATETIME(?)
+        AND NOT EXISTS (
+          SELECT 1
+            FROM calls newer_call
+           WHERE newer_call.customer_id = calls.customer_id
+             AND DATETIME(newer_call.called_at) > DATETIME(calls.called_at)
+        )`,
+    [cutoffIso]
+  );
+
+  for (const call of staleCalls) {
+    const failResult = await dbRun(
+      `UPDATE calls
+          SET outcome = ?,
+              outcome_detail = ?,
+              ended_at = COALESCE(ended_at, ?),
+              last_event = ?,
+              notes = ?
+        WHERE id = ?
+          AND outcome IN ('initiated', 'scheduled_initiated')
+          AND COALESCE(media_packets, 0) = 0`,
+      [
+        'failed',
+        'No iCallMate media stream within 2 minutes of provider acceptance',
+        nowIso,
+        'media_timeout',
+        'Provider accepted request, but no dial/media stream was received in time',
+        call.call_id
+      ]
+    );
+
+    if (!failResult.changes) {
+      continue;
+    }
+
+    await dbRun(
+      `UPDATE customers
+          SET status = ?,
+              next_retry_at = ?,
+              retry_count = COALESCE(retry_count, 0) + 1
+        WHERE id = ?
+          AND status IN ('calling', 'called')`,
+      ['retry_scheduled', retryAt, call.customer_id]
+    );
+
+    logger.error('CALL_FAILED', {
+      callId: call.call_id,
+      customerId: call.customer_id,
+      patient: call.name,
+      phone: call.phone,
+      type: logger.formatCallType(call.call_type),
+      providerCallId: call.provider_call_id,
+      reason: 'No iCallMate media stream within 2 minutes',
+      retryAt: logger.formatHumanDateTime(retryAt)
+    });
+    logger.warn('CALL_RETRY', {
+      callId: call.call_id,
+      customerId: call.customer_id,
+      patient: call.name,
+      phone: call.phone,
+      type: logger.formatCallType(call.call_type),
+      retryAt: logger.formatHumanDateTime(retryAt),
+      delay: '5 hours'
+    });
+  }
 }
 
 // ── Owner Digest ───────────────────────────────────────────────────────────────
@@ -83,6 +171,8 @@ async function runOwnerDigestTick() {
 // ── Outbound Calling Schedulers ────────────────────────────────────────────────
 
 async function triggerScheduledCalls() {
+  await markSubmittedCallsWithoutMediaFailed();
+
   const now = new Date();
   const currentSlot = getCurrentSlotLabel(now);
 

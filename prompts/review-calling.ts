@@ -53,8 +53,9 @@ RULES:
 
 function buildReviewCallingOpeningPrompt({ clientName = 'Apna Blood Centre', greeting = 'Good morning' } = {}) {
   return `
-Sirf yeh exact opening natural phone tone me boliye:
+Sirf yeh exact opening aur pehla sawaal natural phone tone me boliye:
 "${greeting}! Main ${clientName || 'Apna Blood Centre'} se baat kar rahi hoon. Kal aapne hamare Blood Centre mein blood donate kiya tha. Uske liye aapka bahut-bahut dhanyavaad Sir."
+"Sir, blood donate karne ke baad aapko koi dikkat ya problem toh nahi hui?"
 `.trim();
 }
 
