@@ -681,6 +681,41 @@ body.poc-page .header-actions .button-link {
   transform: translateY(-1px);
 }
 
+.overview-patient-directory-search {
+  margin-bottom: 12px;
+}
+
+.overview-patient-directory-search .search-input {
+  width: 100%;
+}
+
+.overview-patient-directory-meta {
+  margin-bottom: 10px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.overview-patient-directory-table {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #eef2f7;
+  border-radius: 14px;
+}
+
+.overview-patient-directory-table table {
+  min-width: 100%;
+}
+
+.overview-patient-card-list {
+  display: grid;
+  gap: 10px;
+}
+
+.overview-patient-card {
+  box-shadow: none;
+}
+
 .reports-page .page-header {
   margin-bottom: 16px;
 }

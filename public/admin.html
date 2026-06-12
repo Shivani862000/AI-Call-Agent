@@ -122,7 +122,7 @@
         <article class="poc-card mobile-overview-card mobile-overview-card--summary">
           <div class="poc-card-header compact-overview-header">
             <div>
-              <h3 class="poc-card-title">Today's Activity</h3>
+              <h3 id="mobileOverviewActivityTitle" class="poc-card-title">Patient Directory</h3>
             </div>
           </div>
           <div id="mobileTodayActivityList" class="mobile-activity-list"></div>
@@ -142,8 +142,8 @@
         <article class="poc-card">
           <div class="poc-card-header">
             <div>
-              <h3 class="poc-card-title">Today's Activity</h3>
-              <div class="poc-card-subtitle">A quick view of today's follow-up activity.</div>
+              <h3 id="overviewActivityTitle" class="poc-card-title">Patient Directory</h3>
+              <div id="overviewActivitySubtitle" class="poc-card-subtitle">All unique patients currently stored in the system.</div>
             </div>
           </div>
           <div id="todayActivityList" class="compact-list"></div>
@@ -209,6 +209,16 @@
   <script>
     let activeOverviewFilter = 'patients';
     let overviewNewCallModal = null;
+    let overviewPatientSearch = '';
+    let overviewState = {
+      customers: [],
+      recentCalls: [],
+      feedbackSummary: null,
+      scheduledToday: 0,
+      completedToday: 0,
+      pendingCalls: 0,
+      uniquePatientCount: 0
+    };
 
     function isToday(value) {
       if (!value) return false;
@@ -231,6 +241,50 @@
         if (normalized) phones.add(normalized);
       });
       return phones.size;
+    }
+
+    function formatPatientPhone(value) {
+      const normalized = normalizePatientPhone(value);
+      if (!normalized) return String(value || '--');
+      return `+91 ${normalized.slice(0, 5)} ${normalized.slice(5)}`;
+    }
+
+    function buildUniquePatients(customers = []) {
+      const patientsByPhone = new Map();
+
+      customers.forEach((customer) => {
+        const normalizedPhone = normalizePatientPhone(customer.phone);
+        if (!normalizedPhone) return;
+
+        const existing = patientsByPhone.get(normalizedPhone);
+        const currentCreatedAt = new Date(customer.created_at || 0).getTime();
+        const existingCreatedAt = new Date(existing?.created_at || 0).getTime();
+
+        if (!existing) {
+          patientsByPhone.set(normalizedPhone, {
+            name: customer.name || 'Patient',
+            phone: formatPatientPhone(customer.phone),
+            normalizedPhone,
+            created_at: customer.created_at || ''
+          });
+          return;
+        }
+
+        if (!existing.name && customer.name) {
+          existing.name = customer.name;
+        }
+
+        if (
+          customer.created_at
+          && (!existing.created_at || currentCreatedAt < existingCreatedAt || Number.isNaN(existingCreatedAt))
+        ) {
+          existing.created_at = customer.created_at;
+        }
+      });
+
+      return [...patientsByPhone.values()].sort((a, b) => (
+        new Date(b.created_at || 0) - new Date(a.created_at || 0)
+      ));
     }
 
     function buildFeedbackSummary(feedbackItems = [], recentCalls = []) {
@@ -335,6 +389,9 @@
       };
 
       const cards = activityCards[activeOverviewFilter] || activityCards.patients;
+      document.getElementById('overviewActivityTitle').textContent = 'Today\'s Activity';
+      document.getElementById('overviewActivitySubtitle').textContent = 'A quick view of today\'s follow-up activity.';
+      document.getElementById('mobileOverviewActivityTitle').textContent = 'Today\'s Activity';
       document.getElementById('todayActivityList').innerHTML = `
         ${cards.map((item) => `<div class="compact-row"><div><strong>${item.label}</strong><div class="muted">${item.note}</div></div><strong>${item.value}</strong></div>`).join('')}
       `;
@@ -343,6 +400,101 @@
         ${cards.map((item) => `<div class="mobile-activity-row"><span>${item.label}</span><strong>${item.value}</strong></div>`).join('')}
       `;
       updateOverviewFilterButtons();
+    }
+
+    function renderPatientDirectory(customers = []) {
+      const patients = buildUniquePatients(customers);
+      const search = overviewPatientSearch.trim().toLowerCase();
+      const filteredPatients = patients.filter((patient) => (
+        !search
+        || `${patient.name} ${patient.phone} ${patient.normalizedPhone}`.toLowerCase().includes(search)
+      ));
+
+      document.getElementById('overviewActivityTitle').textContent = 'Patient Directory';
+      document.getElementById('overviewActivitySubtitle').textContent = `${filteredPatients.length} of ${patients.length} unique patients`;
+      document.getElementById('mobileOverviewActivityTitle').textContent = 'Patient Directory';
+
+      const searchMarkup = `
+        <div class="overview-patient-directory-search">
+          <input
+            data-overview-patient-search
+            class="search-input"
+            type="search"
+            placeholder="Search patient or phone"
+            value="${AppShell.escapeHtml(overviewPatientSearch)}"
+            oninput="handleOverviewPatientSearch(this.value)"
+          >
+        </div>
+      `;
+
+      if (!patients.length || !filteredPatients.length) {
+        const emptyMarkup = `
+          ${searchMarkup}
+          <div class="empty-state">
+            <strong>No patients found.</strong>
+          </div>
+        `;
+        document.getElementById('todayActivityList').innerHTML = emptyMarkup;
+        document.getElementById('mobileTodayActivityList').innerHTML = emptyMarkup;
+        updateOverviewFilterButtons();
+        return;
+      }
+
+      document.getElementById('todayActivityList').innerHTML = `
+        ${searchMarkup}
+        <div class="overview-patient-directory-meta">${filteredPatients.length} unique patients</div>
+        <div class="table-wrap overview-patient-directory-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Patient Name</th>
+                <th>Phone Number</th>
+                <th>Created Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filteredPatients.map((patient) => `
+                <tr>
+                  <td><strong>${AppShell.escapeHtml(patient.name || 'Patient')}</strong></td>
+                  <td>${AppShell.escapeHtml(patient.phone || '--')}</td>
+                  <td>${AppShell.escapeHtml(AppShell.formatDate(patient.created_at) || '--')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      document.getElementById('mobileTodayActivityList').innerHTML = `
+        ${searchMarkup}
+        <div class="overview-patient-directory-meta">${filteredPatients.length} unique patients</div>
+        <div class="overview-patient-card-list">
+          ${filteredPatients.map((patient) => `
+            <article class="mobile-call-card overview-patient-card">
+              <strong>${AppShell.escapeHtml(patient.name || 'Patient')}</strong>
+              <div class="mobile-subtext">${AppShell.escapeHtml(patient.phone || '--')}</div>
+              <div class="mobile-subtext">${AppShell.escapeHtml(AppShell.formatDate(patient.created_at) || '--')}</div>
+            </article>
+          `).join('')}
+        </div>
+      `;
+
+      updateOverviewFilterButtons();
+    }
+
+    function renderOverviewPrimaryContent() {
+      if (activeOverviewFilter === 'patients') {
+        renderPatientDirectory(overviewState.customers);
+        return;
+      }
+
+      renderActivityList({
+        scheduledToday: overviewState.scheduledToday,
+        completedToday: overviewState.completedToday,
+        pendingCalls: overviewState.pendingCalls,
+        totalPatients: overviewState.uniquePatientCount,
+        feedbackSummary: overviewState.feedbackSummary || { total: 0, positive: 0, neutral: 0, negative: 0 }
+      });
     }
 
     function renderRecentCalls(calls, feedbackSummary = { items: [] }) {
@@ -472,15 +624,39 @@
       document.getElementById('mobileMetricCompleted').textContent = completedCount;
       document.getElementById('mobileMetricFeedback').textContent = feedbackSummary.total;
 
-      renderActivityList({ scheduledToday, completedToday, pendingCalls, totalPatients: uniquePatientCount, feedbackSummary });
+      overviewState = {
+        customers,
+        recentCalls,
+        feedbackSummary,
+        scheduledToday,
+        completedToday,
+        pendingCalls,
+        uniquePatientCount
+      };
+
+      renderOverviewPrimaryContent();
       renderRecentCalls(recentCalls, feedbackSummary);
     }
 
     function applyOverviewFilter(filterName) {
       activeOverviewFilter = filterName || 'patients';
-      loadOverview().catch((error) => {
-        AppShell.showAlert(error.message, 'error');
-      });
+      renderOverviewPrimaryContent();
+      renderRecentCalls(overviewState.recentCalls, overviewState.feedbackSummary || { items: [] });
+    }
+
+    function handleOverviewPatientSearch(value) {
+      overviewPatientSearch = String(value || '');
+      const shouldRestoreFocus = document.activeElement?.matches?.('[data-overview-patient-search]');
+      renderPatientDirectory(overviewState.customers);
+      if (shouldRestoreFocus) {
+        window.requestAnimationFrame(() => {
+          const searchInputs = [...document.querySelectorAll('[data-overview-patient-search]')];
+          const visibleInput = searchInputs.find((input) => input.offsetParent !== null) || searchInputs[0];
+          if (!visibleInput) return;
+          visibleInput.focus();
+          visibleInput.setSelectionRange(visibleInput.value.length, visibleInput.value.length);
+        });
+      }
     }
 
     document.addEventListener('DOMContentLoaded', async () => {
@@ -525,6 +701,8 @@
         AppShell.showAlert(error.message, 'error');
       }
     });
+
+    window.handleOverviewPatientSearch = handleOverviewPatientSearch;
   </script>
 </body>
 </html>
