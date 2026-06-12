@@ -92,3 +92,4 @@ wss://<APP_BASE_URL>/icallmate/media
 ```
 
 The app expects `8000 Hz`, `LINEAR16`, `1 channel`, `16 bits` media payloads.
+ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -R 80:localhost:3000 ssh.localhost.run
