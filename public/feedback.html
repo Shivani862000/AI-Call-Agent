@@ -69,10 +69,6 @@
           <span class="desktop-filter-count" id="desktopMetricPendingAnalysis">0</span>
           <span class="desktop-filter-label">Pending</span>
         </button>
-        <button class="desktop-filter-pill" type="button" data-feedback-filter="needs_review" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricNeedsReview">0</span>
-          <span class="desktop-filter-label">Needs review</span>
-        </button>
       </section>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Feedback stats">
@@ -87,10 +83,6 @@
         <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="pending" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricPendingAnalysis">0</span>
           <span class="mobile-stat-label">Pending</span>
-        </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="needs_review" aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricNeedsReview">0</span>
-          <span class="mobile-stat-label">Needs review</span>
         </button>
       </section>
 
@@ -150,9 +142,9 @@
           <div class="metric-note">Positive patient feedback received so far.</div>
         </article>
         <article class="metric-card">
-          <div class="metric-label">Needs Review</div>
-          <div class="metric-value" id="metricNeedsReview">0</div>
-          <div class="metric-note">Completed calls that still need team review.</div>
+          <div class="metric-label">Negative Feedback</div>
+          <div class="metric-value" id="metricNegativeFeedback">0</div>
+          <div class="metric-note">Negative patient feedback received so far.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Pending Analysis</div>
@@ -165,10 +157,10 @@
         <article class="poc-card mobile-feedback-review-card">
           <div class="poc-card-header compact-overview-header">
             <div>
-              <h3 id="mobileFeedbackSectionTitle" class="poc-card-title">Calls Needing Review</h3>
+              <h3 id="mobileFeedbackSectionTitle" class="poc-card-title">Positive Feedback</h3>
             </div>
           </div>
-          <div id="mobileNeedsReviewList" class="mobile-review-list"></div>
+          <div id="mobileFeedbackSectionList" class="mobile-review-list"></div>
           <div id="mobileFeedbackListPagination" class="pagination-bar mobile-only"></div>
         </article>
       </section>
@@ -177,12 +169,12 @@
         <article class="poc-card">
           <div class="poc-card-header">
             <div>
-              <h3 class="poc-card-title">Calls Needing Review</h3>
-              <div class="poc-card-subtitle">Open analysis for the calls that need follow-up review.</div>
+              <h3 class="poc-card-title">Positive Feedback</h3>
+              <div class="poc-card-subtitle">Open feedback captured from completed call analysis.</div>
             </div>
           </div>
-          <div id="needsReviewList" class="compact-list"></div>
-          <div id="needsReviewPagination" class="pagination-bar desktop-only"></div>
+          <div id="feedbackSectionList" class="compact-list"></div>
+          <div id="feedbackSectionPagination" class="pagination-bar desktop-only"></div>
         </article>
 
         <article class="poc-card">
@@ -202,7 +194,6 @@
                   <th>Rating</th>
                   <th>Summary</th>
                   <th>Date</th>
-                  <th>Recording</th>
                 </tr>
               </thead>
               <tbody id="feedbackTableBody"></tbody>
@@ -299,11 +290,6 @@
         </section>
 
         <section class="poc-card analysis-section-card">
-          <h4 class="poc-card-title analysis-section-title">Recording</h4>
-          <div id="analysisRecordingWrap" class="poc-card-subtitle analysis-section-copy"></div>
-        </section>
-
-        <section class="poc-card analysis-section-card">
           <h4 class="poc-card-title analysis-section-title">Summary</h4>
           <div id="analysisSummaryValue" class="poc-card-subtitle analysis-section-copy"></div>
         </section>
@@ -353,19 +339,10 @@
     const PAGE_SIZE = 10;
 
     function feedbackSentiment(feedback) {
-      if (Number(feedback.stars || 0) >= 4) return 'positive';
-      if (Number(feedback.stars || 0) <= 2) return 'negative';
+      const sentiment = String(feedback.sentiment || feedback.category || '').toLowerCase();
+      if (Number(feedback.stars || 0) >= 4 || sentiment === 'positive' || sentiment === 'good') return 'positive';
+      if ((Number(feedback.stars || 0) > 0 && Number(feedback.stars || 0) <= 2) || sentiment === 'negative' || sentiment === 'bad') return 'negative';
       return 'neutral';
-    }
-
-    function pendingReviewCalls() {
-      return recentCallsCache.filter((call) => {
-        const isCompleted = String(call.outcome || '').toLowerCase() === 'completed';
-        const needsTranscript = String(call.transcript_status || '').toLowerCase() !== 'completed';
-        const needsAnalysis = String(call.analysis_status || '').toLowerCase() !== 'completed';
-        const missingRating = !Number(call.extracted_rating || 0);
-        return isCompleted && (needsTranscript || needsAnalysis || missingRating);
-      });
     }
 
     function pendingAnalysisCalls() {
@@ -373,11 +350,11 @@
     }
 
     function positiveFeedbackEntries() {
-      return feedbackCache.filter((item) => Number(item.stars || 0) >= 4);
+      return feedbackCache.filter((item) => feedbackSentiment(item) === 'positive');
     }
 
     function negativeFeedbackEntries() {
-      return feedbackCache.filter((item) => Number(item.stars || 0) > 0 && Number(item.stars || 0) <= 2);
+      return feedbackCache.filter((item) => feedbackSentiment(item) === 'negative');
     }
 
     function parseRecordDate(value) {
@@ -452,10 +429,6 @@
       return true;
     }
 
-    function getFilteredReviewCalls(prefix) {
-      return pendingReviewCalls().filter((call) => matchesDateFilter(call.called_at, prefix));
-    }
-
     function getFilteredPendingAnalysisCalls(prefix) {
       return pendingAnalysisCalls().filter((call) => matchesDateFilter(call.called_at, prefix));
     }
@@ -466,6 +439,17 @@
 
     function getFilteredNegativeFeedback(prefix) {
       return negativeFeedbackEntries().filter((item) => matchesDateFilter(item.submitted_at, prefix));
+    }
+
+    function pendingCallToBoardItem(call) {
+      return {
+        is_pending_analysis: true,
+        customer_name: call.customer_name || 'Patient',
+        sentiment: 'pending',
+        stars: null,
+        review_text: AppShell.formatStatusLabel(call.analysis_status || 'pending'),
+        submitted_at: call.called_at
+      };
     }
 
     function getPagedItems(items, currentPage) {
@@ -493,14 +477,14 @@
       `;
     }
 
-    function buildReviewList(calls, titleText = 'Calls Needing Review') {
-      const container = document.getElementById('needsReviewList');
+    function buildPendingList(calls, titleText = 'Pending Analysis') {
+      const container = document.getElementById('feedbackSectionList');
       const title = document.querySelector('.poc-grid-2 .poc-card .poc-card-title');
       if (title) title.textContent = titleText;
       if (!calls.length) {
         const emptyMarkup = `
           <div class="empty-state">
-            <strong>No matching items found</strong>
+            <strong>No pending analysis found</strong>
             <div class="supporting-text">Try another status or date range to see matching records.</div>
           </div>
         `;
@@ -520,7 +504,7 @@
     }
 
     function buildDesktopFeedbackReviewList(items, filterName) {
-      const container = document.getElementById('needsReviewList');
+      const container = document.getElementById('feedbackSectionList');
       const title = document.querySelector('.poc-grid-2 .poc-card .poc-card-title');
       if (title) title.textContent = filterName === 'positive' ? 'Positive Feedback' : 'Negative Feedback';
 
@@ -546,15 +530,14 @@
     }
 
     function renderMobileFilteredList() {
-      const container = document.getElementById('mobileNeedsReviewList');
+      const container = document.getElementById('mobileFeedbackSectionList');
       const title = document.getElementById('mobileFeedbackSectionTitle');
       const titleByFilter = {
-        needs_review: 'Calls Needing Review',
         pending: 'Pending Analysis',
         positive: 'Positive Feedback',
         negative: 'Negative Feedback'
       };
-      title.textContent = titleByFilter[activeFeedbackFilter] || 'Calls Needing Review';
+      title.textContent = titleByFilter[activeFeedbackFilter] || 'Positive Feedback';
 
       if (activeFeedbackFilter === 'positive' || activeFeedbackFilter === 'negative') {
         const feedback = activeFeedbackFilter === 'positive'
@@ -590,21 +573,14 @@
         return;
       }
 
-      const calls = activeFeedbackFilter === 'pending'
-        ? getFilteredPendingAnalysisCalls('mobile')
-        : getFilteredReviewCalls('mobile');
+      const calls = getFilteredPendingAnalysisCalls('mobile');
 
       if (!calls.length) {
         renderPagination('mobileFeedbackListPagination', 1, 1, 'changeFeedbackListPage');
-        const emptyState = activeFeedbackFilter === 'pending'
-          ? {
-            title: 'No pending calls found',
-            text: 'Calls waiting for transcript or analysis will appear here.'
-          }
-          : {
-            title: 'No calls need review',
-            text: 'Completed calls will appear here when transcripts or ratings still need attention.'
-          };
+        const emptyState = {
+          title: 'No pending calls found',
+          text: 'Calls waiting for transcript or analysis will appear here.'
+        };
 
         container.innerHTML = `
           <div class="empty-state">
@@ -626,7 +602,7 @@
             </div>
           </div>
           <div class="mobile-review-status-row">
-            <span class="mobile-review-status ${activeFeedbackFilter === 'pending' ? 'pending' : 'needs-review'}">${activeFeedbackFilter === 'pending' ? 'Pending' : 'Needs review'}</span>
+            <span class="mobile-review-status pending">Pending</span>
             <button class="mobile-review-button" type="button" onclick="openAnalysisPage(${call.id})">View Analysis</button>
           </div>
         </article>
@@ -640,6 +616,7 @@
       const desktopFeedback = (() => {
         if (activeFeedbackFilter === 'positive') return getFilteredPositiveFeedback('desktop');
         if (activeFeedbackFilter === 'negative') return getFilteredNegativeFeedback('desktop');
+        if (activeFeedbackFilter === 'pending') return getFilteredPendingAnalysisCalls('desktop').map(pendingCallToBoardItem);
         return feedback.filter((item) => matchesDateFilter(item.submitted_at, 'desktop'));
       })();
 
@@ -660,9 +637,7 @@
       currentFeedbackBoardPage = paged.currentPage;
 
       tableBody.innerHTML = paged.items.map((item) => {
-        const sentiment = feedbackSentiment(item);
-        const call = item.call_id ? recentCallsCache.find(c => c.id === item.call_id) : null;
-        const audioPlayer = call ? `<audio controls src="${AppShell.API_BASE}/calls/${call.id}/recording" preload="none" style="height: 32px; width: 160px;"></audio>` : '<span class="muted">No recording</span>';
+        const sentiment = item.is_pending_analysis ? 'pending' : feedbackSentiment(item);
         return `
           <tr>
             <td>
@@ -673,15 +648,12 @@
             <td>${Number(item.stars || 0) ? `${item.stars}/5` : ''}</td>
             <td class="summary-cell">${AppShell.escapeHtml(item.review_text || '')}</td>
             <td>${AppShell.formatDateTime(item.submitted_at)}</td>
-            <td>${audioPlayer}</td>
           </tr>
         `;
       }).join('');
 
-      mobileList.innerHTML = feedback.map((item) => {
-        const sentiment = feedbackSentiment(item);
-        const call = item.call_id ? recentCallsCache.find(c => c.id === item.call_id) : null;
-        const audioPlayer = call ? `<audio controls src="${AppShell.API_BASE}/calls/${call.id}/recording" preload="none" style="height: 32px; width: 100%; margin-top: 8px;"></audio>` : '';
+      mobileList.innerHTML = desktopFeedback.map((item) => {
+        const sentiment = item.is_pending_analysis ? 'pending' : feedbackSentiment(item);
         return `
           <article class="mobile-feedback-card">
             <div class="mobile-feedback-head">
@@ -693,7 +665,6 @@
             </div>
             ${item.review_text ? `<div class="mobile-subtext" style="margin-top:10px;">${AppShell.escapeHtml(item.review_text)}</div>` : ''}
             ${Number(item.stars || 0) ? `<div class="mobile-subtext" style="margin-top:8px;">Rating: ${item.stars}/5</div>` : ''}
-            ${audioPlayer}
           </article>
         `;
       }).join('');
@@ -708,28 +679,23 @@
     }
 
     function renderMetrics() {
-      const reviewCalls = pendingReviewCalls();
       const positiveFeedback = positiveFeedbackEntries().length;
       const negativeFeedback = negativeFeedbackEntries().length;
       const pendingAnalysis = pendingAnalysisCalls().length;
-      const mobileReviewCalls = getFilteredReviewCalls('mobile');
       const mobilePendingAnalysis = getFilteredPendingAnalysisCalls('mobile');
       const mobilePositiveFeedback = getFilteredPositiveFeedback('mobile');
       const mobileNegativeFeedback = getFilteredNegativeFeedback('mobile');
-      const desktopReviewCalls = getFilteredReviewCalls('desktop');
       const desktopPendingAnalysis = getFilteredPendingAnalysisCalls('desktop');
       const desktopPositiveFeedback = getFilteredPositiveFeedback('desktop');
       const desktopNegativeFeedback = getFilteredNegativeFeedback('desktop');
 
       document.getElementById('metricFeedbackTotal').textContent = feedbackCache.length;
       document.getElementById('metricPositiveFeedback').textContent = positiveFeedback;
-      document.getElementById('metricNeedsReview').textContent = reviewCalls.length;
+      document.getElementById('metricNegativeFeedback').textContent = negativeFeedback;
       document.getElementById('metricPendingAnalysis').textContent = pendingAnalysis;
-      document.getElementById('desktopMetricNeedsReview').textContent = desktopReviewCalls.length;
       document.getElementById('desktopMetricPendingAnalysis').textContent = desktopPendingAnalysis.length;
       document.getElementById('desktopMetricPositiveFeedback').textContent = desktopPositiveFeedback.length;
       document.getElementById('desktopMetricNegativeFeedback').textContent = desktopNegativeFeedback.length;
-      document.getElementById('mobileMetricNeedsReview').textContent = mobileReviewCalls.length;
       document.getElementById('mobileMetricPendingAnalysis').textContent = mobilePendingAnalysis.length;
       document.getElementById('mobileMetricPositiveFeedback').textContent = mobilePositiveFeedback.length;
       document.getElementById('mobileMetricNegativeFeedback').textContent = mobileNegativeFeedback.length;
@@ -744,18 +710,12 @@
           paged.items,
           activeFeedbackFilter
         );
-        renderPagination('needsReviewPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
+        renderPagination('feedbackSectionPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
       } else {
-        const paged = getPagedItems(
-          activeFeedbackFilter === 'pending' ? desktopPendingAnalysis : desktopReviewCalls,
-          currentFeedbackListPage
-        );
+        const paged = getPagedItems(desktopPendingAnalysis, currentFeedbackListPage);
         currentFeedbackListPage = paged.currentPage;
-        buildReviewList(
-          paged.items,
-          activeFeedbackFilter === 'pending' ? 'Pending Analysis' : 'Calls Needing Review'
-        );
-        renderPagination('needsReviewPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
+        buildPendingList(paged.items, 'Pending Analysis');
+        renderPagination('feedbackSectionPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
       }
       renderFeedbackBoard(feedbackCache);
       renderMobileFilteredList();
@@ -777,7 +737,7 @@
     }
 
     function applyFeedbackFilter(filterName) {
-      activeFeedbackFilter = filterName || 'needs_review';
+      activeFeedbackFilter = filterName || 'positive';
       currentFeedbackListPage = 1;
       currentFeedbackBoardPage = 1;
       renderMetrics();

@@ -62,8 +62,14 @@ function buildTranscriptTextFromAudioTranscript(audioTranscript) {
 }
 
 async function upsertFeedbackFromAnalysis({ dbGet, dbRun, callRecord, reviewText, stars }) {
-  const effectiveReviewText = reviewText || 'Customer shared feedback on the call.';
-  const effectiveStars = Number.isInteger(stars) ? stars : 3;
+  const hasReviewText = Boolean(String(reviewText || '').trim());
+  const hasStars = Number.isInteger(stars);
+  if (!hasReviewText && !hasStars) {
+    return { feedbackId: null, category: 'average', skipped: true };
+  }
+
+  const effectiveReviewText = hasReviewText ? reviewText : '';
+  const effectiveStars = hasStars ? stars : 3;
   const categorization = await categorizeFeedback(effectiveReviewText, effectiveStars);
   const existingFeedback = await dbGet('SELECT id FROM feedback WHERE call_id = ?', [callRecord.id]);
 

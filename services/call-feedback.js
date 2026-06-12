@@ -414,7 +414,7 @@ async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, customerI
       return { saved: false, reason: 'already_saved', extraction };
     }
 
-    const reviewText = extraction.reviewText || 'Customer shared a rating on the call.';
+    const reviewText = extraction.reviewText || '';
     const stars = Number.isInteger(extraction.stars) ? extraction.stars : 3;
     const categorization = await categorizeFeedback(reviewText, stars);
 
@@ -450,7 +450,7 @@ async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, customerI
     };
   }
 
-  const reviewText = extraction.reviewText || 'Customer shared a rating on the call.';
+  const reviewText = extraction.reviewText || '';
   const stars = Number.isInteger(extraction.stars) ? extraction.stars : 3;
   const categorization = await categorizeFeedback(reviewText, stars);
 
