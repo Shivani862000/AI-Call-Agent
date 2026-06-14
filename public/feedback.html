@@ -338,10 +338,18 @@
     let currentFeedbackBoardPage = 1;
     const PAGE_SIZE = 10;
 
+    function normalizeRating(stars) {
+      if (!stars) return 0;
+      const str = String(stars);
+      const match = str.match(/^(\d+)/);
+      return match ? Number(match[1]) : 0;
+    }
+
     function feedbackSentiment(feedback) {
       const sentiment = String(feedback.sentiment || feedback.category || '').toLowerCase();
-      if (Number(feedback.stars || 0) >= 4 || sentiment === 'positive' || sentiment === 'good') return 'positive';
-      if ((Number(feedback.stars || 0) > 0 && Number(feedback.stars || 0) <= 2) || sentiment === 'negative' || sentiment === 'bad') return 'negative';
+      const rating = normalizeRating(feedback.stars);
+      if (rating >= 4 || sentiment.includes('positive') || sentiment.includes('good')) return 'positive';
+      if ((rating > 0 && rating <= 2) || sentiment.includes('negative') || sentiment.includes('bad')) return 'negative';
       return 'neutral';
     }
 
@@ -688,6 +696,10 @@
       const desktopPendingAnalysis = getFilteredPendingAnalysisCalls('desktop');
       const desktopPositiveFeedback = getFilteredPositiveFeedback('desktop');
       const desktopNegativeFeedback = getFilteredNegativeFeedback('desktop');
+      
+      console.log('[FEEDBACK_FILTER_APPLIED]', activeFeedbackFilter);
+      console.log('[POSITIVE_FEEDBACK_COUNT]', positiveFeedback);
+      console.log('[NEGATIVE_FEEDBACK_COUNT]', negativeFeedback);
 
       document.getElementById('metricFeedbackTotal').textContent = feedbackCache.length;
       document.getElementById('metricPositiveFeedback').textContent = positiveFeedback;

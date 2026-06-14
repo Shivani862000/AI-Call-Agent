@@ -58,12 +58,21 @@ router.post('/manual', async (req, res) => {
 
 function normalizeSentiment(value) {
   const sentiment = String(value || '').trim().toLowerCase();
-  if (sentiment === 'positive' || sentiment === 'negative') return sentiment;
+  if (sentiment.includes('positive') || sentiment.includes('good')) return 'positive';
+  if (sentiment.includes('negative') || sentiment.includes('bad')) return 'negative';
   return 'neutral';
 }
 
+function normalizeRating(stars) {
+  if (!stars) return 0;
+  if (typeof stars === 'number') return stars;
+  const match = String(stars).match(/^(\d+)/);
+  if (match) return Number(match[1]);
+  return 0;
+}
+
 function categoryFromAnalysis(row) {
-  const rating = Number(row.stars || 0);
+  const rating = normalizeRating(row.stars);
   const sentiment = normalizeSentiment(row.sentiment);
 
   if (rating >= 4 || sentiment === 'positive') return 'good';
@@ -73,6 +82,7 @@ function categoryFromAnalysis(row) {
 
 // List feedback using completed call analysis as the source of truth.
 router.get('/', async (req, res) => {
+  console.log('[FEEDBACK_API_CALLED]');
   try {
     const analyzedCalls = await dbAll(`
       SELECT 
@@ -92,7 +102,9 @@ router.get('/', async (req, res) => {
         calls.called_at
       FROM calls
       JOIN customers ON customers.id = calls.customer_id
-      WHERE COALESCE(calls.analysis_status, 'pending') = 'completed'
+      WHERE calls.extracted_rating IS NOT NULL 
+         OR calls.sentiment IS NOT NULL 
+         OR calls.analysis_summary IS NOT NULL
       ORDER BY COALESCE(calls.analysis_completed_at, calls.feedback_saved_at, calls.called_at) DESC
       LIMIT 500
     `);
@@ -125,17 +137,18 @@ router.get('/', async (req, res) => {
         customer_name: row.customer_name,
         review_text: reviewText,
         category: categoryFromAnalysis({ stars: row.stars, sentiment }),
-        stars: row.stars,
+        stars: normalizeRating(row.stars),
         sentiment,
         analysis_status: row.analysis_status,
         source: 'call_analysis',
         submitted_at: row.analysis_completed_at || row.feedback_saved_at || row.called_at
       };
-    }).filter((row) => row.review_text || Number(row.stars || 0) || row.sentiment !== 'neutral');
+    }).filter((row) => row.review_text || row.stars || row.sentiment !== 'neutral');
 
     const feedback = [...analysisFeedback, ...manualFeedback]
       .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
 
+    console.log(`[FEEDBACK_ANALYSIS_RECORDS_FOUND] count=${feedback.length}`);
     res.json(feedback);
   } catch (error) {
     console.error('Error fetching feedback:', error);
@@ -159,17 +172,17 @@ router.get('/analytics', async (req, res) => {
     `);
 
     // Positive Feedback
-    const fbPositive = feedback.filter((item) => Number(item.stars || 0) >= 4);
+    const fbPositive = feedback.filter((item) => normalizeRating(item.stars) >= 4);
     const callsPositive = recentCalls
-      .filter((c) => Number(c.extracted_rating || 0) >= 4 && !feedback.find(f => f.call_id === c.id))
-      .map((c) => ({ ...c, stars: c.extracted_rating, review_text: c.extracted_review_text }));
+      .filter((c) => normalizeRating(c.extracted_rating) >= 4 && !feedback.find(f => f.call_id === c.id))
+      .map((c) => ({ ...c, stars: normalizeRating(c.extracted_rating), review_text: c.extracted_review_text }));
     const positiveFeedback = [...fbPositive, ...callsPositive];
 
     // Negative Feedback
-    const fbNegative = feedback.filter((item) => Number(item.stars || 0) > 0 && Number(item.stars || 0) <= 2);
+    const fbNegative = feedback.filter((item) => normalizeRating(item.stars) > 0 && normalizeRating(item.stars) <= 2);
     const callsNegative = recentCalls
-      .filter((c) => Number(c.extracted_rating || 0) > 0 && Number(c.extracted_rating || 0) <= 2 && !feedback.find(f => f.call_id === c.id))
-      .map((c) => ({ ...c, stars: c.extracted_rating, review_text: c.extracted_review_text }));
+      .filter((c) => normalizeRating(c.extracted_rating) > 0 && normalizeRating(c.extracted_rating) <= 2 && !feedback.find(f => f.call_id === c.id))
+      .map((c) => ({ ...c, stars: normalizeRating(c.extracted_rating), review_text: c.extracted_review_text }));
     const negativeFeedback = [...fbNegative, ...callsNegative];
 
     // Pending Analysis

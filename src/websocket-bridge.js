@@ -290,6 +290,13 @@ module.exports = function setupWebSocketBridge(server) {
           session.sttProducedAt = null;
         } else if (session.turnComplete && session.audioBuffer.length === 0) {
           session.turnComplete = false;
+          if (session.hangupAfterAudioDrains) {
+            session.hangupAfterAudioDrains = false;
+            console.log(`[FINAL_AUDIO_FLUSH_COMPLETED] streamId=${session.streamId}`);
+            console.log(`[HANGUP_REQUESTED] streamId=${session.streamId} reason=gemini_live_turn_complete`);
+            requestCallHangup('gemini_live_turn_complete');
+            scheduleFinalizeCallHangup('gemini_live_turn_complete', transcript[transcript.length - 1]?.text || '');
+          }
           // Clear latency tracking for next turn
           session.firstChunkSentAt = null;
           session.geminiLiveFirstAudioAt = null;
@@ -775,16 +782,14 @@ module.exports = function setupWebSocketBridge(server) {
 
                 // Signal the interval to flush the tail when buffer drains below 3200
                 session.turnComplete = true;
-
-                // Schedule hangup AFTER audio finishes playing, not immediately
-                const pendingAudioMs = ((session.audioBuffer?.length || 0) / 2 / 8000) * 1000;
-                const hangupDelay = pendingAudioMs + 1500; // wait for audio + 1.5s grace
+                
+                const audioQueuedBytes = session.audioBuffer ? session.audioBuffer.length : 0;
+                console.log(`[GEMINI_TURN_COMPLETE] streamId=${getSessionLabel()}`);
+                console.log(`[AUDIO_QUEUE_PENDING] streamId=${getSessionLabel()} bytes=${audioQueuedBytes}`);
 
                 if (pendingHangup || finalResponseInProgress || outboundDemoState.endCallAfterNextReply) {
-                  setTimeout(() => {
-                    requestCallHangup('gemini_live_turn_complete');
-                    scheduleFinalizeCallHangup('gemini_live_turn_complete', transcript[transcript.length - 1]?.text || '');
-                  }, hangupDelay);
+                  console.log(`[FINAL_AUDIO_FLUSH_STARTED] streamId=${getSessionLabel()} marking hangupAfterAudioDrains=true`);
+                  session.hangupAfterAudioDrains = true;
                 }
                 finalResponseInProgress = false;
               }
@@ -909,6 +914,8 @@ module.exports = function setupWebSocketBridge(server) {
         notes: 'AI conversation completed; auto hangup'
       });
       sendReverseMediaStop(ws, session);
+      
+      console.log(`[ACTUAL_HANGUP_SENT] streamId=${getSessionLabel()} reason=${reason}`);
       sendIcallMateJson(ws, {
         event: 'hangup-call',
         callerId: session.callerId,
