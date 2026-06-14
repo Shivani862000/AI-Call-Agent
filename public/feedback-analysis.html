@@ -599,8 +599,8 @@
 
     function renderOverview(call) {
       const analysis = call.analysis || {};
-      setText('analysisPageTitle', call.customer_name || 'Patient');
-      setText('analysisPageSubtitle', `${formatCallType(call.call_type)} · ${AppShell.formatDateTime(call.called_at)}`);
+      setText('analysisPageTitle', AppShell.formatName(call.customer_name) || 'Patient');
+      setText('analysisPageSubtitle', `${AppShell.formatCallType(call.call_type)} · ${AppShell.formatDateTime(call.called_at)}`);
       renderStatus(call);
 
       const isComplete = String(call.outcome || '').toLowerCase() === 'completed';
@@ -611,8 +611,8 @@
       setText('kpiDuration', dur);
 
       // Hidden defaults
-      setText('callTypeValue', formatCallType(call.call_type));
-      setText('patientNameValue', call.customer_name || 'Patient');
+      setText('callTypeValue', AppShell.formatCallType(call.call_type));
+      setText('patientNameValue', AppShell.formatName(call.customer_name) || 'Patient');
       setText('phoneValue', call.customer_phone || '--');
       setText('calledAtValue', AppShell.formatDateTime(call.called_at));
       setText('agentValue', call.agent_name || 'Default AI Agent');

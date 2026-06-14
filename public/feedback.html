@@ -161,7 +161,7 @@
             </div>
           </div>
           <div id="mobileFeedbackSectionList" class="mobile-review-list"></div>
-          <div id="mobileFeedbackListPagination" class="pagination-bar mobile-only"></div>
+          <div id="mobileFeedbackListPagination"></div>
         </article>
       </section>
 
@@ -174,7 +174,7 @@
             </div>
           </div>
           <div id="feedbackSectionList" class="compact-list"></div>
-          <div id="feedbackSectionPagination" class="pagination-bar desktop-only"></div>
+          <div id="feedbackSectionPagination"></div>
         </article>
 
         <article class="poc-card">
@@ -199,9 +199,10 @@
               <tbody id="feedbackTableBody"></tbody>
             </table>
           </div>
-          <div id="feedbackBoardPagination" class="pagination-bar desktop-only"></div>
+          </div>
 
           <div id="mobileFeedbackList" class="mobile-feedback-stack mobile-only"></div>
+          <div id="feedbackBoardPagination"></div>
         </article>
       </section>
     </main>
@@ -336,7 +337,6 @@
     let activeFeedbackFilter = 'positive';
     let currentFeedbackListPage = 1;
     let currentFeedbackBoardPage = 1;
-    const PAGE_SIZE = 10;
 
     function normalizeRating(stars) {
       if (!stars) return 0;
@@ -452,37 +452,12 @@
     function pendingCallToBoardItem(call) {
       return {
         is_pending_analysis: true,
-        customer_name: call.customer_name || 'Patient',
+        customer_name: AppShell.formatName(call.customer_name) || 'Patient',
         sentiment: 'pending',
         stars: null,
         review_text: AppShell.formatStatusLabel(call.analysis_status || 'pending'),
         submitted_at: call.called_at
       };
-    }
-
-    function getPagedItems(items, currentPage) {
-      const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
-      const safePage = Math.min(Math.max(1, currentPage), totalPages);
-      const start = (safePage - 1) * PAGE_SIZE;
-      return {
-        items: items.slice(start, start + PAGE_SIZE),
-        totalPages,
-        currentPage: safePage
-      };
-    }
-
-    function renderPagination(containerId, currentPage, totalPages, onPageChangeName) {
-      const container = document.getElementById(containerId);
-      if (!container) return;
-      if (totalPages <= 1) {
-        container.innerHTML = '';
-        return;
-      }
-      container.innerHTML = `
-        <button class="pagination-button" type="button" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
-        <span class="pagination-meta">Page ${currentPage} of ${totalPages}</span>
-        <button class="pagination-button" type="button" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
-      `;
     }
 
     function buildPendingList(calls, titleText = 'Pending Analysis') {
@@ -503,7 +478,7 @@
       container.innerHTML = calls.map((call) => `
         <div class="compact-row">
           <div>
-            <strong>${AppShell.escapeHtml(call.customer_name || 'Patient')}</strong>
+            <strong>${AppShell.escapeHtml(AppShell.formatName(call.customer_name) || 'Patient')}</strong>
             <div class="muted">${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.outcome || 'completed')}</div>
           </div>
           <button class="secondary" type="button" onclick="openAnalysisPage(${call.id})">View Analysis</button>
@@ -529,7 +504,7 @@
       container.innerHTML = items.map((item) => `
         <div class="compact-row">
           <div>
-            <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
+            <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
             <div class="muted">${AppShell.formatDateTime(item.submitted_at)}${item.stars ? ` · ${item.stars}/5` : ''}</div>
           </div>
           <span class="status-badge ${filterName}">${AppShell.formatStatusLabel(filterName)}</span>
@@ -552,7 +527,7 @@
           ? getFilteredPositiveFeedback('mobile')
           : getFilteredNegativeFeedback('mobile');
         if (!feedback.length) {
-          renderPagination('mobileFeedbackListPagination', 1, 1, 'changeFeedbackListPage');
+          document.getElementById('mobileFeedbackListPagination').innerHTML = '';
           container.innerHTML = `
             <div class="empty-state">
               <strong>No ${activeFeedbackFilter} feedback found</strong>
@@ -562,13 +537,13 @@
           return;
         }
 
-        const paged = getPagedItems(feedback, currentFeedbackListPage);
+        const paged = AppShell.Pagination.getPagedItems(feedback, currentFeedbackListPage);
         currentFeedbackListPage = paged.currentPage;
         container.innerHTML = paged.items.map((item) => `
           <article class="mobile-feedback-card mobile-feedback-card-inline">
             <div class="mobile-feedback-head">
               <div>
-                <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
+                <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
                 <div class="mobile-subtext">${AppShell.formatDateTime(item.submitted_at)}</div>
               </div>
               <span class="status-badge ${activeFeedbackFilter}">${AppShell.formatStatusLabel(activeFeedbackFilter)}</span>
@@ -577,14 +552,14 @@
             ${Number(item.stars || 0) ? `<div class="mobile-subtext" style="margin-top:8px;">Rating: ${item.stars}/5</div>` : ''}
           </article>
         `).join('');
-        renderPagination('mobileFeedbackListPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
+        document.getElementById('mobileFeedbackListPagination').innerHTML = AppShell.Pagination.renderControls(paged.currentPage, paged.totalItems, 'changeFeedbackListPage');
         return;
       }
 
       const calls = getFilteredPendingAnalysisCalls('mobile');
 
       if (!calls.length) {
-        renderPagination('mobileFeedbackListPagination', 1, 1, 'changeFeedbackListPage');
+        document.getElementById('mobileFeedbackListPagination').innerHTML = '';
         const emptyState = {
           title: 'No pending calls found',
           text: 'Calls waiting for transcript or analysis will appear here.'
@@ -599,13 +574,13 @@
         return;
       }
 
-      const paged = getPagedItems(calls, currentFeedbackListPage);
+      const paged = AppShell.Pagination.getPagedItems(calls, currentFeedbackListPage);
       currentFeedbackListPage = paged.currentPage;
       container.innerHTML = paged.items.map((call) => `
         <article class="mobile-review-card">
           <div class="mobile-review-head">
             <div>
-              <strong>${AppShell.escapeHtml(call.customer_name || 'Patient')}</strong>
+              <strong>${AppShell.escapeHtml(AppShell.formatName(call.customer_name) || 'Patient')}</strong>
               <div class="mobile-subtext">${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.outcome || 'completed')}</div>
             </div>
           </div>
@@ -615,7 +590,7 @@
           </div>
         </article>
       `).join('');
-      renderPagination('mobileFeedbackListPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
+      document.getElementById('mobileFeedbackListPagination').innerHTML = AppShell.Pagination.renderControls(paged.currentPage, paged.totalItems, 'changeFeedbackListPage');
     }
 
     function renderFeedbackBoard(feedback) {
@@ -629,7 +604,7 @@
       })();
 
       if (!desktopFeedback.length) {
-        renderPagination('feedbackBoardPagination', 1, 1, 'changeFeedbackBoardPage');
+        document.getElementById('feedbackBoardPagination').innerHTML = '';
         const emptyMarkup = `
           <div class="empty-state">
             <strong>No feedback recorded yet.</strong>
@@ -641,7 +616,7 @@
         return;
       }
 
-      const paged = getPagedItems(desktopFeedback, currentFeedbackBoardPage);
+      const paged = AppShell.Pagination.getPagedItems(desktopFeedback, currentFeedbackBoardPage);
       currentFeedbackBoardPage = paged.currentPage;
 
       tableBody.innerHTML = paged.items.map((item) => {
@@ -649,8 +624,8 @@
         return `
           <tr>
             <td>
-              <div class="row-title">${AppShell.escapeHtml(item.customer_name || 'Patient')}</div>
-              <div class="row-subtitle">${AppShell.escapeHtml(item.source || 'call')}</div>
+              <div class="row-title">${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</div>
+              <div class="row-subtitle">${AppShell.escapeHtml(AppShell.formatSentence(item.source || 'call'))}</div>
             </td>
             <td><span class="status-badge ${sentiment}">${AppShell.formatStatusLabel(sentiment)}</span></td>
             <td>${Number(item.stars || 0) ? `${item.stars}/5` : ''}</td>
@@ -666,7 +641,7 @@
           <article class="mobile-feedback-card">
             <div class="mobile-feedback-head">
               <div>
-                <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
+                <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
                 <div class="mobile-subtext">${AppShell.formatDateTime(item.submitted_at)}</div>
               </div>
               <span class="status-badge ${sentiment}">${AppShell.formatStatusLabel(sentiment)}</span>
@@ -676,13 +651,13 @@
           </article>
         `;
       }).join('');
-      renderPagination('feedbackBoardPagination', paged.currentPage, paged.totalPages, 'changeFeedbackBoardPage');
+      document.getElementById('feedbackBoardPagination').innerHTML = AppShell.Pagination.renderControls(paged.currentPage, paged.totalItems, 'changeFeedbackBoardPage');
     }
 
     function populateCustomerSelect() {
       const select = document.getElementById('feedbackCustomer');
       select.innerHTML = '<option value="">Select customer</option>' + customerCache.map((customer) => `
-        <option value="${customer.id}">${AppShell.escapeHtml(customer.name)} · ${AppShell.escapeHtml(customer.phone)}</option>
+        <option value="${customer.id}">${AppShell.escapeHtml(AppShell.formatName(customer.name))} · ${AppShell.escapeHtml(customer.phone)}</option>
       `).join('');
     }
 
@@ -713,7 +688,7 @@
       document.getElementById('mobileMetricNegativeFeedback').textContent = mobileNegativeFeedback.length;
 
       if (activeFeedbackFilter === 'positive' || activeFeedbackFilter === 'negative') {
-        const paged = getPagedItems(
+        const paged = AppShell.Pagination.getPagedItems(
           activeFeedbackFilter === 'positive' ? desktopPositiveFeedback : desktopNegativeFeedback,
           currentFeedbackListPage
         );
@@ -722,12 +697,12 @@
           paged.items,
           activeFeedbackFilter
         );
-        renderPagination('feedbackSectionPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
+        document.getElementById('feedbackSectionPagination').innerHTML = AppShell.Pagination.renderControls(paged.currentPage, paged.totalItems, 'changeFeedbackListPage');
       } else {
-        const paged = getPagedItems(desktopPendingAnalysis, currentFeedbackListPage);
+        const paged = AppShell.Pagination.getPagedItems(desktopPendingAnalysis, currentFeedbackListPage);
         currentFeedbackListPage = paged.currentPage;
         buildPendingList(paged.items, 'Pending Analysis');
-        renderPagination('feedbackSectionPagination', paged.currentPage, paged.totalPages, 'changeFeedbackListPage');
+        document.getElementById('feedbackSectionPagination').innerHTML = AppShell.Pagination.renderControls(paged.currentPage, paged.totalItems, 'changeFeedbackListPage');
       }
       renderFeedbackBoard(feedbackCache);
       renderMobileFilteredList();
@@ -906,6 +881,8 @@
         if (document.getElementById('analysisModal').classList.contains('open')) closeAnalysisModal();
         if (document.getElementById('feedbackMobileMenuSheet').classList.contains('open')) closeFeedbackSheet('feedbackMobileMenuSheet');
       });
+
+      window.addEventListener('app:pagination:resize', renderMetrics);
 
       try {
         toggleCustomDateRange('mobile');

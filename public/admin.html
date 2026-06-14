@@ -115,9 +115,9 @@
           <div class="metric-note">Finished calls with outcomes recorded.</div>
         </article>
         <article class="metric-card">
-          <div class="metric-label">Calls Scheduled</div>
+          <div class="metric-label">Scheduled Calls</div>
           <div class="metric-value" id="metricScheduled">0</div>
-          <div class="metric-note">Call records waiting for outreach.</div>
+          <div class="metric-note">All call records waiting for outreach.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Feedback Captured</div>
@@ -221,15 +221,30 @@
     let activeOverviewFilter = 'patients';
     let overviewNewCallModal = null;
     let overviewPatientSearch = '';
+    let overviewPatientPage = 1;
+    let overviewRecentCallsPage = 1;
+
     let overviewState = {
       customers: [],
       recentCalls: [],
       feedbackSummary: null,
-      scheduledToday: 0,
+      // scheduledToday: 0,
       completedToday: 0,
       pendingCalls: 0,
       uniquePatientCount: 0
     };
+
+    function setOverviewPatientPage(page) {
+      overviewPatientPage = page;
+      renderPatientDirectory(overviewState.customers);
+    }
+    window.setOverviewPatientPage = setOverviewPatientPage;
+
+    function setOverviewRecentCallsPage(page) {
+      overviewRecentCallsPage = page;
+      renderRecentCalls(overviewState.recentCalls, overviewState.feedbackSummary || { items: [] });
+    }
+    window.setOverviewRecentCallsPage = setOverviewRecentCallsPage;
 
     function isToday(value) {
       if (!value) return false;
@@ -371,7 +386,7 @@
       });
     }
 
-    function renderActivityList({ scheduledToday, completedToday, pendingCalls, totalPatients, feedbackSummary }) {
+    function renderActivityList({ /* scheduledToday, */ completedToday, pendingCalls, totalPatients, feedbackSummary }) {
       const activityCards = {
         patients: [
           { label: 'Patients', value: totalPatients, note: 'Unique phone numbers in the patient follow-up queue.' },
@@ -387,7 +402,7 @@
         ],
         scheduled: [
           { label: 'Scheduled', value: pendingCalls, note: 'Call records waiting for first call or retry.' },
-          { label: 'Added Today', value: scheduledToday, note: 'Call records created or updated today.' },
+          // { label: 'Added Today', value: scheduledToday, note: 'Call records created or updated today.' },
           { label: 'Patients', value: totalPatients, note: 'Unique patients in the follow-up queue.' },
           { label: 'Completed', value: completedToday, note: 'Completed calls today.' }
         ],
@@ -413,6 +428,7 @@
       document.getElementById('mobileTodayActivityList').innerHTML = `
         ${visibleCards.map((item) => `<div class="mobile-activity-row"><span>${item.label}</span><strong>${item.value}</strong></div>`).join('')}
       `;
+      document.getElementById('mobileTodayActivityList').parentElement.style.display = 'none';
       updateOverviewFilterButtons();
     }
 
@@ -424,9 +440,16 @@
         || `${patient.name} ${patient.phone} ${patient.normalizedPhone}`.toLowerCase().includes(search)
       ));
 
+      // Calculate pagination slice
+      const paged = AppShell.Pagination.getPagedItems(filteredPatients, overviewPatientPage);
+      overviewPatientPage = paged.currentPage;
+      const paginatedPatients = paged.items;
+      const totalItems = paged.totalItems;
+
       document.getElementById('overviewActivityTitle').textContent = 'Patient Directory';
       document.getElementById('overviewActivitySubtitle').textContent = `${filteredPatients.length} of ${patients.length} unique patients`;
       document.getElementById('mobileOverviewActivityTitle').textContent = 'Patient Directory';
+      document.getElementById('mobileTodayActivityList').parentElement.style.display = '';
 
       const searchMarkup = `
         <div class="overview-patient-directory-search">
@@ -467,9 +490,9 @@
               </tr>
             </thead>
             <tbody>
-              ${filteredPatients.map((patient) => `
+              ${paginatedPatients.map((patient) => `
                 <tr>
-                  <td><strong>${AppShell.escapeHtml(patient.name || 'Patient')}</strong></td>
+                  <td><strong>${AppShell.escapeHtml(AppShell.formatName(patient.name))}</strong></td>
                   <td>${AppShell.escapeHtml(patient.phone || '--')}</td>
                   <td>${AppShell.escapeHtml(AppShell.formatDate(patient.created_at) || '--')}</td>
                 </tr>
@@ -477,20 +500,24 @@
             </tbody>
           </table>
         </div>
+        ${AppShell.Pagination.renderControls(overviewPatientPage, totalItems, 'setOverviewPatientPage')}
       `;
 
       document.getElementById('mobileTodayActivityList').innerHTML = `
-        ${searchMarkup}
-        <div class="overview-patient-directory-meta">${filteredPatients.length} unique patients</div>
-        <div class="overview-patient-card-list">
-          ${filteredPatients.map((patient) => `
-            <article class="mobile-call-card overview-patient-card">
-              <strong>${AppShell.escapeHtml(patient.name || 'Patient')}</strong>
-              <div class="mobile-subtext">${AppShell.escapeHtml(patient.phone || '--')}</div>
+        <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
+          ${searchMarkup}
+          <div class="overview-patient-directory-meta" style="font-size: 14px; color: var(--text-muted);">${filteredPatients.length} unique patients</div>
+        </div>
+        <div class="overview-patient-card-list" style="display: flex; flex-direction: column; gap: 8px;">
+          ${paginatedPatients.map((patient) => `
+            <article class="mobile-call-card overview-patient-card" style="padding: 12px; margin: 0; width: 100%; box-sizing: border-box;">
+              <strong style="display: block; margin-bottom: 4px;">${AppShell.escapeHtml(AppShell.formatName(patient.name))}</strong>
+              <div class="mobile-subtext" style="margin-bottom: 2px;">${AppShell.escapeHtml(patient.phone || '--')}</div>
               <div class="mobile-subtext">${AppShell.escapeHtml(AppShell.formatDate(patient.created_at) || '--')}</div>
             </article>
           `).join('')}
         </div>
+        ${AppShell.Pagination.renderControls(overviewPatientPage, totalItems, 'setOverviewPatientPage')}
       `;
 
       updateOverviewFilterButtons();
@@ -503,7 +530,7 @@
       }
 
       renderActivityList({
-        scheduledToday: overviewState.scheduledToday,
+        // scheduledToday: overviewState.scheduledToday,
         completedToday: overviewState.completedToday,
         pendingCalls: overviewState.pendingCalls,
         totalPatients: overviewState.uniquePatientCount,
@@ -514,16 +541,64 @@
     function renderRecentCalls(calls, feedbackSummary = { items: [] }) {
       const container = document.getElementById('recentCallActivity');
       const mobileContainer = document.getElementById('mobileRecentCallActivity');
-      const scheduledStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
-      let recent = calls.slice(0, 3);
+      const scheduledStatuses = new Set(['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled']);
+      let recent = [];
 
       if (activeOverviewFilter === 'scheduled') {
-        recent = calls.filter((call) => scheduledStatuses.has(String(call.outcome || '').toLowerCase())).slice(0, 3);
+        const scheduledCustomers = overviewState.customers.filter((c) => scheduledStatuses.has(String(c.status || '').toLowerCase()));
+
+        const paged = AppShell.Pagination.getPagedItems(scheduledCustomers, overviewRecentCallsPage);
+        overviewRecentCallsPage = paged.currentPage;
+        const paginatedCustomers = paged.items;
+        const totalItems = paged.totalItems;
+
+        if (!paginatedCustomers.length) {
+          const emptyMarkup = `
+            <div class="empty-state">
+              <strong>No scheduled calls</strong>
+              <div class="supporting-text">There are currently no calls scheduled for follow-up.</div>
+            </div>
+          `;
+          container.innerHTML = emptyMarkup;
+          mobileContainer.innerHTML = emptyMarkup;
+          return;
+        }
+
+        const scheduledDesktopMarkup = paginatedCustomers.map((customer) => `
+          <div class="simple-call-item">
+            <div>
+              <strong>${AppShell.escapeHtml(AppShell.formatName(customer.name))}</strong>
+              <span>${AppShell.escapeHtml(customer.phone || '--')} · ${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type) || 'Follow-up')} · ${AppShell.formatDateTime(customer.scheduled_datetime || customer.next_retry_at || customer.created_at)}</span>
+            </div>
+            <span class="status-badge pending">Status: ${AppShell.formatStatusLabel(customer.status || 'scheduled')}</span>
+          </div>
+        `).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
+
+        const scheduledMobileMarkup = paginatedCustomers.map((customer) => `
+          <article class="mobile-recent-call-card" style="padding: 12px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">
+            <div>
+              <strong style="display: block; margin-bottom: 4px;">${AppShell.escapeHtml(AppShell.formatName(customer.name))}</strong>
+              <div class="mobile-subtext" style="margin-bottom: 2px;">${AppShell.escapeHtml(customer.phone || '--')} · ${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type) || 'Follow-up')}</div>
+              <div class="mobile-subtext" style="margin-bottom: 4px;">${AppShell.formatDateTime(customer.scheduled_datetime || customer.next_retry_at || customer.created_at)}</div>
+            </div>
+            <span class="status-badge pending">Status: ${AppShell.formatStatusLabel(customer.status || 'scheduled')}</span>
+          </article>
+        `).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
+
+        container.innerHTML = scheduledDesktopMarkup;
+        mobileContainer.innerHTML = scheduledMobileMarkup;
+        return;
       } else if (activeOverviewFilter === 'completed') {
-        recent = calls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed').slice(0, 3);
+        recent = calls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
       } else if (activeOverviewFilter === 'feedback') {
-        const sourceItems = feedbackSummary.items.slice(0, 3);
-        if (!sourceItems.length) {
+        const sourceItems = feedbackSummary.items;
+
+        const paged = AppShell.Pagination.getPagedItems(sourceItems, overviewRecentCallsPage);
+        overviewRecentCallsPage = paged.currentPage;
+        const paginatedItems = paged.items;
+        const totalItems = paged.totalItems;
+
+        if (!paginatedItems.length) {
           const emptyMarkup = `
             <div class="empty-state">
               <strong>No matching feedback yet</strong>
@@ -535,38 +610,45 @@
           return;
         }
 
-        const feedbackMarkup = sourceItems.slice(0, 3).map((item) => {
+        const feedbackMarkup = paginatedItems.map((item) => {
           const tone = Number(item.stars || 0) >= 4 ? 'positive' : Number(item.stars || 0) <= 2 ? 'negative' : 'neutral';
           return `
             <article class="mobile-recent-call-card">
               <div>
-                <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
+                <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name))}</strong>
                 <div class="mobile-subtext">${AppShell.escapeHtml(item.review_text || 'No review text available')}</div>
               </div>
               <span class="status-badge ${tone}">${item.stars || '--'}/5</span>
             </article>
           `;
-        }).join('');
+        }).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
 
-        const desktopFeedbackMarkup = sourceItems.slice(0, 3).map((item) => {
+        const desktopFeedbackMarkup = paginatedItems.map((item) => {
           const tone = Number(item.stars || 0) >= 4 ? 'positive' : Number(item.stars || 0) <= 2 ? 'negative' : 'neutral';
           return `
             <div class="simple-call-item">
               <div>
-                <strong>${AppShell.escapeHtml(item.customer_name || 'Patient')}</strong>
+                <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name))}</strong>
                 <span>${AppShell.escapeHtml(item.review_text || 'No review text available')}</span>
               </div>
               <span class="status-badge ${tone}">${item.stars || '--'}/5</span>
             </div>
           `;
-        }).join('');
+        }).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
 
         container.innerHTML = desktopFeedbackMarkup;
         mobileContainer.innerHTML = feedbackMarkup;
         return;
+      } else {
+        recent = calls;
       }
 
-      if (!recent.length) {
+      const paged = AppShell.Pagination.getPagedItems(recent, overviewRecentCallsPage);
+      overviewRecentCallsPage = paged.currentPage;
+      const paginatedRecent = paged.items;
+      const totalItems = paged.totalItems;
+
+      if (!paginatedRecent.length) {
         const emptyMarkup = `
           <div class="empty-state">
             <strong>No recent calls yet</strong>
@@ -578,25 +660,25 @@
         return;
       }
 
-      container.innerHTML = recent.map((call) => `
+      container.innerHTML = paginatedRecent.map((call) => `
         <div class="simple-call-item">
           <div>
-            <strong>${AppShell.escapeHtml(call.customer_name || 'Patient')}</strong>
+            <strong>${AppShell.escapeHtml(AppShell.formatName(call.customer_name))}</strong>
             <span>${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.call_direction || 'outbound')}</span>
           </div>
           <span class="status-badge ${AppShell.escapeHtml(String(call.outcome || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || 'pending')}</span>
         </div>
-      `).join('');
+      `).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
 
-      mobileContainer.innerHTML = recent.map((call) => `
-        <article class="mobile-recent-call-card">
+      mobileContainer.innerHTML = paginatedRecent.map((call) => `
+        <article class="mobile-recent-call-card" style="padding: 12px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">
           <div>
-            <strong>${AppShell.escapeHtml(call.customer_name || 'Patient')}</strong>
+            <strong style="display: block; margin-bottom: 4px;">${AppShell.escapeHtml(AppShell.formatName(call.customer_name))}</strong>
             <div class="mobile-subtext">${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.call_direction || 'outbound')}</div>
           </div>
           <span class="status-badge ${AppShell.escapeHtml(String(call.outcome || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || 'pending')}</span>
         </article>
-      `).join('');
+      `).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
     }
 
     async function loadOverview() {
@@ -617,6 +699,7 @@
       let feedback = !isAgent && Array.isArray(results[2]) ? results[2] : [];
 
       const scheduledStatuses = new Set(['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled']);
+      /*
       const scheduledToday = customers.filter((customer) => (
         scheduledStatuses.has(String(customer.status || '').toLowerCase())
         && isToday(
@@ -625,6 +708,7 @@
             : (customer.scheduled_datetime || customer.next_retry_at || customer.created_at)
         )
       )).length;
+      */
       const completedRecords = customers.filter((customer) => String(customer.status || '').toLowerCase() === 'completed');
       const completedCount = completedRecords.length;
       const completedToday = completedRecords.filter((customer) => (
@@ -653,7 +737,7 @@
         customers,
         recentCalls,
         feedbackSummary,
-        scheduledToday,
+        // scheduledToday,
         completedToday,
         pendingCalls,
         uniquePatientCount
@@ -671,6 +755,7 @@
 
     function handleOverviewPatientSearch(value) {
       overviewPatientSearch = String(value || '');
+      overviewPatientPage = 1; // Reset to page 1 on search
       const shouldRestoreFocus = document.activeElement?.matches?.('[data-overview-patient-search]');
       renderPatientDirectory(overviewState.customers);
       if (shouldRestoreFocus) {
@@ -720,6 +805,12 @@
           closeOverviewSheet('overviewMobileMenuSheet');
         }
       });
+
+      window.addEventListener('app:pagination:resize', () => {
+        renderOverviewPrimaryContent();
+        renderRecentCalls(overviewState.recentCalls, overviewState.feedbackSummary || { items: [] });
+      });
+
       try {
         await loadOverview();
       } catch (error) {

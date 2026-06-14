@@ -131,6 +131,42 @@
       .replace(/\b\w/g, (match) => match.toUpperCase()) || 'Unknown';
   }
 
+  function formatStatus(value) {
+    return formatStatusLabel(value);
+  }
+
+  function formatName(value) {
+    if (!value) return '';
+    return String(value)
+      .toLowerCase()
+      .split(/\s+/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+
+  function formatLabel(value) {
+    if (!value) return '';
+    return String(value)
+      .toLowerCase()
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, match => match.toUpperCase());
+  }
+
+  function formatCallType(value) {
+    if (!value) return '';
+    const raw = String(value).toLowerCase();
+    if (raw === '3_month_follow_up') return '3 Month Follow-up';
+    if (raw === '6_month_follow_up') return '6 Month Follow-up';
+    return formatLabel(value);
+  }
+
+  function formatSentence(value) {
+    if (!value) return '';
+    const str = String(value).toLowerCase().replace(/_/g, ' ');
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
+
+
   function formatDate(value) {
     if (!value) return '';
     const date = new Date(value);
@@ -659,6 +695,89 @@
 
   document.addEventListener('DOMContentLoaded', loadTestCallWidgetScript);
 
+  const Pagination = (() => {
+    let globalItemsPerPage = window.innerWidth <= 640 ? 5 : 10;
+    
+    window.addEventListener('resize', () => {
+      const isMobile = window.innerWidth <= 640;
+      const newItemsPerPage = isMobile ? 5 : 10;
+      if (newItemsPerPage !== globalItemsPerPage) {
+        globalItemsPerPage = newItemsPerPage;
+        window.dispatchEvent(new CustomEvent('app:pagination:resize'));
+      }
+    });
+
+    function getItemsPerPage() {
+      return globalItemsPerPage;
+    }
+
+    function getPagedItems(items, currentPage) {
+      const perPage = getItemsPerPage();
+      const totalPages = Math.max(1, Math.ceil(items.length / perPage));
+      const safePage = Math.min(Math.max(1, currentPage), totalPages);
+      const start = (safePage - 1) * perPage;
+      return {
+        items: items.slice(start, start + perPage),
+        totalPages,
+        currentPage: safePage,
+        totalItems: items.length
+      };
+    }
+
+    function renderControls(currentPage, totalItems, onPageChangeName) {
+      const perPage = getItemsPerPage();
+      if (totalItems <= perPage) return '';
+      
+      const totalPages = Math.ceil(totalItems / perPage) || 1;
+      const startItem = ((currentPage - 1) * perPage) + 1;
+      const endItem = Math.min(currentPage * perPage, totalItems);
+      const isMobile = window.innerWidth <= 640;
+
+      if (isMobile) {
+        return `
+          <div class="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light); width: 100%;">
+            <button class="secondary" style="padding: 6px 12px; border-radius: 4px;" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
+            <span style="font-size: 14px;">Page ${currentPage} of ${totalPages}</span>
+            <button class="secondary" style="padding: 6px 12px; border-radius: 4px;" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
+          </div>
+        `;
+      }
+
+      let desktopPages = '';
+      for (let i = 1; i <= totalPages; i++) {
+        if (totalPages > 5) {
+          if (i !== 1 && i !== totalPages && Math.abs(i - currentPage) > 1) {
+            if (i === 2 && currentPage > 3) desktopPages += '<span style="margin: 0 4px; color: var(--text-muted);">...</span>';
+            if (i === totalPages - 1 && currentPage < totalPages - 2) desktopPages += '<span style="margin: 0 4px; color: var(--text-muted);">...</span>';
+            continue;
+          }
+        }
+        if (i === currentPage) {
+          desktopPages += `<button class="primary" style="padding: 4px 12px; border-radius: 4px; min-width: 32px;" disabled>${i}</button>`;
+        } else {
+          desktopPages += `<button class="secondary" style="padding: 4px 12px; border-radius: 4px; min-width: 32px;" onclick="${onPageChangeName}(${i})">${i}</button>`;
+        }
+      }
+
+      return `
+        <div class="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light);">
+          <span style="color: var(--text-muted); font-size: 14px;">Showing ${totalItems ? startItem : 0}–${endItem} of ${totalItems} records</span>
+          <div style="display: flex; gap: 8px;">
+            <button class="secondary" style="padding: 4px 12px; border-radius: 4px;" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
+            ${desktopPages}
+            <button class="secondary" style="padding: 4px 12px; border-radius: 4px;" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
+          </div>
+        </div>
+      `;
+    }
+
+    return {
+      getItemsPerPage,
+      getPagedItems,
+      renderControls
+    };
+  })();
+
   window.AppShell = {
     API_BASE,
     applyFieldErrors,
@@ -671,10 +790,16 @@
     formatDate,
     formatDateTime,
     formatStatusLabel,
+    formatStatus,
+    formatName,
+    formatLabel,
+    formatCallType,
+    formatSentence,
     initializeShellChrome,
     logoutAdmin,
     NewCallModal: createNewCallModal,
     normalizePhoneForApi,
+    Pagination,
     redirectToLogin,
     showAlert
   };

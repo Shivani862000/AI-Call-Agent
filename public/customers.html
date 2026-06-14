@@ -107,9 +107,9 @@
           <div class="metric-note">Calls completed with a recorded outcome.</div>
         </article>
         <article class="metric-card">
-          <div class="metric-label">Scheduled Today</div>
+          <div class="metric-label">Scheduled Calls</div>
           <div class="metric-value" id="scheduledTodayMetric">0</div>
-          <div class="metric-note">Patients prepared for today's calling schedule.</div>
+          <div class="metric-note">All call records waiting for outreach.</div>
         </article>
         <article class="metric-card">
           <div class="metric-label">Pending Calls</div>
@@ -134,15 +134,13 @@
         <div class="search-row">
           <input id="customerSearch" class="search-input mobile-only" type="search"
             placeholder="Search patient or phone">
-          <select id="statusFilter" class="table-filter desktop-only">
-            <option value="">All statuses</option>
-            <option value="completed">Completed</option>
-            <option value="pending">Pending</option>
-            <option value="called">Called</option>
-            <option value="busy">Busy</option>
-            <option value="failed">Failed</option>
-            <option value="retry_scheduled">Retry scheduled</option>
+          <select id="dateFilter" class="table-filter desktop-only">
+            <option value="">All Calls</option>
+            <option value="today">Today Calls</option>
+            <option value="tomorrow">Tomorrow Calls</option>
+            <option value="custom">Custom Date</option>
           </select>
+          <input id="customDateFilter" type="date" class="table-filter desktop-only" style="display: none;">
           <select id="callTypeFilter" class="table-filter desktop-only">
             <option value="">All Calls</option>
             <option value="REVIEW_CALL">Review Calling</option>
@@ -169,10 +167,8 @@
           </table>
         </div>
 
-        <div id="queuePaginationDesktop" class="pagination-bar desktop-only"></div>
-
         <div id="mobileCallList" class="mobile-call-stack mobile-only"></div>
-        <div id="queuePaginationMobile" class="pagination-bar mobile-only"></div>
+        <div id="queuePagination"></div>
       </section>
     </main>
   </div>
@@ -258,15 +254,15 @@
         <button id="closeMobileFilterSheet" class="secondary modal-close" type="button">Close</button>
       </div>
       <div class="mobile-sheet-actions mobile-filter-options">
-        <button class="mobile-sheet-action mobile-filter-option active" type="button" data-filter-value="">All</button>
+        <button class="mobile-sheet-action mobile-filter-option active" type="button" data-filter-value="">All Calls</button>
         <button class="mobile-sheet-action mobile-filter-option" type="button"
-          data-filter-value="completed">Completed</button>
+          data-filter-value="today">Today Calls</button>
         <button class="mobile-sheet-action mobile-filter-option" type="button"
-          data-filter-value="pending">Pending</button>
+          data-filter-value="tomorrow">Tomorrow Calls</button>
         <button class="mobile-sheet-action mobile-filter-option" type="button"
-          data-filter-value="failed">Failed</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="retry_scheduled">Retry
-          Scheduled</button>
+          data-filter-value="custom">Custom Date</button>
+        <input id="mobileCustomDateFilter" type="date" class="mobile-filter-option" style="display: none; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid var(--border-light); border-radius: 6px; box-sizing: border-box;">
+        <hr style="border: 0; border-top: 1px solid var(--border-light); margin: 8px 0;" />
         <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="REVIEW_CALL">Review
           Calling</button>
         <button class="mobile-sheet-action mobile-filter-option" type="button"
@@ -300,7 +296,6 @@
     let activeCustomerMetricFilter = 'completed';
     let currentQueuePage = 1;
     let newCallModal = null;
-    const PAGE_SIZE = 10;
 
     function normalizePhoneForApi(value) {
       const digits = String(value || '').replace(/\D/g, '');
@@ -333,9 +328,6 @@
         : 'REVIEW_CALL';
     }
 
-    function formatCallTypeLabel(value) {
-      return normalizeCallType(value) === 'THREE_MONTH_FOLLOWUP' ? '3 Month Follow-up' : 'Review Calling';
-    }
 
     function getScheduledDate(customer) {
       const status = String(customer.status || '').toLowerCase();
@@ -392,6 +384,23 @@
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return false;
       return date.toDateString() === new Date().toDateString();
+    }
+
+    function isTomorrow(value) {
+      if (!value) return false;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return false;
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      return date.toDateString() === tomorrow.toDateString();
+    }
+
+    function isSameDate(value, compareDateString) {
+      if (!value || !compareDateString) return false;
+      const date = new Date(value);
+      const compareDate = new Date(compareDateString);
+      if (Number.isNaN(date.getTime()) || Number.isNaN(compareDate.getTime())) return false;
+      return date.toDateString() === compareDate.toDateString();
     }
 
     function getLatestCall(customerId) {
@@ -502,15 +511,16 @@
     }
 
     function syncMobileFilterOptions() {
-      const activeValue = document.getElementById('statusFilter').value;
+      const activeValue = document.getElementById('dateFilter').value;
       const activeCallType = document.getElementById('callTypeFilter').value;
       document.querySelectorAll('.mobile-filter-option').forEach((button) => {
         if (button.dataset.callTypeValue !== undefined) {
           button.classList.toggle('active', button.dataset.callTypeValue === activeCallType);
-        } else {
-          button.classList.toggle('active', button.dataset.filterValue === activeValue && !activeCallType);
+        } else if (button.dataset.filterValue !== undefined) {
+          button.classList.toggle('active', button.dataset.filterValue === activeValue);
         }
       });
+      document.getElementById('mobileCustomDateFilter').style.display = activeValue === 'custom' ? 'block' : 'none';
     }
 
     function openMobileFilterSheet() {
@@ -549,11 +559,8 @@
       const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
       const completedCalls = recentCallsCache.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
 
-      const isScheduled = (c) => ['scheduled', 'retry_scheduled', 'callback_scheduled'].includes(String(c.status || '').toLowerCase());
-      const scheduledCount = customerCache.filter((customer) => (
-        isScheduled(customer)
-        && isToday(getScheduleMetricDate(customer))
-      )).length;
+      const isScheduled = (c) => ['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled'].includes(String(c.status || '').toLowerCase());
+      const scheduledCount = customerCache.filter((customer) => isScheduled(customer)).length;
       const pendingCount = customerCache.filter((customer) => pendingStatuses.has(String(customer.status || '').toLowerCase())).length;
       const completedCount = completedCalls.length;
       const failedCount = recentCallsCache.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
@@ -582,17 +589,27 @@
 
     function getFilteredCustomers() {
       const search = document.getElementById('customerSearch').value.trim().toLowerCase();
-      const status = document.getElementById('statusFilter').value;
+      const dateFilter = document.getElementById('dateFilter').value;
+      const customDate = document.getElementById('customDateFilter').value || document.getElementById('mobileCustomDateFilter').value;
       const callType = document.getElementById('callTypeFilter').value;
       const pendingStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
       return customerCache.filter((customer) => {
-        const matchesSearch = !search || `${customer.name} ${customer.phone}`.toLowerCase().includes(search);
-        const matchesStatus = !status || String(customer.status || '').toLowerCase() === status;
+        const matchesSearch = !search || `${AppShell.formatName(customer.name)} ${customer.phone}`.toLowerCase().includes(search);
         const matchesCallType = !callType || normalizeCallType(customer.call_type) === callType;
+
+        let matchesDateFilter = true;
+        if (dateFilter === 'today') {
+          matchesDateFilter = isToday(getScheduleMetricDate(customer));
+        } else if (dateFilter === 'tomorrow') {
+          matchesDateFilter = isTomorrow(getScheduleMetricDate(customer));
+        } else if (dateFilter === 'custom' && customDate) {
+          matchesDateFilter = isSameDate(getScheduleMetricDate(customer), customDate);
+        }
+
         let matchesMetricFilter = true;
 
         if (activeCustomerMetricFilter === 'scheduled') {
-          matchesMetricFilter = isToday(customer.created_at) || isToday(customer.updated_at);
+          matchesMetricFilter = ['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled'].includes(String(customer.status || '').toLowerCase());
         } else if (activeCustomerMetricFilter === 'pending') {
           matchesMetricFilter = pendingStatuses.has(String(customer.status || '').toLowerCase());
         } else if (activeCustomerMetricFilter === 'completed') {
@@ -601,7 +618,7 @@
           matchesMetricFilter = hasFailedCall(customer.id);
         }
 
-        return matchesSearch && matchesStatus && matchesCallType && matchesMetricFilter;
+        return matchesSearch && matchesDateFilter && matchesCallType && matchesMetricFilter;
       });
     }
 
@@ -617,53 +634,6 @@
       activeCustomerMetricFilter = filterName || 'completed';
       currentQueuePage = 1;
       renderQueue();
-    }
-
-    function getPagedItems(items, currentPage) {
-      const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
-      const safePage = Math.min(Math.max(1, currentPage), totalPages);
-      const start = (safePage - 1) * PAGE_SIZE;
-      return {
-        items: items.slice(start, start + PAGE_SIZE),
-        totalPages,
-        currentPage: safePage,
-        totalItems: items.length
-      };
-    }
-
-    function renderPagination(containerId, paged, onPageChangeName, isMobile = false) {
-      const container = document.getElementById(containerId);
-      if (!container) return;
-      if (paged.totalPages <= 1) {
-        container.innerHTML = '';
-        return;
-      }
-
-      const { currentPage, totalPages, totalItems } = paged;
-      
-      if (isMobile) {
-        container.innerHTML = `
-          <button class="pagination-button" type="button" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
-          <span class="pagination-meta">Page ${currentPage} of ${totalPages}</span>
-          <button class="pagination-button" type="button" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
-        `;
-      } else {
-        const startRecord = (currentPage - 1) * PAGE_SIZE + 1;
-        const endRecord = Math.min(currentPage * PAGE_SIZE, totalItems);
-        let pagesHtml = '';
-        for (let i = 1; i <= totalPages; i++) {
-          pagesHtml += `<button class="pagination-button ${i === currentPage ? 'active' : ''}" type="button" onclick="${onPageChangeName}(${i})">${i}</button>`;
-        }
-        
-        container.innerHTML = `
-          <div class="pagination-range">Showing ${startRecord}–${endRecord} of ${totalItems} records</div>
-          <div class="pagination-controls">
-            <button class="pagination-button" type="button" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
-            <div class="pagination-pages">${pagesHtml}</div>
-            <button class="pagination-button" type="button" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
-          </div>
-        `;
-      }
     }
 
     function renderDesktopTable(customers) {
@@ -691,11 +661,11 @@
         return `
           <tr>
             <td>
-              <div class="row-title">${AppShell.escapeHtml(customer.name || 'Patient')}</div>
+              <div class="row-title">${AppShell.escapeHtml(AppShell.formatName(customer.name) || 'Patient')}</div>
               <div class="row-subtitle">ID #${customer.id}</div>
             </td>
             <td>${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</td>
-            <td>${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))}</td>
+            <td>${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type))}</td>
             <td>${AppShell.escapeHtml(formatScheduledDate(customer))}</td>
             <td>${AppShell.escapeHtml(formatScheduledTime(customer))}</td>
             <td><span class="status-badge ${AppShell.escapeHtml(String((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span></td>
@@ -734,12 +704,12 @@
           <article class="mobile-call-card">
             <div class="mobile-call-head">
               <div>
-                <strong>${AppShell.escapeHtml(customer.name || 'Patient')}</strong>
+                <strong>${AppShell.escapeHtml(AppShell.formatName(customer.name) || 'Patient')}</strong>
                 <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</div>
               </div>
               <span class="status-badge ${AppShell.escapeHtml(String((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span>
             </div>
-            <div class="mobile-subtext">${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))}</div>
+            <div class="mobile-subtext">${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type))}</div>
             <div class="mobile-subtext">Date: ${AppShell.escapeHtml(formatScheduledDate(customer))}</div>
             <div class="mobile-subtext">Time: ${AppShell.escapeHtml(formatScheduledTime(customer))}</div>
             <div class="mobile-call-actions">
@@ -755,12 +725,11 @@
     function renderQueue() {
       const customers = getFilteredCustomers();
       renderMetrics(customers);
-      const paged = getPagedItems(customers, currentQueuePage);
+      const paged = AppShell.Pagination.getPagedItems(customers, currentQueuePage);
       currentQueuePage = paged.currentPage;
       renderDesktopTable(paged.items);
       renderMobileCards(paged.items);
-      renderPagination('queuePaginationDesktop', paged, 'changeQueuePage', false);
-      renderPagination('queuePaginationMobile', paged, 'changeQueuePage', true);
+      document.getElementById('queuePagination').innerHTML = AppShell.Pagination.renderControls(currentQueuePage, paged.totalItems, 'changeQueuePage');
     }
 
     function changeQueuePage(pageNumber) {
@@ -824,33 +793,31 @@
         if (callId) openAnalysisPage(callId);
       });
       document.getElementById('analysisModalClose').addEventListener('click', closeAnalysisModal);
-      document.getElementById('customerSearch').addEventListener('input', () => {
-        currentQueuePage = 1;
-        renderQueue();
-      });
-      document.getElementById('statusFilter').addEventListener('change', () => {
-        syncMobileFilterOptions();
-        currentQueuePage = 1;
-        renderQueue();
-      });
-      document.getElementById('callTypeFilter').addEventListener('change', () => {
-        syncMobileFilterOptions();
-        currentQueuePage = 1;
-        renderQueue();
-      });
+
       document.querySelectorAll('.mobile-filter-option').forEach((button) => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', (event) => {
           if (button.dataset.callTypeValue !== undefined) {
-            document.getElementById('callTypeFilter').value = button.dataset.callTypeValue || '';
-          } else {
-            document.getElementById('statusFilter').value = button.dataset.filterValue || '';
-            document.getElementById('callTypeFilter').value = '';
+            document.getElementById('callTypeFilter').value = button.dataset.callTypeValue;
+          } else if (button.dataset.filterValue !== undefined) {
+            document.getElementById('dateFilter').value = button.dataset.filterValue;
           }
           syncMobileFilterOptions();
-          closeMobileFilterSheet();
+          currentQueuePage = 1;
           renderQueue();
+          if (button.dataset.filterValue !== 'custom') {
+            closeMobileFilterSheet();
+          }
         });
       });
+      document.getElementById('customerSearch').addEventListener('input', () => { currentQueuePage = 1; renderQueue(); });
+      document.getElementById('dateFilter').addEventListener('change', (e) => { 
+        document.getElementById('customDateFilter').style.display = e.target.value === 'custom' ? 'inline-block' : 'none';
+        currentQueuePage = 1; 
+        renderQueue(); 
+      });
+      document.getElementById('customDateFilter').addEventListener('change', () => { currentQueuePage = 1; renderQueue(); });
+      document.getElementById('mobileCustomDateFilter').addEventListener('change', () => { currentQueuePage = 1; renderQueue(); });
+      document.getElementById('callTypeFilter').addEventListener('change', () => { currentQueuePage = 1; renderQueue(); });
       document.getElementById('analysisModal').addEventListener('click', (event) => {
         if (event.target.id === 'analysisModal') closeAnalysisModal();
       });
@@ -859,6 +826,8 @@
           if (event.target.id === id) closeSheet(id);
         });
       });
+      
+      window.addEventListener('app:pagination:resize', renderQueue);
 
       try {
         await loadPageData();
