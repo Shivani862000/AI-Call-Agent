@@ -1195,6 +1195,7 @@ module.exports = function setupWebSocketBridge(server) {
       close() {
         if (llmWatchdogInterval) clearInterval(llmWatchdogInterval);
         if (session.audioInterval) clearInterval(session.audioInterval);
+        if (session.hardLimitTimer) clearTimeout(session.hardLimitTimer);
         clearOpeningFallbackTimer();
         bridgeClosed = true;
         if (hangupFinalizeTimer) {
@@ -1263,6 +1264,33 @@ module.exports = function setupWebSocketBridge(server) {
       }
 
       session.callStartedLogged = true;
+
+      if (session.callDirection === 'outbound') {
+        const MAX_CALL_DURATION_MS = 100000; // 100 seconds
+        session.hardLimitTimer = setTimeout(() => {
+          console.log(`\n[CALL_DURATION_LIMIT_REACHED]\ncallId=${session.callId}\nduration=100s\n`);
+          console.log(`[CALL_FORCE_DISCONNECTED]\ncallId=${session.callId}\nreason="Maximum call duration reached"\n`);
+
+          if (ws.readyState === WebSocket.OPEN) {
+            // Tell iCallMate to hang up forcefully
+            sendIcallMateJson(ws, {
+              event: 'hangup-call',
+              callerId: session.callerId,
+              streamId: session.streamId,
+              reason: 'Maximum call duration reached'
+            });
+
+            // Disconnect backend immediately
+            setTimeout(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.close();
+              }
+            }, 250);
+          }
+        }, MAX_CALL_DURATION_MS);
+      }
+
+      console.log(`\n[CALL_STARTED]\ncallId=${session.callId}\n`);
       logger.info('CALL_STARTED', {
         callId: session.callId,
         customerId: session.customerId,
