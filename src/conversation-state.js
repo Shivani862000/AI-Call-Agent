@@ -191,8 +191,8 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
     }
 
     if (isNoReply(customerReply)) {
-      markCompletedAfterReply();
-      return 'Donor has not donated again. Say exactly: "Hamare yahan garbhvati mahilaon aur thalassemia se grast bachchon ko free blood diya jata hai. Yadi sambhav ho to kisi bhi din nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain. Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
+      state.step = 'plan_to_donate';
+      return 'Donor has not donated again. Say exactly: "Hamare yahan garbhvati mahilaon aur thalassemia se grast bachchon ko free blood diya jata hai. Yadi sambhav ho to kisi bhi din nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain. Kya aap is baar donate karne ka plan kar sakte hain Sir?"';
     }
 
     return 'Clarify briefly. Say exactly: "Kya aapne 3 mahine ke baad dobara blood donate kiya hai?"';
@@ -206,6 +206,11 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
   if (state.step === 'donation_place') {
     markCompletedAfterReply();
     return 'Capture the donation place. Say exactly: "Bahut achha kaam kiya sir. Dhanyavaad. Aapka din shubh ho." Then end the call.';
+  }
+
+  if (state.step === 'plan_to_donate') {
+    markCompletedAfterReply();
+    return 'Acknowledge the donor warmly in one short sentence. Say exactly: "Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
   }
 
   markCompletedAfterReply();
@@ -240,7 +245,7 @@ function buildOutboundDemoTurnInstruction(callerText, state, clientName, custome
 
 module.exports = {
   evaluateLiveSentimentLabel,
-  // shouldAutoHangupAfterAgentTurn,
+  shouldAutoHangupAfterAgentTurn,
   estimateHangupDelayMs,
   normalizeHindiEnglishText,
   isGreetingOnly,

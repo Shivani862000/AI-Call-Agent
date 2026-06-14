@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Outbound Calls</title>
   <link rel="stylesheet" href="/app-shell.css">
 </head>
+
 <body class="poc-page customers-page">
   <div class="app-shell">
     <aside class="sidebar">
@@ -35,7 +37,8 @@
         <div class="mobile-ops-bar">
           <div class="mobile-ops-title">Outbound Calls</div>
           <div class="mobile-ops-actions">
-            <button id="mobileHeaderMenuButton" class="mobile-icon-button" type="button" aria-label="Open menu">...</button>
+            <button id="mobileHeaderMenuButton" class="mobile-icon-button" type="button"
+              aria-label="Open menu">...</button>
           </div>
         </div>
       </section>
@@ -43,10 +46,11 @@
       <header class="page-header desktop-page-header">
         <div class="page-title-wrap">
           <h2>Outbound Calls</h2>
-          <div class="page-subtitle">Calls placed from the lab or AI assistant to customers for feedback and follow-up.</div>
+          <div class="page-subtitle">Calls placed from the lab or AI assistant to customers for feedback and follow-up.
+          </div>
         </div>
         <div class="header-actions">
-          <button id="deleteAllCustomersButton" class="danger desktop-only" type="button" style="background-color: var(--color-danger); color: white; margin-right: 8px;">Delete All Records</button>
+          <!-- <button id="deleteAllCustomersButton" class="danger desktop-only" type="button" style="background-color: var(--color-danger); color: white; margin-right: 8px;">Delete All Records</button> -->
           <button id="newCallButton" class="primary" type="button">New Call</button>
           <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
@@ -74,19 +78,23 @@
       </section>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Call stats">
-        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-customer-filter="completed" aria-pressed="true">
+        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-customer-filter="completed"
+          aria-pressed="true">
           <span class="mobile-stat-count" id="mobileCompletedMetric">0</span>
           <span class="mobile-stat-label">Completed</span>
         </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="scheduled" aria-pressed="false">
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="scheduled"
+          aria-pressed="false">
           <span class="mobile-stat-count" id="mobileScheduledMetric">0</span>
           <span class="mobile-stat-label">Scheduled</span>
         </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="pending" aria-pressed="false">
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="pending"
+          aria-pressed="false">
           <span class="mobile-stat-count" id="mobilePendingMetric">0</span>
           <span class="mobile-stat-label">Pending</span>
         </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="failed" aria-pressed="false">
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="failed"
+          aria-pressed="false">
           <span class="mobile-stat-count" id="mobileFailedMetric">0</span>
           <span class="mobile-stat-label">Failed</span>
         </button>
@@ -118,13 +126,14 @@
       <section id="queueSection" class="table-card">
         <div class="poc-card-header">
           <div>
-              <h3 class="poc-card-title">Outbound Call Queue</h3>
-              <div class="poc-card-subtitle" id="queueMeta">Manage calls going from the lab to customers.</div>
+            <h3 class="poc-card-title">Outbound Call Queue</h3>
+            <div class="poc-card-subtitle" id="queueMeta">Manage calls going from the lab to customers.</div>
           </div>
         </div>
 
         <div class="search-row">
-          <input id="customerSearch" class="search-input mobile-only" type="search" placeholder="Search patient or phone">
+          <input id="customerSearch" class="search-input mobile-only" type="search"
+            placeholder="Search patient or phone">
           <select id="statusFilter" class="table-filter desktop-only">
             <option value="">All statuses</option>
             <option value="completed">Completed</option>
@@ -139,7 +148,8 @@
             <option value="REVIEW_CALL">Review Calling</option>
             <option value="THREE_MONTH_FOLLOWUP">3 Month Follow-up</option>
           </select>
-          <button id="mobileFilterButton" class="mobile-filter-button mobile-only" type="button" aria-label="Open filters">Filter</button>
+          <button id="mobileFilterButton" class="mobile-filter-button mobile-only" type="button"
+            aria-label="Open filters">Filter</button>
         </div>
 
         <div class="table-wrap desktop-only">
@@ -207,7 +217,7 @@
         </article>
       </section>
 
-      <section  style="margin-bottom: 14px;">
+      <section style="margin-bottom: 14px;">
         <h4 class="poc-card-title" style="font-size:16px;">Recording</h4>
         <div id="analysisRecordingWrap" class="poc-card-subtitle" style="margin-top:10px;"></div>
       </section>
@@ -236,7 +246,7 @@
         <button id="mobileMenuLogoutAction" class="mobile-sheet-action" type="button">Logout</button>
         <button id="closeMobileMenuSheet" class="secondary modal-close" type="button">Close</button>
       </div>
-     
+
     </div>
   </div>
 
@@ -249,12 +259,18 @@
       </div>
       <div class="mobile-sheet-actions mobile-filter-options">
         <button class="mobile-sheet-action mobile-filter-option active" type="button" data-filter-value="">All</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="completed">Completed</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="pending">Pending</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="failed">Failed</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="retry_scheduled">Retry Scheduled</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="REVIEW_CALL">Review Calling</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="THREE_MONTH_FOLLOWUP">3 Month Follow-up</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button"
+          data-filter-value="completed">Completed</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button"
+          data-filter-value="pending">Pending</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button"
+          data-filter-value="failed">Failed</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="retry_scheduled">Retry
+          Scheduled</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="REVIEW_CALL">Review
+          Calling</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button"
+          data-call-type-value="THREE_MONTH_FOLLOWUP">3 Month Follow-up</button>
       </div>
     </div>
   </div>
@@ -268,7 +284,8 @@
       </div>
       <div class="mobile-sheet-actions">
         <button id="mobileActionEdit" class="mobile-sheet-action" type="button">Edit</button>
-        <button id="mobileActionDelete" class="mobile-sheet-action mobile-sheet-action--danger" type="button">Delete</button>
+        <button id="mobileActionDelete" class="mobile-sheet-action mobile-sheet-action--danger"
+          type="button">Delete</button>
         <button id="mobileActionAnalysis" class="mobile-sheet-action" type="button">View Analysis</button>
       </div>
     </div>
@@ -357,7 +374,7 @@
     function formatScheduledDateTime(customer) {
       const date = getScheduledDate(customer);
       if (!date) {
-      return '--';
+        return '--';
       }
       return `${formatScheduledDate(customer)}, ${formatScheduledTime(customer)}`;
     }
@@ -750,16 +767,16 @@
       });
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('newCallButton').addEventListener('click', () => openNewCallModal());
-      document.getElementById('deleteAllCustomersButton').addEventListener('click', async () => {
-        if (!confirm('Are you sure you want to delete all patient and call records? This action cannot be undone.')) return;
-        try {
-          await AppShell.fetchJson(`${AppShell.API_BASE}/customers/bulk`, { method: 'DELETE' });
-          AppShell.showAlert('All records deleted successfully');
-          await loadPageData();
-        } catch (error) {
-          AppShell.showAlert(error.message, 'error');
-        }
-      });
+      // document.getElementById('deleteAllCustomersButton').addEventListener('click', async () => {
+      //   if (!confirm('Are you sure you want to delete all patient and call records? This action cannot be undone.')) return;
+      //   try {
+      //     await AppShell.fetchJson(`${AppShell.API_BASE}/customers/bulk`, { method: 'DELETE' });
+      //     AppShell.showAlert('All records deleted successfully');
+      //     await loadPageData();
+      //   } catch (error) {
+      //     AppShell.showAlert(error.message, 'error');
+      //   }
+      // });
       document.getElementById('mobileFloatingNewCallButton').addEventListener('click', () => openNewCallModal(null, { mode: 'customer' }));
       document.getElementById('mobileHeaderMenuButton').addEventListener('click', openMobileMenuSheet);
       document.getElementById('mobileFilterButton').addEventListener('click', openMobileFilterSheet);
@@ -769,7 +786,7 @@
       document.getElementById('closeMobileMenuSheet').addEventListener('click', closeMobileMenuSheet);
       document.getElementById('closeMobileFilterSheet').addEventListener('click', closeMobileFilterSheet);
       document.getElementById('closeMobileActionSheet').addEventListener('click', closeMobileActionSheet);
-      
+
       document.getElementById('mobileMenuLogoutAction').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('mobileActionEdit').addEventListener('click', () => {
         if (activeMobileActionCustomerId) openNewCallModal(activeMobileActionCustomerId);
@@ -839,4 +856,5 @@
     window.changeQueuePage = changeQueuePage;
   </script>
 </body>
+
 </html>
