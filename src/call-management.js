@@ -333,17 +333,39 @@ async function hydratePreCallIntelligence(customer) {
   };
 }
 
-function shouldBlockCustomerCall(customer) {
+async function shouldBlockCustomerCall(customer) {
   if (customer.do_not_call) {
-    return 'Customer is on DND / do-not-call';
+    return { code: 'BLOCKED', reason: 'Customer is on DND / do-not-call' };
   }
 
   if (customer.wrong_number_flag) {
-    return 'Customer is flagged as wrong number';
+    return { code: 'BLOCKED', reason: 'Customer is flagged as wrong number' };
   }
 
   if (String(customer.consent_status || '').toLowerCase() === 'denied') {
-    return 'Consent denied for this customer';
+    return { code: 'BLOCKED', reason: 'Consent denied for this customer' };
+  }
+
+  if (customer.phone) {
+    const frequencyCheck = await dbGet(
+      `SELECT COUNT(*) as count 
+       FROM calls c
+       JOIN customers cu ON cu.id = c.customer_id
+       WHERE cu.phone = ? 
+         AND c.called_at >= DATETIME('now', '-24 hours')
+         AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+      [customer.phone]
+    );
+    if (frequencyCheck && frequencyCheck.count >= 3) {
+      return { code: 'CALL_BLOCKED_DAILY_LIMIT', reason: 'Maximum 3 call attempts reached in last 24 hours' };
+    }
+  }
+
+  const now = new Date();
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  if ((hours > 0 && hours < 7) || (hours === 0 && minutes > 0)) {
+    return { code: 'CALL_SKIPPED_QUIET_HOURS', reason: 'Outside allowed calling window (07:00 AM - 12:00 AM)' };
   }
 
   return null;

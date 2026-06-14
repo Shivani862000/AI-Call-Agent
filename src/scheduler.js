@@ -252,9 +252,21 @@ async function triggerScheduledCalls() {
   for (const customer of hydratedCustomers) {
     try {
       const agentConfig = customer.default_agent_id ? await getAgentConfigById(customer.default_agent_id) : await getDefaultAgentConfig();
-      const blockedReason = shouldBlockCustomerCall(customer);
+      const blockedReason = await shouldBlockCustomerCall(customer);
       if (blockedReason) {
-        console.log(`[SCHEDULER] Skipping ${customer.name}: ${blockedReason}`);
+        console.log(`[SCHEDULER] Skipping ${customer.name}: ${blockedReason.reason}`);
+        if (blockedReason.code === 'CALL_SKIPPED_QUIET_HOURS') {
+          const nextRetry = new Date();
+          nextRetry.setHours(7, 0, 0, 0);
+          if (nextRetry < new Date()) {
+            nextRetry.setDate(nextRetry.getDate() + 1);
+          }
+          logger.warn('CALL_SKIPPED_QUIET_HOURS', { phone: customer.phone, scheduledTime: logger.formatHumanDateTime(customer.scheduled_datetime || customer.next_retry_at || ''), reason: blockedReason.reason });
+          await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', nextRetry.toISOString(), customer.id]);
+        } else if (blockedReason.code === 'CALL_BLOCKED_DAILY_LIMIT') {
+          logger.error('CALL_BLOCKED_DAILY_LIMIT', { phone: customer.phone, reason: blockedReason.reason });
+          await dbRun(`UPDATE customers SET status = ? WHERE id = ?`, ['failed', customer.id]);
+        }
         continue;
       }
 
@@ -390,9 +402,21 @@ async function triggerAnnualClientReminderCalls() {
     try {
       const customer = await ensureCustomerForClientReminder(client);
       const hydratedCustomer = await hydratePreCallIntelligence(customer);
-      const blockedReason = shouldBlockCustomerCall(hydratedCustomer);
+      const blockedReason = await shouldBlockCustomerCall(hydratedCustomer);
       if (blockedReason) {
-        console.log(`[CLIENT REMINDER] Skipping ${client.name}: ${blockedReason}`);
+        console.log(`[CLIENT REMINDER] Skipping ${client.name}: ${blockedReason.reason}`);
+        if (blockedReason.code === 'CALL_SKIPPED_QUIET_HOURS') {
+          const nextRetry = new Date();
+          nextRetry.setHours(7, 0, 0, 0);
+          if (nextRetry < new Date()) {
+            nextRetry.setDate(nextRetry.getDate() + 1);
+          }
+          logger.warn('CALL_SKIPPED_QUIET_HOURS', { phone: hydratedCustomer.phone, scheduledTime: 'Annual Reminder', reason: blockedReason.reason });
+          await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', nextRetry.toISOString(), hydratedCustomer.id]);
+        } else if (blockedReason.code === 'CALL_BLOCKED_DAILY_LIMIT') {
+          logger.error('CALL_BLOCKED_DAILY_LIMIT', { phone: hydratedCustomer.phone, reason: blockedReason.reason });
+          await dbRun(`UPDATE customers SET status = ? WHERE id = ?`, ['failed', hydratedCustomer.id]);
+        }
         continue;
       }
 

@@ -199,9 +199,14 @@ module.exports = function mountApiRoutes(app) {
       const agentConfig = requestedAgentId ? await getAgentConfigById(requestedAgentId) : await getDefaultAgentConfig();
       const clientName = req.body.clientName || agentConfig?.client_name || CLIENT_NAME;
 
-      const blockedReason = shouldBlockCustomerCall(customer);
+      const blockedReason = await shouldBlockCustomerCall(customer);
       if (blockedReason) {
-        return res.status(409).json({ success: false, error: blockedReason });
+        if (blockedReason.code === 'CALL_SKIPPED_QUIET_HOURS') {
+          logger.warn('CALL_SKIPPED_QUIET_HOURS', { phone: customer.phone, scheduledTime: 'Manual Trigger', reason: blockedReason.reason });
+        } else if (blockedReason.code === 'CALL_BLOCKED_DAILY_LIMIT') {
+          logger.error('CALL_BLOCKED_DAILY_LIMIT', { phone: customer.phone, reason: blockedReason.reason });
+        }
+        return res.status(409).json({ success: false, error: blockedReason.reason, code: blockedReason.code });
       }
 
       const claimed = await claimCustomerForOutboundCall(customer.id);
@@ -476,9 +481,14 @@ module.exports = function mountApiRoutes(app) {
       const requestedAgentId = Number(req.body?.agentId || req.query.agentId || customer.default_agent_id || 0) || null;
       const callType = normalizeOutboundCallType(req.body?.callType || req.body?.call_type || customer.call_type);
       const agentConfig = requestedAgentId ? await getAgentConfigById(requestedAgentId) : await getDefaultAgentConfig();
-      const blockedReason = shouldBlockCustomerCall(customer);
+      const blockedReason = await shouldBlockCustomerCall(customer);
       if (blockedReason) {
-        return res.status(409).json({ error: blockedReason });
+        if (blockedReason.code === 'CALL_SKIPPED_QUIET_HOURS') {
+          logger.warn('CALL_SKIPPED_QUIET_HOURS', { phone: customer.phone, scheduledTime: 'Manual Trigger', reason: blockedReason.reason });
+        } else if (blockedReason.code === 'CALL_BLOCKED_DAILY_LIMIT') {
+          logger.error('CALL_BLOCKED_DAILY_LIMIT', { phone: customer.phone, reason: blockedReason.reason });
+        }
+        return res.status(409).json({ error: blockedReason.reason, code: blockedReason.code });
       }
 
       const claimed = await claimCustomerForOutboundCall(customer.id);
@@ -933,9 +943,14 @@ module.exports = function mountApiRoutes(app) {
       });
       customer = await hydratePreCallIntelligence(customer);
       const agentConfig = requestedAgentId ? await getAgentConfigById(requestedAgentId) : await getDefaultAgentConfig();
-      const blockedReason = shouldBlockCustomerCall(customer);
+      const blockedReason = await shouldBlockCustomerCall(customer);
       if (blockedReason) {
-        return res.status(409).json({ error: blockedReason });
+        if (blockedReason.code === 'CALL_SKIPPED_QUIET_HOURS') {
+          logger.warn('CALL_SKIPPED_QUIET_HOURS', { phone: customer.phone, scheduledTime: 'Manual Trigger', reason: blockedReason.reason });
+        } else if (blockedReason.code === 'CALL_BLOCKED_DAILY_LIMIT') {
+          logger.error('CALL_BLOCKED_DAILY_LIMIT', { phone: customer.phone, reason: blockedReason.reason });
+        }
+        return res.status(409).json({ error: blockedReason.reason, code: blockedReason.code });
       }
 
       const claimed = await claimCustomerForOutboundCall(customer.id);
