@@ -1140,17 +1140,8 @@ module.exports = function setupWebSocketBridge(server) {
         }
         session.audioChunkCount = (session.audioChunkCount || 0) + 1;
 
-        // Avoid echo-driven interruption and chopped playback while the agent is still speaking.
-        if (session.aiSpeakingUntil && Date.now() < session.aiSpeakingUntil) {
-          if (deepgramReady && deepgramWs?.readyState === WebSocket.OPEN) {
-            const audioBuffer = Buffer.from(payload, 'base64');
-            deepgramWs.send(Buffer.alloc(audioBuffer.length));
-          }
-          return;
-        }
-
-        // In DIRECT_AUDIO mode, forward caller audio after the agent finishes speaking
-        // so Gemini Live can do turn-taking without self-interrupting on echo.
+        // In DIRECT_AUDIO mode, keep Gemini Live's native turn-taking fed continuously.
+        // Deepgram STT is still gated below while the agent is speaking to avoid echo transcripts.
         if (useGeminiLive() && GEMINI_LIVE_DIRECT_AUDIO) {
           const openingGraceActive = openingPromptSent
             && !session.geminiLiveFirstAudioAt
@@ -1176,6 +1167,14 @@ module.exports = function setupWebSocketBridge(server) {
               }
             });
           }
+        }
+
+        if (session.aiSpeakingUntil && Date.now() < session.aiSpeakingUntil) {
+          if (deepgramReady && deepgramWs?.readyState === WebSocket.OPEN) {
+            const audioBuffer = Buffer.from(payload, 'base64');
+            deepgramWs.send(Buffer.alloc(audioBuffer.length));
+          }
+          return;
         }
 
         if (!deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
