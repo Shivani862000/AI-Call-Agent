@@ -51,6 +51,11 @@
       backdrop-filter: blur(8px);
     }
 
+    .mobile-topbar {
+      padding: 6px 6px !important;
+      gap: 6px !important;
+    }
+
     .header-left {
       display: flex;
       align-items: center;
@@ -80,6 +85,11 @@
       font-weight: 800;
       line-height: 1.2;
     }
+
+    .analysisPageTitleMobile {
+      font-size: 14px;
+    }
+
 
     .header-meta {
       display: flex;
@@ -401,11 +411,11 @@
 <body class="feedback-analysis-page">
   <main class="analysis-shell">
     <!-- ROW 1: HEADER -->
-    <div class="analysis-topbar">
+    <div class="analysis-topbar mobile-topbar">
       <div class="header-left">
         <button id="analysisPageBackButton" class="analysis-back" type="button">&larr; Back</button>
         <div class="header-info">
-          <h1 id="analysisPageTitle">Loading...</h1>
+          <h1 id="analysisPageTitle" class="analysisPageTitleMobile">Loading...</h1>
           <div class="header-meta">
             <span id="callStatusBadge" class="analysis-status">Loading</span>
             <span id="analysisPageSubtitle">--</span>
