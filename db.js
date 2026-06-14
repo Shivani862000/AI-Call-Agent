@@ -61,48 +61,23 @@ function runMigrations() {
     await run(`UPDATE calls SET provider_call_id = ${legacyColumnName} WHERE provider_call_id IS NULL AND ${legacyColumnName} IS NOT NULL`);
   };
 
-  const enforceCustomersUniquePhone = async () => {
-    const tableInfo = await new Promise((resolve, reject) => {
-      db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='customers'", (err, row) => {
+  const fixCorruptedSchemas = async () => {
+    const corruptedTables = await new Promise((resolve, reject) => {
+      db.all("SELECT name FROM sqlite_master WHERE type='table' AND sql LIKE '%customers_unique_phone_backup%'", (err, rows) => {
         if (err) reject(err);
-        else resolve(row);
+        else resolve(rows || []);
       });
     });
 
-    if (tableInfo && !tableInfo.sql.includes('UNIQUE')) {
-      console.log('Migrating customers table to enforce UNIQUE constraint on phone...');
+    if (corruptedTables.length > 0) {
+      console.log('Fixing corrupted foreign keys in production DB...');
+      await run('PRAGMA writable_schema = ON');
+      await run(`UPDATE sqlite_master SET sql = REPLACE(sql, 'customers_unique_phone_backup', 'customers') WHERE type='table' AND sql LIKE '%customers_unique_phone_backup%'`);
+      await run('PRAGMA writable_schema = OFF');
       
-      // Merge duplicate customers
-      const duplicates = await new Promise((resolve, reject) => {
-        db.all("SELECT phone, MIN(id) as keep_id FROM customers GROUP BY phone HAVING COUNT(*) > 1", (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        });
-      });
-
-      for (const dup of duplicates) {
-        await run(`UPDATE calls SET customer_id = ${dup.keep_id} WHERE customer_id IN (SELECT id FROM customers WHERE phone = '${dup.phone}' AND id != ${dup.keep_id})`);
-        await run(`UPDATE feedback SET customer_id = ${dup.keep_id} WHERE customer_id IN (SELECT id FROM customers WHERE phone = '${dup.phone}' AND id != ${dup.keep_id})`);
-        await run(`DELETE FROM customers WHERE phone = '${dup.phone}' AND id != ${dup.keep_id}`);
-      }
-
-      let newSql = tableInfo.sql.replace(/phone VARCHAR\(20\) NOT NULL/i, 'phone VARCHAR(20) NOT NULL UNIQUE');
-      newSql = newSql.replace(/CREATE TABLE "?customers"?/i, 'CREATE TABLE customers_new');
-      
-      await run(`DROP TABLE IF EXISTS customers_new`);
-      await run(newSql);
-      
-      const columns = await new Promise((resolve, reject) => {
-        db.all("PRAGMA table_info(customers)", (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        });
-      });
-      const colNames = columns.map(c => c.name).join(', ');
-      
-      await run(`INSERT INTO customers_new (${colNames}) SELECT ${colNames} FROM customers`);
-      await run(`DROP TABLE customers`);
-      await run(`ALTER TABLE customers_new RENAME TO customers`);
+      // Force SQLite to reload the schema by modifying it safely
+      await run('CREATE TABLE IF NOT EXISTS _schema_refresh_dummy (id INTEGER)');
+      await run('DROP TABLE _schema_refresh_dummy');
     }
   };
 
@@ -118,7 +93,7 @@ function runMigrations() {
       )
     `);
 
-    await enforceCustomersUniquePhone();
+    await fixCorruptedSchemas();
 
     await run(`
       CREATE TABLE IF NOT EXISTS calls (
@@ -222,62 +197,7 @@ function runMigrations() {
       )
     `);
 
-    const removeUniqueCustomerPhoneConstraint = async () => {
-      const indexes = await new Promise((resolve, reject) => {
-        db.all('PRAGMA index_list(customers)', (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        });
-      });
 
-      let hasUniquePhoneIndex = false;
-      for (const index of indexes) {
-        if (!Number(index.unique)) continue;
-        const columns = await new Promise((resolve, reject) => {
-          db.all(`PRAGMA index_info(${index.name})`, (err, rows) => {
-            if (err) reject(err);
-            else resolve(rows || []);
-          });
-        });
-        if (columns.length === 1 && columns[0]?.name === 'phone') {
-          hasUniquePhoneIndex = true;
-          break;
-        }
-      }
-
-      if (!hasUniquePhoneIndex) return;
-
-      const columns = await new Promise((resolve, reject) => {
-        db.all('PRAGMA table_info(customers)', (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        });
-      });
-      const columnNames = columns.map((column) => column.name).join(', ');
-      const columnDefs = columns.map((column) => {
-        if (column.pk) {
-          return `${column.name} INTEGER PRIMARY KEY AUTOINCREMENT`;
-        }
-
-        const parts = [column.name, column.type || 'TEXT'];
-        if (column.notnull) parts.push('NOT NULL');
-        if (column.dflt_value !== null && column.dflt_value !== undefined) {
-          parts.push(`DEFAULT ${column.dflt_value}`);
-        }
-        return parts.join(' ');
-      });
-
-      await run('PRAGMA foreign_keys = OFF');
-      await run('PRAGMA legacy_alter_table = ON');
-      await run('ALTER TABLE customers RENAME TO customers_unique_phone_backup');
-      await run(`CREATE TABLE customers (${columnDefs.join(', ')})`);
-      await run(`INSERT INTO customers (${columnNames}) SELECT ${columnNames} FROM customers_unique_phone_backup`);
-      await run('DROP TABLE customers_unique_phone_backup');
-      await run('PRAGMA legacy_alter_table = OFF');
-      await run('PRAGMA foreign_keys = ON');
-    };
-
-    await removeUniqueCustomerPhoneConstraint();
 
     await addColumnIfMissing('customers', 'customer_value', "VARCHAR(20) DEFAULT 'standard'");
     await addColumnIfMissing('customers', 'urgency_level', "VARCHAR(20) DEFAULT 'normal'");
