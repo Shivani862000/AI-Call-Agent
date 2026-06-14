@@ -6,7 +6,6 @@
 'use strict';
 
 const { dbGet, dbRun, dbAll } = require('../db');
-const crypto = require('crypto');
 const { CLIENT_NAME, CALL_TYPES } = require('./config');
 const {
   shouldTriggerOwnerDigest,
@@ -24,9 +23,112 @@ const {
 const { getAgentConfigById, getDefaultAgentConfig } = require('./prompt-builder');
 const { computePriorityScore, getCurrentSlotLabel } = require('../services/call-orchestration');
 const { buildOwnerDashboardData } = require('../services/reporting');
+const logger = require('../services/system-logger');
 
 let ownerDigestRunning = false;
 let schedulerRunning = false;
+
+const SUBMITTED_CALL_GRACE_MS = Number(process.env.SUBMITTED_CALL_GRACE_MS || 6 * 60 * 1000);
+const SUBMITTED_CALL_RETRY_MS = Number(process.env.SUBMITTED_CALL_RETRY_MS || 5 * 60 * 60 * 1000);
+
+function formatTimeoutLabel(ms) {
+  const minutes = Math.round((Number(ms || 0) / 60000) * 10) / 10;
+  return `${minutes || 0} minute${minutes === 1 ? '' : 's'}`;
+}
+
+function isProviderAcceptedOnly(call) {
+  const reason = String(call?.raw?.reason || call?.raw?.message || '');
+  const status = String(call?.status || '').toLowerCase();
+  return status === 'queued'
+    || status === 'submitted'
+    || reason.includes('Total Records Being Inserted');
+}
+
+async function markSubmittedCallsWithoutMediaFailed() {
+  const cutoffIso = new Date(Date.now() - SUBMITTED_CALL_GRACE_MS).toISOString();
+  const retryAt = new Date(Date.now() + SUBMITTED_CALL_RETRY_MS).toISOString();
+  const nowIso = new Date().toISOString();
+  const timeoutLabel = formatTimeoutLabel(SUBMITTED_CALL_GRACE_MS);
+  const staleCalls = await dbAll(
+    `SELECT calls.id AS call_id,
+            calls.customer_id,
+            calls.provider_call_id,
+            calls.called_at,
+            calls.call_type,
+            customers.name,
+            customers.phone,
+            customers.status AS customer_status
+       FROM calls
+       LEFT JOIN customers ON customers.id = calls.customer_id
+      WHERE calls.call_direction = 'outbound'
+        AND calls.outcome IN ('initiated', 'scheduled_initiated')
+        AND COALESCE(calls.media_packets, 0) = 0
+        AND DATETIME(calls.called_at) <= DATETIME(?)
+        AND NOT EXISTS (
+          SELECT 1
+            FROM calls newer_call
+           WHERE newer_call.customer_id = calls.customer_id
+             AND DATETIME(newer_call.called_at) > DATETIME(calls.called_at)
+        )`,
+    [cutoffIso]
+  );
+
+  for (const call of staleCalls) {
+    const failResult = await dbRun(
+      `UPDATE calls
+          SET outcome = ?,
+              outcome_detail = ?,
+              ended_at = COALESCE(ended_at, ?),
+              last_event = ?,
+              notes = ?
+        WHERE id = ?
+          AND outcome IN ('initiated', 'scheduled_initiated')
+          AND COALESCE(media_packets, 0) = 0`,
+      [
+        'failed',
+        `No iCallMate media stream within ${timeoutLabel} of provider acceptance`,
+        nowIso,
+        'media_timeout',
+        'Provider accepted request, but no dial/media stream was received in time',
+        call.call_id
+      ]
+    );
+
+    if (!failResult.changes) {
+      continue;
+    }
+
+    await dbRun(
+      `UPDATE customers
+          SET status = ?,
+              next_retry_at = ?,
+              retry_count = COALESCE(retry_count, 0) + 1
+        WHERE id = ?
+          AND status IN ('calling', 'called')`,
+      ['retry_scheduled', retryAt, call.customer_id]
+    );
+
+    logger.error('CALL_FAILED', {
+      callId: call.call_id,
+      customerId: call.customer_id,
+      patient: call.name,
+      phone: call.phone,
+      type: logger.formatCallType(call.call_type),
+      providerCallId: call.provider_call_id,
+      reason: `No iCallMate media stream within ${timeoutLabel}`,
+      retryAt: logger.formatHumanDateTime(retryAt)
+    });
+    logger.warn('CALL_RETRY', {
+      callId: call.call_id,
+      customerId: call.customer_id,
+      patient: call.name,
+      phone: call.phone,
+      type: logger.formatCallType(call.call_type),
+      retryAt: logger.formatHumanDateTime(retryAt),
+      delay: '5 hours'
+    });
+  }
+}
 
 // ── Owner Digest ───────────────────────────────────────────────────────────────
 
@@ -77,37 +179,52 @@ async function runOwnerDigestTick() {
 // ── Outbound Calling Schedulers ────────────────────────────────────────────────
 
 async function triggerScheduledCalls() {
+  await markSubmittedCallsWithoutMediaFailed();
+
   const now = new Date();
   const currentSlot = getCurrentSlotLabel(now);
 
-  const dueCalls = await dbAll(
-    `SELECT c.*, 
-            calls.id AS call_id, 
-            calls.status AS call_status, 
-            calls.call_type AS call_record_type
-     FROM calls
-     JOIN customers c ON calls.customer_id = c.id
+  const dueCustomers = await dbAll(
+    `SELECT c.*
+     FROM customers c
      WHERE COALESCE(c.do_not_call, 0) = 0
        AND COALESCE(c.wrong_number_flag, 0) = 0
        AND COALESCE(c.admin_review_required, 0) = 0
        AND COALESCE(c.consent_status, 'unknown') != 'denied'
-       AND COALESCE(c.status, '') != 'calling'
-       AND calls.status IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')
+       AND COALESCE(c.status, 'pending') != 'calling'
        AND (
-         calls.scheduled_at IS NULL 
-         OR DATETIME(calls.scheduled_at) <= DATETIME('now')
-         OR COALESCE(c.best_call_slot, c.preferred_slot) <= ?
+         (
+           c.status IN ('pending', 'scheduled')
+           AND (
+             (c.scheduled_datetime IS NOT NULL AND DATETIME(c.scheduled_datetime) <= DATETIME('now'))
+             OR (c.scheduled_datetime IS NULL AND COALESCE(c.best_call_slot, c.preferred_slot) <= ?)
+           )
+         )
+         OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND c.next_retry_at IS NOT NULL AND DATETIME(c.next_retry_at) <= DATETIME('now'))
+       )
+       AND (
+         c.status IN ('retry_scheduled', 'callback_scheduled')
+         OR NOT EXISTS (
+           SELECT 1
+           FROM calls recent_call
+           WHERE recent_call.customer_id = c.id
+             AND DATETIME(recent_call.called_at) >= DATETIME('now', '-45 minutes')
+             AND (
+               c.scheduled_datetime IS NULL
+               OR DATETIME(recent_call.called_at) >= DATETIME(c.scheduled_datetime)
+             )
+         )
        )`,
     [currentSlot]
   );
 
-  if (!dueCalls.length) {
+  if (!dueCustomers.length) {
     return;
   }
 
   const uniqueByPhone = new Map();
-  for (const callRow of dueCalls) {
-    const phoneKey = normalizePhoneLookupValue(callRow.phone) || String(callRow.phone || '').trim();
+  for (const customer of dueCustomers) {
+    const phoneKey = normalizePhoneLookupValue(customer.phone) || String(customer.phone || '').trim();
     if (!phoneKey) {
       continue;
     }
@@ -115,93 +232,127 @@ async function triggerScheduledCalls() {
     if (uniqueByPhone.has(phoneKey)) {
       const existing = uniqueByPhone.get(phoneKey);
       console.log(
-        `[SCHEDULER] Skipping duplicate call row id=${callRow.call_id} phone=${callRow.phone} ` +
-        `because call id=${existing.call_id} already queued for this number`
+        `[SCHEDULER] Skipping duplicate customer row id=${customer.id} phone=${customer.phone} ` +
+        `because row id=${existing.id} already queued`
       );
       continue;
     }
 
-    uniqueByPhone.set(phoneKey, callRow);
+    uniqueByPhone.set(phoneKey, customer);
   }
 
-  const hydratedCalls = [];
-  for (const callRow of uniqueByPhone.values()) {
-    const hydratedCustomer = await hydratePreCallIntelligence(callRow);
-    hydratedCalls.push({ ...hydratedCustomer, call_id: callRow.call_id, call_record_type: callRow.call_record_type });
+  const hydratedCustomers = [];
+  for (const customer of uniqueByPhone.values()) {
+    hydratedCustomers.push(await hydratePreCallIntelligence(customer));
   }
 
-  hydratedCalls.sort((a, b) => (Number(b.priority_score) || 0) - (Number(a.priority_score) || 0));
-  console.log(`[SCHEDULER] Found ${hydratedCalls.length} eligible call(s) due at ${currentSlot}`);
+  hydratedCustomers.sort((a, b) => (Number(b.priority_score) || 0) - (Number(a.priority_score) || 0));
+  console.log(`[SCHEDULER] Found ${hydratedCustomers.length} eligible customer(s) due at ${currentSlot}`);
 
-  for (const callRecord of hydratedCalls) {
+  for (const customer of hydratedCustomers) {
     try {
-      const agentConfig = callRecord.default_agent_id ? await getAgentConfigById(callRecord.default_agent_id) : await getDefaultAgentConfig();
-      const blockedReason = shouldBlockCustomerCall(callRecord);
+      const agentConfig = customer.default_agent_id ? await getAgentConfigById(customer.default_agent_id) : await getDefaultAgentConfig();
+      const blockedReason = shouldBlockCustomerCall(customer);
       if (blockedReason) {
-        console.log(`[SCHEDULER] Skipping ${callRecord.name}: ${blockedReason}`);
+        console.log(`[SCHEDULER] Skipping ${customer.name}: ${blockedReason}`);
         continue;
       }
 
       const claimResult = await dbRun(
-        `UPDATE calls
-            SET status = ?
+        `UPDATE customers
+            SET status = ?,
+                last_called_at = ?
           WHERE id = ?
-            AND status IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')`,
-        ['calling', callRecord.call_id]
+            AND COALESCE(status, 'pending') IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')`,
+        ['calling', new Date().toISOString(), customer.id]
       );
 
       if (!claimResult.changes) {
-        console.log(`[SCHEDULER] Skipping ${callRecord.name}: call already claimed by another run`);
+        console.log(`[SCHEDULER] Skipping ${customer.name}: already claimed by another run`);
         continue;
       }
-
-      const call = await placeRealtimeCall({
-        customerPhone: callRecord.phone,
-        customerName: callRecord.name,
-        customerId: callRecord.id,
-        clientName: agentConfig?.client_name || CLIENT_NAME,
-        agentId: agentConfig?.id || null,
-        callType: callRecord.call_record_type || callRecord.call_type
+      logger.info('CALL_PENDING', {
+        customerId: customer.id,
+        patient: customer.name,
+        phone: customer.phone,
+        type: logger.formatCallType(customer.call_type),
+        scheduledAt: logger.formatHumanDateTime(customer.scheduled_datetime || customer.next_retry_at),
+        status: 'scheduler_picked'
       });
 
-      await dbRun(
-        `UPDATE calls SET
-          agent_id = ?, outcome = ?, provider_call_id = ?, called_at = ?, hot_lead_score = ?,
-          consent_message_played = ?, call_script_version = ?, supervisor_alert_level = ?, call_direction = ?, call_source = ?, uuid = ?, status = ?
-         WHERE id = ?`,
+      const call = await placeRealtimeCall({
+        customerPhone: customer.phone,
+        customerName: customer.name,
+        customerId: customer.id,
+        clientName: agentConfig?.client_name || CLIENT_NAME,
+        agentId: agentConfig?.id || null,
+        callType: customer.call_type
+      });
+
+      const insertResult = await dbRun(
+        `INSERT INTO calls (
+          customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
+          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
+          provider_payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
+          customer.id,
           agentConfig?.id || null,
           'scheduled_initiated',
           call.sid,
           new Date().toISOString(),
-          callRecord.priority_score || computePriorityScore(callRecord),
+          customer.priority_score || computePriorityScore(customer),
           1,
           agentConfig?.slug || 'hindi-feedback-v1',
           'normal',
           'outbound',
           'icallmate',
-          crypto.randomUUID(),
-          'called',
-          callRecord.call_id
+          normalizeOutboundCallType(customer.call_type),
+          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
         ]
       );
-      // We update customer.status to 'calling' to lock concurrent calls for this patient
-      await dbRun("UPDATE customers SET status = 'calling', last_called_at = ? WHERE id = ?", [new Date().toISOString(), callRecord.id]);
-      
-      console.log(`[SCHEDULER] Scheduled call started for ${callRecord.name} (${call.sid})`);
+      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      const insertedCall = { id: insertResult.lastID };
+      const acceptedOnly = isProviderAcceptedOnly(call);
+      logger.info(acceptedOnly ? 'CALL_PENDING' : 'CALL_STARTED', {
+        callId: insertedCall?.id,
+        customerId: customer.id,
+        patient: customer.name,
+        phone: customer.phone,
+        type: logger.formatCallType(customer.call_type),
+        provider: 'icallmate',
+        providerCallId: call.sid,
+        providerStatus: call.status,
+        providerReason: call.providerReason || call.raw?.reason || call.raw?.message || '',
+        status: acceptedOnly ? 'provider_accepted_waiting_for_media' : 'started'
+      });
+      console.log(
+        acceptedOnly
+          ? `[SCHEDULER] Scheduled call submitted for ${customer.name}; waiting for iCallMate media (${call.sid}) providerStatus=${call.status}`
+          : `[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`
+      );
     } catch (error) {
-      console.error(`[SCHEDULER] Failed to call ${callRecord.name}:`, error.message);
+      const retryAt = new Date(Date.now() + (5 * 60 * 1000)).toISOString();
+      logger.error('CALL_FAILED', {
+        customerId: customer.id,
+        patient: customer.name,
+        phone: customer.phone,
+        type: logger.formatCallType(customer.call_type),
+        reason: error.message,
+        retryAt: logger.formatHumanDateTime(retryAt)
+      });
       try {
         await dbRun(
-          `UPDATE calls
-              SET status = ?
+          `UPDATE customers
+              SET status = ?,
+                  next_retry_at = ?,
+                  retry_count = COALESCE(retry_count, 0) + 1
             WHERE id = ?
               AND status = 'calling'`,
-          ['pending', callRecord.call_id]
+          ['retry_scheduled', retryAt, customer.id]
         );
-        await dbRun("UPDATE customers SET status = 'pending' WHERE id = ? AND status = 'calling'", [callRecord.id]);
       } catch (rollbackError) {
-        console.error(`[SCHEDULER] Failed to roll back call ${callRecord.call_id}:`, rollbackError.message);
+        console.error(`[SCHEDULER] Failed to roll back customer ${customer.id}:`, rollbackError.message);
       }
     }
   }
@@ -254,7 +405,7 @@ async function triggerAnnualClientReminderCalls() {
             SET status = ?,
                 last_called_at = ?
           WHERE id = ?
-            AND COALESCE(status, 'pending') IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled', 'called', 'completed')`,
+            AND COALESCE(status, 'pending') IN ('pending', 'retry_scheduled', 'callback_scheduled', 'called', 'completed')`,
         ['calling', new Date().toISOString(), hydratedCustomer.id]
       );
 
@@ -275,8 +426,8 @@ async function triggerAnnualClientReminderCalls() {
       await dbRun(
         `INSERT INTO calls (
           customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type, uuid
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           hydratedCustomer.id,
           agentConfig?.id || null,
@@ -289,8 +440,7 @@ async function triggerAnnualClientReminderCalls() {
           'normal',
           'outbound',
           'icallmate',
-          CALL_TYPES.THREE_MONTH_FOLLOWUP,
-          crypto.randomUUID()
+          CALL_TYPES.THREE_MONTH_FOLLOWUP
         ]
       );
 

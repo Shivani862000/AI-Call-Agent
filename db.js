@@ -111,7 +111,7 @@ function runMigrations() {
       CREATE TABLE IF NOT EXISTS customers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name VARCHAR(100) NOT NULL,
-        phone VARCHAR(20) NOT NULL UNIQUE,
+        phone VARCHAR(20) NOT NULL,
         preferred_slot VARCHAR(10) DEFAULT '10:00',
         status VARCHAR(20) DEFAULT 'pending',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -222,6 +222,61 @@ function runMigrations() {
       )
     `);
 
+    const removeUniqueCustomerPhoneConstraint = async () => {
+      const indexes = await new Promise((resolve, reject) => {
+        db.all('PRAGMA index_list(customers)', (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        });
+      });
+
+      let hasUniquePhoneIndex = false;
+      for (const index of indexes) {
+        if (!Number(index.unique)) continue;
+        const columns = await new Promise((resolve, reject) => {
+          db.all(`PRAGMA index_info(${index.name})`, (err, rows) => {
+            if (err) reject(err);
+            else resolve(rows || []);
+          });
+        });
+        if (columns.length === 1 && columns[0]?.name === 'phone') {
+          hasUniquePhoneIndex = true;
+          break;
+        }
+      }
+
+      if (!hasUniquePhoneIndex) return;
+
+      const columns = await new Promise((resolve, reject) => {
+        db.all('PRAGMA table_info(customers)', (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        });
+      });
+      const columnNames = columns.map((column) => column.name).join(', ');
+      const columnDefs = columns.map((column) => {
+        if (column.pk) {
+          return `${column.name} INTEGER PRIMARY KEY AUTOINCREMENT`;
+        }
+
+        const parts = [column.name, column.type || 'TEXT'];
+        if (column.notnull) parts.push('NOT NULL');
+        if (column.dflt_value !== null && column.dflt_value !== undefined) {
+          parts.push(`DEFAULT ${column.dflt_value}`);
+        }
+        return parts.join(' ');
+      });
+
+      await run('PRAGMA foreign_keys = OFF');
+      await run('ALTER TABLE customers RENAME TO customers_unique_phone_backup');
+      await run(`CREATE TABLE customers (${columnDefs.join(', ')})`);
+      await run(`INSERT INTO customers (${columnNames}) SELECT ${columnNames} FROM customers_unique_phone_backup`);
+      await run('DROP TABLE customers_unique_phone_backup');
+      await run('PRAGMA foreign_keys = ON');
+    };
+
+    await removeUniqueCustomerPhoneConstraint();
+
     await addColumnIfMissing('customers', 'customer_value', "VARCHAR(20) DEFAULT 'standard'");
     await addColumnIfMissing('customers', 'urgency_level', "VARCHAR(20) DEFAULT 'normal'");
     await addColumnIfMissing('customers', 'priority_score', 'INTEGER DEFAULT 50');
@@ -231,6 +286,7 @@ function runMigrations() {
     await addColumnIfMissing('customers', 'do_not_call', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('customers', 'consent_status', "VARCHAR(20) DEFAULT 'unknown'");
     await addColumnIfMissing('customers', 'last_contact_outcome', 'VARCHAR(40)');
+    await addColumnIfMissing('customers', 'scheduled_datetime', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'next_retry_at', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'retry_count', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('customers', 'wrong_number_flag', 'INTEGER DEFAULT 0');

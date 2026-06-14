@@ -3,6 +3,7 @@ const path = require('path');
 const { analyzeCallTranscript, transcribeAudioFile, categorizeFeedback } = require('./gemini');
 const { extractCallFeedback } = require('./call-feedback');
 const { buildCallAnalysis, storeCallAnalysis } = require('./call-analysis');
+const logger = require('./system-logger');
 const {
   detectConversationOutcome,
   detectObjectionsAndCompetitors,
@@ -62,8 +63,14 @@ function buildTranscriptTextFromAudioTranscript(audioTranscript) {
 }
 
 async function upsertFeedbackFromAnalysis({ dbGet, dbRun, callRecord, reviewText, stars }) {
-  const effectiveReviewText = reviewText || 'Customer shared feedback on the call.';
-  const effectiveStars = Number.isInteger(stars) ? stars : 3;
+  const hasReviewText = Boolean(String(reviewText || '').trim());
+  const hasStars = Number.isInteger(stars);
+  if (!hasReviewText && !hasStars) {
+    return { feedbackId: null, category: 'average', skipped: true };
+  }
+
+  const effectiveReviewText = hasReviewText ? reviewText : '';
+  const effectiveStars = hasStars ? stars : 3;
   const categorization = await categorizeFeedback(effectiveReviewText, effectiveStars);
   const existingFeedback = await dbGet('SELECT id FROM feedback WHERE call_id = ?', [callRecord.id]);
 
@@ -106,13 +113,18 @@ async function upsertFeedbackFromAnalysis({ dbGet, dbRun, callRecord, reviewText
   return { feedbackId: result.lastID, category: categorization.category, updated: false };
 }
 
-async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
+async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   const callRecord = await dbGet(
     `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone
      FROM calls
      LEFT JOIN customers ON customers.id = calls.customer_id
-     WHERE calls.provider_call_id = ?`,
-    [callSid]
+     WHERE ${callId ? 'calls.id = ?' : 'calls.provider_call_id = ?'}
+     ORDER BY
+       CASE WHEN COALESCE(calls.transcript_text, '') != '' THEN 0 ELSE 1 END,
+       CASE WHEN calls.outcome = 'completed' THEN 0 ELSE 1 END,
+       calls.id DESC
+     LIMIT 1`,
+    [callId || callSid]
   );
 
   if (!callRecord) {
@@ -125,7 +137,25 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     return { ok: false, reason: 'already_processed' };
   }
 
-  await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['processing', 'processing', callRecord.id]);
+  const claimResult = await dbRun(
+    `UPDATE calls
+        SET transcript_status = ?,
+            analysis_status = ?
+      WHERE id = ?
+        AND COALESCE(analysis_status, 'pending') NOT IN ('processing', 'completed')`,
+    ['processing', 'processing', callRecord.id]
+  );
+
+  if (!claimResult.changes) {
+    return { ok: false, reason: 'already_processing' };
+  }
+
+  logger.info('FEEDBACK_ANALYSIS_STARTED', {
+    callId: callRecord.id,
+    customerId: callRecord.customer_id,
+    patient: callRecord.customer_name,
+    phone: callRecord.customer_phone
+  });
 
   let recordingLocalPath = callRecord.recording_local_path || null;
   if (!recordingLocalPath && callRecord.recording_url) {
@@ -154,6 +184,13 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
 
   if (!transcriptText) {
     await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['missing', 'blocked', callRecord.id]);
+    logger.warn('FEEDBACK_PENDING', {
+      callId: callRecord.id,
+      customerId: callRecord.customer_id,
+      patient: callRecord.customer_name,
+      phone: callRecord.customer_phone,
+      reason: 'no_transcript_available'
+    });
     return { ok: false, reason: 'no_transcript_available' };
   }
 
@@ -278,6 +315,25 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     'completed',
     callRecord.id
   ]);
+
+  const finalSentimentLabel = productAnalysis.sentiment || sentimentLabel || 'neutral';
+  const normalizedFinalSentiment = String(finalSentimentLabel || '').toLowerCase();
+  const feedbackEvent = (Number(mergedRating || 0) >= 4 || normalizedFinalSentiment === 'positive')
+    ? 'FEEDBACK_POSITIVE'
+    : ((Number(mergedRating || 0) > 0 && Number(mergedRating || 0) <= 2) || normalizedFinalSentiment === 'negative')
+      ? 'FEEDBACK_NEGATIVE'
+      : 'FEEDBACK_PENDING';
+  const feedbackDetails = {
+    callId: callRecord.id,
+    customerId: callRecord.customer_id,
+    patient: callRecord.customer_name,
+    phone: callRecord.customer_phone,
+    sentiment: finalSentimentLabel,
+    rating: Number(mergedRating || 0) ? `${mergedRating}/5` : '',
+    feedbackId: feedbackResult.feedbackId
+  };
+  logger.info('FEEDBACK_ANALYSIS_COMPLETED', feedbackDetails);
+  logger.info(feedbackEvent, feedbackDetails);
 
   const refreshedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [callRecord.id]);
   const refreshedCustomer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);

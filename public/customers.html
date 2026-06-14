@@ -20,10 +20,12 @@
 
         <nav class="nav-list">
           <a href="/admin.html" class="nav-link">Overview</a>
+          <!-- Incoming Calls page disabled. -->
           <!-- <a href="/incoming-calls.html" class="nav-link">Incoming Calls</a> -->
           <a href="/customers.html" class="nav-link active">Outbound Calls</a>
           <a href="/feedback.html" class="nav-link">Feedback</a>
-          <a href="/reports.html" class="nav-link" style="display: none;">Reports</a>
+          <!-- Reports page disabled. -->
+          <!-- <a href="/reports.html" class="nav-link">Reports</a> -->
         </nav>
       </div>
     </aside>
@@ -53,11 +55,11 @@
       <div id="alertContainer" class="alert-stack"></div>
 
       <section class="desktop-filter-strip desktop-only" aria-label="Outbound call filters">
-        <button class="desktop-filter-pill" type="button" data-customer-filter="completed" aria-pressed="false">
+        <button class="desktop-filter-pill active" type="button" data-customer-filter="completed" aria-pressed="true">
           <span class="desktop-filter-count" id="desktopCompletedMetric">0</span>
           <span class="desktop-filter-label">Completed</span>
         </button>
-        <button class="desktop-filter-pill active" type="button" data-customer-filter="scheduled" aria-pressed="true">
+        <button class="desktop-filter-pill" type="button" data-customer-filter="scheduled" aria-pressed="false">
           <span class="desktop-filter-count" id="desktopScheduledMetric">0</span>
           <span class="desktop-filter-label">Scheduled</span>
         </button>
@@ -72,11 +74,11 @@
       </section>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Call stats">
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="completed" aria-pressed="false">
+        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-customer-filter="completed" aria-pressed="true">
           <span class="mobile-stat-count" id="mobileCompletedMetric">0</span>
           <span class="mobile-stat-label">Completed</span>
         </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-customer-filter="scheduled" aria-pressed="true">
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="scheduled" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileScheduledMetric">0</span>
           <span class="mobile-stat-label">Scheduled</span>
         </button>
@@ -125,9 +127,9 @@
           <input id="customerSearch" class="search-input mobile-only" type="search" placeholder="Search patient or phone">
           <select id="statusFilter" class="table-filter desktop-only">
             <option value="">All statuses</option>
+            <option value="completed">Completed</option>
             <option value="pending">Pending</option>
             <option value="called">Called</option>
-            <option value="completed">Completed</option>
             <option value="busy">Busy</option>
             <option value="failed">Failed</option>
             <option value="retry_scheduled">Retry scheduled</option>
@@ -145,10 +147,11 @@
             <thead>
               <tr>
                 <th>Patient</th>
-                <th>Campaign</th>
+                <th>Phone</th>
+                <th>Call Type</th>
+                <th>Call Date</th>
+                <th>Call Time</th>
                 <th>Status</th>
-                <th>Scheduled For</th>
-                <th>Last Activity</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -164,17 +167,19 @@
     </main>
   </div>
 
-  <button id="mobileFloatingNewCallButton" class="mobile-floating-cta mobile-only" type="button">Add Customer</button>
+  <button id="mobileFloatingNewCallButton" class="mobile-floating-cta mobile-only" type="button">New Call</button>
 
   <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
     <a href="/admin.html" class="mobile-dock-link">Overview</a>
+    <!-- Incoming Calls page disabled. -->
     <!-- <a href="/incoming-calls.html" class="mobile-dock-link">Calls</a> -->
     <a href="/customers.html" class="mobile-dock-link active">Outbound</a>
     <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
-    <a href="/reports.html" class="mobile-dock-link" style="display: none;">Reports</a>
+    <!-- Reports page disabled. -->
+    <!-- <a href="/reports.html" class="mobile-dock-link">Reports</a> -->
   </nav>
 
-
+  <div id="newCallModalMount"></div>
 
   <div id="analysisModal" class="modal-backdrop" aria-hidden="true">
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle">
@@ -244,8 +249,8 @@
       </div>
       <div class="mobile-sheet-actions mobile-filter-options">
         <button class="mobile-sheet-action mobile-filter-option active" type="button" data-filter-value="">All</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="pending">Pending</button>
         <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="completed">Completed</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="pending">Pending</button>
         <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="failed">Failed</button>
         <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="retry_scheduled">Retry Scheduled</button>
         <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="REVIEW_CALL">Review Calling</button>
@@ -272,12 +277,12 @@
   <script src="/app-shell.js"></script>
   <script>
     let customerCache = [];
-    let clientCache = [];
     let recentCallsCache = [];
     let activeMobileActionCustomerId = null;
     let activeMobileActionCallId = null;
-    let activeCustomerMetricFilter = 'scheduled';
+    let activeCustomerMetricFilter = 'completed';
     let currentQueuePage = 1;
+    let newCallModal = null;
     const PAGE_SIZE = 10;
 
     function normalizePhoneForApi(value) {
@@ -315,68 +320,54 @@
       return normalizeCallType(value) === 'THREE_MONTH_FOLLOWUP' ? '3 Month Follow-up' : 'Review Calling';
     }
 
-    function setCallTypeSelection(value) {
-      const normalized = normalizeCallType(value);
-      const hiddenInput = document.getElementById('hiddenCallType');
-      if (hiddenInput) hiddenInput.value = normalized;
-      
-      document.querySelectorAll('.saas-campaign-card').forEach((card) => {
-        if (card.dataset.value === normalized) {
-          card.classList.add('selected');
-        } else {
-          card.classList.remove('selected');
-        }
-      });
-      
-      const reviewContext = document.getElementById('reviewCallContext');
-      const followUpContext = document.getElementById('followUpContext');
-      
-      if (reviewContext && followUpContext) {
-        if (normalized === 'REVIEW_CALL') {
-          reviewContext.style.display = 'block';
-          followUpContext.style.display = 'none';
-        } else {
-          reviewContext.style.display = 'none';
-          followUpContext.style.display = 'block';
+    function getScheduledDate(customer) {
+      const status = String(customer.status || '').toLowerCase();
+      const scheduledValue = ['retry_scheduled', 'callback_scheduled'].includes(status)
+        ? (customer.next_retry_at || customer.scheduled_datetime)
+        : (customer.scheduled_datetime || customer.next_retry_at);
+      if (scheduledValue) {
+        const date = new Date(scheduledValue);
+        if (!Number.isNaN(date.getTime())) {
+          return date;
         }
       }
-      updateAiPreview();
-      validateNewCallForm();
+
+      if (customer.preferred_slot) {
+        const today = new Date();
+        const [hours, minutes] = String(customer.preferred_slot).split(':');
+        today.setHours(Number(hours || 0), Number(minutes || 0), 0, 0);
+        return today;
+      }
+
+      return null;
     }
 
-    function getSelectedCallType() {
-      const hiddenInput = document.getElementById('hiddenCallType');
-      return hiddenInput ? hiddenInput.value : 'REVIEW_CALL';
-    }
-    
-    function updateAiPreview() {
-      const nameInput = document.getElementById('callCustomerName');
-      const name = nameInput ? nameInput.value.trim() || '...' : '...';
-      const callType = getSelectedCallType();
-      const previewText = document.getElementById('aiPreviewText');
-      
-      if (!previewText) return;
-      
-      if (callType === 'REVIEW_CALL') {
-        previewText.innerHTML = `Good Morning.<br>Main Apna Blood Centre se baat kar rahi hoon.<br>Kya main <strong>${AppShell.escapeHtml(name)}</strong> ji se baat kar rahi hoon?`;
-      } else {
-        previewText.innerHTML = `Good Morning.<br>Main Apna Blood Centre se baat kar rahi hoon.<br><strong>${AppShell.escapeHtml(name)}</strong> ji, aapko blood donate kiye huye 3 mahine ho chuke hain.`;
-      }
+    function formatScheduledDate(customer) {
+      const date = getScheduledDate(customer);
+      if (!date) return '--';
+      return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     }
 
-    function validateNewCallForm() {
-      const name = document.getElementById('callCustomerName')?.value.trim() || '';
-      const phone = document.getElementById('callCustomerPhone')?.value.trim() || '';
-      const time = document.getElementById('callCustomerTime')?.value.trim() || '';
-      const btn = document.getElementById('scheduleCallSubmit');
-      
-      if (btn) {
-        if (name.length >= 2 && phone.length >= 10 && time) {
-          btn.disabled = false;
-        } else {
-          btn.disabled = true;
-        }
+    function formatScheduledTime(customer) {
+      const date = getScheduledDate(customer);
+      if (!date) return '--';
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function formatScheduledDateTime(customer) {
+      const date = getScheduledDate(customer);
+      if (!date) {
+      return '--';
       }
+      return `${formatScheduledDate(customer)}, ${formatScheduledTime(customer)}`;
+    }
+
+    function getScheduleMetricDate(customer) {
+      const status = String(customer.status || '').toLowerCase();
+      if (['retry_scheduled', 'callback_scheduled'].includes(status)) {
+        return customer.next_retry_at || customer.scheduled_datetime || customer.created_at;
+      }
+      return customer.scheduled_datetime || customer.next_retry_at || customer.created_at;
     }
 
     function isToday(value) {
@@ -401,26 +392,9 @@
       ));
     }
 
-    function getClientByPhone(phone) {
-      const normalized = normalizePhoneForApi(phone);
-      return clientCache.find((client) => normalizePhoneForApi(client.phone) === normalized) || null;
-    }
-
-    function clearFormErrors() {
-      // Errors handled differently in SaaS form, kept for compatibility
-    }
-
     function openNewCallModal(customerId = null, options = {}) {
-      if (!window.SharedCallModal) return;
-      const customer = customerId ? customerCache.find(c => Number(c.id) === Number(customerId)) : null;
-      const client = customer ? getClientByPhone(customer.phone) : null;
-      window.SharedCallModal.open(customer, client, {
-        onSuccess: loadPageData,
-        getClientIdByPhone: (phone) => {
-          const c = getClientByPhone(phone);
-          return c ? c.id : null;
-        }
-      });
+      if (!newCallModal) return;
+      newCallModal.open(customerId, options);
     }
 
     async function triggerCallNow(customerId) {
@@ -436,7 +410,6 @@
         AppShell.showAlert(error.message, 'error');
       }
     }
-
 
     async function scheduleRetry(customerId) {
       try {
@@ -560,8 +533,11 @@
       const completedCalls = recentCallsCache.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
 
       const isScheduled = (c) => ['scheduled', 'retry_scheduled', 'callback_scheduled'].includes(String(c.status || '').toLowerCase());
-      const scheduledCount = customerCache.filter((customer) => isScheduled(customer) && (isToday(customer.scheduled_at) || isToday(customer.created_at))).length;
-      const pendingCount = customerCache.filter((customer) => pendingStatuses.has(String(customer.status || '').toLowerCase()) && String(customer.outcome || '').toLowerCase() !== 'completed').length;
+      const scheduledCount = customerCache.filter((customer) => (
+        isScheduled(customer)
+        && isToday(getScheduleMetricDate(customer))
+      )).length;
+      const pendingCount = customerCache.filter((customer) => pendingStatuses.has(String(customer.status || '').toLowerCase())).length;
       const completedCount = completedCalls.length;
       const failedCount = recentCallsCache.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
 
@@ -599,14 +575,13 @@
         let matchesMetricFilter = true;
 
         if (activeCustomerMetricFilter === 'scheduled') {
-          const isScheduled = ['scheduled', 'retry_scheduled', 'callback_scheduled'].includes(String(customer.status || '').toLowerCase());
-          matchesMetricFilter = isScheduled && (isToday(customer.scheduled_at) || isToday(customer.created_at));
+          matchesMetricFilter = isToday(customer.created_at) || isToday(customer.updated_at);
         } else if (activeCustomerMetricFilter === 'pending') {
-          matchesMetricFilter = pendingStatuses.has(String(customer.status || '').toLowerCase()) && String(customer.outcome || '').toLowerCase() !== 'completed';
+          matchesMetricFilter = pendingStatuses.has(String(customer.status || '').toLowerCase());
         } else if (activeCustomerMetricFilter === 'completed') {
-          matchesMetricFilter = String(customer.outcome || '').toLowerCase() === 'completed';
+          matchesMetricFilter = Boolean(getLatestCompletedCall(customer.id));
         } else if (activeCustomerMetricFilter === 'failed') {
-          matchesMetricFilter = ['failed', 'busy', 'no_answer'].includes(String(customer.outcome || '').toLowerCase());
+          matchesMetricFilter = hasFailedCall(customer.id);
         }
 
         return matchesSearch && matchesStatus && matchesCallType && matchesMetricFilter;
@@ -622,7 +597,7 @@
     }
 
     function applyCustomerMetricFilter(filterName) {
-      activeCustomerMetricFilter = filterName || 'scheduled';
+      activeCustomerMetricFilter = filterName || 'completed';
       currentQueuePage = 1;
       renderQueue();
     }
@@ -658,7 +633,7 @@
       if (!customers.length) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="6">
+            <td colspan="7">
               <div class="empty-state">
                 <strong>No scheduled calls found</strong>
                 <div class="supporting-text">Add a patient to schedule the next follow-up call.</div>
@@ -669,35 +644,29 @@
         return;
       }
 
-      tbody.innerHTML = customers.map((call) => {
-        const completedCall = String(call.outcome || '').toLowerCase() === 'completed' ? call : null;
+      tbody.innerHTML = customers.map((customer) => {
+        const completedCall = getLatestCompletedCall(customer.id);
         const contextButton = completedCall
           ? `<button class="secondary" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
-          : `<button class="secondary" type="button" onclick="scheduleRetry(${call.customer_id})">Retry</button>`;
-
-        const isRescheduled = new Date(call.updated_at).getTime() > new Date(call.created_at).getTime() + 1000;
-        const schedulePrefix = isRescheduled ? 'Rescheduled' : 'Scheduled';
-        const scheduleDisplay = call.scheduled_at ? `${schedulePrefix}: ${AppShell.formatDateTime(call.scheduled_at)}` : 'Pending';
+          : `<button class="secondary" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
 
         return `
           <tr>
             <td>
-              <div class="row-title">${AppShell.escapeHtml(call.customer_name || 'Patient')}</div>
-              <div class="row-subtitle">${AppShell.escapeHtml(formatDisplayPhone(call.customer_phone))}</div>
+              <div class="row-title">${AppShell.escapeHtml(customer.name || 'Patient')}</div>
+              <div class="row-subtitle">ID #${customer.id}</div>
             </td>
-            <td>${AppShell.escapeHtml(formatCallTypeLabel(call.call_type))}</td>
-            <td><span class="status-badge ${AppShell.escapeHtml(String(call.outcome || call.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || call.status || 'pending')}</span></td>
-            <td>
-              <div class="row-title">${AppShell.escapeHtml(scheduleDisplay)}</div>
-            </td>
-            <td>
-              <div class="row-title">${AppShell.formatDateTime(call.updated_at || call.created_at)}</div>
-            </td>
+            <td>${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</td>
+            <td>${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))}</td>
+            <td>${AppShell.escapeHtml(formatScheduledDate(customer))}</td>
+            <td>${AppShell.escapeHtml(formatScheduledTime(customer))}</td>
+            <td><span class="status-badge ${AppShell.escapeHtml(String((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span></td>
             <td>
               <div class="table-actions">
-                <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${call.customer_id})">Call Now</button>
+                <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
                 ${contextButton}
-                <button class="danger desktop-action-button" type="button" onclick="deleteCustomer(${call.customer_id})">Delete</button>
+                <button class="secondary desktop-action-button" type="button" onclick="openNewCallModal(${customer.id})">Edit</button>
+                <button class="danger desktop-action-button" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
               </div>
             </td>
           </tr>
@@ -717,30 +686,28 @@
         return;
       }
 
-      container.innerHTML = customers.map((call) => {
-        const completedCall = String(call.outcome || '').toLowerCase() === 'completed' ? call : null;
+      container.innerHTML = customers.map((customer) => {
+        const latestCall = getLatestCall(customer.id);
+        const completedCall = getLatestCompletedCall(customer.id);
         const actionButton = completedCall
           ? `<button class="secondary mobile-action-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
-          : `<button class="secondary mobile-action-button" type="button" onclick="scheduleRetry(${call.customer_id})">Retry</button>`;
-
-        const isRescheduled = new Date(call.updated_at).getTime() > new Date(call.created_at).getTime() + 1000;
-        const schedulePrefix = isRescheduled ? 'Rescheduled' : 'Scheduled';
-        const scheduleDisplay = call.scheduled_at ? `${schedulePrefix}: ${AppShell.formatDateTime(call.scheduled_at)}` : 'Pending';
-
+          : `<button class="secondary mobile-action-button" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
         return `
           <article class="mobile-call-card">
             <div class="mobile-call-head">
               <div>
-                <strong>${AppShell.escapeHtml(call.customer_name || 'Patient')}</strong>
-                <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(call.customer_phone))}</div>
+                <strong>${AppShell.escapeHtml(customer.name || 'Patient')}</strong>
+                <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</div>
               </div>
-              <span class="status-badge ${AppShell.escapeHtml(String(call.outcome || call.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || call.status || 'pending')}</span>
+              <span class="status-badge ${AppShell.escapeHtml(String((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span>
             </div>
-            <div class="mobile-subtext">${AppShell.escapeHtml(formatCallTypeLabel(call.call_type))} · ${scheduleDisplay}</div>
+            <div class="mobile-subtext">${AppShell.escapeHtml(formatCallTypeLabel(customer.call_type))}</div>
+            <div class="mobile-subtext">Date: ${AppShell.escapeHtml(formatScheduledDate(customer))}</div>
+            <div class="mobile-subtext">Time: ${AppShell.escapeHtml(formatScheduledTime(customer))}</div>
             <div class="mobile-call-actions">
-              <button class="warning mobile-action-button" type="button" onclick="triggerCallNow(${call.customer_id})">Call Now</button>
+              <button class="warning mobile-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
               ${actionButton}
-              <button class="secondary mobile-more-button" type="button" onclick="openMobileActionSheet(${call.customer_id}, ${completedCall ? completedCall.id : 'null'})">More</button>
+              <button class="secondary mobile-more-button" type="button" onclick="openMobileActionSheet(${customer.id}, ${completedCall ? completedCall.id : 'null'})">More</button>
             </div>
           </article>
         `;
@@ -764,19 +731,23 @@
     }
 
     async function loadPageData() {
-      let [customers, clients, recentCalls] = await Promise.all([
-        AppShell.fetchJson(`${AppShell.API_BASE}/customers/queue`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/clients`),
+      let [customers, recentCalls] = await Promise.all([
+        AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
       ]);
       customerCache = customers;
-      clientCache = clients;
       recentCallsCache = recentCalls;
       renderQueue();
     }
 
     document.addEventListener('DOMContentLoaded', async () => {
       await AppShell.ensureAuthenticatedSession();
+      newCallModal = AppShell.NewCallModal({
+        mountId: 'newCallModalMount',
+        modalId: 'outboundNewCallModal',
+        getCustomer: (customerId) => customerCache.find((item) => Number(item.id) === Number(customerId)),
+        onSaved: loadPageData
+      });
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('newCallButton').addEventListener('click', () => openNewCallModal());
       document.getElementById('deleteAllCustomersButton').addEventListener('click', async () => {

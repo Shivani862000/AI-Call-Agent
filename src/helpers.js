@@ -88,9 +88,10 @@ function buildXmlResponse(innerXml) {
 
 function toWssUrl(baseUrl, pathName) {
   const url = new URL(baseUrl);
+  const pathUrl = new URL(pathName, url.origin);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.pathname = pathName;
-  url.search = '';
+  url.pathname = pathUrl.pathname;
+  url.search = pathUrl.search;
   url.hash = '';
   return url.toString();
 }

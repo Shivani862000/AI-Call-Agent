@@ -681,8 +681,39 @@ body.poc-page .header-actions .button-link {
   transform: translateY(-1px);
 }
 
-.overview-page #overviewNewCallModal .modal-panel--narrow {
-  width: min(620px, 100%);
+.overview-patient-directory-search {
+  margin-bottom: 12px;
+}
+
+.overview-patient-directory-search .search-input {
+  width: 100%;
+}
+
+.overview-patient-directory-meta {
+  margin-bottom: 10px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.overview-patient-directory-table {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #eef2f7;
+  border-radius: 14px;
+}
+
+.overview-patient-directory-table table {
+  min-width: 100%;
+}
+
+.overview-patient-card-list {
+  display: grid;
+  gap: 10px;
+}
+
+.overview-patient-card {
+  box-shadow: none;
 }
 
 .reports-page .page-header {
@@ -1533,6 +1564,15 @@ body.poc-page .search-row .table-filter.desktop-only {
 
 .modal-panel--narrow {
   width: min(560px, 100%);
+}
+
+.new-call-modal-panel {
+  width: min(760px, 100%);
+}
+
+.new-call-modal-actions {
+  margin-top: 18px;
+  justify-content: flex-end;
 }
 
 .modal-close {
@@ -2779,8 +2819,7 @@ body.poc-page .search-row .table-filter.desktop-only {
     padding: 18px 16px calc(24px + env(safe-area-inset-bottom));
   }
 
-  #newCallModal .modal-panel--narrow,
-  #overviewNewCallModal .modal-panel--narrow {
+  .new-call-modal-panel {
     min-height: 90vh;
   }
 }

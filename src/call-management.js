@@ -488,7 +488,7 @@ async function upsertIcallMateCallFromMedia(message = {}, session = {}, patch = 
     `UPDATE calls
         SET outcome = CASE
               WHEN ? = 'completed' THEN 'completed'
-              WHEN outcome IN ('initiated', 'scheduled_initiated') THEN 'active'
+              WHEN ? = 'active' AND (outcome IN ('initiated', 'scheduled_initiated') OR last_event = 'media_timeout') THEN 'active'
               ELSE outcome
             END,
             did = COALESCE(?, did),
@@ -500,6 +500,7 @@ async function upsertIcallMateCallFromMedia(message = {}, session = {}, patch = 
             provider_payload_json = ?
       WHERE id = ?`,
     [
+      patch.status || null,
       patch.status || null,
       message.did || session.did || null,
       patch.answered_at || null,

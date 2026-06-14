@@ -5,9 +5,8 @@
 
 'use strict';
 
-const crypto = require('crypto');
-const fs = require('fs');
 const fetch = require('node-fetch');
+const fs = require('fs');
 const customersRouter = require('../routes/customers');
 const clientsRouter = require('../routes/clients');
 const campaignsRouter = require('../routes/campaigns');
@@ -80,6 +79,7 @@ const { buildCallAnalysis, storeCallAnalysis } = require('../services/call-analy
 const { generateCallAnalysisPDF } = require('../services/pdf');
 const { initiateCall, buildMasterPostPayload } = require('../services/icallmate');
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
+const logger = require('../services/system-logger');
 
 module.exports = function mountApiRoutes(app) {
   app.get('/health', (req, res) => {
@@ -119,11 +119,13 @@ module.exports = function mountApiRoutes(app) {
 
     if (!verifyCredentials(username, password)) {
       clearAuthCookie(req, res);
+      logger.warn('USER_LOGIN', { user: username || 'unknown', status: 'failed' });
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
     const token = createAuthToken(username);
     setAuthCookie(req, res, token);
+    logger.info('USER_LOGIN', { user: username });
     return res.json({
       success: true,
       username
@@ -131,7 +133,9 @@ module.exports = function mountApiRoutes(app) {
   });
 
   app.post('/api/auth/logout', (req, res) => {
+    const session = readAuthSession(req);
     clearAuthCookie(req, res);
+    logger.info('USER_LOGOUT', { user: session?.username || req.adminSession?.username || 'admin' });
     return res.json({ success: true });
   });
 
@@ -143,6 +147,36 @@ module.exports = function mountApiRoutes(app) {
   app.use('/api/agents', agentsRouter);
   app.use('/api/test-call', testCallRouter);
   app.use('/api/test-ai-call', testAiCallRouter);
+
+  app.get('/api/logs', async (req, res) => {
+    try {
+      const filter = String(req.query.filter || 'all').toLowerCase();
+      const max = Math.min(Math.max(Number(req.query.limit || 200), 1), 1000);
+      if (!fs.existsSync(logger.LOG_FILE)) {
+        return res.json({ logs: [] });
+      }
+
+      const text = await fs.promises.readFile(logger.LOG_FILE, 'utf8');
+      const filters = {
+        calls: /\[(CALL_[A-Z_]+)\]/,
+        users: /\[(USER_[A-Z_]+)\]/,
+        feedback: /\[(FEEDBACK_[A-Z_]+)\]/,
+        errors: /\[ERROR\]/
+      };
+      const matcher = filters[filter] || null;
+      const logs = text
+        .split('\n')
+        .filter(Boolean)
+        .filter((line) => !matcher || matcher.test(line))
+        .slice(-max)
+        .reverse();
+
+      res.json({ logs });
+    } catch (error) {
+      logger.error('LOG_READ_FAILED', { reason: error.message });
+      res.status(500).json({ error: 'Failed to read logs' });
+    }
+  });
 
   app.post('/call/start', async (req, res) => {
     let customer = null;
@@ -198,7 +232,8 @@ module.exports = function mountApiRoutes(app) {
       const result = await dbRun(
         `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type, uuid
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
+        provider_payload_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
@@ -213,10 +248,19 @@ module.exports = function mountApiRoutes(app) {
           'outbound',
           'icallmate',
           callType,
-          crypto.randomUUID()
+          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
         ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      logger.info('CALL_STARTED', {
+        callId: result.lastID,
+        customerId: customer.id,
+        patient: customer.name || customerName,
+        phone: customer.phone || customerPhone,
+        type: logger.formatCallType(callType),
+        provider: 'icallmate',
+        providerCallId: call.sid
+      });
 
       schedulePendingCallDiagnostic(call.sid, {
         customerId: customer.id,
@@ -225,7 +269,6 @@ module.exports = function mountApiRoutes(app) {
         agentId: agentConfig?.id || null,
         trigger: '/call/start'
       });
-      console.log(`[CALL STARTED] SID: ${call.sid}`);
       res.json({ success: true, sid: call.sid, callId: result.lastID, customerId: customer.id, agentId: agentConfig?.id || null });
     } catch (error) {
       if (customer?.id) {
@@ -235,7 +278,12 @@ module.exports = function mountApiRoutes(app) {
           console.error('[CALL CLAIM RELEASE ERROR]', releaseError.message);
         }
       }
-      console.error('[ERROR starting call]', error.message);
+      logger.error('CALL_FAILED', {
+        customerId: customer?.id,
+        patient: customer?.name,
+        phone: customer?.phone || req.body.customerPhone,
+        reason: error.message
+      });
       res.status(500).json({ success: false, error: error.message });
     }
   });
@@ -277,6 +325,7 @@ module.exports = function mountApiRoutes(app) {
 
       const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [providerCallSid]);
       const customerId = req.query.customerId || callRecord?.customer_id;
+      const customer = customerId ? await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]) : null;
 
       if (callRecord) {
         let mappedOutcome = null;
@@ -307,12 +356,29 @@ module.exports = function mountApiRoutes(app) {
 
         if (mappedOutcome) {
           await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ? WHERE id = ?', [mappedOutcome, providerStatus, callRecord.id]);
+          const eventName = mappedOutcome === 'completed'
+            ? 'CALL_COMPLETED'
+            : (mappedOutcome === 'failed' || mappedOutcome === 'busy' || mappedOutcome === 'no_answer' ? 'CALL_FAILED' : 'CALL_PENDING');
+          const statusDetails = {
+            callId: callRecord.id,
+            customerId: customerId || callRecord.customer_id,
+            patient: customer?.name,
+            phone: customer?.phone,
+            status: mappedOutcome,
+            providerStatus,
+            duration: logger.formatDuration(callRecord.call_duration || 0)
+          };
+          if (eventName === 'CALL_FAILED') {
+            logger.warn(eventName, statusDetails);
+          } else {
+            logger.info(eventName, statusDetails);
+          }
         }
 
         if (mappedOutcome === 'completed' && normalizedRecordingUrl) {
           setTimeout(() => {
             runInBackground('POST CALL PIPELINE ERROR', async () => {
-              const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: providerCallSid });
+              const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: providerCallSid, callId: callRecord.id });
               if (result.ok) {
                 console.log(`[POST CALL PIPELINE] Processed call ${providerCallSid} with feedback ${result.feedbackId}`);
               } else {
@@ -323,7 +389,6 @@ module.exports = function mountApiRoutes(app) {
         }
 
         if (customerId) {
-          const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
           if (customer && mappedOutcome) {
             await applyCallOutcomeWorkflow({
               dbGet,
@@ -353,8 +418,9 @@ module.exports = function mountApiRoutes(app) {
 
       console.log(`[RECORDING STATUS] ${recordingStatus} | Call SID: ${callSid} | Recording SID: ${recordingSid}`);
 
-      const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [callSid]);
+      const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ? ORDER BY id DESC LIMIT 1', [callSid]);
       if (callRecord) {
+        const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
         await dbRun(
           `UPDATE calls
             SET recording_sid = ?,
@@ -367,7 +433,7 @@ module.exports = function mountApiRoutes(app) {
         if (recordingStatus === 'completed' && recordingUrl) {
           setTimeout(() => {
             runInBackground('POST CALL PIPELINE ERROR', async () => {
-              const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid });
+              const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid, callId: callRecord.id });
               if (result.ok) {
                 console.log(`[POST CALL PIPELINE] Processed call ${callSid} with feedback ${result.feedbackId}`);
               } else {
@@ -375,6 +441,15 @@ module.exports = function mountApiRoutes(app) {
               }
             });
           }, 1500);
+        }
+        if (recordingStatus && recordingStatus !== 'completed') {
+          logger.info('CALL_PENDING', {
+            callId: callRecord.id,
+            customerId: callRecord.customer_id,
+            patient: customer?.name,
+            phone: customer?.phone,
+            status: recordingStatus
+          });
         }
       }
 
@@ -419,7 +494,8 @@ module.exports = function mountApiRoutes(app) {
       const result = await dbRun(
         `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type, uuid
+        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
+        provider_payload_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
@@ -434,11 +510,20 @@ module.exports = function mountApiRoutes(app) {
           'outbound',
           'icallmate',
           callType,
-          crypto.randomUUID()
+          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
         ]
       );
 
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      logger.info('CALL_STARTED', {
+        callId: result.lastID,
+        customerId: customer.id,
+        patient: customer.name,
+        phone: customer.phone,
+        type: logger.formatCallType(callType),
+        provider: 'icallmate',
+        providerCallId: call.sid
+      });
       schedulePendingCallDiagnostic(call.sid, {
         customerId: customer.id,
         customerPhone: customer.phone,
@@ -455,7 +540,12 @@ module.exports = function mountApiRoutes(app) {
           console.error('[API CALL CLAIM RELEASE ERROR]', releaseError.message);
         }
       }
-      console.error('[API CALL INITIATE ERROR]', error.message);
+      logger.error('CALL_FAILED', {
+        customerId: customer?.id,
+        patient: customer?.name,
+        phone: customer?.phone,
+        reason: error.message
+      });
       res.status(500).json({ error: error.message });
     }
   });
@@ -619,7 +709,7 @@ module.exports = function mountApiRoutes(app) {
           last_event: 'callback',
           answered_at: payload.call_ansd_time ? normalizeIcallTimestamp(payload.call_ansd_time) : null,
           ended_at: payload.call_end_time ? normalizeIcallTimestamp(payload.call_end_time) : null,
-          recording_url: payload.recording_filename ? `https://crm.icallmate.in/Recordings/${payload.recording_filename}` : '',
+          recording_url: payload.recording_filename || '',
           talktime: payload.talktime || ''
         });
 
@@ -652,30 +742,16 @@ module.exports = function mountApiRoutes(app) {
           `, [cleanPhone]);
 
           if (callRecord) {
-            const talkTimeSecs = Number(payload.talktime) || 0;
-            const fallbackReason = mappedOutcome === 'completed' ? 'customer_hangup' : mappedOutcome;
-            
-            await dbRun(`
-              UPDATE calls 
-              SET outcome = ?, 
-                  outcome_detail = ?,
-                  call_duration = CASE WHEN call_duration = 0 THEN ? ELSE call_duration END,
-                  call_end_reason = CASE WHEN call_end_reason IS NULL THEN ? ELSE call_end_reason END,
-                  recording_url = COALESCE(NULLIF(?, ''), recording_url)
-              WHERE id = ?
-            `, [
+            await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ? WHERE id = ?', [
               mappedOutcome,
               payload.call_status || 'callback',
-              talkTimeSecs,
-              fallbackReason,
-              payload.recording_filename ? `https://crm.icallmate.in/Recordings/${payload.recording_filename}` : '',
               callRecord.id
             ]);
 
             if (mappedOutcome === 'completed' && payload.recording_filename) {
               setTimeout(() => {
                 runInBackground('POST CALL PIPELINE ERROR', async () => {
-                  const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: callRecord.provider_call_id });
+                  const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: callRecord.provider_call_id, callId: callRecord.id });
                   if (result.ok) {
                     console.log(`[POST CALL PIPELINE] Processed call ${callRecord.provider_call_id} with feedback ${result.feedbackId}`);
                   } else {
@@ -758,6 +834,66 @@ module.exports = function mountApiRoutes(app) {
     }
   });
 
+  // app.post('/api/icallmate/outbound-campaign', async (req, res) => {
+  //   try {
+  //     const requestBaseUrl = getRequestPublicBaseUrl(req);
+  //     const endpoint = `${String(process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in').replace(/\/+$/, '')}/OBDAPI/webresources/CreateOBDCampaignPost`;
+  //     const msisdnlist = Array.isArray(req.body.msisdnlist) ? req.body.msisdnlist : [];
+  //     if (!msisdnlist.length) {
+  //       return res.status(400).json({ error: 'msisdnlist is required' });
+  //     }
+
+  //     const payload = {
+  //       sourcetype: String(req.body.sourcetype || '0'),
+  //       customivr: req.body.customivr ?? true,
+  //       campaigntype: String(req.body.campaigntype || '4'),
+  //       filetype: String(req.body.filetype || '2'),
+  //       ukey: req.body.ukey || process.env.ICALLMATE_UKEY || '',
+  //       serviceno: req.body.serviceno || process.env.ICALLMATE_SERVICE_NO || '',
+  //       ivrtemplateid: req.body.ivrtemplateid || process.env.ICALLMATE_IVR_TEMPLATE_ID || '',
+  //       maxTalkTimeInSec: Number(req.body.maxTalkTimeInSec || 0),
+  //       retryatmpt: String(req.body.retryatmpt || '2'),
+  //       sendnow: String(req.body.sendnow || '0'),
+  //       schddate: req.body.schddate || '',
+  //       retryduration: String(req.body.retryduration || '5'),
+  //       s_unique: req.body.s_unique || '',
+  //       msisdnlist: msisdnlist.map((item) => ({
+  //         ...item,
+  //         wsurl: item.wsurl || `${toWssUrl(requestBaseUrl, '/icallmate/media')}`,
+  //         agentid: String(item.agentid || process.env.ICALLMATE_AGENT_ID || '0'),
+  //         iscallbackapi: String(item.iscallbackapi ?? '0'),
+  //         callbackapi: item.callbackapi || `${requestBaseUrl}/api/icallmate/callback`
+  //       }))
+  //     };
+
+  //     if (String(req.body.dryRun || '').toLowerCase() === 'true') {
+  //       return res.json({ endpoint, payload, dryRun: true });
+  //     }
+
+  //     const response = await fetch(endpoint, {
+  //       method: 'POST',
+  //       headers: { 'Content-Type': 'application/json' },
+  //       body: JSON.stringify(payload)
+  //     });
+  //     const text = await response.text();
+  //     let parsed = {};
+  //     try {
+  //       parsed = text ? JSON.parse(text) : {};
+  //     } catch (error) {
+  //       parsed = { rawText: text };
+  //     }
+  //     const providerSuccess = response.ok && String(parsed.status || '').toLowerCase() !== 'failure';
+
+  //     res.status(providerSuccess ? 200 : (response.ok ? 502 : response.status)).json({
+  //       success: providerSuccess,
+  //       endpoint,
+  //       response: text
+  //     });
+  //   } catch (error) {
+  //     console.error('[ICALLMATE OUTBOUND CAMPAIGN ERROR]', error.message);
+  //     res.status(500).json({ error: error.message });
+  //   }
+  // });
 
   app.post('/api/icallmate/outgoing-call', async (req, res) => {
     let customer = null;
@@ -818,8 +954,8 @@ module.exports = function mountApiRoutes(app) {
         `INSERT INTO calls (
         customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
         consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source,
-        provider_payload_json, call_type, uuid
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        provider_payload_json, call_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           agentConfig?.id || null,
@@ -832,13 +968,21 @@ module.exports = function mountApiRoutes(app) {
           'normal',
           'outbound',
           'icallmate-masterpost',
-          JSON.stringify(payload),
-          callType,
-          crypto.randomUUID()
+          JSON.stringify({ request: call.requestPayload || payload, response: call.raw || null }),
+          callType
         ]
       );
 
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      logger.info('CALL_STARTED', {
+        callId: result.lastID,
+        customerId: customer.id,
+        patient: customer.name || customerName,
+        phone: customer.phone || phone,
+        type: logger.formatCallType(callType),
+        provider: 'icallmate-masterpost',
+        providerCallId: call.sid
+      });
       schedulePendingCallDiagnostic(call.sid, {
         customerId: customer.id,
         customerPhone: phone,
@@ -865,7 +1009,12 @@ module.exports = function mountApiRoutes(app) {
           console.error('[OUTGOING CALL CLAIM RELEASE ERROR]', releaseError.message);
         }
       }
-      console.error('[ICALLMATE OUTGOING CALL ERROR]', error.message);
+      logger.error('CALL_FAILED', {
+        customerId: customer?.id,
+        patient: customer?.name,
+        phone: customer?.phone || req.body.Phone_No || req.body.phone || req.body.customerPhone,
+        reason: error.message
+      });
       res.status(500).json({ error: error.message });
     }
   });
@@ -1084,9 +1233,26 @@ module.exports = function mountApiRoutes(app) {
         return res.status(404).json({ error: 'Call not found' });
       }
 
+      logger.info('FEEDBACK_ANALYSIS_STARTED', {
+        callId: call.id,
+        customerId: call.customer_id,
+        patient: call.customer_name,
+        phone: call.customer_phone,
+        source: 'manual_rerun'
+      });
       const analysis = buildCallAnalysis(call);
       await storeCallAnalysis({ dbRun, callId: call.id, analysis });
       const updatedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [call.id]);
+      const sentiment = updatedCall.sentiment || updatedCall.sentiment_label || analysis.sentiment || 'neutral';
+      const rating = Number(updatedCall.extracted_rating || 0);
+      logger.info('FEEDBACK_ANALYSIS_COMPLETED', {
+        callId: call.id,
+        customerId: call.customer_id,
+        patient: call.customer_name,
+        phone: call.customer_phone,
+        sentiment,
+        rating: rating ? `${rating}/5` : ''
+      });
       res.json({
         success: true,
         call: updatedCall,
@@ -1237,20 +1403,9 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId/recording', async (req, res) => {
     try {
-      const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status, recording_local_path FROM calls WHERE id = ?', [req.params.callId]);
+      const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status FROM calls WHERE id = ?', [req.params.callId]);
 
-      if (!call) {
-        return res.status(404).json({ error: 'Call not found' });
-      }
-
-      if (call.recording_local_path && fs.existsSync(call.recording_local_path)) {
-        res.setHeader('Content-Type', 'audio/mpeg');
-        res.setHeader('Cache-Control', 'private, max-age=300');
-        const stream = fs.createReadStream(call.recording_local_path);
-        return stream.pipe(res);
-      }
-
-      if (!call.recording_url && !call.provider_call_id) {
+      if (!call?.recording_url && !call?.provider_call_id) {
         return res.status(404).json({ error: 'Recording not available yet' });
       }
 
@@ -1276,8 +1431,14 @@ module.exports = function mountApiRoutes(app) {
 
   app.delete('/api/calls/bulk', async (req, res) => {
     try {
+      const counts = await dbGet('SELECT COUNT(*) AS call_count FROM calls');
       await dbRun('DELETE FROM call_supervisor_events');
       await dbRun('DELETE FROM calls');
+      logger.warn('ALL_RECORDS_DELETED', {
+        deletedBy: req.adminSession?.username || 'admin',
+        calls: counts?.call_count || 0,
+        scope: 'call_history'
+      });
       res.json({ message: 'All call history deleted successfully' });
     } catch (error) {
       console.error('Error in calls bulk delete:', error);

@@ -137,21 +137,26 @@ function buildReviewCallTurnInstruction(customerReply, state) {
     }
 
     if (isNoReply(customerReply)) {
-      markCompletedAfterReply();
-      return 'Donor had no problem. Say exactly: "Bahut achhi baat hai sir. Dhanyavaad. Hamne aapko ek video bheja hai. Kripya use like, comment aur subscribe karein. Hamara Facebook aur Google page bhi hai. Kripya like, share aur review zarur karein. Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
+      state.step = 'feedback';
+      return 'Donor had no problem. Say exactly: "OKK, Thankyou Sir! Sir, aapko hamare yahan blood donate karna kaisa laga?"';
     }
 
     if (isAffirmativeReply(customerReply)) {
       state.step = 'issue_detail';
-      return 'Donor had a problem. Say exactly: "Maaf kijiye sir. Kripya batayein aapko kya problem hui thi?"';
+      return 'Donor had a problem. Say exactly: "Kya problem hui Sir?"';
     }
 
     return 'Clarify briefly. Say exactly: "Sir, blood donate karne ke baad aapko koi dikkat ya problem hui thi?"';
   }
 
   if (state.step === 'issue_detail') {
+    state.step = 'feedback';
+    return 'Capture the issue from the donor response. Say exactly: "Sir, hum apne adhikari ko batayenge. Next time poora dhyan rakhenge. Sorry Sir. Sir, aapko hamare yahan blood donate karna kaisa laga?"';
+  }
+
+  if (state.step === 'feedback') {
     markCompletedAfterReply();
-    return 'Capture the issue from the donor response. Say exactly: "Dhanyavaad sir. Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge. Hamne aapko ek video bheja hai. Kripya use like, comment aur subscribe karein. Hamara Facebook aur Google page bhi hai. Kripya like, share aur review zarur karein. Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
+    return 'Acknowledge the donor feedback warmly in one short sentence. Then say exactly: "Sir, humne aapke paas ek video send ki hai. Usko please Like, Comment karein aur Channel ko Subscribe karein. Hamaara Facebook aur Google par Apna Blood Bank ke naam se page bhi hai. Usse bhi Like, Share, Comment aur Subscribe karein, taaki aage ki activities ke baare mein aapko pata lagta rahe. Dhanyavaad Sir! Aapka din shubh ho." Then end the call.';
   }
 
   markCompletedAfterReply();

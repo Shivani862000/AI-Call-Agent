@@ -71,7 +71,6 @@ app.use((req, res, next) => {
     req.path === '/api/icallmate/callback'
     || req.path === '/api/icallmate/config'
     || req.path === '/icallmate/health'
-    || req.path === '/icallmate/media'
   ) {
     return basicAuth(req, res, next);
   }
@@ -81,6 +80,14 @@ app.use((req, res, next) => {
   }
 
   return next();
+});
+
+app.get('/incoming-calls.html', (req, res) => {
+  res.status(404).send('Incoming Calls page is disabled.');
+});
+
+app.get('/reports.html', (req, res) => {
+  res.status(404).send('Reports page is disabled.');
 });
 
 // Static files

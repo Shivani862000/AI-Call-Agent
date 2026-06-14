@@ -57,35 +57,30 @@ function buildMasterPostPayload(customerPhone, leadId, options = {}) {
     throw new Error('Customer phone is required for iCallMate master-post call');
   }
 
-  let wsurl = options.wsurl || process.env.ICALLMATE_MASTER_POST_WSURL || '';
-  if (!wsurl && process.env.APP_BASE_URL) {
-    wsurl = process.env.APP_BASE_URL.replace(/^http/, 'ws') + '/icallmate/media';
-  }
-  // Fallback: forcefully update wsurl if the current one has an old tunnel URL
-  if (process.env.APP_BASE_URL && wsurl.includes('.lhr.life')) {
-    const baseHost = new URL(process.env.APP_BASE_URL).host;
-    if (!wsurl.includes(baseHost)) {
-      wsurl = process.env.APP_BASE_URL.replace(/^http/, 'ws') + '/icallmate/media';
-    }
-  }
+  const wsurl = options.wsurl || process.env.ICALLMATE_MASTER_POST_WSURL || '';
+  const resolvedLeadId = String(leadId || options.leadid || options.leadId || process.env.ICALLMATE_MASTER_POST_LEAD_ID || '1031').replace(/\D/g, '') || '1031';
   return {
     campid: String(options.campid || process.env.ICALLMATE_MASTER_POST_CAMP_ID || '54'),
-    leadid: String(leadId || options.leadid || process.env.ICALLMATE_MASTER_POST_LEAD_ID || '1031'),
+    leadid: resolvedLeadId,
     fieldpairs: [
       {
         Phone_No: phoneNo,
-        Mobile_No: phoneNo,
-        Moblie_No: phoneNo,
+        Name: options.customerName || '',
         wsurl,
-        Customer_Name: options.customerName || '',
-        Customer_ID: options.customerId || ''
+        extraparam: JSON.stringify({
+          callDirection: 'outbound',
+          customerId: options.customerId || null,
+          customerName: options.customerName || '',
+          clientName: options.clientName || '',
+          callType: options.callType || 'REVIEW_CALL',
+          leadId: resolvedLeadId
+        })
       }
     ]
   };
 }
 
 function extractCallSid(payload, fallback) {
-  const text = typeof payload === 'string' ? payload : JSON.stringify(payload || {});
   const parsedSid = (
     payload?.sid
     || payload?.callSid
@@ -101,6 +96,26 @@ function extractCallSid(payload, fallback) {
   return parsedSid || fallback || `icallmate-${Date.now()}`;
 }
 
+function hasProviderCallSid(payload) {
+  return Boolean(
+    payload?.sid
+    || payload?.callSid
+    || payload?.campaignId
+    || payload?.campaignid
+    || payload?.data?.sid
+    || payload?.data?.campaignId
+    || payload?.response?.sid
+    || payload?.response?.campaignId
+  );
+}
+
+function getProviderReason(payload) {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  return String(payload?.reason || payload?.message || payload?.rawText || '');
+}
+
 function isFailurePayload(payload) {
   const status = String(payload?.status || payload?.Status || '').toLowerCase();
   const statusCode = Number(payload?.statuscode || payload?.statusCode || payload?.code || 0);
@@ -109,7 +124,8 @@ function isFailurePayload(payload) {
 
 async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
   const endpoint = getMasterPostEndpoint();
-  const payload = buildMasterPostPayload(customerPhone, options.leadid || process.env.ICALLMATE_MASTER_POST_LEAD_ID, options);
+  const leadId = options.leadid || options.leadId || process.env.ICALLMATE_MASTER_POST_LEAD_ID || '1031';
+  const payload = buildMasterPostPayload(customerPhone, leadId, { ...options, customerId });
 
   if (!payload.fieldpairs[0].wsurl) {
     throw new Error('Missing iCallMate master-post config: wsurl or ICALLMATE_MASTER_POST_WSURL is required.');
@@ -119,7 +135,6 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
     `[ICALLMATE OUTBOUND] Initiating call to ${customerPhone} provider=masterpost endpoint=${endpoint} ` +
     `campid=${payload.campid} leadid=${payload.leadid}`
   );
-  console.log(`[ICALLMATE OUTBOUND REQUEST PAYLOAD]`, JSON.stringify(payload, null, 2));
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -127,8 +142,6 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
     body: JSON.stringify(payload)
   });
   const rawText = await response.text();
-  console.log(`[ICALLMATE OUTBOUND RESPONSE] HTTP ${response.status} Body:`, rawText);
-
   let parsed = {};
   try {
     parsed = rawText ? JSON.parse(rawText) : {};
@@ -144,12 +157,18 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
     throw new Error(`iCallMate master-post call rejected: ${parsed.message || rawText || 'unknown failure'}`);
   }
 
-  const sid = extractCallSid(parsed, `icallmate-masterpost-${Date.now()}`);
-  console.log(`[ICALLMATE OUTBOUND] Call accepted sid=${sid}`);
+  const providerReturnedSid = hasProviderCallSid(parsed);
+  const sid = extractCallSid(parsed, `icallmate-masterpost-${payload.leadid}-${Date.now()}`);
+  const providerReason = getProviderReason(parsed);
+  const status = providerReturnedSid ? 'queued' : 'submitted';
+  console.log(`[ICALLMATE OUTBOUND] Call ${status} sid=${sid}${providerReason ? ` reason="${providerReason}"` : ''}`);
   return {
     sid,
-    status: 'queued',
-    raw: parsed
+    status,
+    providerReturnedSid,
+    providerReason,
+    raw: parsed,
+    requestPayload: payload
   };
 }
 

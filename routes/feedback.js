@@ -56,10 +56,48 @@ router.post('/manual', async (req, res) => {
   }
 });
 
-// List all feedback with customer names
+function normalizeSentiment(value) {
+  const sentiment = String(value || '').trim().toLowerCase();
+  if (sentiment === 'positive' || sentiment === 'negative') return sentiment;
+  return 'neutral';
+}
+
+function categoryFromAnalysis(row) {
+  const rating = Number(row.stars || 0);
+  const sentiment = normalizeSentiment(row.sentiment);
+
+  if (rating >= 4 || sentiment === 'positive') return 'good';
+  if ((rating > 0 && rating <= 2) || sentiment === 'negative') return 'bad';
+  return 'average';
+}
+
+// List feedback using completed call analysis as the source of truth.
 router.get('/', async (req, res) => {
   try {
-    const feedback = await dbAll(`
+    const analyzedCalls = await dbAll(`
+      SELECT 
+        calls.id AS call_id,
+        calls.customer_id,
+        customers.name AS customer_name,
+        calls.extracted_review_text,
+        calls.analysis_summary,
+        calls.summary,
+        calls.report_excerpt,
+        calls.extracted_rating AS stars,
+        calls.sentiment_label,
+        calls.sentiment,
+        calls.analysis_status,
+        calls.analysis_completed_at,
+        calls.feedback_saved_at,
+        calls.called_at
+      FROM calls
+      JOIN customers ON customers.id = calls.customer_id
+      WHERE COALESCE(calls.analysis_status, 'pending') = 'completed'
+      ORDER BY COALESCE(calls.analysis_completed_at, calls.feedback_saved_at, calls.called_at) DESC
+      LIMIT 500
+    `);
+
+    const manualFeedback = await dbAll(`
       SELECT 
         f.id,
         f.customer_id,
@@ -72,8 +110,31 @@ router.get('/', async (req, res) => {
         f.submitted_at
       FROM feedback f
       JOIN customers c ON f.customer_id = c.id
+      WHERE f.call_id IS NULL
       ORDER BY f.submitted_at DESC
+      LIMIT 500
     `);
+
+    const analysisFeedback = analyzedCalls.map((row) => {
+      const reviewText = row.extracted_review_text || row.analysis_summary || row.summary || row.report_excerpt || '';
+      const sentiment = normalizeSentiment(row.sentiment_label || row.sentiment);
+      return {
+        id: `analysis-${row.call_id}`,
+        customer_id: row.customer_id,
+        call_id: row.call_id,
+        customer_name: row.customer_name,
+        review_text: reviewText,
+        category: categoryFromAnalysis({ stars: row.stars, sentiment }),
+        stars: row.stars,
+        sentiment,
+        analysis_status: row.analysis_status,
+        source: 'call_analysis',
+        submitted_at: row.analysis_completed_at || row.feedback_saved_at || row.called_at
+      };
+    }).filter((row) => row.review_text || Number(row.stars || 0) || row.sentiment !== 'neutral');
+
+    const feedback = [...analysisFeedback, ...manualFeedback]
+      .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
 
     res.json(feedback);
   } catch (error) {
