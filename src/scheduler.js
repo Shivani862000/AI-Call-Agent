@@ -33,7 +33,9 @@ const SUBMITTED_CALL_RETRY_MS = Number(process.env.SUBMITTED_CALL_RETRY_MS || 5 
 
 function isProviderAcceptedOnly(call) {
   const reason = String(call?.raw?.reason || call?.raw?.message || '');
-  return String(call?.status || '').toLowerCase() === 'queued'
+  const status = String(call?.status || '').toLowerCase();
+  return status === 'queued'
+    || status === 'submitted'
     || reason.includes('Total Records Being Inserted');
 }
 
@@ -314,11 +316,13 @@ async function triggerScheduledCalls() {
         type: logger.formatCallType(customer.call_type),
         provider: 'icallmate',
         providerCallId: call.sid,
+        providerStatus: call.status,
+        providerReason: call.providerReason || call.raw?.reason || call.raw?.message || '',
         status: acceptedOnly ? 'provider_accepted_waiting_for_media' : 'started'
       });
       console.log(
         acceptedOnly
-          ? `[SCHEDULER] Scheduled call submitted for ${customer.name}; waiting for iCallMate media (${call.sid})`
+          ? `[SCHEDULER] Scheduled call submitted for ${customer.name}; waiting for iCallMate media (${call.sid}) providerStatus=${call.status}`
           : `[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`
       );
     } catch (error) {

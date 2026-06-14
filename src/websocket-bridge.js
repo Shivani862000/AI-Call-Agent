@@ -63,6 +63,8 @@ const {
 const { validateMediaToken } = require('./auth');
 
 const REQUIRE_MEDIA_TOKEN = /^(1|true|yes|on)$/i.test(String(process.env.ICALLMATE_REQUIRE_MEDIA_TOKEN || ''));
+const GEMINI_OPENING_INPUT_GRACE_MS = Math.max(Number(process.env.GEMINI_OPENING_INPUT_GRACE_MS || 3500) || 3500, 1000);
+const GEMINI_OPENING_FALLBACK_MS = Math.max(Number(process.env.GEMINI_OPENING_FALLBACK_MS || 2500) || 2500, 1000);
 
 function debugLog(message, details = {}) {
   logger.debug('MEDIA_DEBUG', { message, ...details });
@@ -315,6 +317,7 @@ module.exports = function setupWebSocketBridge(server) {
     let finalTranscriptBuffer = [];
     let pendingHangup = false;
     let hangupFinalizeTimer = null;
+    let openingFallbackTimer = null;
     let completionPersisted = false;
     let finalResponseInProgress = false;
     let activeResponseId = null;
@@ -356,6 +359,35 @@ module.exports = function setupWebSocketBridge(server) {
 
       pendingTtsTexts.push(safeText);
       connectDeepgramTts();
+    }
+
+    function clearOpeningFallbackTimer() {
+      if (openingFallbackTimer) {
+        clearTimeout(openingFallbackTimer);
+        openingFallbackTimer = null;
+      }
+    }
+
+    function scheduleOpeningFallback(text) {
+      clearOpeningFallbackTimer();
+      const safeText = String(text || '').replace(/\s+/g, ' ').trim();
+      if (!safeText) {
+        return;
+      }
+
+      openingFallbackTimer = setTimeout(() => {
+        openingFallbackTimer = null;
+        if (bridgeClosed || session.geminiLiveFirstAudioAt || session.outChunkCount > 0) {
+          return;
+        }
+
+        logger.warn('GEMINI_LIVE_OPENING_FALLBACK', {
+          streamId: getSessionLabel(),
+          delayMs: GEMINI_OPENING_FALLBACK_MS
+        });
+        pushTranscriptTurn(transcript, 'AGENT', safeText);
+        sendDeepgramTtsText(safeText);
+      }, GEMINI_OPENING_FALLBACK_MS);
     }
 
     function toPlainTranscript() {
@@ -592,7 +624,6 @@ module.exports = function setupWebSocketBridge(server) {
               geminiLiveReady = true;
               lastLlmResponseAt = Date.now();
               debugLog('Gemini Live connected', { streamId: getSessionLabel() });
-              sendOpeningPrompt();
 
               if (!llmWatchdogInterval) {
                 llmWatchdogInterval = setInterval(() => {
@@ -676,6 +707,7 @@ module.exports = function setupWebSocketBridge(server) {
                 const pcm16 = Buffer.from(base64Audio, 'base64');
                 if (!session.geminiLiveFirstAudioAt) {
                   session.geminiLiveFirstAudioAt = Date.now();
+                  clearOpeningFallbackTimer();
                   const responseMs = geminiLivePromptSentAt ? session.geminiLiveFirstAudioAt - geminiLivePromptSentAt : null;
                   debugLog('Gemini Live first audio chunk', {
                     streamId: getSessionLabel(),
@@ -782,6 +814,9 @@ module.exports = function setupWebSocketBridge(server) {
             }
           }
         });
+        if (geminiLiveReady) {
+          sendOpeningPrompt();
+        }
       } catch (error) {
         console.error('[ICALLMATE][GEMINI LIVE CONNECT ERROR]', error.message);
       } finally {
@@ -804,9 +839,12 @@ module.exports = function setupWebSocketBridge(server) {
       });
 
       if (useGeminiLive()) {
-        const sent = sendGeminiLiveText(getOpeningPrompt(), { interrupt: true });
+        const openingText = getOpeningPrompt();
+        const sent = sendGeminiLiveText(openingText, { interrupt: true });
         if (sent) {
           openingPromptSent = true;
+          session.openingPromptSentAt = Date.now();
+          scheduleOpeningFallback(openingText);
         }
         return;
       }
@@ -1100,6 +1138,7 @@ module.exports = function setupWebSocketBridge(server) {
         if (bridgeClosed || pendingHangup || !payload) {
           return;
         }
+        session.audioChunkCount = (session.audioChunkCount || 0) + 1;
 
         // Avoid echo-driven interruption and chopped playback while the agent is still speaking.
         if (session.aiSpeakingUntil && Date.now() < session.aiSpeakingUntil) {
@@ -1113,7 +1152,20 @@ module.exports = function setupWebSocketBridge(server) {
         // In DIRECT_AUDIO mode, forward caller audio after the agent finishes speaking
         // so Gemini Live can do turn-taking without self-interrupting on echo.
         if (useGeminiLive() && GEMINI_LIVE_DIRECT_AUDIO) {
-          if (geminiLiveSession && geminiLiveReady) {
+          const openingGraceActive = openingPromptSent
+            && !session.geminiLiveFirstAudioAt
+            && (session.outChunkCount || 0) < 1
+            && session.openingPromptSentAt
+            && Date.now() - session.openingPromptSentAt < GEMINI_OPENING_INPUT_GRACE_MS;
+
+          if (openingGraceActive) {
+            if (session.audioChunkCount % 100 === 0) {
+              debugLog('Holding caller audio from Gemini Live during opening grace', {
+                streamId: getSessionLabel(),
+                count: session.audioChunkCount
+              });
+            }
+          } else if (geminiLiveSession && geminiLiveReady) {
             if (session.audioChunkCount % 100 === 0) {
               debugLog('Sending audio chunk to Gemini Live Native Audio', { streamId: getSessionLabel(), count: session.audioChunkCount });
             }
@@ -1137,6 +1189,7 @@ module.exports = function setupWebSocketBridge(server) {
       close() {
         if (llmWatchdogInterval) clearInterval(llmWatchdogInterval);
         if (session.audioInterval) clearInterval(session.audioInterval);
+        clearOpeningFallbackTimer();
         bridgeClosed = true;
         if (hangupFinalizeTimer) {
           clearTimeout(hangupFinalizeTimer);

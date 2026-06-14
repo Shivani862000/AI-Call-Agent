@@ -81,7 +81,6 @@ function buildMasterPostPayload(customerPhone, leadId, options = {}) {
 }
 
 function extractCallSid(payload, fallback) {
-  const text = typeof payload === 'string' ? payload : JSON.stringify(payload || {});
   const parsedSid = (
     payload?.sid
     || payload?.callSid
@@ -95,6 +94,26 @@ function extractCallSid(payload, fallback) {
   );
 
   return parsedSid || fallback || `icallmate-${Date.now()}`;
+}
+
+function hasProviderCallSid(payload) {
+  return Boolean(
+    payload?.sid
+    || payload?.callSid
+    || payload?.campaignId
+    || payload?.campaignid
+    || payload?.data?.sid
+    || payload?.data?.campaignId
+    || payload?.response?.sid
+    || payload?.response?.campaignId
+  );
+}
+
+function getProviderReason(payload) {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  return String(payload?.reason || payload?.message || payload?.rawText || '');
 }
 
 function isFailurePayload(payload) {
@@ -138,11 +157,16 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
     throw new Error(`iCallMate master-post call rejected: ${parsed.message || rawText || 'unknown failure'}`);
   }
 
-  const sid = extractCallSid(parsed, `icallmate-masterpost-${payload.leadid}`);
-  console.log(`[ICALLMATE OUTBOUND] Call accepted sid=${sid}`);
+  const providerReturnedSid = hasProviderCallSid(parsed);
+  const sid = extractCallSid(parsed, `icallmate-masterpost-${payload.leadid}-${Date.now()}`);
+  const providerReason = getProviderReason(parsed);
+  const status = providerReturnedSid ? 'queued' : 'submitted';
+  console.log(`[ICALLMATE OUTBOUND] Call ${status} sid=${sid}${providerReason ? ` reason="${providerReason}"` : ''}`);
   return {
     sid,
-    status: 'queued',
+    status,
+    providerReturnedSid,
+    providerReason,
     raw: parsed,
     requestPayload: payload
   };
