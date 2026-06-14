@@ -20,18 +20,30 @@ const COLORS = {
 
 function resolveFontPath() {
   const candidates = [
-    '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-    '/Library/Fonts/Arial Unicode.ttf'
+    { path: '/System/Library/Fonts/Supplemental/DevanagariMT.ttc', family: 'DevanagariMT', boldFamily: 'DevanagariMT-Bold' },
+    { path: '/System/Library/Fonts/MuktaMahee.ttc', family: 'MuktaMahee-Regular', boldFamily: 'MuktaMahee-Bold' },
+    { path: '/System/Library/Fonts/Supplemental/Arial Unicode.ttf', family: null, boldFamily: null },
+    { path: '/Library/Fonts/Arial Unicode.ttf', family: null, boldFamily: null }
   ];
 
-  return candidates.find((fontPath) => fs.existsSync(fontPath)) || null;
+  return candidates.find((c) => fs.existsSync(c.path)) || null;
 }
 
 function registerFonts(doc) {
-  const unicodeFontPath = resolveFontPath();
-  if (unicodeFontPath) {
-    doc.registerFont('ReportUnicode', unicodeFontPath);
-    return { regular: 'ReportUnicode', heading: 'ReportUnicode' };
+  const fontObj = resolveFontPath();
+  if (fontObj) {
+    if (fontObj.family) {
+      doc.registerFont('ReportUnicode', fontObj.path, fontObj.family);
+      try {
+        doc.registerFont('ReportUnicodeBold', fontObj.path, fontObj.boldFamily);
+        return { regular: 'ReportUnicode', heading: 'ReportUnicodeBold' };
+      } catch (e) {
+        return { regular: 'ReportUnicode', heading: 'ReportUnicode' };
+      }
+    } else {
+      doc.registerFont('ReportUnicode', fontObj.path);
+      return { regular: 'ReportUnicode', heading: 'ReportUnicode' };
+    }
   }
 
   return { regular: 'Helvetica', heading: 'Helvetica-Bold' };

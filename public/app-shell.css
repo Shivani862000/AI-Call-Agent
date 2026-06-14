@@ -5145,19 +5145,32 @@ a[href="/incoming-calls.html"] {
     box-sizing: border-box;
   }
 
+  .saas-form-section,
+  .saas-field {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+
   .saas-grid-2,
   .saas-campaign-cards,
   .form-grid,
   .field-row {
     grid-template-columns: 1fr !important;
     width: 100%;
+    box-sizing: border-box;
   }
 
+  input[type="date"],
+  input[type="time"],
   input,
   select,
   textarea,
   button {
+    width: 100%;
     max-width: 100%;
+    min-width: 0;
     box-sizing: border-box;
   }
 
