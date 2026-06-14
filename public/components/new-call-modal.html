@@ -2,8 +2,8 @@
     <div class="saas-modal-panel" role="dialog" aria-modal="true" aria-labelledby="newCallModalTitle">
       <div class="saas-modal-header">
         <div>
-          <h3 id="newCallModalTitle" class="saas-modal-title">📞 Schedule New Call</h3>
-          <div class="saas-modal-subtitle">Create and schedule an AI-powered call.</div>
+          <h3 id="newCallModalTitle" class="saas-modal-title">Schedule New Follow-up Call</h3>
+          <div class="saas-modal-subtitle">Create and schedule a customer follow-up call.</div>
         </div>
         <button id="closeNewCallModal" class="saas-modal-close" type="button" aria-label="Close">
           <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -14,9 +14,9 @@
 
       <div class="saas-modal-body">
         
-        <!-- Section 1: Customer Info -->
-        <div>
-          <div class="saas-section-title">Customer Information</div>
+        <!-- Section 1: Patient Information -->
+        <div class="saas-form-section saas-card-section">
+          <div class="saas-section-title">Patient Information</div>
           <div class="saas-grid-2">
             <div class="saas-field">
               <label for="callCustomerName">Patient Name <span style="color:var(--color-danger)">*</span></label>
@@ -29,9 +29,9 @@
           </div>
         </div>
 
-        <!-- Section 2: Call Scheduling -->
-        <div>
-          <div class="saas-section-title">Call Scheduling</div>
+        <!-- Section 2: Schedule Information -->
+        <div class="saas-form-section">
+          <div class="saas-section-title">Schedule Information</div>
           <div class="saas-grid-2">
             <div class="saas-field">
               <label for="callCustomerDate">Call Date</label>
@@ -44,88 +44,89 @@
           </div>
         </div>
 
-        <!-- Section 3: Campaign Type -->
-        <div>
-          <div class="saas-section-title">Call Campaign Type</div>
-          <div class="saas-campaign-cards">
-            <div class="saas-campaign-card selected" data-value="REVIEW_CALL">
-              <strong>Review Call</strong>
-              <span>Collect feedback after donation</span>
-            </div>
-            <div class="saas-campaign-card" data-value="THREE_MONTH_FOLLOWUP">
-              <strong>3-Month Follow-up</strong>
-              <span>Schedule next donation</span>
+        <!-- Section 3: Call Configuration -->
+        <div class="saas-form-section">
+          <div class="saas-section-title">Call Configuration</div>
+          
+          <div class="saas-field">
+            <label style="margin-bottom: 8px;">Call Type</label>
+            <div class="saas-campaign-cards">
+              <div class="saas-campaign-card selected" data-value="REVIEW_CALL">
+                <div class="saas-card-content">
+                  <strong>Review Calling</strong>
+                </div>
+                <div class="saas-card-check">
+                  <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                </div>
+              </div>
+              <div class="saas-campaign-card" data-value="THREE_MONTH_FOLLOWUP">
+                <div class="saas-card-content">
+                  <strong>3 Month Follow-up</strong>
+                </div>
+                <div class="saas-card-check">
+                  <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                </div>
+              </div>
             </div>
           </div>
+
           <!-- Hidden inputs for legacy JS compatibility -->
           <input type="hidden" id="hiddenCallType" value="REVIEW_CALL">
           <input type="hidden" id="hiddenVideoSent" value="false">
-        </div>
 
-        <!-- Section 4: Additional Context -->
-        <div id="additionalContextSection">
-          <div class="saas-section-title">Additional Context</div>
+          <details class="saas-accordion">
+            <summary>Additional Care Details (Optional)</summary>
+            <div class="saas-accordion-content">
+              
+              <div class="saas-field">
+                <textarea id="customNotes" placeholder="Additional notes for the care team..." rows="3" style="width:100%; border:1px solid #cbd5e1; border-radius:8px; padding:12px; font-size:14px; font-family:inherit; resize:vertical; outline:none; transition:border-color 0.15s, box-shadow 0.15s;" onfocus="this.style.borderColor='#3b82f6'; this.style.boxShadow='0 0 0 3px rgba(59, 130, 246, 0.1)';" onblur="this.style.borderColor='#cbd5e1'; this.style.boxShadow='none';"></textarea>
+              </div>
+
+              <!-- Other legacy fields wrapped inside to not clutter UI -->
+              <div id="additionalContextSection" style="margin-top: 8px; display: flex; flex-direction: column; gap: 16px;">
+                <div id="reviewCallContext">
+                  <div class="saas-toggle-row">
+                    <div class="saas-toggle-info">
+                      <strong>Video Sent?</strong>
+                      <span>Ask the patient about the video sent</span>
+                    </div>
+                    <label class="saas-toggle">
+                      <input type="checkbox" id="videoSentToggle">
+                      <span class="saas-toggle-slider"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div id="followUpContext" style="display: none;">
+                  <div class="saas-field">
+                    <label for="careLastVisit">Previous Donation Date</label>
+                    <input id="careLastVisit" type="date">
+                  </div>
+                </div>
+                
+                <div class="saas-grid-2">
+                  <div class="saas-field">
+                    <label for="careDob">Date of Birth</label>
+                    <input id="careDob" type="date">
+                  </div>
+                  <div class="saas-field">
+                    <label for="careTreatment">Treatment Type</label>
+                    <input id="careTreatment" type="text" placeholder="e.g. Blood test">
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </details>
           
-          <div id="reviewCallContext">
-            <div class="saas-toggle-row">
-              <div class="saas-toggle-info">
-                <strong>Video Sent?</strong>
-                <span>Ask the patient about the video sent</span>
-              </div>
-              <label class="saas-toggle">
-                <input type="checkbox" id="videoSentToggle">
-                <span class="saas-toggle-slider"></span>
-              </label>
+          <div style="margin-top: 8px;">
+            <div class="saas-ai-preview">
+              <div class="saas-ai-preview-badge">AI Will Say</div>
+              <p class="saas-ai-preview-text" id="aiPreviewText">Good Morning.<br>Main Apna Blood Centre se baat kar rahi hoon.<br>Kya main <strong>...</strong> ji se baat kar rahi hoon?</p>
             </div>
           </div>
 
-          <div id="followUpContext" style="display: none;">
-            <div class="saas-grid-2">
-              <div class="saas-field">
-                <label for="careLastVisit">Previous Donation Date</label>
-                <input id="careLastVisit" type="date">
-              </div>
-              <div class="saas-field">
-                <label for="customNotes">Optional Notes</label>
-                <input id="customNotes" type="text" placeholder="e.g. Needs transport">
-              </div>
-            </div>
-          </div>
         </div>
-
-        <!-- Section 5: AI Preview Card -->
-        <div>
-          <div class="saas-section-title">AI Preview</div>
-          <div class="saas-ai-preview">
-            <div class="saas-ai-preview-badge">AI Will Say</div>
-            <p class="saas-ai-preview-text" id="aiPreviewText">Good Morning.<br>Main Apna Blood Centre se baat kar rahi hoon.<br>Kya main <strong>...</strong> ji se baat kar rahi hoon?</p>
-          </div>
-        </div>
-
-        <!-- Section 6: Advanced Settings -->
-        <details class="saas-accordion">
-          <summary>Advanced Settings</summary>
-          <div class="saas-accordion-content">
-            <div class="saas-grid-2">
-              <div class="saas-field">
-                <label for="careDob">Date of Birth</label>
-                <input id="careDob" type="date">
-              </div>
-              <div class="saas-field">
-                <label for="careTreatment">Treatment Type</label>
-                <input id="careTreatment" type="text" placeholder="e.g. Blood test">
-              </div>
-              <div class="saas-field">
-                <label>Retry Attempts</label>
-                <input type="number" value="2" min="1" max="5">
-              </div>
-              <div class="saas-field">
-                <label>Preferred Language</label>
-                <input type="text" value="Hindi" disabled>
-              </div>
-            </div>
-          </div>
-        </details>
 
       </div>
 

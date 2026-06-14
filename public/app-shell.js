@@ -227,85 +227,125 @@
       careToggle: `${fieldPrefix}CareToggle`,
       dob: `${fieldPrefix}Dob`,
       lastVisit: `${fieldPrefix}LastVisit`,
-      treatment: `${fieldPrefix}Treatment`
+      treatment: `${fieldPrefix}Treatment`,
+      notes: `${fieldPrefix}Notes`
     };
 
     mount.innerHTML = `
-      <div id="${ids.backdrop}" class="modal-backdrop new-call-modal" aria-hidden="true">
-        <div class="modal-panel new-call-modal-panel" role="dialog" aria-modal="true" aria-labelledby="${ids.panelTitle}">
-          <div class="mobile-sheet-handle mobile-only"></div>
-          <div class="poc-card-header modal-sheet-header">
+      <div id="${ids.backdrop}" class="modal-backdrop" aria-hidden="true">
+        <div class="saas-modal-panel" role="dialog" aria-modal="true" aria-labelledby="${ids.panelTitle}">
+          <div class="saas-modal-header">
             <div>
-              <h3 id="${ids.panelTitle}" class="poc-card-title">Schedule New Call</h3>
+              <h3 id="${ids.panelTitle}" class="saas-modal-title">Schedule New Follow-up Call</h3>
+              <div class="saas-modal-subtitle">Create and schedule a customer follow-up call.</div>
             </div>
-            <button id="${ids.close}" class="secondary modal-close" type="button">Close</button>
+            <button id="${ids.close}" class="saas-modal-close" type="button" aria-label="Close">
+              <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
           </div>
 
           <input id="${ids.editingId}" type="hidden">
 
-          <div class="poc-form-grid">
-            <label class="span-2">
-              Patient Name
-              <input id="${ids.name}" type="text" maxlength="100" placeholder="e.g. Rahul Sharma">
-              <span class="error-text" id="${ids.name}Error"></span>
-            </label>
-            <label>
-              Phone Number
-              <input id="${ids.phone}" type="tel" placeholder="+91 98765 43210">
-              <span class="error-text" id="${ids.phone}Error"></span>
-            </label>
-            <label>
-              Call Date
-              <input id="${ids.date}" type="date">
-              <span class="error-text" id="${ids.date}Error"></span>
-            </label>
-            <label>
-              Call Time
-              <input id="${ids.time}" type="time">
-              <span class="error-text" id="${ids.time}Error"></span>
-            </label>
-            <div class="form-field-block">
-              <div class="field-label">Call Type</div>
-              <div class="segmented-control call-type-control" role="radiogroup" aria-label="Call type">
-                <label class="segment-button active">
-                  <input type="radio" name="${ids.callType}" value="REVIEW_CALL" checked>
-                  Review Calling
-                </label>
-                <label class="segment-button">
-                  <input type="radio" name="${ids.callType}" value="THREE_MONTH_FOLLOWUP">
-                  3 Month Follow-up
-                </label>
+          <div class="saas-modal-body">
+            
+            <div class="saas-form-section saas-card-section">
+              <div class="saas-section-title">Patient Information</div>
+              <div class="saas-grid-2">
+                <div class="saas-field">
+                  <label for="${ids.name}">Patient Name <span style="color:var(--color-danger)">*</span></label>
+                  <input id="${ids.name}" type="text" maxlength="100" placeholder="e.g. Rahul Sharma" required>
+                  <span class="error-text" id="${ids.name}Error"></span>
+                </div>
+                <div class="saas-field">
+                  <label for="${ids.phone}">Phone Number <span style="color:var(--color-danger)">*</span></label>
+                  <input id="${ids.phone}" type="tel" placeholder="+91 98765 43210" required>
+                  <span class="error-text" id="${ids.phone}Error"></span>
+                </div>
               </div>
-              <span class="error-text" id="${ids.callType}Error"></span>
             </div>
+
+            <div class="saas-form-section">
+              <div class="saas-section-title">Schedule Information</div>
+              <div class="saas-grid-2">
+                <div class="saas-field">
+                  <label for="${ids.date}">Call Date</label>
+                  <input id="${ids.date}" type="date">
+                  <span class="error-text" id="${ids.date}Error"></span>
+                </div>
+                <div class="saas-field">
+                  <label for="${ids.time}">Call Time <span style="color:var(--color-danger)">*</span></label>
+                  <input id="${ids.time}" type="time" required>
+                  <span class="error-text" id="${ids.time}Error"></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="saas-form-section">
+              <div class="saas-section-title">Call Configuration</div>
+              
+              <div class="saas-field">
+                <label style="margin-bottom: 8px;">Call Type</label>
+                <div class="saas-campaign-cards">
+                  <label class="saas-campaign-card selected">
+                    <input type="radio" name="${ids.callType}" value="REVIEW_CALL" checked style="display:none;">
+                    <div class="saas-card-content">
+                      <strong>Review Calling</strong>
+                    </div>
+                    <div class="saas-card-check">
+                      <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
+                  </label>
+                  <label class="saas-campaign-card">
+                    <input type="radio" name="${ids.callType}" value="THREE_MONTH_FOLLOWUP" style="display:none;">
+                    <div class="saas-card-content">
+                      <strong>3 Month Follow-up</strong>
+                    </div>
+                    <div class="saas-card-check">
+                      <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
+                  </label>
+                </div>
+                <span class="error-text" id="${ids.callType}Error"></span>
+              </div>
+
+              <details id="${ids.careToggle}" class="saas-accordion">
+                <summary>Additional Care Details (Optional)</summary>
+                <div class="saas-accordion-content">
+                  
+                  <div class="saas-field">
+                    <textarea id="${ids.notes}" placeholder="Additional notes for the care team..." rows="3" style="width:100%; border:1px solid #cbd5e1; border-radius:8px; padding:12px; font-size:14px; font-family:inherit; resize:vertical; outline:none; transition:border-color 0.15s, box-shadow 0.15s;" onfocus="this.style.borderColor='#3b82f6'; this.style.boxShadow='0 0 0 3px rgba(59, 130, 246, 0.1)';" onblur="this.style.borderColor='#cbd5e1'; this.style.boxShadow='none';"></textarea>
+                  </div>
+
+                  <div id="additionalContextSection" style="margin-top: 8px; display: flex; flex-direction: column; gap: 16px;">
+                    <div class="saas-grid-2">
+                      <div class="saas-field">
+                        <label for="${ids.dob}">Date of Birth</label>
+                        <input id="${ids.dob}" type="date">
+                        <span class="error-text" id="${ids.dob}Error"></span>
+                      </div>
+                      <div class="saas-field">
+                        <label for="${ids.lastVisit}">Previous Donation Date</label>
+                        <input id="${ids.lastVisit}" type="date">
+                        <span class="error-text" id="${ids.lastVisit}Error"></span>
+                      </div>
+                      <div class="saas-field" style="grid-column: span 2;">
+                        <label for="${ids.treatment}">Treatment Type</label>
+                        <input id="${ids.treatment}" type="text" placeholder="e.g. Blood test">
+                        <span class="error-text" id="${ids.treatment}Error"></span>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              </details>
+              
+            </div>
+
           </div>
 
-          <details id="${ids.careToggle}" class="details-toggle">
-            <summary>Additional Care Details</summary>
-            <div class="details-content">
-              <div class="poc-form-grid">
-                <label>
-                  DOB
-                  <input id="${ids.dob}" type="date">
-                  <span class="error-text" id="${ids.dob}Error"></span>
-                </label>
-                <label>
-                  Last Visit
-                  <input id="${ids.lastVisit}" type="date">
-                  <span class="error-text" id="${ids.lastVisit}Error"></span>
-                </label>
-                <label class="span-2">
-                  Treatment Type
-                  <input id="${ids.treatment}" type="text" placeholder="e.g. Blood test">
-                  <span class="error-text" id="${ids.treatment}Error"></span>
-                </label>
-              </div>
-            </div>
-          </details>
-
-          <div class="button-row new-call-modal-actions">
-            <button id="${ids.cancel}" class="secondary" type="button">Cancel</button>
-            <button id="${ids.submit}" class="primary" type="button">Schedule Call</button>
+          <div class="saas-modal-footer">
+            <button id="${ids.cancel}" class="btn-ghost-saas" type="button">Cancel</button>
+            <button id="${ids.submit}" class="btn-primary-saas" type="button">Schedule Call</button>
           </div>
         </div>
       </div>
@@ -333,7 +373,7 @@
       const normalized = normalizeCallType(value);
       document.querySelectorAll(`input[name="${ids.callType}"]`).forEach((input) => {
         input.checked = input.value === normalized;
-        input.closest('.segment-button')?.classList.toggle('active', input.checked);
+        input.closest('.saas-campaign-card')?.classList.toggle('selected', input.checked);
       });
     }
 
@@ -342,7 +382,7 @@
     }
 
     function allFieldIds() {
-      return [ids.name, ids.phone, ids.date, ids.time, ids.callType, ids.dob, ids.lastVisit, ids.treatment];
+      return [ids.name, ids.phone, ids.date, ids.time, ids.callType, ids.dob, ids.lastVisit, ids.treatment, ids.notes];
     }
 
     function clearErrors() {
@@ -406,7 +446,7 @@
         treatment_type: getEl('treatment').value.trim(),
         annual_reminder_enabled: 1,
         annual_reminder_slot: customerPayload.preferred_slot || '10:00',
-        notes: '',
+        notes: getEl('notes').value.trim(),
         status: 'active'
       };
     }
@@ -446,7 +486,7 @@
 
     function reset() {
       getEl('editingId').value = '';
-      getEl('panelTitle').textContent = 'Schedule New Call';
+      getEl('panelTitle').textContent = 'Schedule New Follow-up Call';
       getEl('submit').textContent = 'Schedule Call';
       getEl('name').value = '';
       getEl('phone').value = '';
@@ -456,6 +496,7 @@
       getEl('dob').value = '';
       getEl('lastVisit').value = '';
       getEl('treatment').value = '';
+      getEl('notes').value = '';
       getEl('careToggle').open = false;
       setCallTypeSelection('REVIEW_CALL');
       clearErrors();
