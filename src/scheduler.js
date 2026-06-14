@@ -28,8 +28,13 @@ const logger = require('../services/system-logger');
 let ownerDigestRunning = false;
 let schedulerRunning = false;
 
-const SUBMITTED_CALL_GRACE_MS = Number(process.env.SUBMITTED_CALL_GRACE_MS || 2 * 60 * 1000);
+const SUBMITTED_CALL_GRACE_MS = Number(process.env.SUBMITTED_CALL_GRACE_MS || 6 * 60 * 1000);
 const SUBMITTED_CALL_RETRY_MS = Number(process.env.SUBMITTED_CALL_RETRY_MS || 5 * 60 * 60 * 1000);
+
+function formatTimeoutLabel(ms) {
+  const minutes = Math.round((Number(ms || 0) / 60000) * 10) / 10;
+  return `${minutes || 0} minute${minutes === 1 ? '' : 's'}`;
+}
 
 function isProviderAcceptedOnly(call) {
   const reason = String(call?.raw?.reason || call?.raw?.message || '');
@@ -43,6 +48,7 @@ async function markSubmittedCallsWithoutMediaFailed() {
   const cutoffIso = new Date(Date.now() - SUBMITTED_CALL_GRACE_MS).toISOString();
   const retryAt = new Date(Date.now() + SUBMITTED_CALL_RETRY_MS).toISOString();
   const nowIso = new Date().toISOString();
+  const timeoutLabel = formatTimeoutLabel(SUBMITTED_CALL_GRACE_MS);
   const staleCalls = await dbAll(
     `SELECT calls.id AS call_id,
             calls.customer_id,
@@ -80,7 +86,7 @@ async function markSubmittedCallsWithoutMediaFailed() {
           AND COALESCE(media_packets, 0) = 0`,
       [
         'failed',
-        'No iCallMate media stream within 2 minutes of provider acceptance',
+        `No iCallMate media stream within ${timeoutLabel} of provider acceptance`,
         nowIso,
         'media_timeout',
         'Provider accepted request, but no dial/media stream was received in time',
@@ -109,7 +115,7 @@ async function markSubmittedCallsWithoutMediaFailed() {
       phone: call.phone,
       type: logger.formatCallType(call.call_type),
       providerCallId: call.provider_call_id,
-      reason: 'No iCallMate media stream within 2 minutes',
+      reason: `No iCallMate media stream within ${timeoutLabel}`,
       retryAt: logger.formatHumanDateTime(retryAt)
     });
     logger.warn('CALL_RETRY', {
