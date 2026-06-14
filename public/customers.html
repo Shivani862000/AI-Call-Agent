@@ -286,7 +286,7 @@
         <button id="mobileActionEdit" class="mobile-sheet-action" type="button">Edit</button>
         <button id="mobileActionDelete" class="mobile-sheet-action mobile-sheet-action--danger"
           type="button">Delete</button>
-        <button id="mobileActionAnalysis" class="mobile-sheet-action" type="button">View Analysis</button>
+        <button id="mobileActionAnalysis" class="mobile-sheet-action analysis-cta-button" type="button">View Analysis</button>
       </div>
     </div>
   </div>
@@ -664,7 +664,7 @@
       tbody.innerHTML = customers.map((customer) => {
         const completedCall = getLatestCompletedCall(customer.id);
         const contextButton = completedCall
-          ? `<button class="secondary" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
+          ? `<button class="secondary analysis-cta-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
           : `<button class="secondary" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
 
         return `
@@ -707,7 +707,7 @@
         const latestCall = getLatestCall(customer.id);
         const completedCall = getLatestCompletedCall(customer.id);
         const actionButton = completedCall
-          ? `<button class="secondary mobile-action-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
+          ? `<button class="secondary mobile-action-button analysis-cta-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
           : `<button class="secondary mobile-action-button" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
         return `
           <article class="mobile-call-card">

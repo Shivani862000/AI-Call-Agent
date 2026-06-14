@@ -62,9 +62,10 @@ function signAuthValue(value) {
   return crypto.createHmac('sha256', AUTH_SIGNING_SECRET).update(value).digest('base64url');
 }
 
-function createAuthToken(username) {
+function createAuthToken(username, role = 'ADMIN') {
   const payload = Buffer.from(JSON.stringify({
     username,
+    role,
     exp: Date.now() + AUTH_SESSION_TTL_MS
   })).toString('base64url');
   const signature = signAuthValue(payload);
@@ -99,6 +100,9 @@ function readAuthSession(req) {
     const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (!session?.username || !session?.exp || session.exp < Date.now()) {
       return null;
+    }
+    if (!session.role) {
+      session.role = 'ADMIN';
     }
     return session;
   } catch (error) {
@@ -192,15 +196,33 @@ function requireAdminAuth(req, res, next) {
   return res.redirect('/login.html');
 }
 
-function verifyCredentials(username, password) {
-  return username === ADMIN_USERNAME && bcrypt.compareSync(password, ADMIN_PASSWORD_HASH);
+async function verifyCredentials(username, password) {
+  const { dbGet } = require('../db');
+  try {
+    const user = await dbGet('SELECT * FROM users WHERE username = ?', [username]);
+    if (user && bcrypt.compareSync(password, user.password_hash)) {
+      return { success: true, role: user.role };
+    }
+    // Fallback to env for safety
+    if (username === ADMIN_USERNAME && bcrypt.compareSync(password, ADMIN_PASSWORD_HASH)) {
+      return { success: true, role: 'ADMIN' };
+    }
+    return { success: false };
+  } catch (err) {
+    if (username === ADMIN_USERNAME && bcrypt.compareSync(password, ADMIN_PASSWORD_HASH)) {
+      return { success: true, role: 'ADMIN' };
+    }
+    return { success: false };
+  }
 }
 
-function basicAuth(req, res, next) {
+async function basicAuth(req, res, next) {
   const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
   const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
 
-  if (verifyCredentials(login, password)) {
+  const authResult = await verifyCredentials(login, password);
+  if (authResult.success) {
+    req.adminSession = { username: login, role: authResult.role };
     return next();
   }
 

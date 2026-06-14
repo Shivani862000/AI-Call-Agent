@@ -109,26 +109,30 @@ module.exports = function mountApiRoutes(app) {
 
     return res.json({
       authenticated: true,
-      username: session.username
+      username: session.username,
+      role: session.role
     });
   });
 
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
 
-    if (!verifyCredentials(username, password)) {
+    const authResult = await verifyCredentials(username, password);
+
+    if (!authResult.success) {
       clearAuthCookie(req, res);
       logger.warn('USER_LOGIN', { user: username || 'unknown', status: 'failed' });
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const token = createAuthToken(username);
+    const token = createAuthToken(username, authResult.role);
     setAuthCookie(req, res, token);
-    logger.info('USER_LOGIN', { user: username });
+    logger.info('USER_LOGIN', { user: username, role: authResult.role });
     return res.json({
       success: true,
-      username
+      username,
+      role: authResult.role
     });
   });
 

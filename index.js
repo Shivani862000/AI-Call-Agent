@@ -82,6 +82,23 @@ app.use((req, res, next) => {
   return next();
 });
 
+// RBAC Middleware
+app.use((req, res, next) => {
+  if (req.adminSession && req.adminSession.role === 'AGENT') {
+    const forbiddenHtml = ['/feedback.html', '/feedback-analysis.html', '/reports.html'];
+    const isForbiddenApi = req.path.startsWith('/api/feedback') || req.path.startsWith('/api/reports');
+    
+    if (forbiddenHtml.includes(req.path) || isForbiddenApi) {
+      if (req.path.startsWith('/api/')) {
+        return res.status(403).json({ error: 'Forbidden: Insufficient role' });
+      } else {
+        return res.status(403).send('Forbidden: You do not have access to this page.');
+      }
+    }
+  }
+  next();
+});
+
 app.get('/incoming-calls.html', (req, res) => {
   res.status(404).send('Incoming Calls page is disabled.');
 });

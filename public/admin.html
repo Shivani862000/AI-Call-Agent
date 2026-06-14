@@ -400,15 +400,18 @@
       };
 
       const cards = activityCards[activeOverviewFilter] || activityCards.patients;
+      const isAgent = window.AppShell.session?.role === 'AGENT';
+      const visibleCards = isAgent ? cards.filter(item => item.label !== 'Feedback' && item.label !== 'Positive' && item.label !== 'Neutral' && item.label !== 'Negative') : cards;
+
       document.getElementById('overviewActivityTitle').textContent = 'Today\'s Activity';
       document.getElementById('overviewActivitySubtitle').textContent = 'A quick view of today\'s follow-up activity.';
       document.getElementById('mobileOverviewActivityTitle').textContent = 'Today\'s Activity';
       document.getElementById('todayActivityList').innerHTML = `
-        ${cards.map((item) => `<div class="compact-row"><div><strong>${item.label}</strong><div class="muted">${item.note}</div></div><strong>${item.value}</strong></div>`).join('')}
+        ${visibleCards.map((item) => `<div class="compact-row"><div><strong>${item.label}</strong><div class="muted">${item.note}</div></div><strong>${item.value}</strong></div>`).join('')}
       `;
 
       document.getElementById('mobileTodayActivityList').innerHTML = `
-        ${cards.map((item) => `<div class="mobile-activity-row"><span>${item.label}</span><strong>${item.value}</strong></div>`).join('')}
+        ${visibleCards.map((item) => `<div class="mobile-activity-row"><span>${item.label}</span><strong>${item.value}</strong></div>`).join('')}
       `;
       updateOverviewFilterButtons();
     }
@@ -597,14 +600,21 @@
     }
 
     async function loadOverview() {
-      let [customers, feedback, recentCalls] = await Promise.all([
+      const isAgent = window.AppShell.session?.role === 'AGENT';
+
+      const promises = [
         AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
         AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
-      ]);
-      customers = Array.isArray(customers) ? customers : [];
-      feedback = Array.isArray(feedback) ? feedback : [];
-      recentCalls = Array.isArray(recentCalls) ? recentCalls : [];
+      ];
+
+      if (!isAgent) {
+        promises.push(AppShell.fetchJson(`${AppShell.API_BASE}/feedback`));
+      }
+
+      const results = await Promise.all(promises);
+      let customers = Array.isArray(results[0]) ? results[0] : [];
+      let recentCalls = Array.isArray(results[1]) ? results[1] : [];
+      let feedback = !isAgent && Array.isArray(results[2]) ? results[2] : [];
 
       const scheduledStatuses = new Set(['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled']);
       const scheduledToday = customers.filter((customer) => (

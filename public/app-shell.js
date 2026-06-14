@@ -48,7 +48,12 @@
   }
 
   async function ensureAuthenticatedSession() {
-    return fetchJson('/api/auth/session');
+    const session = await fetchJson('/api/auth/session');
+    if (session.role === 'AGENT') {
+      document.body.classList.add('role-agent');
+    }
+    window.AppShell.session = session;
+    return session;
   }
 
   async function logoutAdmin(button) {

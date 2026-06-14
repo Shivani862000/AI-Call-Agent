@@ -197,7 +197,62 @@ function runMigrations() {
       )
     `);
 
+    await run(`
+      CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username VARCHAR(100) NOT NULL UNIQUE,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(20) DEFAULT 'AGENT',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
 
+    const adminUserCountRow = await new Promise((resolve, reject) => {
+      db.get('SELECT COUNT(*) as count FROM users', [], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!adminUserCountRow || adminUserCountRow.count === 0) {
+      const defaultAdminUsername = process.env.ADMIN_USERNAME || 'admin';
+      const defaultAdminPasswordHash = process.env.ADMIN_PASSWORD_HASH || '$2b$10$Gl3xR8zUgWQfsseWE63q3e4JBUoU4pZCPpvjSn9ENt0ZHA7rYR4Zm';
+      
+      await new Promise((resolve, reject) => {
+        db.run(
+          `INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)`,
+          [defaultAdminUsername, defaultAdminPasswordHash, 'ADMIN'],
+          (err) => {
+            if (err) reject(err);
+            else resolve();
+          }
+        );
+      });
+      console.log('✓ Seeded default admin user');
+    }
+
+    const agentUserRow = await new Promise((resolve, reject) => {
+      db.get('SELECT COUNT(*) as count FROM users WHERE username = ?', ['agent1'], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!agentUserRow || agentUserRow.count === 0) {
+      const bcrypt = require('bcrypt');
+      const hash = bcrypt.hashSync('1234', 10);
+      await new Promise((resolve, reject) => {
+        db.run(
+          `INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)`,
+          ['agent1', hash, 'AGENT'],
+          (err) => {
+            if (err) reject(err);
+            else resolve();
+          }
+        );
+      });
+      console.log('✓ Seeded agent1 test user');
+    }
 
     await addColumnIfMissing('customers', 'customer_value', "VARCHAR(20) DEFAULT 'standard'");
     await addColumnIfMissing('customers', 'urgency_level', "VARCHAR(20) DEFAULT 'normal'");

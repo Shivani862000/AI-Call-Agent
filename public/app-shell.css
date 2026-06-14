@@ -39,6 +39,13 @@ body {
     linear-gradient(180deg, #f9fbff 0%, #f1f6ff 44%, #eef4ff 100%);
 }
 
+body.role-agent [href="/feedback.html"],
+body.role-agent [href="/reports.html"],
+body.role-agent [data-overview-filter="feedback"],
+body.role-agent .analysis-cta-button {
+  display: none !important;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 1fr;
@@ -469,6 +476,14 @@ body.poc-page .header-actions .button-link {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 20px;
+}
+
+body.role-agent .metric-card:nth-child(4) {
+  display: none !important;
+}
+
+body.role-agent .poc-metrics-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
 }
 
 .metric-card {
