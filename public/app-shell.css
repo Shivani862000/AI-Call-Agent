@@ -1337,6 +1337,35 @@ body.role-agent .poc-metrics-grid {
   flex-wrap: wrap;
 }
 
+#queuePaginationDesktop {
+  justify-content: space-between;
+  padding: 16px;
+  margin-top: 0;
+  border-top: 1px solid rgba(219, 228, 240, 0.7);
+  background: #fcfdfe;
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+}
+
+.pagination-range {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pagination-pages {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .pagination-button {
   min-height: 38px;
   padding: 0 14px;
@@ -1348,6 +1377,19 @@ body.role-agent .poc-metrics-grid {
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pagination-button:hover:not(:disabled) {
+  background: #f1f6ff;
+  border-color: #dbe7ff;
+  color: var(--blue-deep);
+}
+
+.pagination-button.active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
 }
 
 .pagination-button:disabled {

@@ -631,18 +631,39 @@
       };
     }
 
-    function renderPagination(containerId, currentPage, totalPages, onPageChangeName) {
+    function renderPagination(containerId, paged, onPageChangeName, isMobile = false) {
       const container = document.getElementById(containerId);
       if (!container) return;
-      if (totalPages <= 1) {
+      if (paged.totalPages <= 1) {
         container.innerHTML = '';
         return;
       }
-      container.innerHTML = `
-        <button class="pagination-button" type="button" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
-        <span class="pagination-meta">Page ${currentPage} of ${totalPages}</span>
-        <button class="pagination-button" type="button" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
-      `;
+
+      const { currentPage, totalPages, totalItems } = paged;
+      
+      if (isMobile) {
+        container.innerHTML = `
+          <button class="pagination-button" type="button" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
+          <span class="pagination-meta">Page ${currentPage} of ${totalPages}</span>
+          <button class="pagination-button" type="button" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
+        `;
+      } else {
+        const startRecord = (currentPage - 1) * PAGE_SIZE + 1;
+        const endRecord = Math.min(currentPage * PAGE_SIZE, totalItems);
+        let pagesHtml = '';
+        for (let i = 1; i <= totalPages; i++) {
+          pagesHtml += `<button class="pagination-button ${i === currentPage ? 'active' : ''}" type="button" onclick="${onPageChangeName}(${i})">${i}</button>`;
+        }
+        
+        container.innerHTML = `
+          <div class="pagination-range">Showing ${startRecord}–${endRecord} of ${totalItems} records</div>
+          <div class="pagination-controls">
+            <button class="pagination-button" type="button" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
+            <div class="pagination-pages">${pagesHtml}</div>
+            <button class="pagination-button" type="button" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
+          </div>
+        `;
+      }
     }
 
     function renderDesktopTable(customers) {
@@ -738,8 +759,8 @@
       currentQueuePage = paged.currentPage;
       renderDesktopTable(paged.items);
       renderMobileCards(paged.items);
-      renderPagination('queuePaginationDesktop', paged.currentPage, paged.totalPages, 'changeQueuePage');
-      renderPagination('queuePaginationMobile', paged.currentPage, paged.totalPages, 'changeQueuePage');
+      renderPagination('queuePaginationDesktop', paged, 'changeQueuePage', false);
+      renderPagination('queuePaginationMobile', paged, 'changeQueuePage', true);
     }
 
     function changeQueuePage(pageNumber) {
