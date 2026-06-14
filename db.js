@@ -268,10 +268,12 @@ function runMigrations() {
       });
 
       await run('PRAGMA foreign_keys = OFF');
+      await run('PRAGMA legacy_alter_table = ON');
       await run('ALTER TABLE customers RENAME TO customers_unique_phone_backup');
       await run(`CREATE TABLE customers (${columnDefs.join(', ')})`);
       await run(`INSERT INTO customers (${columnNames}) SELECT ${columnNames} FROM customers_unique_phone_backup`);
       await run('DROP TABLE customers_unique_phone_backup');
+      await run('PRAGMA legacy_alter_table = OFF');
       await run('PRAGMA foreign_keys = ON');
     };
 
