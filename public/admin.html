@@ -103,6 +103,25 @@
         </button>
       </section>
 
+      <section class="overview-mobile-compact-stats mobile-only" aria-label="Overview summary">
+        <div class="overview-mobile-stat-row">
+          <span>Patients</span>
+          <strong id="overviewMobileStatPatients">0</strong>
+        </div>
+        <div class="overview-mobile-stat-row">
+          <span>Completed</span>
+          <strong id="overviewMobileStatCompleted">0</strong>
+        </div>
+        <div class="overview-mobile-stat-row">
+          <span>Scheduled</span>
+          <strong id="overviewMobileStatScheduled">0</strong>
+        </div>
+        <div class="overview-mobile-stat-row">
+          <span>Feedback</span>
+          <strong id="overviewMobileStatFeedback">0</strong>
+        </div>
+      </section>
+
       <section class="poc-metrics-grid">
         <article class="metric-card">
           <div class="metric-label">Total Patients</div>
@@ -187,7 +206,8 @@
     </main>
   </div>
 
-  <button id="mobileOverviewFloatingCta" class="mobile-floating-cta mobile-only" type="button">New Call</button>
+  <button id="mobileOverviewFloatingCta" class="mobile-floating-cta mobile-only" type="button"
+    aria-label="Schedule new call">+</button>
 
   <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
     <a href="/admin.html" class="mobile-dock-link active">Overview</a>
@@ -273,6 +293,34 @@
       const normalized = normalizePatientPhone(value);
       if (!normalized) return String(value || '--');
       return `+91 ${normalized.slice(0, 5)} ${normalized.slice(5)}`;
+    }
+
+    function formatOverviewDateShort(value) {
+      if (!value) return '--';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '--';
+      return date.toLocaleDateString('en-GB');
+    }
+
+    function formatOverviewCallDate(value) {
+      if (!value) return '--';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '--';
+      return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    function renderOverviewMobilePagination(currentPage, totalItems, onPageChangeName) {
+      const perPage = AppShell.Pagination.getItemsPerPage();
+      if (totalItems <= perPage) return '';
+
+      const totalPages = Math.ceil(totalItems / perPage) || 1;
+      return `
+        <div class="overview-mobile-pagination">
+          <button class="overview-mobile-page-button" type="button" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})" aria-label="Previous page">&lt;</button>
+          <span>${currentPage}/${totalPages}</span>
+          <button class="overview-mobile-page-button" type="button" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})" aria-label="Next page">&gt;</button>
+        </div>
+      `;
     }
 
     function buildUniquePatients(customers = []) {
@@ -504,20 +552,20 @@
       `;
 
       document.getElementById('mobileTodayActivityList').innerHTML = `
-        <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
+        <div class="overview-mobile-directory-head">
           ${searchMarkup}
-          <div class="overview-patient-directory-meta" style="font-size: 14px; color: var(--text-muted);">${filteredPatients.length} unique patients</div>
+          <div class="overview-patient-directory-meta">${filteredPatients.length} unique patients</div>
         </div>
-        <div class="overview-patient-card-list" style="display: flex; flex-direction: column; gap: 8px;">
+        <div class="overview-patient-card-list">
           ${paginatedPatients.map((patient) => `
-            <article class="mobile-call-card overview-patient-card" style="padding: 12px; margin: 0; width: 100%; box-sizing: border-box;">
-              <strong style="display: block; margin-bottom: 4px;">${AppShell.escapeHtml(AppShell.formatName(patient.name))}</strong>
-              <div class="mobile-subtext" style="margin-bottom: 2px;">${AppShell.escapeHtml(patient.phone || '--')}</div>
-              <div class="mobile-subtext">${AppShell.escapeHtml(AppShell.formatDate(patient.created_at) || '--')}</div>
+            <article class="mobile-call-card overview-patient-card">
+              <strong>${AppShell.escapeHtml(AppShell.formatName(patient.name))}</strong>
+              <div class="mobile-subtext">${AppShell.escapeHtml(patient.phone || '--')}</div>
+              <div class="mobile-subtext">${AppShell.escapeHtml(formatOverviewDateShort(patient.created_at))}</div>
             </article>
           `).join('')}
         </div>
-        ${AppShell.Pagination.renderControls(overviewPatientPage, totalItems, 'setOverviewPatientPage')}
+        ${renderOverviewMobilePagination(overviewPatientPage, totalItems, 'setOverviewPatientPage')}
       `;
 
       updateOverviewFilterButtons();
@@ -575,15 +623,14 @@
         `).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
 
         const scheduledMobileMarkup = paginatedCustomers.map((customer) => `
-          <article class="mobile-recent-call-card" style="padding: 12px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">
+          <article class="mobile-recent-call-card">
             <div>
-              <strong style="display: block; margin-bottom: 4px;">${AppShell.escapeHtml(AppShell.formatName(customer.name))}</strong>
-              <div class="mobile-subtext" style="margin-bottom: 2px;">${AppShell.escapeHtml(customer.phone || '--')} · ${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type) || 'Follow-up')}</div>
-              <div class="mobile-subtext" style="margin-bottom: 4px;">${AppShell.formatDateTime(customer.scheduled_datetime || customer.next_retry_at || customer.created_at)}</div>
+              <strong>${AppShell.escapeHtml(AppShell.formatName(customer.name))}</strong>
+              <div class="mobile-subtext">${formatOverviewCallDate(customer.scheduled_datetime || customer.next_retry_at || customer.created_at)} &bull; ${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type) || 'Follow-up')}</div>
             </div>
             <span class="status-badge pending">Status: ${AppShell.formatStatusLabel(customer.status || 'scheduled')}</span>
           </article>
-        `).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
+        `).join('') + renderOverviewMobilePagination(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
 
         container.innerHTML = scheduledDesktopMarkup;
         mobileContainer.innerHTML = scheduledMobileMarkup;
@@ -621,7 +668,7 @@
               <span class="status-badge ${tone}">${item.stars || '--'}/5</span>
             </article>
           `;
-        }).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
+        }).join('') + renderOverviewMobilePagination(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
 
         const desktopFeedbackMarkup = paginatedItems.map((item) => {
           const tone = Number(item.stars || 0) >= 4 ? 'positive' : Number(item.stars || 0) <= 2 ? 'negative' : 'neutral';
@@ -671,14 +718,14 @@
       `).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
 
       mobileContainer.innerHTML = paginatedRecent.map((call) => `
-        <article class="mobile-recent-call-card" style="padding: 12px; margin-bottom: 8px; width: 100%; box-sizing: border-box;">
+        <article class="mobile-recent-call-card">
           <div>
-            <strong style="display: block; margin-bottom: 4px;">${AppShell.escapeHtml(AppShell.formatName(call.customer_name))}</strong>
-            <div class="mobile-subtext">${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.call_direction || 'outbound')}</div>
+            <strong>${AppShell.escapeHtml(AppShell.formatName(call.customer_name))}</strong>
+            <div class="mobile-subtext">${formatOverviewCallDate(call.called_at)} &bull; ${AppShell.formatStatusLabel(call.call_direction || 'outbound')}</div>
           </div>
           <span class="status-badge ${AppShell.escapeHtml(String(call.outcome || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || 'pending')}</span>
         </article>
-      `).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
+      `).join('') + renderOverviewMobilePagination(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
     }
 
     async function loadOverview() {
@@ -732,6 +779,10 @@
       document.getElementById('mobileMetricScheduled').textContent = pendingCalls;
       document.getElementById('mobileMetricCompleted').textContent = completedCount;
       document.getElementById('mobileMetricFeedback').textContent = feedbackSummary.total;
+      document.getElementById('overviewMobileStatPatients').textContent = uniquePatientCount;
+      document.getElementById('overviewMobileStatScheduled').textContent = pendingCalls;
+      document.getElementById('overviewMobileStatCompleted').textContent = completedCount;
+      document.getElementById('overviewMobileStatFeedback').textContent = feedbackSummary.total;
 
       overviewState = {
         customers,

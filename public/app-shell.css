@@ -5123,6 +5123,295 @@ a[href="/incoming-calls.html"] {
 }
 
 @media (max-width: 768px) {
+  .overview-page {
+    --overview-mobile-dock-height: 58px;
+  }
+
+  body.overview-page .main-panel {
+    padding: 8px 10px calc(78px + env(safe-area-inset-bottom));
+    overflow-x: hidden;
+  }
+
+  .overview-page .mobile-ops-header {
+    margin-bottom: 7px;
+  }
+
+  .overview-page .mobile-ops-bar {
+    min-width: 0;
+    padding: 0;
+    gap: 8px;
+  }
+
+  .overview-page .mobile-ops-title {
+    font-size: 19px;
+    line-height: 1.1;
+    letter-spacing: 0;
+  }
+
+  .overview-page .mobile-ops-subtitle {
+    margin-top: 2px;
+    font-size: 11px;
+    line-height: 1.25;
+  }
+
+  .overview-page .mobile-icon-button {
+    width: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    border-radius: 11px;
+  }
+
+  .overview-page .mobile-stat-strip {
+    display: flex;
+    gap: 6px;
+    margin: 0 0 7px;
+    padding: 0 0 2px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .overview-page .mobile-stat-pill {
+    gap: 5px;
+    min-height: 30px;
+    padding: 5px 9px;
+    border-radius: 999px;
+    box-shadow: none;
+  }
+
+  .overview-page .mobile-stat-count {
+    min-width: 12px;
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  .overview-page .mobile-stat-label {
+    font-size: 11px;
+    line-height: 1;
+  }
+
+  .overview-page .overview-mobile-compact-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px 14px;
+    max-height: 74px;
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border: 1px solid rgba(219, 228, 240, 0.78);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+  }
+
+  .overview-page .overview-mobile-stat-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    min-height: 24px;
+  }
+
+  .overview-page .overview-mobile-stat-row span {
+    min-width: 0;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .overview-page .overview-mobile-stat-row strong {
+    color: #0f172a;
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .overview-page .mobile-overview-stack {
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .overview-page .mobile-overview-card,
+  .overview-page .mobile-overview-card--summary {
+    padding: 10px;
+    border-radius: 14px;
+    border: 1px solid rgba(219, 228, 240, 0.72);
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.045);
+  }
+
+  .overview-page .compact-overview-header {
+    margin-bottom: 7px;
+  }
+
+  .overview-page .poc-card-title {
+    font-size: 14px;
+    line-height: 1.15;
+    letter-spacing: 0;
+  }
+
+  .overview-page .overview-mobile-directory-head {
+    display: grid;
+    gap: 4px;
+    margin-bottom: 7px;
+  }
+
+  .overview-page .overview-patient-directory-search {
+    margin-bottom: 0;
+  }
+
+  .overview-page .overview-patient-directory-search .search-input {
+    width: 100%;
+    height: 36px;
+    min-height: 36px;
+    padding: 0 10px;
+    border-radius: 10px;
+    font-size: 13px;
+  }
+
+  .overview-page .overview-patient-directory-meta {
+    margin-bottom: 0;
+    font-size: 11px;
+    line-height: 1.2;
+    font-weight: 700;
+  }
+
+  .overview-page .overview-patient-card-list,
+  .overview-page .mobile-recent-call-list {
+    display: grid;
+    gap: 6px;
+  }
+
+  .overview-page .overview-patient-card {
+    display: grid;
+    gap: 2px;
+    width: 100%;
+    min-height: 70px;
+    margin: 0;
+    padding: 9px 10px;
+    border-radius: 12px;
+    box-shadow: none;
+  }
+
+  .overview-page .overview-patient-card strong,
+  .overview-page .mobile-recent-call-card strong {
+    display: block;
+    overflow: hidden;
+    color: #0f172a;
+    font-size: 13px;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .overview-page .mobile-subtext {
+    margin-top: 0;
+    overflow: hidden;
+    color: #64748b;
+    font-size: 11px;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .overview-page .mobile-recent-call-card {
+    align-items: center;
+    width: 100%;
+    min-height: 54px;
+    margin: 0;
+    padding: 9px 10px;
+    border-radius: 12px;
+    background: #f8fbff;
+    box-sizing: border-box;
+  }
+
+  .overview-page .mobile-recent-call-card > div {
+    min-width: 0;
+  }
+
+  .overview-page .mobile-recent-call-card .status-badge {
+    flex: 0 0 auto;
+    min-height: 24px;
+    max-width: 104px;
+    padding: 0 8px;
+    font-size: 10px;
+    line-height: 24px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .overview-page .overview-mobile-pagination {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 34px;
+    margin: 7px auto 0;
+    padding: 3px 6px;
+    border: 1px solid rgba(219, 228, 240, 0.82);
+    border-radius: 999px;
+    background: #fff;
+  }
+
+  .overview-page .overview-mobile-pagination span {
+    min-width: 34px;
+    text-align: center;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .overview-page .overview-mobile-page-button {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: #f1f5f9;
+    color: #0f172a;
+    font-size: 15px;
+    font-weight: 800;
+  }
+
+  .overview-page .overview-mobile-page-button:disabled {
+    opacity: 0.35;
+  }
+
+  .overview-page .mobile-floating-cta {
+    left: auto;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: calc(var(--overview-mobile-dock-height) + 18px + env(safe-area-inset-bottom));
+    transform: none;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 28px;
+    line-height: 1;
+    box-shadow: 0 14px 28px rgba(37, 99, 235, 0.26);
+  }
+
+  .overview-page .mobile-dock {
+    left: 10px;
+    right: 10px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    gap: 4px;
+    padding: 5px;
+    border-radius: 16px;
+  }
+
+  .overview-page .mobile-dock-link {
+    min-height: 32px;
+    border-radius: 11px;
+    font-size: 11px;
+  }
+
+  .overview-page .empty-state {
+    padding: 12px;
+  }
+
   .saas-modal-panel {
     width: calc(100vw - 24px);
     max-width: calc(100vw - 24px);
@@ -5172,6 +5461,30 @@ a[href="/incoming-calls.html"] {
     max-width: 100%;
     min-width: 0;
     box-sizing: border-box;
+  }
+
+  .overview-page .mobile-floating-cta {
+    width: 48px;
+    max-width: 48px;
+    min-width: 48px;
+  }
+
+  .overview-page .overview-mobile-page-button {
+    width: 28px;
+    max-width: 28px;
+    min-width: 28px;
+  }
+
+  .overview-page .mobile-icon-button {
+    width: 34px;
+    max-width: 34px;
+    min-width: 34px;
+  }
+
+  .overview-page .mobile-stat-pill-button {
+    width: auto;
+    max-width: none;
+    min-width: 0;
   }
 
   .saas-modal-footer {
