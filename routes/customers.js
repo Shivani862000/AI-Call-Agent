@@ -238,15 +238,15 @@ function handleSqliteError(error, res) {
   return res.status(500).json({ error: error.message });
 }
 
-async function saveCustomer(payload) {
+async function saveCustomer(payload, isManual = false) {
   const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
   return dbRun(
     `INSERT INTO customers (
       name, phone, preferred_slot, scheduled_datetime, status, customer_value, urgency_level,
       preferred_language, preferred_dialect, do_not_call, consent_status,
       outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
-      campaign_name, service_interest, call_type
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      campaign_name, service_interest, call_type, is_manual
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       payload.name,
       payload.phone,
@@ -265,7 +265,8 @@ async function saveCustomer(payload) {
       payload.revenue_estimate,
       payload.campaign_name || null,
       payload.service_interest || null,
-      payload.call_type
+      payload.call_type,
+      isManual ? 1 : 0
     ]
   );
 }
@@ -306,7 +307,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
-    const result = await saveCustomer(payload);
+    const result = await saveCustomer(payload, true);
     const customer = { ...payload, id: result.lastID };
     logger.info('USER_CREATED_CALL', baseCustomerLogDetails(customer, { user: req.adminSession?.username || 'admin' }));
     logger.info('CALL_CREATED', baseCustomerLogDetails(customer));
@@ -350,7 +351,7 @@ router.post('/csv', upload.single('file'), async (req, res) => {
       }
 
       try {
-        await saveCustomer(payload);
+        await saveCustomer(payload, false);
         successCount += 1;
       } catch (err) {
         errorCount += 1;
@@ -456,7 +457,8 @@ router.put('/:id', async (req, res) => {
               revenue_estimate = ?,
               campaign_name = ?,
               service_interest = ?,
-              call_type = ?
+              call_type = ?,
+              is_manual = 1
         WHERE id = ?`,
       [
         payload.name,
@@ -481,6 +483,14 @@ router.put('/:id', async (req, res) => {
         req.params.id
       ]
     );
+
+    if (existingStatus === 'completed' && nextStatus === 'scheduled') {
+      logger.info('CALL_MANUALLY_RESCHEDULED', {
+        phone: payload.phone,
+        callType: payload.call_type,
+        updatedBy: req.adminSession?.username || 'admin'
+      });
+    }
 
     const updatedCustomer = { ...existing, ...payload, id: existing.id };
     logger.info('USER_EDITED_CALL', baseCustomerLogDetails(updatedCustomer, { user: req.adminSession?.username || 'admin' }));
@@ -567,6 +577,23 @@ router.put('/:id/auto-retry', async (req, res) => {
     }
     const auto_retry_enabled = req.body.auto_retry_enabled ? 1 : 0;
     await dbRun('UPDATE customers SET auto_retry_enabled = ? WHERE id = ?', [auto_retry_enabled, req.params.id]);
+
+    if (auto_retry_enabled === 0) {
+      logger.info('AUTO_RETRY_DISABLED', {
+        customerId: existing.id,
+        patient: existing.name,
+        phone: existing.phone,
+        user: req.adminSession?.username || 'admin'
+      });
+    } else {
+      logger.info('AUTO_RETRY_ENABLED', {
+        customerId: existing.id,
+        patient: existing.name,
+        phone: existing.phone,
+        user: req.adminSession?.username || 'admin'
+      });
+    }
+
     res.json({ message: 'Auto retry toggled successfully', auto_retry_enabled });
   } catch (error) {
     console.error('Error toggling auto-retry:', error);

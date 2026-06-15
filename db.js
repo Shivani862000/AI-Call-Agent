@@ -295,6 +295,9 @@ function runMigrations() {
     await addColumnIfMissing('customers', 'phone_number', 'VARCHAR(20)');
     await addColumnIfMissing('customers', 'normalized_phone', 'VARCHAR(20)');
     await addColumnIfMissing('customers', 'auto_retry_enabled', 'INTEGER DEFAULT 1');
+    await addColumnIfMissing('customers', 'locked_at', 'TIMESTAMP');
+    await addColumnIfMissing('customers', 'provider_request_id', 'VARCHAR(100)');
+    await addColumnIfMissing('customers', 'is_manual', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('customers', 'last_visit_date', 'DATE');
     await addColumnIfMissing('clients', 'date_of_birth', 'DATE');
     await addColumnIfMissing('clients', 'annual_reminder_enabled', 'INTEGER DEFAULT 1');
@@ -308,6 +311,7 @@ function runMigrations() {
     await addColumnIfMissing('clients', 'updated_at', 'TIMESTAMP');
 
     await addColumnIfMissing('calls', 'provider_call_id', 'VARCHAR(100)');
+    await addColumnIfMissing('calls', 'idempotency_key', 'VARCHAR(100)');
     await addColumnIfMissing('calls', 'status', "VARCHAR(30) DEFAULT 'pending'");
     await addColumnIfMissing('calls', 'scheduled_at', 'TIMESTAMP');
     await addColumnIfMissing('calls', 'updated_at', 'TIMESTAMP');

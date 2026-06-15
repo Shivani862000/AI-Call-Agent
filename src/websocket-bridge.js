@@ -185,9 +185,9 @@ module.exports = function setupWebSocketBridge(server) {
     if (ws.readyState !== WebSocket.OPEN || !session.streamId) return;
 
     if (!session.outChunkCount) session.outChunkCount = 0;
-    
+
     const buffer = Buffer.isBuffer(pcmBuffer) ? pcmBuffer : Buffer.from(pcmBuffer || []);
-    
+
     if (!session.audioBuffer) session.audioBuffer = Buffer.alloc(0);
 
     if (buffer.length) {
@@ -219,7 +219,7 @@ module.exports = function setupWebSocketBridge(server) {
         if (session.audioBuffer.length >= 320) {
           const chunk = session.audioBuffer.subarray(0, 320);
           session.audioBuffer = session.audioBuffer.subarray(320);
-          
+
           session.outChunkCount++;
           if (session.outChunkCount % 100 === 0) {
             debugLog('Sending TTS audio chunk to caller', { count: session.outChunkCount, streamId: session.streamId });
@@ -230,11 +230,11 @@ module.exports = function setupWebSocketBridge(server) {
 
           if (!session.firstChunkSentAt) {
             session.firstChunkSentAt = Date.now();
-            
+
             // Calculate latencies
             const sttProducedAt = session.sttProducedAt || session.firstChunkSentAt;
             const llmFirstAudioAt = session.geminiLiveFirstAudioAt || session.firstChunkSentAt;
-            
+
             // In Gemini Live Direct Audio, LLM hears speech directly and STT runs in parallel.
             // STT Latency is roughly the endpointing time (which is known), but we track when the final text was emitted.
             const sttLatencyMs = DEEPGRAM_ENDPOINTING_MS;
@@ -245,7 +245,7 @@ module.exports = function setupWebSocketBridge(server) {
             // E2E Latency: from user finishing speaking (approximated by STT event minus endpointing) to audio sent
             const estimatedUserSpeechEndAt = sttProducedAt - DEEPGRAM_ENDPOINTING_MS;
             const e2eLatencyMs = Math.max(0, session.firstChunkSentAt - estimatedUserSpeechEndAt);
-            
+
             debugLog('First audio chunk sent to caller', {
               streamId: session.streamId,
               sttLatencyMs,
@@ -269,11 +269,11 @@ module.exports = function setupWebSocketBridge(server) {
           const tail = session.audioBuffer;
           session.audioBuffer = Buffer.alloc(0);
           session.turnComplete = false; // Reset so we don't send empty chunks
-          
+
           session.outChunkCount++;
           const remainingMs = (session.audioBuffer.length / 2 / 8000) * 1000;
           session.aiSpeakingUntil = Date.now() + remainingMs + 500;
-          
+
           sendIcallMateJson(ws, {
             event: 'reverse-media',
             encoding: 'LINEAR16',
@@ -283,7 +283,7 @@ module.exports = function setupWebSocketBridge(server) {
             source: 'ai',
             payload: tail.toString('base64')
           });
-          
+
           // Clear latency tracking for next turn
           session.firstChunkSentAt = null;
           session.geminiLiveFirstAudioAt = null;
@@ -782,7 +782,7 @@ module.exports = function setupWebSocketBridge(server) {
 
                 // Signal the interval to flush the tail when buffer drains below 3200
                 session.turnComplete = true;
-                
+
                 const audioQueuedBytes = session.audioBuffer ? session.audioBuffer.length : 0;
                 console.log(`[GEMINI_TURN_COMPLETE] streamId=${getSessionLabel()}`);
                 console.log(`[AUDIO_QUEUE_PENDING] streamId=${getSessionLabel()} bytes=${audioQueuedBytes}`);
@@ -914,7 +914,7 @@ module.exports = function setupWebSocketBridge(server) {
         notes: 'AI conversation completed; auto hangup'
       });
       sendReverseMediaStop(ws, session);
-      
+
       console.log(`[ACTUAL_HANGUP_SENT] streamId=${getSessionLabel()} reason=${reason}`);
       sendIcallMateJson(ws, {
         event: 'hangup-call',

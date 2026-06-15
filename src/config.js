@@ -41,6 +41,7 @@ const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
 const DISABLE_SCHEDULER = String(process.env.DISABLE_SCHEDULER || '').toLowerCase() === 'true';
 const DISABLE_OWNER_DIGEST = String(process.env.DISABLE_OWNER_DIGEST || '').toLowerCase() === 'true';
 const MAX_CALL_DURATION_SECONDS = Math.max(Number(process.env.MAX_CALL_DURATION_SECONDS || 60) || 60, 10);
+const MIN_RETRY_GAP_MINUTES = Math.max(Number(process.env.MIN_RETRY_GAP_MINUTES || 180) || 180, 1);
 
 // ── In-memory state maps (shared across modules) ──────────────────────────────
 
@@ -178,6 +179,7 @@ module.exports = {
   DISABLE_SCHEDULER,
   DISABLE_OWNER_DIGEST,
   MAX_CALL_DURATION_SECONDS,
+  MIN_RETRY_GAP_MINUTES,
   liveCallState,
   incomingCallState,
   pendingCallDiagnostics,

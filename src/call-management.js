@@ -16,7 +16,8 @@ const {
   CLIENT_NAME,
   PUBLIC_BASE_URL,
   incomingCallState,
-  INCOMING_CALL_RETENTION_MS
+  INCOMING_CALL_RETENTION_MS,
+  MIN_RETRY_GAP_MINUTES
 } = require('./config');
 const {
   toWssUrl,
@@ -347,6 +348,26 @@ async function shouldBlockCustomerCall(customer) {
   }
 
   if (customer.phone) {
+    const activeCall = await dbGet(
+      `SELECT 1 FROM customers WHERE phone = ? AND status IN ('calling', 'in_progress') AND id != ? LIMIT 1`,
+      [customer.phone, customer.id]
+    );
+    if (activeCall) {
+      return { code: 'CALL_BLOCKED_ACTIVE_CALL', reason: 'Another call is currently active for this phone number' };
+    }
+    if (customer.is_manual !== 1) {
+      const completedCall = await dbGet(
+        `SELECT 1 FROM customers WHERE phone = ? AND call_type = ? AND status = 'completed' AND id != ? LIMIT 1`,
+        [customer.phone, customer.call_type, customer.id]
+      );
+      if (completedCall) {
+        return {
+          code: 'CALL_AUTO_SCHEDULE_BLOCKED_COMPLETED',
+          reason: 'Completed call already exists'
+        };
+      }
+    }
+
     const callsToday = await dbAll(
       `SELECT called_at 
        FROM calls c
@@ -365,12 +386,12 @@ async function shouldBlockCustomerCall(customer) {
     if (callsToday && callsToday.length > 0) {
       const lastCallTime = new Date(callsToday[0].called_at);
       const diffMs = Date.now() - lastCallTime.getTime();
-      const threeHoursMs = 3 * 60 * 60 * 1000;
-      if (diffMs < threeHoursMs) {
-        const nextAllowedAt = new Date(lastCallTime.getTime() + threeHoursMs);
-        return { 
-          code: 'CALL_BLOCKED_THREE_HOUR_GAP', 
-          reason: '3-hour gap required between attempts',
+      const gapMs = MIN_RETRY_GAP_MINUTES * 60 * 1000;
+      if (diffMs < gapMs) {
+        const nextAllowedAt = new Date(lastCallTime.getTime() + gapMs);
+        return {
+          code: 'CALL_BLOCKED_THREE_HOUR_GAP',
+          reason: `Cooldown gap required between attempts`,
           lastAttemptAt: lastCallTime.toISOString(),
           nextAllowedAt: nextAllowedAt.toISOString()
         };

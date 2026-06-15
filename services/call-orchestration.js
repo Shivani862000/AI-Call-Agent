@@ -99,12 +99,12 @@ function computePriorityScore(customer = {}) {
   const wrongNumberPenalty = customer.wrong_number_flag ? 100 : 0;
   const score = Math.round(
     VALUE_SCORES[valueBand] * 0.45
-      + URGENCY_SCORES[urgencyBand] * 0.45
-      + consentBonus
-      - retryPenalty
-      - reviewPenalty
-      - dndPenalty
-      - wrongNumberPenalty
+    + URGENCY_SCORES[urgencyBand] * 0.45
+    + consentBonus
+    - retryPenalty
+    - reviewPenalty
+    - dndPenalty
+    - wrongNumberPenalty
   );
 
   return Math.max(0, Math.min(100, score));
@@ -309,12 +309,13 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
       customerUpdates.failed_reason = 'Maximum 3 attempts completed for the day';
       callUpdates.outcome = 'failed';
       callUpdates.outcome_detail = 'Maximum 3 attempts completed for the day';
-      
+
       const logger = require('../services/system-logger');
       logger.error('CALL_FAILED_MAX_ATTEMPTS', { phone: customer.phone, attempts: 3, reason: customerUpdates.failed_reason });
     } else {
       customerUpdates.status = 'retry_scheduled';
-      const retryAt = new Date(Date.now() + 3 * 60 * 60 * 1000);
+      const { MIN_RETRY_GAP_MINUTES } = require('./config');
+      const retryAt = new Date(Date.now() + MIN_RETRY_GAP_MINUTES * 60 * 1000);
       customerUpdates.next_retry_at = retryAt.toISOString();
       callUpdates.next_action_at = customerUpdates.next_retry_at;
       if (normalized !== 'busy') {

@@ -179,6 +179,15 @@ async function runOwnerDigestTick() {
 // ── Outbound Calling Schedulers ────────────────────────────────────────────────
 
 async function triggerScheduledCalls() {
+  if (String(process.env.DISABLE_SCHEDULER || '').toLowerCase() === 'true') {
+    return;
+  }
+
+  if (global.providerFailureCooldownUntil && Date.now() < global.providerFailureCooldownUntil) {
+    console.log('[SCHEDULER] Paused due to recent provider failure (global cooldown)');
+    return;
+  }
+
   await markSubmittedCallsWithoutMediaFailed();
 
   const now = new Date();
@@ -191,7 +200,10 @@ async function triggerScheduledCalls() {
        AND COALESCE(c.wrong_number_flag, 0) = 0
        AND COALESCE(c.admin_review_required, 0) = 0
        AND COALESCE(c.consent_status, 'unknown') != 'denied'
-       AND COALESCE(c.status, 'pending') != 'calling'
+       AND c.status IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')
+       AND (c.locked_at IS NULL OR DATETIME(c.locked_at) <= DATETIME('now', '-10 minutes'))
+       AND COALESCE(c.auto_retry_enabled, 1) = 1
+       AND COALESCE(c.attempt_count, 0) < 3
        AND (
          (
            c.status IN ('pending', 'scheduled')
@@ -269,23 +281,40 @@ async function triggerScheduledCalls() {
         } else if (blockedReason.code === 'CALL_BLOCKED_THREE_HOUR_GAP') {
           logger.warn('CALL_BLOCKED_THREE_HOUR_GAP', { phone: customer.phone, lastAttemptAt: logger.formatHumanDateTime(blockedReason.lastAttemptAt), nextAllowedAt: logger.formatHumanDateTime(blockedReason.nextAllowedAt) });
           await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', blockedReason.nextAllowedAt, customer.id]);
+        } else if (blockedReason.code === 'CALL_AUTO_SCHEDULE_BLOCKED_COMPLETED') {
+          logger.warn('CALL_AUTO_SCHEDULE_BLOCKED_COMPLETED', { phone: customer.phone, callType: customer.call_type, reason: blockedReason.reason });
+          await dbRun(`UPDATE customers SET status = ?, failed_reason = ? WHERE id = ?`, ['cancelled', blockedReason.reason, customer.id]);
+        } else if (blockedReason.code === 'CALL_BLOCKED_ACTIVE_CALL') {
+          logger.warn('CALL_BLOCKED_ACTIVE_CALL', { phone: customer.phone, reason: blockedReason.reason });
+          // Don't update status, just skip for now, it'll be picked up later when the other call is done
         }
+        continue;
+      }
+
+      const idempotencyKey = `${customer.id}-${customer.attempt_count || 0}-${customer.scheduled_datetime || customer.next_retry_at || 'now'}`;
+      const existingCall = await dbGet('SELECT 1 FROM calls WHERE idempotency_key = ?', [idempotencyKey]);
+      if (existingCall) {
+        logger.warn('CALL_START_BLOCKED_DUPLICATE', { phone: customer.phone, reason: 'Already calling' });
         continue;
       }
 
       const claimResult = await dbRun(
         `UPDATE customers
             SET status = ?,
-                last_called_at = ?
+                last_called_at = ?,
+                locked_at = CURRENT_TIMESTAMP
           WHERE id = ?
-            AND COALESCE(status, 'pending') IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')`,
+            AND COALESCE(status, 'pending') IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')
+            AND (locked_at IS NULL OR DATETIME(locked_at) <= DATETIME('now', '-10 minutes'))`,
         ['calling', new Date().toISOString(), customer.id]
       );
 
       if (!claimResult.changes) {
-        console.log(`[SCHEDULER] Skipping ${customer.name}: already claimed by another run`);
+        logger.warn('CALL_START_BLOCKED_DUPLICATE', { phone: customer.phone, reason: 'Already calling or locked' });
         continue;
       }
+
+      logger.info('CALL_LOCK_ACQUIRED', { callId: customer.id, lockedAt: new Date().toISOString() });
       logger.info('CALL_PENDING', {
         customerId: customer.id,
         patient: customer.name,
@@ -295,21 +324,39 @@ async function triggerScheduledCalls() {
         status: 'scheduler_picked'
       });
 
-      const call = await placeRealtimeCall({
-        customerPhone: customer.phone,
-        customerName: customer.name,
-        customerId: customer.id,
-        clientName: agentConfig?.client_name || CLIENT_NAME,
-        agentId: agentConfig?.id || null,
-        callType: customer.call_type
-      });
+      let call;
+      try {
+        call = await placeRealtimeCall({
+          customerPhone: customer.phone,
+          customerName: customer.name,
+          customerId: customer.id,
+          clientName: agentConfig?.client_name || CLIENT_NAME,
+          agentId: agentConfig?.id || null,
+          callType: customer.call_type
+        });
+      } catch (error) {
+        logger.error('CALL_PROVIDER_FAILED', { callId: customer.id, provider: 'icallmate', reason: error.message || 'provider unavailable' });
+
+        global.providerFailureCooldownUntil = Date.now() + 15 * 60 * 1000;
+        logger.error('SCHEDULER_PAUSED_PROVIDER_DOWN', { reason: 'Provider failed, pausing scheduler for 15 minutes' });
+
+        const { MIN_RETRY_GAP_MINUTES } = require('./config');
+        const nextRetry = new Date(Date.now() + MIN_RETRY_GAP_MINUTES * 60 * 1000);
+        await dbRun(
+          `UPDATE customers SET status = ?, next_retry_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1, locked_at = NULL WHERE id = ?`,
+          ['retry_scheduled', nextRetry.toISOString(), customer.id]
+        );
+        logger.info('CALL_RETRY_SCHEDULED', { callId: customer.id, nextAttemptAt: logger.formatHumanDateTime(nextRetry), attempt: (customer.attempt_count || 0) + 1 });
+        logger.info('CALL_LOCK_RELEASED', { callId: customer.id });
+        continue;
+      }
 
       const insertResult = await dbRun(
         `INSERT INTO calls (
           customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
           consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
-          provider_payload_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          provider_payload_json, idempotency_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
           agentConfig?.id || null,
@@ -323,11 +370,12 @@ async function triggerScheduledCalls() {
           'outbound',
           'icallmate',
           normalizeOutboundCallType(customer.call_type),
-          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
+          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null }),
+          idempotencyKey
         ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
-      
+
       const callsTodayRow = await dbGet(
         `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
         [customer.id]
