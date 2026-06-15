@@ -147,6 +147,23 @@ function categorizeFeedback(reviewText = '', stars) {
 }
 
 async function analyzeCallTranscript(transcriptText, context = {}) {
+  const userTurns = String(transcriptText || '').split('\n').filter(line => !line.toUpperCase().startsWith('AGENT:'));
+  const hasCustomerSpeech = userTurns.some(line => line.trim().length > 0);
+
+  if (!hasCustomerSpeech) {
+    return {
+      summary: 'Call ended before the customer could provide any feedback.',
+      customer_sentiment: 'neutral',
+      rating: null,
+      consent: null,
+      language: 'en',
+      review_text: '',
+      report_excerpt: 'No customer response.',
+      key_points: [],
+      improvement_suggestions: []
+    };
+  }
+
   const systemPrompt = `You are an expert patient care call analyst. Analyze the following call transcript and generate a JSON response strictly following this schema:
 {
   "summary": "1-2 sentences summarizing the call",
