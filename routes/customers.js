@@ -191,6 +191,18 @@ function validateCustomerPayload(payload) {
     }
   }
 
+  if (scheduled) {
+    const hours = scheduled.getHours();
+    if (hours < 7 || hours >= 21) {
+      errors.preferred_slot = 'Calls can only be scheduled between 7:00 AM and 9:00 PM.';
+      logger.warn('CALL_SCHEDULE_BLOCKED_QUIET_HOURS', {
+        phone: payload.phone,
+        selectedTime: payload.preferred_slot,
+        reason: 'Calls can only be scheduled between 7 AM and 9 PM'
+      });
+    }
+  }
+
   if (!['vip', 'high', 'standard', 'low'].includes(payload.customer_value)) {
     errors.customer_value = 'Customer value must be vip, high, standard, or low';
   }
@@ -274,6 +286,21 @@ router.post('/', async (req, res) => {
   try {
     const payload = normalizeCustomerPayload(req.body);
     const fieldErrors = validateCustomerPayload(payload);
+
+    if (payload.phone && payload.scheduled_date === getLocalDateValue()) {
+      const callsTodayRow = await dbGet(
+        `SELECT COUNT(*) as count 
+         FROM calls c
+         JOIN customers cu ON cu.id = c.customer_id
+         WHERE cu.phone = ? 
+           AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
+           AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+        [payload.phone]
+      );
+      if (callsTodayRow && callsTodayRow.count >= 3) {
+        fieldErrors.preferred_slot = 'Maximum 3 attempts completed for the day';
+      }
+    }
 
     if (Object.keys(fieldErrors).length > 0) {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
@@ -380,6 +407,21 @@ router.put('/:id', async (req, res) => {
 
     const payload = normalizeCustomerPayload(req.body);
     const fieldErrors = validateCustomerPayload(payload);
+
+    if (payload.phone && payload.scheduled_date === getLocalDateValue()) {
+      const callsTodayRow = await dbGet(
+        `SELECT COUNT(*) as count 
+         FROM calls c
+         JOIN customers cu ON cu.id = c.customer_id
+         WHERE cu.phone = ? 
+           AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
+           AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+        [payload.phone]
+      );
+      if (callsTodayRow && callsTodayRow.count >= 3) {
+        fieldErrors.preferred_slot = 'Maximum 3 attempts completed for the day';
+      }
+    }
 
     if (Object.keys(fieldErrors).length > 0) {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
@@ -513,6 +555,21 @@ router.post('/:id/retry', async (req, res) => {
     res.json({ message: 'Retry scheduled successfully', retry_at: retryAt });
   } catch (error) {
     console.error('Error scheduling retry:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+// Toggle auto-retry
+router.put('/:id/auto-retry', async (req, res) => {
+  try {
+    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+    const auto_retry_enabled = req.body.auto_retry_enabled ? 1 : 0;
+    await dbRun('UPDATE customers SET auto_retry_enabled = ? WHERE id = ?', [auto_retry_enabled, req.params.id]);
+    res.json({ message: 'Auto retry toggled successfully', auto_retry_enabled });
+  } catch (error) {
+    console.error('Error toggling auto-retry:', error);
     res.status(500).json({ error: error.message });
   }
 });

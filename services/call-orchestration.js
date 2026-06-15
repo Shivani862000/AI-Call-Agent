@@ -275,44 +275,62 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
     hot_lead_score: normalized === 'interested' ? Math.max(priorityScore, 85) : priorityScore
   };
 
+  let attemptsToday = (Number(customer?.retry_count) || 0) + 1;
+  if (customer && customer.phone) {
+    const callsTodayRow = await dbGet(
+      `SELECT COUNT(*) as count 
+       FROM calls c
+       WHERE c.customer_id = ? 
+         AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
+         AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+      [customer.id]
+    );
+    if (callsTodayRow && callsTodayRow.count > 0) {
+      attemptsToday = callsTodayRow.count;
+    }
+  }
+
   if (normalized === 'wrong_number') {
     customerUpdates.status = 'admin_review';
     customerUpdates.wrong_number_flag = 1;
     customerUpdates.admin_review_required = 1;
     customerUpdates.do_not_call = 1;
-  } else if (normalized === 'busy') {
-    customerUpdates.retry_count = (Number(customer?.retry_count) || 0) + 1;
-    if (customerUpdates.retry_count >= 2) {
+  } else if (normalized === 'busy' || normalized === 'no_answer' || normalized === 'failed') {
+    customerUpdates.retry_count = attemptsToday;
+    if (customer.auto_retry_enabled === 0) {
+      customerUpdates.status = normalized;
+      customerUpdates.next_retry_at = null;
+      customerUpdates.failed_reason = 'Auto-retry disabled';
+      callUpdates.outcome = normalized;
+      callUpdates.outcome_detail = 'Auto-retry disabled';
+    } else if (attemptsToday >= 3) {
       customerUpdates.status = 'failed';
       customerUpdates.next_retry_at = null;
+      customerUpdates.failed_reason = 'Maximum 3 attempts completed for the day';
       callUpdates.outcome = 'failed';
-      callUpdates.outcome_detail = 'max_retries_reached';
+      callUpdates.outcome_detail = 'Maximum 3 attempts completed for the day';
+      
+      const logger = require('../services/system-logger');
+      logger.error('CALL_FAILED_MAX_ATTEMPTS', { phone: customer.phone, attempts: 3, reason: customerUpdates.failed_reason });
     } else {
-      customerUpdates.status = 'busy';
-      customerUpdates.next_retry_at = getSmartRetryIso('busy');
+      customerUpdates.status = 'retry_scheduled';
+      const retryAt = new Date(Date.now() + 3 * 60 * 60 * 1000);
+      customerUpdates.next_retry_at = retryAt.toISOString();
       callUpdates.next_action_at = customerUpdates.next_retry_at;
+      if (normalized !== 'busy') {
+        callUpdates.outcome = normalized;
+        callUpdates.outcome_detail = normalized;
+      }
+      const logger = require('../services/system-logger');
+      logger.warn('CALL_RETRY_SCHEDULED', { phone: customer.phone, attempt: attemptsToday, nextAttemptAt: retryAt.toISOString() });
     }
-    if (customer) {
+    if (normalized === 'busy' && customer) {
       try {
         const sent = await maybeSendBusyFallback({ customer, callId: callRecord?.id });
         callUpdates.fallback_triggered = sent ? 1 : 0;
       } catch (error) {
         console.error('[BUSY FALLBACK ERROR]', error.message);
       }
-    }
-  } else if (normalized === 'no_answer' || normalized === 'failed') {
-    customerUpdates.retry_count = (Number(customer?.retry_count) || 0) + 1;
-    if (customerUpdates.retry_count >= 2) {
-      customerUpdates.status = 'failed';
-      customerUpdates.next_retry_at = null;
-      callUpdates.outcome = 'failed';
-      callUpdates.outcome_detail = 'max_retries_reached';
-    } else {
-      customerUpdates.status = 'retry_scheduled';
-      customerUpdates.next_retry_at = getSmartRetryIso('no_answer');
-      callUpdates.next_action_at = customerUpdates.next_retry_at;
-      callUpdates.outcome = 'no_answer';
-      callUpdates.outcome_detail = normalized;
     }
   } else if (normalized === 'callback') {
     customerUpdates.status = 'callback_scheduled';
@@ -343,7 +361,8 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
             callback_requested_at = ?,
             consent_status = ?,
             priority_score = ?,
-            ai_score = ?
+            ai_score = ?,
+            failed_reason = COALESCE(?, failed_reason)
       WHERE id = ?`,
     [
       customerUpdates.status,
@@ -357,6 +376,7 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
       customerUpdates.consent_status,
       priorityScore,
       priorityScore,
+      customerUpdates.failed_reason || null,
       customer.id
     ]
   );

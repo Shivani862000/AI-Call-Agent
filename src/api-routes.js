@@ -261,6 +261,14 @@ module.exports = function mountApiRoutes(app) {
         ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      
+      const callsTodayRow = await dbGet(
+        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+        [customer.id]
+      );
+      const attempt = callsTodayRow ? callsTodayRow.count : 1;
+      logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone || customerPhone, attempt });
+      
       logger.info('CALL_STARTED', {
         callId: result.lastID,
         customerId: customer.id,
@@ -529,6 +537,14 @@ module.exports = function mountApiRoutes(app) {
       );
 
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      
+      const callsTodayRow = await dbGet(
+        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+        [customer.id]
+      );
+      const attempt = callsTodayRow ? callsTodayRow.count : 1;
+      logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone, attempt });
+
       logger.info('CALL_STARTED', {
         callId: result.lastID,
         customerId: customer.id,

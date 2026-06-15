@@ -347,25 +347,41 @@ async function shouldBlockCustomerCall(customer) {
   }
 
   if (customer.phone) {
-    const frequencyCheck = await dbGet(
-      `SELECT COUNT(*) as count 
+    const callsToday = await dbAll(
+      `SELECT called_at 
        FROM calls c
        JOIN customers cu ON cu.id = c.customer_id
        WHERE cu.phone = ? 
-         AND c.called_at >= DATETIME('now', '-24 hours')
-         AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+         AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
+         AND COALESCE(c.call_direction, 'outbound') = 'outbound'
+       ORDER BY c.called_at DESC`,
       [customer.phone]
     );
-    if (frequencyCheck && frequencyCheck.count >= 3) {
-      return { code: 'CALL_BLOCKED_DAILY_LIMIT', reason: 'Maximum 3 call attempts reached in last 24 hours' };
+
+    if (callsToday && callsToday.length >= 3) {
+      return { code: 'CALL_FAILED_MAX_ATTEMPTS', reason: 'Maximum 3 attempts completed for the day' };
+    }
+
+    if (callsToday && callsToday.length > 0) {
+      const lastCallTime = new Date(callsToday[0].called_at);
+      const diffMs = Date.now() - lastCallTime.getTime();
+      const threeHoursMs = 3 * 60 * 60 * 1000;
+      if (diffMs < threeHoursMs) {
+        const nextAllowedAt = new Date(lastCallTime.getTime() + threeHoursMs);
+        return { 
+          code: 'CALL_BLOCKED_THREE_HOUR_GAP', 
+          reason: '3-hour gap required between attempts',
+          lastAttemptAt: lastCallTime.toISOString(),
+          nextAllowedAt: nextAllowedAt.toISOString()
+        };
+      }
     }
   }
 
   const now = new Date();
   const hours = now.getHours();
-  const minutes = now.getMinutes();
-  if ((hours > 0 && hours < 7) || (hours === 0 && minutes > 0)) {
-    return { code: 'CALL_SKIPPED_QUIET_HOURS', reason: 'Outside allowed calling window (07:00 AM - 12:00 AM)' };
+  if (hours < 7 || hours >= 21) {
+    return { code: 'CALL_SKIPPED_QUIET_HOURS', reason: 'Calls can only be scheduled between 7:00 AM and 9:00 PM' };
   }
 
   return null;

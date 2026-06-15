@@ -279,6 +279,7 @@
         <button id="closeMobileActionSheet" class="secondary modal-close" type="button">Close</button>
       </div>
       <div class="mobile-sheet-actions">
+        <button id="mobileActionToggleRetry" class="mobile-sheet-action" type="button">Auto Retry: ON</button>
         <button id="mobileActionEdit" class="mobile-sheet-action" type="button">Edit</button>
         <button id="mobileActionDelete" class="mobile-sheet-action mobile-sheet-action--danger"
           type="button">Delete</button>
@@ -458,6 +459,20 @@
       }
     }
 
+    async function toggleAutoRetry(customerId, newState) {
+      try {
+        await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}/auto-retry`, { 
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ auto_retry_enabled: newState })
+        });
+        AppShell.showAlert(`Auto Retry turned ${newState ? 'ON' : 'OFF'}`);
+        await loadPageData();
+      } catch (error) {
+        AppShell.showAlert(error.message, 'error');
+      }
+    }
+
     function buildAnalysisReview(call) {
       const rating = Number(call.extracted_rating || 0);
       const stars = rating ? ('★'.repeat(rating) + '☆'.repeat(Math.max(0, 5 - rating))) : 'No rating';
@@ -532,10 +547,16 @@
       closeSheet('mobileFilterSheet');
     }
 
-    function openMobileActionSheet(customerId, callId = null) {
+    function openMobileActionSheet(customerId, callId = null, autoRetryEnabled = 1) {
       activeMobileActionCustomerId = Number(customerId) || null;
       activeMobileActionCallId = Number(callId) || null;
       document.getElementById('mobileActionAnalysis').disabled = !activeMobileActionCallId;
+      const isAutoRetryOn = autoRetryEnabled !== 0;
+      document.getElementById('mobileActionToggleRetry').textContent = `Auto Retry: ${isAutoRetryOn ? 'ON' : 'OFF'}`;
+      document.getElementById('mobileActionToggleRetry').onclick = () => {
+        closeMobileActionSheet();
+        toggleAutoRetry(customerId, !isAutoRetryOn);
+      };
       openSheet('mobileActionSheet');
     }
 
@@ -674,6 +695,7 @@
                 <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
                 ${contextButton}
                 <button class="secondary desktop-action-button" type="button" onclick="openNewCallModal(${customer.id})">Edit</button>
+                <button class="secondary desktop-action-button" type="button" onclick="toggleAutoRetry(${customer.id}, ${customer.auto_retry_enabled === 0 ? 'true' : 'false'})">Auto Retry: ${customer.auto_retry_enabled === 0 ? 'OFF' : 'ON'}</button>
                 <button class="danger desktop-action-button" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
               </div>
             </td>
@@ -715,7 +737,7 @@
             <div class="mobile-call-actions">
               <button class="warning mobile-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
               ${actionButton}
-              <button class="secondary mobile-more-button" type="button" onclick="openMobileActionSheet(${customer.id}, ${completedCall ? completedCall.id : 'null'})">More</button>
+              <button class="secondary mobile-more-button" type="button" onclick="openMobileActionSheet(${customer.id}, ${completedCall ? completedCall.id : 'null'}, ${customer.auto_retry_enabled === 0 ? 0 : 1})">More</button>
             </div>
           </article>
         `;
@@ -839,6 +861,7 @@
     window.triggerCallNow = triggerCallNow;
     window.scheduleRetry = scheduleRetry;
     window.deleteCustomer = deleteCustomer;
+    window.toggleAutoRetry = toggleAutoRetry;
     window.openAnalysisModal = openAnalysisModal;
     window.openAnalysisPage = openAnalysisPage;
     window.openNewCallModal = openNewCallModal;

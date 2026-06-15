@@ -263,9 +263,12 @@ async function triggerScheduledCalls() {
           }
           logger.warn('CALL_SKIPPED_QUIET_HOURS', { phone: customer.phone, scheduledTime: logger.formatHumanDateTime(customer.scheduled_datetime || customer.next_retry_at || ''), reason: blockedReason.reason });
           await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', nextRetry.toISOString(), customer.id]);
-        } else if (blockedReason.code === 'CALL_BLOCKED_DAILY_LIMIT') {
-          logger.error('CALL_BLOCKED_DAILY_LIMIT', { phone: customer.phone, reason: blockedReason.reason });
-          await dbRun(`UPDATE customers SET status = ? WHERE id = ?`, ['failed', customer.id]);
+        } else if (blockedReason.code === 'CALL_FAILED_MAX_ATTEMPTS' || blockedReason.code === 'CALL_BLOCKED_DAILY_LIMIT') {
+          logger.error('CALL_FAILED_MAX_ATTEMPTS', { phone: customer.phone, attempts: 3, reason: blockedReason.reason });
+          await dbRun(`UPDATE customers SET status = ?, failed_reason = ? WHERE id = ?`, ['failed', blockedReason.reason, customer.id]);
+        } else if (blockedReason.code === 'CALL_BLOCKED_THREE_HOUR_GAP') {
+          logger.warn('CALL_BLOCKED_THREE_HOUR_GAP', { phone: customer.phone, lastAttemptAt: logger.formatHumanDateTime(blockedReason.lastAttemptAt), nextAllowedAt: logger.formatHumanDateTime(blockedReason.nextAllowedAt) });
+          await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', blockedReason.nextAllowedAt, customer.id]);
         }
         continue;
       }
@@ -324,6 +327,14 @@ async function triggerScheduledCalls() {
         ]
       );
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      
+      const callsTodayRow = await dbGet(
+        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+        [customer.id]
+      );
+      const attempt = callsTodayRow ? callsTodayRow.count : 1;
+      logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone, attempt });
+
       const insertedCall = { id: insertResult.lastID };
       const acceptedOnly = isProviderAcceptedOnly(call);
       logger.info(acceptedOnly ? 'CALL_PENDING' : 'CALL_STARTED', {
@@ -413,9 +424,12 @@ async function triggerAnnualClientReminderCalls() {
           }
           logger.warn('CALL_SKIPPED_QUIET_HOURS', { phone: hydratedCustomer.phone, scheduledTime: 'Annual Reminder', reason: blockedReason.reason });
           await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', nextRetry.toISOString(), hydratedCustomer.id]);
-        } else if (blockedReason.code === 'CALL_BLOCKED_DAILY_LIMIT') {
-          logger.error('CALL_BLOCKED_DAILY_LIMIT', { phone: hydratedCustomer.phone, reason: blockedReason.reason });
-          await dbRun(`UPDATE customers SET status = ? WHERE id = ?`, ['failed', hydratedCustomer.id]);
+        } else if (blockedReason.code === 'CALL_FAILED_MAX_ATTEMPTS' || blockedReason.code === 'CALL_BLOCKED_DAILY_LIMIT') {
+          logger.error('CALL_FAILED_MAX_ATTEMPTS', { phone: hydratedCustomer.phone, attempts: 3, reason: blockedReason.reason });
+          await dbRun(`UPDATE customers SET status = ?, failed_reason = ? WHERE id = ?`, ['failed', blockedReason.reason, hydratedCustomer.id]);
+        } else if (blockedReason.code === 'CALL_BLOCKED_THREE_HOUR_GAP') {
+          logger.warn('CALL_BLOCKED_THREE_HOUR_GAP', { phone: hydratedCustomer.phone, lastAttemptAt: logger.formatHumanDateTime(blockedReason.lastAttemptAt), nextAllowedAt: logger.formatHumanDateTime(blockedReason.nextAllowedAt) });
+          await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', blockedReason.nextAllowedAt, hydratedCustomer.id]);
         }
         continue;
       }
@@ -469,6 +483,14 @@ async function triggerAnnualClientReminderCalls() {
       );
 
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', hydratedCustomer.id]);
+
+      const callsTodayRow = await dbGet(
+        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+        [hydratedCustomer.id]
+      );
+      const attempt = callsTodayRow ? callsTodayRow.count : 1;
+      logger.info('CALL_ATTEMPT_STARTED', { phone: hydratedCustomer.phone, attempt });
+
       await dbRun(
         `UPDATE clients
             SET last_annual_reminder_at = ?,
