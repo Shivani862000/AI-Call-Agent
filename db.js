@@ -294,7 +294,7 @@ function runMigrations() {
     await addColumnIfMissing('customers', 'scheduled_at', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'phone_number', 'VARCHAR(20)');
     await addColumnIfMissing('customers', 'normalized_phone', 'VARCHAR(20)');
-    await addColumnIfMissing('customers', 'auto_retry_enabled', 'INTEGER DEFAULT 1');
+    await addColumnIfMissing('customers', 'auto_retry_enabled', 'INTEGER DEFAULT 0');
     await addColumnIfMissing('customers', 'locked_at', 'TIMESTAMP');
     await addColumnIfMissing('customers', 'provider_request_id', 'VARCHAR(100)');
     await addColumnIfMissing('customers', 'is_manual', 'INTEGER DEFAULT 0');
