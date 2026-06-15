@@ -14,6 +14,17 @@
     return window.matchMedia('(max-width: 768px)').matches;
   }
 
+  function syncMobileOptionalSections() {
+    const isMobile = isMobileModalLayout();
+    document.querySelectorAll('#newCallModal .additional-care-details, #newCallModal .optional-notes-section, #newCallModal .saas-mobile-hidden').forEach(section => {
+      section.hidden = isMobile;
+      section.setAttribute('aria-hidden', String(isMobile));
+      if (isMobile && section.tagName === 'DETAILS') {
+        section.open = false;
+      }
+    });
+  }
+
   function formatPhoneForInput(value) {
     let digits = String(value || '').replace(/\D/g, '');
     if (digits.startsWith('91') && digits.length === 12) {
@@ -231,6 +242,7 @@
     if (accordion) accordion.open = false;
     
     setCallTypeSelection('REVIEW_CALL');
+    syncMobileOptionalSections();
     clearFormErrors();
     updateAiPreview();
     validateNewCallForm();
@@ -260,6 +272,7 @@
       
       const modal = document.getElementById('newCallModal');
       if (modal) {
+        syncMobileOptionalSections();
         modal.classList.add('open');
         modal.setAttribute('aria-hidden', 'false');
       }
@@ -291,6 +304,9 @@
           validateNewCallForm();
         });
       });
+
+      syncMobileOptionalSections();
+      window.addEventListener('resize', syncMobileOptionalSections);
     }
   };
 })();

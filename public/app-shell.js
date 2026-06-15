@@ -426,6 +426,17 @@
       return window.matchMedia('(max-width: 768px)').matches;
     }
 
+    function syncMobileOptionalSections() {
+      const isMobile = isMobileModalLayout();
+      mount.querySelectorAll('.additional-care-details, .optional-notes-section, .saas-mobile-hidden').forEach((section) => {
+        section.hidden = isMobile;
+        section.setAttribute('aria-hidden', String(isMobile));
+        if (isMobile && section.tagName === 'DETAILS') {
+          section.open = false;
+        }
+      });
+    }
+
     function allFieldIds() {
       return [ids.name, ids.phone, ids.date, ids.time, ids.callType, ids.dob, ids.lastVisit, ids.treatment, ids.notes];
     }
@@ -558,6 +569,7 @@
       getEl('notes').value = '';
       getEl('careToggle').open = false;
       setCallTypeSelection('REVIEW_CALL');
+      syncMobileOptionalSections();
       clearErrors();
       setSubmitting(false);
     }
@@ -653,6 +665,7 @@
 
       getEl('backdrop').classList.add('open');
       getEl('backdrop').setAttribute('aria-hidden', 'false');
+      syncMobileOptionalSections();
       window.requestAnimationFrame(() => getEl('name').focus());
     }
 
@@ -678,6 +691,8 @@
         close();
       }
     });
+    syncMobileOptionalSections();
+    window.addEventListener('resize', syncMobileOptionalSections);
 
     return { open, close };
   }
