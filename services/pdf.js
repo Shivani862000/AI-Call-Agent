@@ -20,10 +20,12 @@ const COLORS = {
 
 function resolveFontPath() {
   const candidates = [
-    { path: '/System/Library/Fonts/Supplemental/DevanagariMT.ttc', family: 'DevanagariMT', boldFamily: 'DevanagariMT-Bold' },
-    { path: '/System/Library/Fonts/MuktaMahee.ttc', family: 'MuktaMahee-Regular', boldFamily: 'MuktaMahee-Bold' },
     { path: '/System/Library/Fonts/Supplemental/Arial Unicode.ttf', family: null, boldFamily: null },
-    { path: '/Library/Fonts/Arial Unicode.ttf', family: null, boldFamily: null }
+    { path: '/Library/Fonts/Arial Unicode.ttf', family: null, boldFamily: null },
+    { path: '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf', family: null, boldFamily: null },
+    { path: '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf', family: null, boldFamily: null },
+    { path: '/System/Library/Fonts/Supplemental/DevanagariMT.ttc', family: 'DevanagariMT', boldFamily: 'DevanagariMT-Bold' },
+    { path: '/System/Library/Fonts/MuktaMahee.ttc', family: 'MuktaMahee-Regular', boldFamily: 'MuktaMahee-Bold' }
   ];
 
   return candidates.find((c) => fs.existsSync(c.path)) || null;
