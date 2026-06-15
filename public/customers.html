@@ -141,8 +141,9 @@
             <option value="custom">Custom Date</option>
           </select>
           <input id="customDateFilter" type="date" class="table-filter desktop-only" style="display: none;">
-          <select id="callTypeFilter" class="table-filter desktop-only">
-            <option value="">All Calls</option>
+          <span class="desktop-only" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-left: auto;">Call Type:</span>
+          <select id="callTypeFilter" class="table-filter desktop-only" aria-label="Call Type">
+            <option value="">All Call Types</option>
             <option value="REVIEW_CALL">Review Calling</option>
             <option value="THREE_MONTH_FOLLOWUP">3 Month Follow-up</option>
           </select>
@@ -263,10 +264,10 @@
           data-filter-value="custom">Custom Date</button>
         <input id="mobileCustomDateFilter" type="date" class="mobile-filter-option" style="display: none; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid var(--border-light); border-radius: 6px; box-sizing: border-box;">
         <hr style="border: 0; border-top: 1px solid var(--border-light); margin: 8px 0;" />
-        <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="REVIEW_CALL">Review
-          Calling</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button"
-          data-call-type-value="THREE_MONTH_FOLLOWUP">3 Month Follow-up</button>
+        <div style="font-weight: 600; padding: 8px 16px 4px; font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Call Type</div>
+        <button class="mobile-sheet-action mobile-filter-option active" type="button" data-call-type-value="">All Call Types</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="REVIEW_CALL">Review Calling</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="THREE_MONTH_FOLLOWUP">3 Month Follow-up</button>
       </div>
     </div>
   </div>
