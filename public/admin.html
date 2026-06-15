@@ -103,7 +103,7 @@
         </button>
       </section>
 
-      <section class="overview-mobile-compact-stats mobile-only" aria-label="Overview summary">
+      <!-- <section class="overview-mobile-compact-stats mobile-only" aria-label="Overview summary">
         <div class="overview-mobile-stat-row">
           <span>Patients</span>
           <strong id="overviewMobileStatPatients">0</strong>
@@ -120,7 +120,7 @@
           <span>Feedback</span>
           <strong id="overviewMobileStatFeedback">0</strong>
         </div>
-      </section>
+      </section> -->
 
       <section class="poc-metrics-grid">
         <article class="metric-card">
@@ -207,7 +207,7 @@
   </div>
 
   <button id="mobileOverviewFloatingCta" class="mobile-floating-cta mobile-only" type="button"
-    aria-label="Schedule new call">+</button>
+    aria-label="Schedule new call">+ New Call</button>
 
   <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
     <a href="/admin.html" class="mobile-dock-link active">Overview</a>
@@ -779,10 +779,10 @@
       document.getElementById('mobileMetricScheduled').textContent = pendingCalls;
       document.getElementById('mobileMetricCompleted').textContent = completedCount;
       document.getElementById('mobileMetricFeedback').textContent = feedbackSummary.total;
-      document.getElementById('overviewMobileStatPatients').textContent = uniquePatientCount;
-      document.getElementById('overviewMobileStatScheduled').textContent = pendingCalls;
-      document.getElementById('overviewMobileStatCompleted').textContent = completedCount;
-      document.getElementById('overviewMobileStatFeedback').textContent = feedbackSummary.total;
+      // document.getElementById('overviewMobileStatPatients').textContent = uniquePatientCount;
+      // document.getElementById('overviewMobileStatScheduled').textContent = pendingCalls;
+      // document.getElementById('overviewMobileStatCompleted').textContent = completedCount;
+      // document.getElementById('overviewMobileStatFeedback').textContent = feedbackSummary.total;
 
       overviewState = {
         customers,

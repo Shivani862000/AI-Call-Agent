@@ -141,7 +141,9 @@
             <option value="custom">Custom Date</option>
           </select>
           <input id="customDateFilter" type="date" class="table-filter desktop-only" style="display: none;">
-          <span class="desktop-only" style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-left: auto;">Call Type:</span>
+          <span class="desktop-only"
+            style="font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-left: auto;">Call
+            Type:</span>
           <select id="callTypeFilter" class="table-filter desktop-only" aria-label="Call Type">
             <option value="">All Call Types</option>
             <option value="REVIEW_CALL">Review Calling</option>
@@ -175,7 +177,7 @@
   </div>
 
   <button id="mobileFloatingNewCallButton" class="mobile-floating-cta mobile-only" type="button"
-    aria-label="Add new call">+</button>
+    aria-label="Add new call">+ New Call</button>
 
   <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
     <a href="/admin.html" class="mobile-dock-link">Overview</a>
@@ -256,19 +258,26 @@
         <button id="closeMobileFilterSheet" class="secondary modal-close" type="button">Close</button>
       </div>
       <div class="mobile-sheet-actions mobile-filter-options">
-        <button class="mobile-sheet-action mobile-filter-option active" type="button" data-filter-value="">All Calls</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button"
-          data-filter-value="today">Today Calls</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button"
-          data-filter-value="tomorrow">Tomorrow Calls</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button"
-          data-filter-value="custom">Custom Date</button>
-        <input id="mobileCustomDateFilter" type="date" class="mobile-filter-option" style="display: none; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid var(--border-light); border-radius: 6px; box-sizing: border-box;">
+        <button class="mobile-sheet-action mobile-filter-option active" type="button" data-filter-value="">All
+          Calls</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="today">Today
+          Calls</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="tomorrow">Tomorrow
+          Calls</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-filter-value="custom">Custom
+          Date</button>
+        <input id="mobileCustomDateFilter" type="date" class="mobile-filter-option"
+          style="display: none; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid var(--border-light); border-radius: 6px; box-sizing: border-box;">
         <hr style="border: 0; border-top: 1px solid var(--border-light); margin: 8px 0;" />
-        <div style="font-weight: 600; padding: 8px 16px 4px; font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">Call Type</div>
-        <button class="mobile-sheet-action mobile-filter-option active" type="button" data-call-type-value="">All Call Types</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="REVIEW_CALL">Review Calling</button>
-        <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="THREE_MONTH_FOLLOWUP">3 Month Follow-up</button>
+        <div
+          style="font-weight: 600; padding: 8px 16px 4px; font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px;">
+          Call Type</div>
+        <button class="mobile-sheet-action mobile-filter-option active" type="button" data-call-type-value="">All Call
+          Types</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button" data-call-type-value="REVIEW_CALL">Review
+          Calling</button>
+        <button class="mobile-sheet-action mobile-filter-option" type="button"
+          data-call-type-value="THREE_MONTH_FOLLOWUP">3 Month Follow-up</button>
       </div>
     </div>
   </div>
@@ -285,7 +294,8 @@
         <button id="mobileActionEdit" class="mobile-sheet-action" type="button">Edit</button>
         <button id="mobileActionDelete" class="mobile-sheet-action mobile-sheet-action--danger"
           type="button">Delete</button>
-        <button id="mobileActionAnalysis" class="mobile-sheet-action analysis-cta-button" type="button">View Analysis</button>
+        <button id="mobileActionAnalysis" class="mobile-sheet-action analysis-cta-button" type="button">View
+          Analysis</button>
       </div>
     </div>
   </div>
@@ -463,7 +473,7 @@
 
     async function toggleAutoRetry(customerId, newState) {
       try {
-        await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}/auto-retry`, { 
+        await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}/auto-retry`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ auto_retry_enabled: newState })
@@ -834,10 +844,10 @@
         });
       });
       document.getElementById('customerSearch').addEventListener('input', () => { currentQueuePage = 1; renderQueue(); });
-      document.getElementById('dateFilter').addEventListener('change', (e) => { 
+      document.getElementById('dateFilter').addEventListener('change', (e) => {
         document.getElementById('customDateFilter').style.display = e.target.value === 'custom' ? 'inline-block' : 'none';
-        currentQueuePage = 1; 
-        renderQueue(); 
+        currentQueuePage = 1;
+        renderQueue();
       });
       document.getElementById('customDateFilter').addEventListener('change', () => { currentQueuePage = 1; renderQueue(); });
       document.getElementById('mobileCustomDateFilter').addEventListener('change', () => { currentQueuePage = 1; renderQueue(); });
@@ -850,7 +860,7 @@
           if (event.target.id === id) closeSheet(id);
         });
       });
-      
+
       window.addEventListener('app:pagination:resize', renderQueue);
 
       try {

@@ -1866,11 +1866,7 @@ body.poc-page .search-row .table-filter.desktop-only {
     padding: 4px 0 2px;
   }
 
-  .mobile-ops-title {
-    font-size: 24px;
-    font-weight: 800;
-    letter-spacing: -0.04em;
-  }
+
 
   .mobile-ops-subtitle {
     display: block;
@@ -1927,14 +1923,14 @@ body.poc-page .search-row .table-filter.desktop-only {
     box-shadow: 0 14px 28px rgba(37, 99, 235, 0.24);
   }
 
-  .mobile-stat-strip {
+  /* .mobile-stat-strip {
     display: flex;
     gap: 10px;
     overflow-x: auto;
     padding: 4px 0 10px;
     margin: 0 -2px 14px;
     scrollbar-width: none;
-  }
+  } */
 
   .mobile-stat-strip::-webkit-scrollbar {
     display: none;
@@ -2064,19 +2060,19 @@ body.poc-page .search-row .table-filter.desktop-only {
 
   .mobile-dock {
     position: fixed;
-    left: 12px;
-    right: 12px;
-    bottom: calc(12px + env(safe-area-inset-bottom));
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 6px;
-    padding: 8px;
-    border-radius: 20px;
     background: rgba(255, 255, 255, 0.96);
     border: 1px solid rgba(219, 228, 240, 0.9);
     box-shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
     z-index: 30;
     backdrop-filter: blur(18px);
+    left: 10px;
+    right: 10px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    gap: 4px;
+    padding: 5px;
+    border-radius: 16px;
   }
 
   .mobile-dock-link {
@@ -5127,22 +5123,14 @@ a[href="/incoming-calls.html"] {
     --overview-mobile-dock-height: 58px;
   }
 
-  body.overview-page .main-panel {
-    padding: 8px 10px calc(78px + env(safe-area-inset-bottom));
-    overflow-x: hidden;
-  }
+
 
   .overview-page .mobile-ops-header {
     margin-bottom: 7px;
   }
 
-  .overview-page .mobile-ops-bar {
-    min-width: 0;
-    padding: 0;
-    gap: 8px;
-  }
 
-  .overview-page .mobile-ops-title {
+  .mobile-ops-title {
     font-size: 19px;
     line-height: 1.1;
     letter-spacing: 0;
@@ -5154,14 +5142,14 @@ a[href="/incoming-calls.html"] {
     line-height: 1.25;
   }
 
-  .overview-page .mobile-icon-button {
+  /* .overview-page .mobile-icon-button {
     width: 34px;
     min-width: 34px;
     min-height: 34px;
     border-radius: 11px;
-  }
+  } */
 
-  .overview-page .mobile-stat-strip {
+  .mobile-stat-strip {
     display: flex;
     gap: 6px;
     margin: 0 0 7px;
@@ -5170,7 +5158,7 @@ a[href="/incoming-calls.html"] {
     overscroll-behavior-x: contain;
   }
 
-  .overview-page .mobile-stat-pill {
+  .mobile-stat-pill {
     gap: 5px;
     min-height: 30px;
     padding: 5px 9px;
@@ -5322,7 +5310,7 @@ a[href="/incoming-calls.html"] {
     box-sizing: border-box;
   }
 
-  .overview-page .mobile-recent-call-card > div {
+  .overview-page .mobile-recent-call-card>div {
     min-width: 0;
   }
 
@@ -5382,25 +5370,25 @@ a[href="/incoming-calls.html"] {
     right: max(14px, env(safe-area-inset-right));
     bottom: calc(var(--overview-mobile-dock-height) + 18px + env(safe-area-inset-bottom));
     transform: none;
-    width: 48px;
-    min-width: 48px;
+    width: 100px;
+    min-width: 150px;
     height: 48px;
     min-height: 48px;
     padding: 0;
-    border-radius: 50%;
-    font-size: 28px;
+    border-radius: 30px;
+    font-size: 16px;
     line-height: 1;
     box-shadow: 0 14px 28px rgba(37, 99, 235, 0.26);
   }
 
-  .overview-page .mobile-dock {
+  /* .overview-page .mobile-dock {
     left: 10px;
     right: 10px;
     bottom: calc(8px + env(safe-area-inset-bottom));
     gap: 4px;
     padding: 5px;
     border-radius: 16px;
-  }
+  } */
 
   .overview-page .mobile-dock-link {
     min-height: 32px;
@@ -5464,9 +5452,9 @@ a[href="/incoming-calls.html"] {
   }
 
   .overview-page .mobile-floating-cta {
-    width: 48px;
-    max-width: 48px;
-    min-width: 48px;
+    width: 150px;
+    max-width: 150px;
+    min-width: 150px;
   }
 
   .overview-page .overview-mobile-page-button {
@@ -5475,17 +5463,17 @@ a[href="/incoming-calls.html"] {
     min-width: 28px;
   }
 
-  .overview-page .mobile-icon-button {
+  /* .overview-page .mobile-icon-button {
     width: 34px;
     max-width: 34px;
     min-width: 34px;
-  }
+  } */
 
-  .overview-page .mobile-stat-pill-button {
+  /* .overview-page .mobile-stat-pill-button {
     width: auto;
     max-width: none;
     min-width: 0;
-  }
+  } */
 
   .saas-modal-footer {
     width: 100%;
@@ -5552,7 +5540,7 @@ a[href="/incoming-calls.html"] {
     border-bottom: 1px solid rgba(226, 232, 240, 0.9);
   }
 
-  #newCallModal .saas-modal-header > div {
+  #newCallModal .saas-modal-header>div {
     min-width: 0;
   }
 
@@ -5789,6 +5777,7 @@ a[href="/incoming-calls.html"] {
   }
 
   @supports not (max-height: 100dvh) {
+
     .schedule-call-modal .schedule-modal,
     #newCallModal .saas-modal-panel {
       max-height: calc(100vh - 24px) !important;
@@ -5803,7 +5792,7 @@ a[href="/incoming-calls.html"] {
 
   .schedule-call-modal .saas-modal-title,
   #newCallModal .saas-modal-title {
-    font-size: 28px;
+    font-size: 16px;
     line-height: 1.12;
   }
 
@@ -5811,7 +5800,7 @@ a[href="/incoming-calls.html"] {
   #newCallModal .saas-modal-subtitle {
     max-width: 240px;
     margin-top: 8px;
-    font-size: 17px;
+    font-size: 12px;
     line-height: 1.18;
   }
 
@@ -5858,7 +5847,7 @@ a[href="/incoming-calls.html"] {
   .schedule-call-modal .saas-form-section,
   #newCallModal .saas-form-section {
     display: block !important;
-    margin-bottom: 18px;
+    /* margin-bottom: 18px; */
   }
 
   .schedule-call-modal .saas-card-section,
@@ -5879,8 +5868,8 @@ a[href="/incoming-calls.html"] {
   .schedule-call-modal .saas-field,
   #newCallModal .saas-field {
     display: grid;
-    gap: 8px;
-    margin-bottom: 14px;
+    gap: 2px;
+    /* margin-bottom: 14px; */
   }
 
   .schedule-call-modal .saas-field:last-child,
@@ -5960,7 +5949,7 @@ a[href="/incoming-calls.html"] {
   }
 
   body.customers-page .main-panel {
-    padding: 12px 10px calc(88px + env(safe-area-inset-bottom));
+    /* padding: 12px 10px calc(88px + env(safe-area-inset-bottom)); */
     overflow-x: hidden;
   }
 
@@ -6006,7 +5995,7 @@ a[href="/incoming-calls.html"] {
     margin-bottom: 12px;
   }
 
-  .customers-page .mobile-stat-strip {
+  /* .customers-page .mobile-stat-strip {
     display: flex;
     gap: 8px;
     margin: 0 0 12px;
@@ -6014,13 +6003,13 @@ a[href="/incoming-calls.html"] {
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
-  }
+  } */
 
-  .customers-page .mobile-stat-strip::-webkit-scrollbar {
+  .mobile-stat-strip::-webkit-scrollbar {
     display: none;
   }
 
-  .customers-page .mobile-stat-pill-button {
+  .mobile-stat-pill-button {
     flex: 0 0 auto;
     width: auto;
     max-width: none;
@@ -6070,7 +6059,7 @@ a[href="/incoming-calls.html"] {
     min-width: 0;
   }
 
-  .customers-page .mobile-call-head > div {
+  .customers-page .mobile-call-head>div {
     min-width: 0;
   }
 
@@ -6137,14 +6126,14 @@ a[href="/incoming-calls.html"] {
     right: max(14px, env(safe-area-inset-right));
     bottom: calc(68px + env(safe-area-inset-bottom));
     transform: none;
-    width: 52px;
-    max-width: 52px;
-    min-width: 52px;
+    width: 150px;
+    max-width: 150px;
+    min-width: 150px;
     height: 52px;
     min-height: 52px;
     padding: 0;
-    border-radius: 50%;
-    font-size: 30px;
+    border-radius: 30px;
+    font-size: 16px;
     line-height: 1;
     letter-spacing: 0;
     box-shadow: 0 14px 30px rgba(37, 99, 235, 0.26);
