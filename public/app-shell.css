@@ -5511,6 +5511,207 @@ a[href="/incoming-calls.html"] {
   }
 }
 
+@media (max-width: 768px) {
+  body.customers-page {
+    overflow-x: hidden;
+  }
+
+  body.customers-page .main-panel {
+    padding: 12px 10px calc(88px + env(safe-area-inset-bottom));
+    overflow-x: hidden;
+  }
+
+  .customers-page .table-card,
+  .customers-page #queueSection,
+  .customers-page #mobileCallList,
+  .customers-page .mobile-call-stack,
+  .customers-page .mobile-call-card,
+  .customers-page .mobile-call-actions,
+  .customers-page .search-row {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+
+  .customers-page #queueSection {
+    padding: 16px 12px calc(118px + env(safe-area-inset-bottom));
+    border-radius: 22px;
+  }
+
+  .customers-page .poc-card-header {
+    margin-bottom: 12px;
+  }
+
+  .customers-page .poc-card-title {
+    font-size: 20px;
+    line-height: 1.15;
+    letter-spacing: 0;
+  }
+
+  .customers-page .poc-card-subtitle {
+    margin-top: 6px;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .customers-page .search-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .customers-page .mobile-stat-strip {
+    display: flex;
+    gap: 8px;
+    margin: 0 0 12px;
+    padding: 2px 0 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .customers-page .mobile-stat-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .customers-page .mobile-stat-pill-button {
+    flex: 0 0 auto;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    min-height: 34px;
+    padding: 7px 12px;
+    gap: 7px;
+    box-shadow: none;
+  }
+
+  .customers-page .mobile-stat-count {
+    min-width: 14px;
+    font-size: 13px;
+  }
+
+  .customers-page .mobile-stat-label {
+    font-size: 12px;
+  }
+
+  .customers-page .search-row .search-input,
+  .customers-page .mobile-filter-button {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    height: 46px;
+    min-height: 46px;
+    border-radius: 14px;
+  }
+
+  .customers-page .mobile-call-stack {
+    display: grid;
+    gap: 12px;
+    padding-bottom: calc(116px + env(safe-area-inset-bottom));
+  }
+
+  .customers-page .mobile-call-card {
+    display: grid;
+    gap: 6px;
+    padding: 14px;
+    border-radius: 20px;
+  }
+
+  .customers-page .mobile-call-head {
+    align-items: flex-start;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .customers-page .mobile-call-head > div {
+    min-width: 0;
+  }
+
+  .customers-page .mobile-call-card strong {
+    display: block;
+    overflow: hidden;
+    font-size: 17px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .customers-page .mobile-subtext {
+    margin-top: 2px;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+    line-height: 1.28;
+  }
+
+  .customers-page .mobile-call-head .status-badge {
+    flex: 0 0 auto;
+    max-width: 44%;
+    min-height: 34px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 999px;
+    font-size: 12px;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .customers-page .mobile-call-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .customers-page .mobile-call-actions .mobile-action-button,
+  .customers-page .mobile-call-actions .mobile-more-button {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 42px;
+    height: 42px;
+    padding: 0 10px;
+    border-radius: 14px;
+    font-size: 13px;
+    line-height: 1.1;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .customers-page .mobile-call-actions .mobile-more-button {
+    grid-column: 1 / -1;
+  }
+
+  .customers-page #mobileFloatingNewCallButton.mobile-floating-cta {
+    left: auto;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: calc(68px + env(safe-area-inset-bottom));
+    transform: none;
+    width: 52px;
+    max-width: 52px;
+    min-width: 52px;
+    height: 52px;
+    min-height: 52px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 30px;
+    line-height: 1;
+    letter-spacing: 0;
+    box-shadow: 0 14px 30px rgba(37, 99, 235, 0.26);
+  }
+
+  .customers-page .mobile-dock {
+    z-index: 30;
+  }
+}
+
 /* SaaS Feedback Redesign */
 .saas-feedback-container {
   max-width: 1000px;
