@@ -388,13 +388,17 @@ async function shouldBlockCustomerCall(customer) {
       const diffMs = Date.now() - lastCallTime.getTime();
       const gapMs = MIN_RETRY_GAP_MINUTES * 60 * 1000;
       if (diffMs < gapMs) {
-        const nextAllowedAt = new Date(lastCallTime.getTime() + gapMs);
-        return {
-          code: 'CALL_BLOCKED_THREE_HOUR_GAP',
-          reason: `Cooldown gap required between attempts`,
-          lastAttemptAt: lastCallTime.toISOString(),
-          nextAllowedAt: nextAllowedAt.toISOString()
-        };
+        if (customer.is_manual === 1 && customer.status === 'scheduled') {
+          // Bypass 3 hour gap because user manually scheduled it
+        } else {
+          const nextAllowedAt = new Date(lastCallTime.getTime() + gapMs);
+          return {
+            code: 'CALL_BLOCKED_THREE_HOUR_GAP',
+            reason: `Cooldown gap required between attempts`,
+            lastAttemptAt: lastCallTime.toISOString(),
+            nextAllowedAt: nextAllowedAt.toISOString()
+          };
+        }
       }
     }
   }

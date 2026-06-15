@@ -1394,11 +1394,22 @@ module.exports = function setupWebSocketBridge(server) {
       }
 
       if (eventName === 'media') {
-        await upsertIcallMateCallFromMedia(message, session, {
-          status: 'active',
-          media_packets: 1,
-          notes: session.answered ? 'Audio streaming' : 'Media before answer'
-        });
+        if (!session.answered) {
+          session.answered = true;
+          await upsertIcallMateCallFromMedia(message, session, {
+            status: 'active',
+            answered_at: normalizeIcallTimestamp(message.timestamp || new Date().toISOString()),
+            notes: session.callDirection === 'outbound' ? 'Outbound call answered (inferred from media)' : 'Incoming call answered (inferred from media)'
+          });
+          logRealCallStarted('media_started_implicitly');
+          aiBridge.start();
+        } else {
+          await upsertIcallMateCallFromMedia(message, session, {
+            status: 'active',
+            media_packets: 1,
+            notes: 'Audio streaming'
+          });
+        }
         aiBridge.sendCallerAudio(message.payload);
         return;
       }

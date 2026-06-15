@@ -458,7 +458,8 @@ router.put('/:id', async (req, res) => {
               campaign_name = ?,
               service_interest = ?,
               call_type = ?,
-              is_manual = 1
+              is_manual = 1,
+              locked_at = NULL
         WHERE id = ?`,
       [
         payload.name,

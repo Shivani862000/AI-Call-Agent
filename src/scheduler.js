@@ -203,8 +203,8 @@ async function triggerScheduledCalls() {
        AND c.status IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')
        AND (c.locked_at IS NULL OR DATETIME(c.locked_at) <= DATETIME('now', '-10 minutes'))
        AND (
-         c.status IN ('pending', 'scheduled')
-         OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND COALESCE(c.auto_retry_enabled, 0) = 1)
+         COALESCE(c.attempt_count, 0) = 0
+         OR COALESCE(c.auto_retry_enabled, 0) = 1
        )
        AND COALESCE(c.attempt_count, 0) < 3
        AND (
