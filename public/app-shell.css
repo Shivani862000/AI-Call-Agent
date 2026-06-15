@@ -5512,6 +5512,449 @@ a[href="/incoming-calls.html"] {
 }
 
 @media (max-width: 768px) {
+  #newCallModal.modal-backdrop {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+    overflow: hidden;
+    background: rgba(15, 23, 42, 0.42);
+  }
+
+  #newCallModal,
+  #newCallModal * {
+    box-sizing: border-box;
+  }
+
+  #newCallModal .saas-modal-panel {
+    width: 100%;
+    max-width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  @supports not (height: 100dvh) {
+    #newCallModal .saas-modal-panel {
+      height: 100vh;
+      max-height: 100vh;
+    }
+  }
+
+  #newCallModal .saas-modal-header {
+    flex: 0 0 auto;
+    min-height: 0;
+    padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+    gap: 12px;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+  }
+
+  #newCallModal .saas-modal-header > div {
+    min-width: 0;
+  }
+
+  #newCallModal .saas-modal-title {
+    display: block;
+    margin: 0;
+    color: #0f172a;
+    font-size: 18px;
+    line-height: 1.15;
+    letter-spacing: 0;
+  }
+
+  #newCallModal .saas-modal-subtitle {
+    margin-top: 3px;
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
+  #newCallModal .saas-modal-close {
+    flex: 0 0 auto;
+    width: 40px;
+    max-width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0;
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    border-radius: 12px;
+    background: #fff;
+  }
+
+  #newCallModal .saas-modal-close svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  #newCallModal .saas-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    max-width: 100%;
+    padding: 14px 14px calc(98px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #newCallModal .saas-form-section,
+  #newCallModal .saas-card-section,
+  #newCallModal .saas-field,
+  #newCallModal .saas-grid-2,
+  #newCallModal .saas-campaign-cards,
+  #newCallModal .saas-accordion,
+  #newCallModal .saas-accordion-content,
+  #newCallModal #additionalContextSection {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  #newCallModal .saas-form-section {
+    gap: 12px;
+  }
+
+  #newCallModal .saas-card-section {
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  #newCallModal .saas-section-title {
+    margin-bottom: 0;
+    font-size: 11px;
+    line-height: 1.2;
+    letter-spacing: 0.06em;
+  }
+
+  #newCallModal .saas-grid-2,
+  #newCallModal .saas-campaign-cards {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px;
+  }
+
+  #newCallModal .saas-field {
+    display: grid;
+    gap: 7px;
+  }
+
+  #newCallModal .saas-field label {
+    margin: 0 !important;
+    font-size: 13px;
+    line-height: 1.25;
+  }
+
+  #newCallModal .saas-field input[type="text"],
+  #newCallModal .saas-field input[type="tel"],
+  #newCallModal .saas-field input[type="date"],
+  #newCallModal .saas-field input[type="time"],
+  #newCallModal .saas-field textarea {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 50px;
+    height: 50px;
+    padding: 0 14px;
+    border-radius: 14px !important;
+    font-size: 16px !important;
+    line-height: 1.25;
+    overflow: hidden;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  #newCallModal .saas-field textarea {
+    height: auto;
+    min-height: 96px;
+    padding-top: 12px !important;
+    padding-bottom: 12px !important;
+    resize: vertical;
+  }
+
+  #newCallModal .saas-campaign-card {
+    width: 100%;
+    max-width: 100%;
+    min-height: 50px;
+    padding: 12px 14px;
+    border-radius: 14px;
+  }
+
+  #newCallModal .saas-toggle-row {
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 14px;
+  }
+
+  #newCallModal .saas-toggle-info {
+    min-width: 0;
+  }
+
+  #newCallModal .saas-toggle {
+    flex: 0 0 auto;
+    width: 44px;
+    max-width: 44px;
+    min-width: 44px;
+  }
+
+  #newCallModal .saas-accordion {
+    border-radius: 14px;
+  }
+
+  #newCallModal .saas-accordion summary {
+    min-height: 50px;
+    padding: 0 14px;
+    font-size: 14px;
+  }
+
+  #newCallModal .saas-accordion-content {
+    margin-top: 0;
+    padding: 14px;
+    gap: 14px;
+    border-top: 1px solid #e2e8f0;
+  }
+
+  #newCallModal .saas-ai-preview {
+    padding: 15px 12px 12px;
+    border-radius: 14px;
+  }
+
+  #newCallModal .saas-ai-preview-text {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  #newCallModal .saas-modal-footer {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    gap: 10px;
+    width: 100%;
+    max-width: 100%;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    border-radius: 0;
+    background: rgba(248, 250, 252, 0.98);
+  }
+
+  #newCallModal .saas-modal-footer button,
+  #newCallModal .btn-ghost-saas,
+  #newCallModal .btn-primary-saas {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    height: 50px;
+    min-height: 50px;
+    padding: 0 12px;
+    border-radius: 14px;
+    font-size: 14px;
+  }
+
+  #newCallModal .btn-ghost-saas {
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+  }
+
+  .schedule-call-modal.modal-backdrop,
+  #newCallModal.modal-backdrop {
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    overflow: hidden;
+    background: rgba(15, 23, 42, 0.42);
+  }
+
+  .schedule-call-modal .schedule-modal,
+  #newCallModal .saas-modal-panel {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    height: auto !important;
+    max-height: calc(100dvh - 24px) !important;
+    margin: 0 !important;
+    border-radius: 24px !important;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden !important;
+    box-sizing: border-box;
+  }
+
+  @supports not (max-height: 100dvh) {
+    .schedule-call-modal .schedule-modal,
+    #newCallModal .saas-modal-panel {
+      max-height: calc(100vh - 24px) !important;
+    }
+  }
+
+  .schedule-call-modal .saas-modal-header,
+  #newCallModal .saas-modal-header {
+    flex: 0 0 auto;
+    padding: calc(16px + env(safe-area-inset-top)) 18px 14px;
+  }
+
+  .schedule-call-modal .saas-modal-title,
+  #newCallModal .saas-modal-title {
+    font-size: 28px;
+    line-height: 1.12;
+  }
+
+  .schedule-call-modal .saas-modal-subtitle,
+  #newCallModal .saas-modal-subtitle {
+    max-width: 240px;
+    margin-top: 8px;
+    font-size: 17px;
+    line-height: 1.18;
+  }
+
+  .schedule-call-modal .saas-modal-close,
+  #newCallModal .saas-modal-close {
+    flex: 0 0 auto;
+    width: 40px;
+    max-width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+    padding: 0;
+  }
+
+  .schedule-call-modal .saas-modal-body,
+  #newCallModal .saas-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: calc(100dvh - 170px);
+    padding: 16px 16px calc(96px + env(safe-area-inset-bottom));
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    box-sizing: border-box;
+  }
+
+  .schedule-call-modal .saas-form-section,
+  .schedule-call-modal .saas-card-section,
+  .schedule-call-modal .saas-grid-2,
+  .schedule-call-modal .saas-campaign-cards,
+  .schedule-call-modal .saas-field,
+  #newCallModal .saas-form-section,
+  #newCallModal .saas-card-section,
+  #newCallModal .saas-grid-2,
+  #newCallModal .saas-campaign-cards,
+  #newCallModal .saas-field {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    overflow: visible !important;
+  }
+
+  .schedule-call-modal .saas-form-section,
+  #newCallModal .saas-form-section {
+    display: block !important;
+    margin-bottom: 18px;
+  }
+
+  .schedule-call-modal .saas-card-section,
+  #newCallModal .saas-card-section {
+    padding: 14px;
+    border-radius: 18px;
+  }
+
+  .schedule-call-modal .saas-grid-2,
+  .schedule-call-modal .saas-campaign-cards,
+  #newCallModal .saas-grid-2,
+  #newCallModal .saas-campaign-cards {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 14px;
+  }
+
+  .schedule-call-modal .saas-field,
+  #newCallModal .saas-field {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .schedule-call-modal .saas-field:last-child,
+  #newCallModal .saas-field:last-child {
+    margin-bottom: 0;
+  }
+
+  .schedule-call-modal .saas-section-title,
+  #newCallModal .saas-section-title {
+    margin: 0 0 14px;
+    font-size: 13px;
+    line-height: 1.2;
+  }
+
+  .schedule-call-modal .saas-field input[type="text"],
+  .schedule-call-modal .saas-field input[type="tel"],
+  .schedule-call-modal .saas-field input[type="date"],
+  .schedule-call-modal .saas-field input[type="time"],
+  .schedule-call-modal .saas-field select,
+  .schedule-call-modal .saas-field textarea,
+  #newCallModal .saas-field input[type="text"],
+  #newCallModal .saas-field input[type="tel"],
+  #newCallModal .saas-field input[type="date"],
+  #newCallModal .saas-field input[type="time"],
+  #newCallModal .saas-field select,
+  #newCallModal .saas-field textarea {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box;
+  }
+
+  .schedule-call-modal .saas-campaign-card,
+  #newCallModal .saas-campaign-card {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0 !important;
+  }
+
+  .schedule-call-modal .additional-care-section,
+  .schedule-call-modal .additional-care-details,
+  .schedule-call-modal .optional-notes-section,
+  .schedule-call-modal .saas-mobile-hidden,
+  #newCallModal .additional-care-section,
+  #newCallModal .additional-care-details,
+  #newCallModal .optional-notes-section,
+  #newCallModal .saas-mobile-hidden {
+    display: none !important;
+  }
+
+  .schedule-call-modal .saas-modal-footer,
+  #newCallModal .saas-modal-footer {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    display: flex;
+    width: 100%;
+    max-width: 100%;
+    gap: 10px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    border-radius: 0;
+    background: #ffffff;
+    box-sizing: border-box;
+  }
+
+  .schedule-call-modal .saas-modal-footer button,
+  #newCallModal .saas-modal-footer button {
+    flex: 1 1 0;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+  }
+
   body.customers-page {
     overflow-x: hidden;
   }

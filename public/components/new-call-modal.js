@@ -10,6 +10,10 @@
     return `+${digits}`;
   }
 
+  function isMobileModalLayout() {
+    return window.matchMedia('(max-width: 768px)').matches;
+  }
+
   function formatPhoneForInput(value) {
     let digits = String(value || '').replace(/\D/g, '');
     if (digits.startsWith('91') && digits.length === 12) {
@@ -85,6 +89,20 @@
   }
 
   function getCarePayload(customerPayload) {
+    if (isMobileModalLayout()) {
+      return {
+        name: customerPayload.name,
+        phone: customerPayload.phone,
+        date_of_birth: '',
+        last_visit_date: '',
+        treatment_type: '',
+        annual_reminder_enabled: 1,
+        annual_reminder_slot: customerPayload.preferred_slot || '10:00',
+        notes: '',
+        status: 'active'
+      };
+    }
+
     return {
       name: customerPayload.name,
       phone: customerPayload.phone,
@@ -107,6 +125,8 @@
   }
 
   function validateCareDetails(payload) {
+    if (isMobileModalLayout()) return {};
+
     const hasAny = payload.date_of_birth || payload.last_visit_date || payload.treatment_type;
     if (!hasAny) return {};
     const fieldErrors = {};
@@ -194,7 +214,7 @@
     if (editingInput) editingInput.value = '';
     
     const title = document.getElementById('newCallModalTitle');
-    if (title) title.textContent = mode === 'customer' ? 'Add Customer' : '📞 Schedule New Call';
+    if (title) title.textContent = mode === 'customer' ? 'Add Customer' : 'Schedule New Follow-up Call';
     
     const submit = document.getElementById('scheduleCallSubmit');
     if (submit) submit.textContent = mode === 'customer' ? 'Add Customer' : 'Schedule Call';
@@ -232,7 +252,7 @@
       }
       if (client) {
         const acc = document.querySelector('.saas-accordion');
-        if (acc) acc.open = true;
+        if (acc) acc.open = !isMobileModalLayout();
         document.getElementById('careDob').value = client.date_of_birth || '';
         document.getElementById('careLastVisit').value = client.last_visit_date || '';
         document.getElementById('careTreatment').value = client.treatment_type || '';

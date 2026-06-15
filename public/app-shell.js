@@ -273,8 +273,8 @@
     };
 
     mount.innerHTML = `
-      <div id="${ids.backdrop}" class="modal-backdrop" aria-hidden="true">
-        <div class="saas-modal-panel" role="dialog" aria-modal="true" aria-labelledby="${ids.panelTitle}">
+      <div id="${ids.backdrop}" class="modal-backdrop schedule-call-modal" aria-hidden="true">
+        <div class="saas-modal-panel schedule-modal" role="dialog" aria-modal="true" aria-labelledby="${ids.panelTitle}">
           <div class="saas-modal-header">
             <div>
               <h3 id="${ids.panelTitle}" class="saas-modal-title">Schedule New Follow-up Call</h3>
@@ -349,7 +349,7 @@
                 <span class="error-text" id="${ids.callType}Error"></span>
               </div>
 
-              <details id="${ids.careToggle}" class="saas-accordion">
+              <details id="${ids.careToggle}" class="saas-accordion additional-care-details optional-notes-section">
                 <summary>Additional Care Details (Optional)</summary>
                 <div class="saas-accordion-content">
                   
@@ -422,6 +422,10 @@
       return document.querySelector(`input[name="${ids.callType}"]:checked`)?.value || 'REVIEW_CALL';
     }
 
+    function isMobileModalLayout() {
+      return window.matchMedia('(max-width: 768px)').matches;
+    }
+
     function allFieldIds() {
       return [ids.name, ids.phone, ids.date, ids.time, ids.callType, ids.dob, ids.lastVisit, ids.treatment, ids.notes];
     }
@@ -479,6 +483,20 @@
     }
 
     function getCarePayload(customerPayload) {
+      if (isMobileModalLayout()) {
+        return {
+          name: customerPayload.name,
+          phone: customerPayload.phone,
+          date_of_birth: '',
+          last_visit_date: '',
+          treatment_type: '',
+          annual_reminder_enabled: 1,
+          annual_reminder_slot: customerPayload.preferred_slot || '10:00',
+          notes: '',
+          status: 'active'
+        };
+      }
+
       return {
         name: customerPayload.name,
         phone: customerPayload.phone,
@@ -625,7 +643,7 @@
           await ensureClientsLoaded();
           const client = getClientByPhone(customer.phone);
           if (client) {
-            getEl('careToggle').open = true;
+            getEl('careToggle').open = !isMobileModalLayout();
             getEl('dob').value = client.date_of_birth || '';
             getEl('lastVisit').value = client.last_visit_date || '';
             getEl('treatment').value = client.treatment_type || '';

@@ -208,7 +208,7 @@
     </main>
   </div>
 
-  <button id="mobileManualFeedbackFab" class="mobile-floating-cta mobile-only" type="button">+ Add Feedback</button>
+  <!-- <button id="mobileManualFeedbackFab" class="mobile-floating-cta mobile-only" type="button">+ Add Feedback</button> -->
 
   <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
     <a href="/admin.html" class="mobile-dock-link">Overview</a>
@@ -837,7 +837,7 @@
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('openManualFeedbackButton').addEventListener('click', openManualFeedbackModal);
-      document.getElementById('mobileManualFeedbackFab').addEventListener('click', openManualFeedbackModal);
+      // document.getElementById('mobileManualFeedbackFab').addEventListener('click', openManualFeedbackModal);
       document.getElementById('mobileFeedbackMenuButton').addEventListener('click', () => openFeedbackSheet('feedbackMobileMenuSheet'));
       document.querySelectorAll('[data-mobile-filter]').forEach((button) => {
         button.addEventListener('click', () => applyFeedbackFilter(button.dataset.mobileFilter));

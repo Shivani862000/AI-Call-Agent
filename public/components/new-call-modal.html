@@ -1,5 +1,5 @@
-  <div id="newCallModal" class="modal-backdrop" aria-hidden="true">
-    <div class="saas-modal-panel" role="dialog" aria-modal="true" aria-labelledby="newCallModalTitle">
+  <div id="newCallModal" class="modal-backdrop schedule-call-modal" aria-hidden="true">
+    <div class="saas-modal-panel schedule-modal" role="dialog" aria-modal="true" aria-labelledby="newCallModalTitle">
       <div class="saas-modal-header">
         <div>
           <h3 id="newCallModalTitle" class="saas-modal-title">Schedule New Follow-up Call</h3>
@@ -74,7 +74,7 @@
           <input type="hidden" id="hiddenCallType" value="REVIEW_CALL">
           <input type="hidden" id="hiddenVideoSent" value="false">
 
-          <details class="saas-accordion">
+          <details class="saas-accordion additional-care-details optional-notes-section">
             <summary>Additional Care Details (Optional)</summary>
             <div class="saas-accordion-content">
               
@@ -119,7 +119,7 @@
             </div>
           </details>
           
-          <div style="margin-top: 8px;">
+          <div class="saas-mobile-hidden" style="margin-top: 8px;">
             <div class="saas-ai-preview">
               <div class="saas-ai-preview-badge">AI Will Say</div>
               <p class="saas-ai-preview-text" id="aiPreviewText">Good Morning.<br>Main Apna Blood Centre se baat kar rahi hoon.<br>Kya main <strong>...</strong> ji se baat kar rahi hoon?</p>
@@ -136,4 +136,3 @@
       </div>
     </div>
   </div>
-
