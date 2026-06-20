@@ -36,28 +36,8 @@ function shouldAutoHangupAfterAgentTurn(text) {
     return false;
   }
 
-  const looksLikeFollowupQuestion = (
-    /[?？]|[?？]\s*$/.test(text)
-    || /\b(kya|kaisa|kaisi|kaise|aur|kab|kyun|kyon|kripya|please|bataiye|batayiye)\b/i.test(normalized)
-  );
-
-  if (looksLikeFollowupQuestion) {
-    return false;
-  }
-
-  return [
-    /(^|\b)(goodbye|bye|alvida)(\b|$)/i,
-    /(^|\b)(namaste|dhanyavaad|shukriya)(\b|$)/i,
-    /apna dhyaan rakh/i,
-    /din shubh ho/i,
-    /aapka samay dene ke liye/i,
-    /aapke feedback ke liye dhanyavaad/i,
-    /aapka feedback bahut/i,
-    /aapne jo feedback diya uske liye/i,
-    /bahut (bahut )?dhanyawa?d/i,
-    /google form ka link/i,
-    /have a great day/i
-  ].some((pattern) => pattern.test(normalized));
+  // User specifically requested to ONLY disconnect if this exact phrase is spoken
+  return /disconnect kar dijiye/i.test(normalized);
 }
 
 function estimateHangupDelayMs(text) {

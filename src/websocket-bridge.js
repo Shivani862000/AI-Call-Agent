@@ -290,6 +290,13 @@ module.exports = function setupWebSocketBridge(server) {
           session.sttProducedAt = null;
         } else if (session.turnComplete && session.audioBuffer.length === 0) {
           session.turnComplete = false;
+          if (session.hangupAfterAudioDrains) {
+            session.hangupAfterAudioDrains = false;
+            console.log(`[FINAL_AUDIO_FLUSH_COMPLETED] streamId=${session.streamId}`);
+            console.log(`[HANGUP_REQUESTED] streamId=${session.streamId} reason=gemini_live_turn_complete`);
+            if (session.requestCallHangup) session.requestCallHangup('gemini_live_turn_complete');
+            if (session.scheduleFinalizeCallHangup) session.scheduleFinalizeCallHangup('gemini_live_turn_complete', '');
+          }
           // Clear latency tracking for next turn
           session.firstChunkSentAt = null;
           session.geminiLiveFirstAudioAt = null;
@@ -747,10 +754,14 @@ module.exports = function setupWebSocketBridge(server) {
                   finalResponseInProgress = true;
                   scheduleFinalizeCallHangup('gemini_live_end_call_marker', cleanTranscript);
                 }
-                if (outboundDemoState.endCallAfterNextReply && shouldAutoHangupAfterAgentTurn(cleanTranscript)) {
+                const fullAgentTurnText = transcript[transcript.length - 1]?.role === 'AGENT' 
+                  ? transcript[transcript.length - 1].text 
+                  : cleanTranscript;
+                console.log('Checking hangup condition for text:', fullAgentTurnText, 'shouldHangup:', shouldAutoHangupAfterAgentTurn(fullAgentTurnText));
+                if (outboundDemoState.endCallAfterNextReply || shouldAutoHangupAfterAgentTurn(fullAgentTurnText)) {
                   requestCallHangup('gemini_live_state_completed');
                   finalResponseInProgress = true;
-                  scheduleFinalizeCallHangup('gemini_live_state_completed', cleanTranscript);
+                  scheduleFinalizeCallHangup('gemini_live_state_completed', fullAgentTurnText);
                 }
               }
 
@@ -866,6 +877,7 @@ module.exports = function setupWebSocketBridge(server) {
       stopListeningForCallerAudio();
       debugLog('Hangup requested', { streamId: getSessionLabel(), reason });
     }
+    session.requestCallHangup = requestCallHangup;
 
     function scheduleFinalizeCallHangup(reason = 'model_requested_end_call', spokenText = '') {
       if (bridgeClosed || !pendingHangup) {
@@ -883,6 +895,7 @@ module.exports = function setupWebSocketBridge(server) {
         finalizeCallHangup(reason);
       }, delayMs);
     }
+    session.scheduleFinalizeCallHangup = scheduleFinalizeCallHangup;
 
     async function finalizeCallHangup(reason = 'model_requested_end_call') {
       if (bridgeClosed || !pendingHangup) {
