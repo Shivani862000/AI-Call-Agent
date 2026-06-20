@@ -102,6 +102,7 @@ async function markSubmittedCallsWithoutMediaFailed() {
       `UPDATE customers
           SET status = ?,
               next_retry_at = ?,
+              last_contact_outcome = 'failed',
               retry_count = COALESCE(retry_count, 0) + 1,
               attempt_count = COALESCE(attempt_count, 0) + 1
         WHERE id = ?
