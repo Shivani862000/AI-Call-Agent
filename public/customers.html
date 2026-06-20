@@ -648,7 +648,10 @@
         } else if (activeCustomerMetricFilter === 'completed') {
           matchesMetricFilter = Boolean(getLatestCompletedCall(customer.id));
         } else if (activeCustomerMetricFilter === 'failed') {
-          matchesMetricFilter = hasFailedCall(customer.id);
+          const hasCompleted = Boolean(getLatestCompletedCall(customer.id));
+          const currentStatus = String(customer.status || '').toLowerCase();
+          const isScheduledOrCompleted = ['scheduled', 'pending', 'completed'].includes(currentStatus);
+          matchesMetricFilter = hasFailedCall(customer.id) && !hasCompleted && !isScheduledOrCompleted;
         }
 
         return matchesSearch && matchesDateFilter && matchesCallType && matchesMetricFilter;
