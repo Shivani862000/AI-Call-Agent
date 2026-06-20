@@ -588,11 +588,11 @@
     }
 
     function renderMetrics(filteredCustomers = customerCache) {
-      const pendingStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
+      const pendingStatuses = new Set(['pending', 'called', 'callback_scheduled']);
       const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
       const completedCalls = recentCallsCache.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
 
-      const isScheduled = (c) => ['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled'].includes(String(c.status || '').toLowerCase());
+      const isScheduled = (c) => ['scheduled', 'pending', 'called', 'callback_scheduled'].includes(String(c.status || '').toLowerCase());
       const scheduledCount = customerCache.filter((customer) => isScheduled(customer)).length;
       const pendingCount = customerCache.filter((customer) => pendingStatuses.has(String(customer.status || '').toLowerCase())).length;
       const completedCount = completedCalls.length;
@@ -625,7 +625,7 @@
       const dateFilter = document.getElementById('dateFilter').value;
       const customDate = document.getElementById('customDateFilter').value || document.getElementById('mobileCustomDateFilter').value;
       const callType = document.getElementById('callTypeFilter').value;
-      const pendingStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
+      const pendingStatuses = new Set(['pending', 'called', 'callback_scheduled']);
       return customerCache.filter((customer) => {
         const matchesSearch = !search || `${AppShell.formatName(customer.name)} ${customer.phone}`.toLowerCase().includes(search);
         const matchesCallType = !callType || normalizeCallType(customer.call_type) === callType;
@@ -642,7 +642,7 @@
         let matchesMetricFilter = true;
 
         if (activeCustomerMetricFilter === 'scheduled') {
-          matchesMetricFilter = ['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled'].includes(String(customer.status || '').toLowerCase());
+          matchesMetricFilter = ['scheduled', 'pending', 'called', 'callback_scheduled'].includes(String(customer.status || '').toLowerCase());
         } else if (activeCustomerMetricFilter === 'pending') {
           matchesMetricFilter = pendingStatuses.has(String(customer.status || '').toLowerCase());
         } else if (activeCustomerMetricFilter === 'completed') {
