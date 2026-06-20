@@ -721,7 +721,7 @@ module.exports = function mountApiRoutes(app) {
 
       console.log(
         `[ICALLMATE CALLBACK] event=${eventName} key=${key} callerId=${callerId} did=${did} ` +
-        `callType=${callType || 'unknown'} status=${status}`
+        `callType=${callType || 'unknown'} status=${status} payload=${JSON.stringify(payload)}`
       );
 
       if (callType === 'inbound' || callType === 'inbou' || !callType) {
