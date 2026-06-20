@@ -86,10 +86,10 @@ async function markSubmittedCallsWithoutMediaFailed() {
           AND COALESCE(media_packets, 0) = 0`,
       [
         'failed',
-        `No iCallMate media stream within ${timeoutLabel} of provider acceptance`,
+        `Connection timeout after ${timeoutLabel} (User may not have answered or is out of network)`,
         nowIso,
         'media_timeout',
-        'Provider accepted request, but no dial/media stream was received in time',
+        'Provider accepted request, but no media stream was received. Assume no-answer or network issue.',
         call.call_id
       ]
     );
@@ -117,7 +117,7 @@ async function markSubmittedCallsWithoutMediaFailed() {
       phone: call.phone,
       type: logger.formatCallType(call.call_type),
       providerCallId: call.provider_call_id,
-      reason: `No iCallMate media stream within ${timeoutLabel}`,
+      reason: `Connection timeout after ${timeoutLabel} (No Answer / Network Issue)`,
       retryAt: logger.formatHumanDateTime(retryAt)
     });
     logger.warn('CALL_RETRY', {
