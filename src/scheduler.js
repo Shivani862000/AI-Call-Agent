@@ -57,7 +57,9 @@ async function markSubmittedCallsWithoutMediaFailed() {
             calls.call_type,
             customers.name,
             customers.phone,
-            customers.status AS customer_status
+            customers.status AS customer_status,
+            COALESCE(customers.auto_retry_enabled, 1) AS auto_retry_enabled,
+            COALESCE(customers.attempt_count, 0) AS attempt_count
        FROM calls
        LEFT JOIN customers ON customers.id = calls.customer_id
       WHERE calls.call_direction = 'outbound'
@@ -98,6 +100,15 @@ async function markSubmittedCallsWithoutMediaFailed() {
       continue;
     }
 
+    const attempts = call.attempt_count + 1;
+    let nextStatus = 'failed';
+    let nextRetryAt = null;
+
+    if (call.auto_retry_enabled !== 0 && attempts < 3) {
+      nextStatus = 'retry_scheduled';
+      nextRetryAt = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    }
+
     await dbRun(
       `UPDATE customers
           SET status = ?,
@@ -107,7 +118,7 @@ async function markSubmittedCallsWithoutMediaFailed() {
               attempt_count = COALESCE(attempt_count, 0) + 1
         WHERE id = ?
           AND status IN ('calling', 'called')`,
-      ['retry_scheduled', retryAt, call.customer_id]
+      [nextStatus, nextRetryAt, call.customer_id]
     );
 
     logger.error('CALL_FAILED', {
@@ -118,17 +129,20 @@ async function markSubmittedCallsWithoutMediaFailed() {
       type: logger.formatCallType(call.call_type),
       providerCallId: call.provider_call_id,
       reason: `Connection timeout after ${timeoutLabel} (No Answer / Network Issue)`,
-      retryAt: logger.formatHumanDateTime(retryAt)
+      retryAt: nextRetryAt ? logger.formatHumanDateTime(nextRetryAt) : null
     });
-    logger.warn('CALL_RETRY', {
-      callId: call.call_id,
-      customerId: call.customer_id,
-      patient: call.name,
-      phone: call.phone,
-      type: logger.formatCallType(call.call_type),
-      retryAt: logger.formatHumanDateTime(retryAt),
-      delay: '5 hours'
-    });
+    
+    if (nextStatus === 'retry_scheduled') {
+      logger.warn('CALL_RETRY', {
+        callId: call.call_id,
+        customerId: call.customer_id,
+        patient: call.name,
+        phone: call.phone,
+        type: logger.formatCallType(call.call_type),
+        retryAt: logger.formatHumanDateTime(nextRetryAt),
+        delay: '3 hours'
+      });
+    }
   }
 }
 
