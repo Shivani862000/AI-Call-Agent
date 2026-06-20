@@ -754,8 +754,8 @@ module.exports = function setupWebSocketBridge(server) {
                   finalResponseInProgress = true;
                   scheduleFinalizeCallHangup('gemini_live_end_call_marker', cleanTranscript);
                 }
-                const fullAgentTurnText = transcript[transcript.length - 1]?.role === 'AGENT' 
-                  ? transcript[transcript.length - 1].text 
+                const fullAgentTurnText = transcript[transcript.length - 1]?.role === 'AGENT'
+                  ? transcript[transcript.length - 1].text
                   : cleanTranscript;
                 console.log('Checking hangup condition for text:', fullAgentTurnText, 'shouldHangup:', shouldAutoHangupAfterAgentTurn(fullAgentTurnText));
                 if (outboundDemoState.endCallAfterNextReply || shouldAutoHangupAfterAgentTurn(fullAgentTurnText)) {
