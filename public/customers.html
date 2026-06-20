@@ -704,7 +704,7 @@
             <td>${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type))}</td>
             <td>${AppShell.escapeHtml(formatScheduledDate(customer))}</td>
             <td>${AppShell.escapeHtml(formatScheduledTime(customer))}</td>
-            <td><span class="status-badge ${AppShell.escapeHtml(String((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span></td>
+            <td><span class="status-badge ${AppShell.escapeHtml(String((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span></td>
             <td>
               <div class="table-actions">
                 <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
@@ -744,7 +744,7 @@
                 <strong>${AppShell.escapeHtml(AppShell.formatName(customer.name) || 'Patient')}</strong>
                 <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</div>
               </div>
-              <span class="status-badge ${AppShell.escapeHtml(String((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((['retry_scheduled', 'failed'].includes(customer.status) && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span>
+              <span class="status-badge ${AppShell.escapeHtml(String((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span>
             </div>
             <div class="mobile-subtext">${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type))}</div>
             <div class="mobile-subtext">Date: ${AppShell.escapeHtml(formatScheduledDate(customer))}</div>
