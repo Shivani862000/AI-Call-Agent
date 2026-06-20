@@ -345,17 +345,17 @@
     function getScheduledDate(customer) {
       if (activeCustomerMetricFilter === 'failed') {
         const failedCall = getLatestFailedCall(customer.id);
-        if (failedCall) return AppShell.formatDate(failedCall.called_at || failedCall.created_at);
+        if (failedCall) return new Date(failedCall.called_at || failedCall.created_at);
       }
       const scheduledValue = ['retry_scheduled', 'callback_scheduled'].includes(customer.status)
         ? (customer.next_retry_at || customer.scheduled_datetime || '')
         : (customer.scheduled_datetime || customer.next_retry_at || '');
-      return scheduledValue ? AppShell.formatDate(scheduledValue) : AppShell.formatDate(new Date());
+      return scheduledValue ? new Date(scheduledValue) : new Date();
     }
 
     function formatScheduledDate(customer) {
       const date = getScheduledDate(customer);
-      if (!date) return '--';
+      if (!date || Number.isNaN(date.getTime())) return '--';
       return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     }
 
@@ -378,26 +378,13 @@
       }
 
       if (customer.preferred_slot) {
-        const today = new Date();
-        const [hours, minutes] = String(customer.preferred_slot).split(':');
-        today.setHours(Number(hours || 0), Number(minutes || 0), 0, 0);
-        return today;
+        return customer.preferred_slot;
       }
 
-      return null;
+      return '--';
     }
 
-    function formatScheduledDate(customer) {
-      const date = getScheduledDate(customer);
-      if (!date) return '--';
-      return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    }
 
-    function formatScheduledTime(customer) {
-      const date = getScheduledDate(customer);
-      if (!date) return '--';
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
 
     function formatScheduledDateTime(customer) {
       const date = getScheduledDate(customer);
