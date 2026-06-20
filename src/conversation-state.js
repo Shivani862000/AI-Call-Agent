@@ -37,7 +37,7 @@ function shouldAutoHangupAfterAgentTurn(text) {
   }
 
   // User specifically requested to ONLY disconnect if this exact phrase is spoken
-  return /disconnect kar dijiye/i.test(normalized);
+  return /Aapka din shubh ho/i.test(normalized);
 }
 
 function estimateHangupDelayMs(text) {

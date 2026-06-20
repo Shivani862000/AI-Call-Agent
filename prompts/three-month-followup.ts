@@ -47,12 +47,7 @@ Say:
 
 End:
 
-"Dhanyavaad.
-
-Agr apko koi sawal nhi hai toh kripya app apni taraf se call disconnect kar dijiye.
-
-Dhanyavaad.
-Aapka din shubh ho."
+"Dhanyavaad.Aapka din shubh ho."
 
 Rules:
 - Speak in natural Hindi/Hinglish phone tone.

@@ -10,8 +10,7 @@ Flow & Exact Lines:
 4. Social Media: "Hamne aapke registered number par ek video bheja hai,usko like aur subscribe karein.
 Hamare Facebook aur Google page Ko review zarur karein."
 5. Closing:
-"Dhanyavaad.
-Kripya apni taraf se call disconnect kar dijiye."
+"Dhanyavaad.Aapka din shubh ho."
 
 Rules:
 - Ask 1 question at a time. Never repeat questions.
