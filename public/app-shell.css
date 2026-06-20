@@ -6397,3 +6397,45 @@ a[href="/incoming-calls.html"] {
     text-align: center;
   }
 }
+
+/* Autocomplete Dropdown Styles */
+.autocomplete-item {
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #f1f5f9;
+}
+.autocomplete-item:hover, .autocomplete-item.active {
+  background: #f8fafc;
+}
+.autocomplete-item:last-child {
+  border-bottom: none;
+}
+.autocomplete-item-title {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--text-main);
+}
+.autocomplete-item-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.autocomplete-create-new {
+  padding: 10px 12px;
+  cursor: pointer;
+  color: #3b82f6;
+  font-weight: 500;
+  font-size: 14px;
+  text-align: center;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+.autocomplete-create-new:hover {
+  background: #f0f9ff;
+}
+.autocomplete-loading, .autocomplete-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+}

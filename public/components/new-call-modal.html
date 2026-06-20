@@ -18,9 +18,11 @@
         <div class="saas-form-section saas-card-section">
           <div class="saas-section-title">Patient Information</div>
           <div class="saas-grid-2">
-            <div class="saas-field">
+            <div class="saas-field autocomplete-wrapper" style="position: relative;">
               <label for="callCustomerName">Patient Name <span style="color:var(--color-danger)">*</span></label>
-              <input id="callCustomerName" type="text" maxlength="100" placeholder="e.g. Rahul Sharma" required>
+              <input id="callCustomerName" type="text" maxlength="100" placeholder="e.g. Rahul Sharma" autocomplete="off" required>
+              <div id="customerAutocompleteDropdown" class="autocomplete-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); z-index: 50; max-height: 200px; overflow-y: auto;">
+              </div>
             </div>
             <div class="saas-field">
               <label for="callCustomerPhone">Phone Number <span style="color:var(--color-danger)">*</span></label>

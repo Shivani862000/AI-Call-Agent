@@ -372,6 +372,29 @@ router.post('/csv', upload.single('file'), async (req, res) => {
   }
 });
 
+// Search customers
+router.get('/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) {
+      return res.json([]);
+    }
+    const pattern = `%${q}%`;
+    const customers = await dbAll(
+      `SELECT id, name, phone, call_type, preferred_slot
+       FROM customers 
+       WHERE name LIKE ? OR phone LIKE ? 
+       ORDER BY created_at DESC 
+       LIMIT 20`,
+      [pattern, pattern]
+    );
+    res.json(customers);
+  } catch (error) {
+    console.error('Error searching customers:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // List all customers
 router.get('/', async (req, res) => {
   try {

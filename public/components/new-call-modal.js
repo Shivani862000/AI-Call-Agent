@@ -1,5 +1,7 @@
 (function() {
   let callbacks = {};
+  let searchTimeout = null;
+  let currentSearchResults = [];
 
   function normalizePhoneForApi(value) {
     const digits = String(value || '').replace(/\D/g, '');
@@ -232,8 +234,14 @@
     
     ['callCustomerName', 'callCustomerPhone', 'callCustomerTime', 'callCustomerDate', 'careDob', 'careLastVisit', 'careTreatment', 'customNotes'].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.value = '';
+      if (el) {
+        el.value = '';
+        el.disabled = false;
+      }
     });
+    
+    const dropdown = document.getElementById('customerAutocompleteDropdown');
+    if (dropdown) dropdown.style.display = 'none';
     
     const videoToggle = document.getElementById('videoSentToggle');
     if (videoToggle) videoToggle.checked = false;
@@ -244,6 +252,98 @@
     setCallTypeSelection('REVIEW_CALL');
     syncMobileOptionalSections();
     clearFormErrors();
+    updateAiPreview();
+    validateNewCallForm();
+  }
+
+  async function handleCustomerSearch(e) {
+    const query = e.target.value; // don't trim right away so spaces can be typed
+    const trimmed = query.trim();
+    const dropdown = document.getElementById('customerAutocompleteDropdown');
+    const phoneInput = document.getElementById('callCustomerPhone');
+    const editingInput = document.getElementById('editingCustomerId');
+    
+    if (editingInput && editingInput.value) {
+      editingInput.value = '';
+      if (phoneInput) {
+        phoneInput.disabled = false;
+        phoneInput.value = '';
+      }
+    }
+
+    if (trimmed.length < 2) {
+      if (dropdown) dropdown.style.display = 'none';
+      return;
+    }
+
+    if (dropdown) {
+      dropdown.style.display = 'block';
+      dropdown.innerHTML = '<div class="autocomplete-loading">Searching...</div>';
+    }
+
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(async () => {
+      try {
+        const response = await AppShell.fetchJson(`${AppShell.API_BASE}/customers/search?q=${encodeURIComponent(trimmed)}`);
+        renderCustomerDropdown(response || [], query);
+      } catch (err) {
+        console.error('Customer search error:', err);
+        if (dropdown) dropdown.innerHTML = '<div class="autocomplete-loading">Error searching patients.</div>';
+      }
+    }, 300);
+  }
+
+  function renderCustomerDropdown(customers, query) {
+    const dropdown = document.getElementById('customerAutocompleteDropdown');
+    if (!dropdown) return;
+    
+    dropdown.innerHTML = '';
+    
+    if (!customers || customers.length === 0) {
+      dropdown.innerHTML = `
+        <div class="autocomplete-empty">No matching patients found.</div>
+        <div class="autocomplete-create-new" id="autoCreateNewBtn">
+          + Create New Patient
+        </div>
+      `;
+      const btn = dropdown.querySelector('#autoCreateNewBtn');
+      if (btn) btn.addEventListener('click', () => window.SharedCallModal.createNewPatient(query));
+      return;
+    }
+
+    currentSearchResults = customers;
+    customers.forEach(customer => {
+      const item = document.createElement('div');
+      item.className = 'autocomplete-item';
+      item.innerHTML = `
+        <div class="autocomplete-item-title">${AppShell.escapeHtml(customer.name)}</div>
+        <div class="autocomplete-item-subtitle">${AppShell.escapeHtml(customer.phone)}</div>
+      `;
+      item.addEventListener('click', () => selectCustomerFromDropdown(customer));
+      dropdown.appendChild(item);
+    });
+
+    const createNewBtn = document.createElement('div');
+    createNewBtn.className = 'autocomplete-create-new';
+    createNewBtn.innerHTML = '+ Create New Patient';
+    createNewBtn.addEventListener('click', () => window.SharedCallModal.createNewPatient(query));
+    dropdown.appendChild(createNewBtn);
+  }
+
+  function selectCustomerFromDropdown(customer) {
+    const nameInput = document.getElementById('callCustomerName');
+    const phoneInput = document.getElementById('callCustomerPhone');
+    const editingInput = document.getElementById('editingCustomerId');
+    const dropdown = document.getElementById('customerAutocompleteDropdown');
+
+    if (nameInput) nameInput.value = customer.name;
+    if (phoneInput) {
+      phoneInput.value = formatPhoneForInput(customer.phone);
+      phoneInput.disabled = true;
+    }
+    if (editingInput) editingInput.value = customer.id;
+    if (dropdown) dropdown.style.display = 'none';
+
     updateAiPreview();
     validateNewCallForm();
   }
@@ -286,6 +386,23 @@
         modal.setAttribute('aria-hidden', 'true');
       }
     },
+    createNewPatient: function(name) {
+      const nameInput = document.getElementById('callCustomerName');
+      const phoneInput = document.getElementById('callCustomerPhone');
+      const editingInput = document.getElementById('editingCustomerId');
+      const dropdown = document.getElementById('customerAutocompleteDropdown');
+
+      if (nameInput) nameInput.value = name || '';
+      if (phoneInput) {
+        phoneInput.disabled = false;
+        phoneInput.focus();
+      }
+      if (editingInput) editingInput.value = '';
+      if (dropdown) dropdown.style.display = 'none';
+      
+      updateAiPreview();
+      validateNewCallForm();
+    },
     init: function() {
       // Event listeners
       document.getElementById('closeNewCallModal')?.addEventListener('click', () => this.close());
@@ -299,10 +416,24 @@
       });
       
       ['callCustomerName', 'callCustomerPhone', 'callCustomerTime'].forEach(id => {
-        document.getElementById(id)?.addEventListener('input', () => {
-          updateAiPreview();
-          validateNewCallForm();
-        });
+        const el = document.getElementById(id);
+        if (el) {
+          el.addEventListener('input', () => {
+            updateAiPreview();
+            validateNewCallForm();
+          });
+          if (id === 'callCustomerName') {
+            el.addEventListener('input', handleCustomerSearch);
+          }
+        }
+      });
+      
+      document.addEventListener('click', (e) => {
+        const wrapper = document.querySelector('.autocomplete-wrapper');
+        const dropdown = document.getElementById('customerAutocompleteDropdown');
+        if (wrapper && dropdown && !wrapper.contains(e.target)) {
+          dropdown.style.display = 'none';
+        }
       });
 
       syncMobileOptionalSections();
