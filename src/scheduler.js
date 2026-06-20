@@ -102,7 +102,8 @@ async function markSubmittedCallsWithoutMediaFailed() {
       `UPDATE customers
           SET status = ?,
               next_retry_at = ?,
-              retry_count = COALESCE(retry_count, 0) + 1
+              retry_count = COALESCE(retry_count, 0) + 1,
+              attempt_count = COALESCE(attempt_count, 0) + 1
         WHERE id = ?
           AND status IN ('calling', 'called')`,
       ['retry_scheduled', retryAt, call.customer_id]
@@ -298,6 +299,8 @@ async function triggerScheduledCalls() {
       const existingCall = await dbGet('SELECT 1 FROM calls WHERE idempotency_key = ?', [idempotencyKey]);
       if (existingCall) {
         logger.warn('CALL_START_BLOCKED_DUPLICATE', { phone: customer.phone, reason: 'Already calling' });
+        // Fix: Advance the attempt_count to break out of infinite loop for this idempotency key
+        await dbRun('UPDATE customers SET attempt_count = COALESCE(attempt_count, 0) + 1 WHERE id = ?', [customer.id]);
         continue;
       }
 
