@@ -222,7 +222,7 @@ module.exports = function setupWebSocketBridge(server) {
 
           session.outChunkCount++;
           if (session.outChunkCount % 100 === 0) {
-            debugLog('Sending TTS audio chunk to caller', { count: session.outChunkCount, streamId: session.streamId });
+            console.log(`[STAGE 7: Audio Stream] Sending TTS audio chunk ${session.outChunkCount} back to Caller`);
           }
 
           const remainingMs = (session.audioBuffer.length / 2 / 8000) * 1000;
@@ -246,13 +246,13 @@ module.exports = function setupWebSocketBridge(server) {
             const estimatedUserSpeechEndAt = sttProducedAt - DEEPGRAM_ENDPOINTING_MS;
             const e2eLatencyMs = Math.max(0, session.firstChunkSentAt - estimatedUserSpeechEndAt);
 
-            debugLog('First audio chunk sent to caller', {
-              streamId: session.streamId,
-              sttLatencyMs,
-              llmLatencyMs,
-              ttsLatencyMs,
-              e2eLatencyMs
-            });
+            console.log(`[LATENCY TRACKING] 
+  STT Latency: ~${sttLatencyMs}ms (endpointing)
+  LLM Latency: ${llmLatencyMs}ms
+  TTS Latency: ${ttsLatencyMs}ms
+  End-to-End Latency: ${e2eLatencyMs}ms
+`);
+            console.log(`[STAGE 7: Audio Stream] First chunk sent to Caller. e2eLatencyMs=${e2eLatencyMs}`);
           }
 
           sendIcallMateJson(ws, {
@@ -290,13 +290,6 @@ module.exports = function setupWebSocketBridge(server) {
           session.sttProducedAt = null;
         } else if (session.turnComplete && session.audioBuffer.length === 0) {
           session.turnComplete = false;
-          if (session.hangupAfterAudioDrains) {
-            session.hangupAfterAudioDrains = false;
-            console.log(`[FINAL_AUDIO_FLUSH_COMPLETED] streamId=${session.streamId}`);
-            console.log(`[HANGUP_REQUESTED] streamId=${session.streamId} reason=gemini_live_turn_complete`);
-            requestCallHangup('gemini_live_turn_complete');
-            scheduleFinalizeCallHangup('gemini_live_turn_complete', transcript[transcript.length - 1]?.text || '');
-          }
           // Clear latency tracking for next turn
           session.firstChunkSentAt = null;
           session.geminiLiveFirstAudioAt = null;
@@ -305,6 +298,7 @@ module.exports = function setupWebSocketBridge(server) {
       }, 20); // Match ~8kHz chunk rate
     }
   }
+
 
   function createIcallMateAiBridge(ws, session) {
     let aiWs = null;
@@ -917,9 +911,11 @@ module.exports = function setupWebSocketBridge(server) {
 
       console.log(`[ACTUAL_HANGUP_SENT] streamId=${getSessionLabel()} reason=${reason}`);
       sendIcallMateJson(ws, {
-        event: 'hangup-call',
+        event: 'reverse-hangup-call',
         callerId: session.callerId,
         streamId: session.streamId,
+        source: 'ai',
+        message: 'Call Dropped on BOT',
         reason
       });
       bridgeClosed = true;
@@ -951,9 +947,7 @@ module.exports = function setupWebSocketBridge(server) {
               ? buildOutboundDemoTurnInstruction(merged, outboundDemoState, getSessionClientName(), getSessionCustomerName(), getSessionCallType())
               : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`;
             if (useGeminiLive()) {
-              if (!GEMINI_LIVE_DIRECT_AUDIO) {
-                sendGeminiLiveText(turnText, { interrupt: true });
-              }
+              sendGeminiLiveText(turnText, { interrupt: true });
             } else if (useGemini()) {
               sendGeminiClientTurn(turnText, { interrupt: true });
             } else {
@@ -979,9 +973,7 @@ module.exports = function setupWebSocketBridge(server) {
           pushTranscriptTurn(transcript, 'CUSTOMER', merged);
           const turnText = `Caller said: ${merged}\nRespond naturally in Hindi/Hinglish based on the system prompt instructions.`;
           if (useGeminiLive()) {
-            if (!GEMINI_LIVE_DIRECT_AUDIO) {
-              sendGeminiLiveText(turnText, { interrupt: true });
-            }
+            sendGeminiLiveText(turnText, { interrupt: true });
           } else if (useGemini()) {
             sendGeminiClientTurn(turnText, { interrupt: true });
           } else {
@@ -1414,7 +1406,7 @@ module.exports = function setupWebSocketBridge(server) {
         return;
       }
 
-      if (eventName === 'hangup-call') {
+      if (eventName === 'hangup-call' || eventName === 'reverse-hangup-call') {
         await upsertIcallMateCallFromMedia(message, session, {
           status: session.answered ? 'completed' : 'missed',
           ended_at: normalizeIcallTimestamp(message.timestamp),
