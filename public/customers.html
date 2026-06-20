@@ -343,14 +343,37 @@
 
 
     function getScheduledDate(customer) {
-      const status = String(customer.status || '').toLowerCase();
-      const scheduledValue = ['retry_scheduled', 'callback_scheduled'].includes(status)
-        ? (customer.next_retry_at || customer.scheduled_datetime)
-        : (customer.scheduled_datetime || customer.next_retry_at);
+      if (activeCustomerMetricFilter === 'failed') {
+        const failedCall = getLatestFailedCall(customer.id);
+        if (failedCall) return AppShell.formatDate(failedCall.called_at || failedCall.created_at);
+      }
+      const scheduledValue = ['retry_scheduled', 'callback_scheduled'].includes(customer.status)
+        ? (customer.next_retry_at || customer.scheduled_datetime || '')
+        : (customer.scheduled_datetime || customer.next_retry_at || '');
+      return scheduledValue ? AppShell.formatDate(scheduledValue) : AppShell.formatDate(new Date());
+    }
+
+    function formatScheduledDate(customer) {
+      const date = getScheduledDate(customer);
+      if (!date) return '--';
+      return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    function formatScheduledTime(customer) {
+      if (activeCustomerMetricFilter === 'failed') {
+        const failedCall = getLatestFailedCall(customer.id);
+        if (failedCall) {
+          const date = new Date(failedCall.called_at || failedCall.created_at);
+          return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+        }
+      }
+      const scheduledValue = ['retry_scheduled', 'callback_scheduled'].includes(customer.status)
+        ? (customer.next_retry_at || customer.scheduled_datetime || '')
+        : (customer.scheduled_datetime || customer.next_retry_at || '');
       if (scheduledValue) {
         const date = new Date(scheduledValue);
         if (!Number.isNaN(date.getTime())) {
-          return date;
+          return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
         }
       }
 
@@ -704,7 +727,7 @@
             <td>${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type))}</td>
             <td>${AppShell.escapeHtml(formatScheduledDate(customer))}</td>
             <td>${AppShell.escapeHtml(formatScheduledTime(customer))}</td>
-            <td><span class="status-badge ${AppShell.escapeHtml(String((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span></td>
+            <td><span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(String((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span></td>
             <td>
               <div class="table-actions">
                 <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
@@ -744,7 +767,7 @@
                 <strong>${AppShell.escapeHtml(AppShell.formatName(customer.name) || 'Patient')}</strong>
                 <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</div>
               </div>
-              <span class="status-badge ${AppShell.escapeHtml(String((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${AppShell.formatStatusLabel((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span>
+              <span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(String((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span>
             </div>
             <div class="mobile-subtext">${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type))}</div>
             <div class="mobile-subtext">Date: ${AppShell.escapeHtml(formatScheduledDate(customer))}</div>

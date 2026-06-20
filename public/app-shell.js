@@ -536,6 +536,14 @@
         }
       }
 
+      if (payload.preferred_slot) {
+        const [hourStr] = payload.preferred_slot.split(':');
+        const hour = parseInt(hourStr, 10);
+        if (!isNaN(hour) && (hour >= 21 || hour < 7)) {
+          fieldErrors[ids.time] = 'Calls cannot be scheduled between 9 PM and 7 AM';
+        }
+      }
+
       const hasCareDetails = carePayload.date_of_birth || carePayload.last_visit_date || carePayload.treatment_type;
       if (hasCareDetails) {
         if (!carePayload.last_visit_date) fieldErrors[ids.lastVisit] = 'Last visit is required when adding care details';

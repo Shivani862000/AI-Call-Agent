@@ -44,6 +44,18 @@ function isProviderAcceptedOnly(call) {
     || reason.includes('Total Records Being Inserted');
 }
 
+function enforceBusinessHours(isoString) {
+  const date = new Date(isoString);
+  const hour = date.getHours();
+  if (hour >= 21) {
+    date.setDate(date.getDate() + 1);
+    date.setHours(7, 0, 0, 0);
+  } else if (hour < 7) {
+    date.setHours(7, 0, 0, 0);
+  }
+  return date.toISOString();
+}
+
 async function markSubmittedCallsWithoutMediaFailed() {
   const cutoffIso = new Date(Date.now() - SUBMITTED_CALL_GRACE_MS).toISOString();
   const retryAt = new Date(Date.now() + SUBMITTED_CALL_RETRY_MS).toISOString();
@@ -106,7 +118,8 @@ async function markSubmittedCallsWithoutMediaFailed() {
 
     if (call.auto_retry_enabled !== 0 && attempts < 3) {
       nextStatus = 'retry_scheduled';
-      nextRetryAt = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+      let retryDate = new Date(Date.now() + 3 * 60 * 60 * 1000);
+      nextRetryAt = enforceBusinessHours(retryDate.toISOString());
     }
 
     await dbRun(

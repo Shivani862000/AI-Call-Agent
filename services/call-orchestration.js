@@ -141,29 +141,41 @@ function buildPreCallIntelligence(customer = {}, history = []) {
   };
 }
 
+function enforceBusinessHours(isoString) {
+  const date = new Date(isoString);
+  const hour = date.getHours();
+  if (hour >= 21) {
+    date.setDate(date.getDate() + 1);
+    date.setHours(7, 0, 0, 0);
+  } else if (hour < 7) {
+    date.setHours(7, 0, 0, 0);
+  }
+  return date.toISOString();
+}
+
 function getSmartRetryIso(outcome, now = new Date()) {
   const retryAt = new Date(now);
   const normalizedOutcome = String(outcome || '').toLowerCase();
 
   if (normalizedOutcome === 'busy') {
     retryAt.setMinutes(retryAt.getMinutes() + 30);
-    return retryAt.toISOString();
+    return enforceBusinessHours(retryAt.toISOString());
   }
 
   if (normalizedOutcome === 'callback') {
     retryAt.setHours(retryAt.getHours() + 2);
-    return retryAt.toISOString();
+    return enforceBusinessHours(retryAt.toISOString());
   }
 
   if (normalizedOutcome === 'no_answer') {
     retryAt.setDate(retryAt.getDate() + 1);
     retryAt.setHours(18, 30, 0, 0);
-    return retryAt.toISOString();
+    return enforceBusinessHours(retryAt.toISOString());
   }
 
   retryAt.setDate(retryAt.getDate() + 1);
   retryAt.setHours(11, 0, 0, 0);
-  return retryAt.toISOString();
+  return enforceBusinessHours(retryAt.toISOString());
 }
 
 function detectConversationOutcome({ analysisSummary = '', reportExcerpt = '', reviewText = '', transcriptText = '' } = {}) {
@@ -316,7 +328,7 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
       customerUpdates.status = 'retry_scheduled';
       const { MIN_RETRY_GAP_MINUTES } = require('./config');
       const retryAt = new Date(Date.now() + MIN_RETRY_GAP_MINUTES * 60 * 1000);
-      customerUpdates.next_retry_at = retryAt.toISOString();
+      customerUpdates.next_retry_at = enforceBusinessHours(retryAt.toISOString());
       callUpdates.next_action_at = customerUpdates.next_retry_at;
       if (normalized !== 'busy') {
         callUpdates.outcome = normalized;
