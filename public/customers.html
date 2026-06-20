@@ -454,6 +454,13 @@
       ));
     }
 
+    function getLatestFailedCall(customerId) {
+      return recentCallsCache.find((call) => (
+        Number(call.customer_id) === Number(customerId)
+        && ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase())
+      )) || null;
+    }
+
     function openNewCallModal(customerId = null, options = {}) {
       if (!newCallModal) return;
       newCallModal.open(customerId, options);
