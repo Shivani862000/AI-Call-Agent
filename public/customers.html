@@ -448,6 +448,38 @@
       )) || null;
     }
 
+    function getComputedCustomerStatus(customer) {
+      let status = String(customer.status || 'pending').toLowerCase();
+      
+      if (status === 'called') {
+        const latestCall = getLatestCall(customer.id);
+        if (latestCall) {
+          const callTime = new Date(latestCall.called_at || latestCall.created_at).getTime();
+          const now = Date.now();
+          if (!Number.isNaN(callTime) && (now - callTime) > 3 * 60 * 1000) {
+            const completedCall = getLatestCompletedCall(customer.id);
+            if (completedCall) {
+              return 'completed';
+            } else {
+              return 'failed';
+            }
+          }
+        } else {
+          const lastContactTime = new Date(customer.last_contact_at || customer.created_at).getTime();
+          const now = Date.now();
+          if (!Number.isNaN(lastContactTime) && (now - lastContactTime) > 3 * 60 * 1000) {
+            return 'failed';
+          }
+        }
+      }
+      
+      if (status === 'failed' && customer.last_contact_outcome) {
+        return customer.last_contact_outcome;
+      }
+      
+      return status;
+    }
+
     function openNewCallModal(customerId = null, options = {}) {
       if (!newCallModal) return;
       newCallModal.open(customerId, options);
@@ -658,17 +690,18 @@
 
         let matchesMetricFilter = true;
 
+        let computedStatus = getComputedCustomerStatus(customer);
+
         if (activeCustomerMetricFilter === 'scheduled') {
-          matchesMetricFilter = ['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled'].includes(String(customer.status || '').toLowerCase());
+          matchesMetricFilter = ['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled'].includes(computedStatus);
         } else if (activeCustomerMetricFilter === 'pending') {
-          matchesMetricFilter = pendingStatuses.has(String(customer.status || '').toLowerCase());
+          matchesMetricFilter = pendingStatuses.has(computedStatus);
         } else if (activeCustomerMetricFilter === 'completed') {
-          matchesMetricFilter = Boolean(getLatestCompletedCall(customer.id));
+          matchesMetricFilter = Boolean(getLatestCompletedCall(customer.id)) || computedStatus === 'completed';
         } else if (activeCustomerMetricFilter === 'failed') {
-          const hasCompleted = Boolean(getLatestCompletedCall(customer.id));
-          const currentStatus = String(customer.status || '').toLowerCase();
-          const isScheduledOrCompleted = ['scheduled', 'pending', 'completed'].includes(currentStatus);
-          matchesMetricFilter = hasFailedCall(customer.id) && !hasCompleted && !isScheduledOrCompleted;
+          const hasCompleted = Boolean(getLatestCompletedCall(customer.id)) || computedStatus === 'completed';
+          const isScheduledOrCompleted = ['scheduled', 'pending', 'completed', 'retry_scheduled', 'callback_scheduled'].includes(computedStatus);
+          matchesMetricFilter = (hasFailedCall(customer.id) || computedStatus === 'failed') && !hasCompleted && !isScheduledOrCompleted;
         }
 
         return matchesSearch && matchesDateFilter && matchesCallType && matchesMetricFilter;
@@ -721,7 +754,7 @@
             <td>${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type))}</td>
             <td>${AppShell.escapeHtml(formatScheduledDate(customer))}</td>
             <td>${AppShell.escapeHtml(formatScheduledTime(customer))}</td>
-            <td><span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(String((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span></td>
+            <td><span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(getComputedCustomerStatus(customer))}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel(getComputedCustomerStatus(customer))}</span></td>
             <td>
               <div class="table-actions">
                 <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
@@ -761,7 +794,7 @@
                 <strong>${AppShell.escapeHtml(AppShell.formatName(customer.name) || 'Patient')}</strong>
                 <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</div>
               </div>
-              <span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(String((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending').toLowerCase())}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel((customer.status === 'failed' && customer.last_contact_outcome) ? customer.last_contact_outcome : customer.status || 'pending')}</span>
+              <span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(getComputedCustomerStatus(customer))}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel(getComputedCustomerStatus(customer))}</span>
             </div>
             <div class="mobile-subtext">${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type))}</div>
             <div class="mobile-subtext">Date: ${AppShell.escapeHtml(formatScheduledDate(customer))}</div>

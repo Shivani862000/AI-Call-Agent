@@ -25,13 +25,17 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ALLOWED_CALL_TYPES = new Set(['REVIEW_CALL', 'THREE_MONTH_FOLLOWUP']);
 const RESCHEDULABLE_STATUSES = new Set([
   'scheduled',
+  'pending',
   'called',
   'no_answer',
   'busy',
   'failed',
   'completed',
   'retry_scheduled',
-  'callback_scheduled'
+  'callback_scheduled',
+  'hot_lead',
+  'churn_watch',
+  'admin_review'
 ]);
 function toBooleanFlag(value) {
   if (typeof value === 'boolean') return value ? 1 : 0;
