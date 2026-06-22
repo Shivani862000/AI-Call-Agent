@@ -269,7 +269,12 @@
       dob: `${fieldPrefix}Dob`,
       lastVisit: `${fieldPrefix}LastVisit`,
       treatment: `${fieldPrefix}Treatment`,
-      notes: `${fieldPrefix}Notes`
+      notes: `${fieldPrefix}Notes`,
+      selectionBody: `${modalId}SelectionBody`,
+      existingPatientBtn: `${modalId}ExistingPatientBtn`,
+      newPatientBtn: `${modalId}NewPatientBtn`,
+      formBody: `${modalId}FormBody`,
+      nameDropdown: `${fieldPrefix}NameDropdown`
     };
 
     mount.innerHTML = `
@@ -287,14 +292,34 @@
 
           <input id="${ids.editingId}" type="hidden">
 
-          <div class="saas-modal-body">
-            
+          <div id="${ids.selectionBody}" class="saas-modal-body" style="padding-bottom:24px;">
+            <div class="saas-selection-cards">
+              <div id="${ids.existingPatientBtn}" class="saas-selection-card">
+                <div class="saas-selection-card-icon">
+                  <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 017.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                </div>
+                <div class="saas-selection-card-title">Existing Patient</div>
+                <div class="saas-selection-card-subtitle">Schedule follow-up for a returning patient</div>
+              </div>
+              <div id="${ids.newPatientBtn}" class="saas-selection-card">
+                <div class="saas-selection-card-icon">
+                  <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
+                </div>
+                <div class="saas-selection-card-title">New Patient</div>
+                <div class="saas-selection-card-subtitle">Create record and schedule new call</div>
+              </div>
+            </div>
+          </div>
+
+          <div id="${ids.formBody}" style="display:none; flex: 1 1 auto; overflow:hidden; flex-direction:column;">
+            <div class="saas-modal-body">
             <div class="saas-form-section saas-card-section">
               <div class="saas-section-title">Patient Information</div>
               <div class="saas-grid-2">
-                <div class="saas-field">
+                <div class="saas-field" style="position:relative;">
                   <label for="${ids.name}">Patient Name <span style="color:var(--color-danger)">*</span></label>
-                  <input id="${ids.name}" type="text" maxlength="100" placeholder="e.g. Rahul Sharma" required>
+                  <input id="${ids.name}" type="text" maxlength="100" placeholder="e.g. Rahul Sharma" autocomplete="off" required>
+                  <div id="${ids.nameDropdown}" style="display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; background:#fff; border:1px solid #cbd5e1; border-radius:8px; z-index:50; max-height:220px; overflow-y:auto; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);"></div>
                   <span class="error-text" id="${ids.name}Error"></span>
                 </div>
                 <div class="saas-field">
@@ -387,6 +412,7 @@
           <div class="saas-modal-footer">
             <button id="${ids.cancel}" class="btn-ghost-saas" type="button">Cancel</button>
             <button id="${ids.submit}" class="btn-primary-saas" type="button">Schedule Call</button>
+          </div>
           </div>
         </div>
       </div>
@@ -567,6 +593,8 @@
       getEl('panelTitle').textContent = 'Schedule New Follow-up Call';
       getEl('submit').textContent = 'Schedule Call';
       getEl('name').value = '';
+      getEl('name').readOnly = false;
+      getEl('nameDropdown').style.display = 'none';
       getEl('phone').value = '';
       getEl('date').value = todayDateValue();
       getEl('date').min = todayDateValue();
@@ -645,6 +673,31 @@
       }
     }
 
+    let searchTimeout = null;
+    let isExistingPatientMode = false;
+
+    function showSelectionView() {
+      getEl('selectionBody').style.display = 'block';
+      getEl('formBody').style.display = 'none';
+      getEl('panelTitle').textContent = 'Schedule Follow-up Call';
+    }
+
+    function showFormView(isExisting) {
+      isExistingPatientMode = isExisting;
+      getEl('selectionBody').style.display = 'none';
+      getEl('formBody').style.display = 'flex';
+      getEl('panelTitle').textContent = isExisting ? 'Select Existing Patient' : 'Schedule New Follow-up Call';
+      
+      const nameInput = getEl('name');
+      if (isExisting) {
+        nameInput.placeholder = 'Search by name or phone...';
+        nameInput.value = '';
+      } else {
+        nameInput.placeholder = 'e.g. Rahul Sharma';
+      }
+      setTimeout(() => nameInput.focus(), 50);
+    }
+
     async function open(customerId = null) {
       reset();
       if (customerId && typeof options.getCustomer === 'function') {
@@ -668,13 +721,17 @@
             getEl('lastVisit').value = client.last_visit_date || '';
             getEl('treatment').value = client.treatment_type || '';
           }
+          showFormView(false);
+        } else {
+          showSelectionView();
         }
+      } else {
+        showSelectionView();
       }
 
       getEl('backdrop').classList.add('open');
       getEl('backdrop').setAttribute('aria-hidden', 'false');
       syncMobileOptionalSections();
-      window.requestAnimationFrame(() => getEl('name').focus());
     }
 
     function close() {
@@ -685,6 +742,69 @@
     getEl('close').addEventListener('click', close);
     getEl('cancel').addEventListener('click', close);
     getEl('submit').addEventListener('click', submit);
+    getEl('existingPatientBtn').addEventListener('click', () => showFormView(true));
+    getEl('newPatientBtn').addEventListener('click', () => showFormView(false));
+    
+    getEl('name').addEventListener('input', (e) => {
+      if (!isExistingPatientMode) return;
+      const q = e.target.value.trim();
+      const dropdown = getEl('nameDropdown');
+      
+      if (q.length < 2) {
+        dropdown.style.display = 'none';
+        return;
+      }
+      
+      dropdown.style.display = 'block';
+      dropdown.innerHTML = '<div class="autocomplete-loading">Searching...</div>';
+      
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(async () => {
+        try {
+          const results = await fetchJson(`${API_BASE}/customers/search?q=${encodeURIComponent(q)}`);
+          if (!results || results.length === 0) {
+            dropdown.innerHTML = '<div class="autocomplete-empty">No matching patients found.</div>';
+            return;
+          }
+          
+          dropdown.innerHTML = results.slice(0, 10).map(c => `
+            <div class="autocomplete-item" data-id="${c.id}" data-name="${(c.name || '').replace(/"/g, '&quot;')}" data-phone="${c.phone || ''}">
+              <div class="autocomplete-item-title">${c.name || 'Unknown'}</div>
+              <div class="autocomplete-item-subtitle">${c.phone || ''}</div>
+            </div>
+          `).join('');
+          
+          dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
+            item.addEventListener('click', async () => {
+              getEl('editingId').value = item.dataset.id;
+              getEl('name').value = item.dataset.name;
+              getEl('phone').value = formatPhoneForInput(item.dataset.phone);
+              dropdown.style.display = 'none';
+              
+              await ensureClientsLoaded();
+              const client = getClientByPhone(item.dataset.phone);
+              if (client) {
+                getEl('careToggle').open = !isMobileModalLayout();
+                getEl('dob').value = client.date_of_birth || '';
+                getEl('lastVisit').value = client.last_visit_date || '';
+                getEl('treatment').value = client.treatment_type || '';
+              }
+            });
+          });
+        } catch (error) {
+          dropdown.innerHTML = '<div class="autocomplete-empty">Error searching patients.</div>';
+        }
+      }, 300);
+    });
+
+    document.addEventListener('click', (e) => {
+      const dropdown = getEl('nameDropdown');
+      const container = getEl('name').parentElement;
+      if (dropdown && dropdown.style.display !== 'none' && !container.contains(e.target)) {
+        dropdown.style.display = 'none';
+      }
+    });
+
     getEl('phone').addEventListener('input', (event) => {
       event.target.value = formatPhoneForInput(event.target.value);
     });

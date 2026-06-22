@@ -933,10 +933,10 @@ module.exports = function setupWebSocketBridge(server) {
       });
       bridgeClosed = true;
       setTimeout(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.close();
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CLOSING) {
+          ws.terminate();
         }
-      }, 250);
+      }, 500);
     }
 
     function handleDeepgramTranscript(event) {
@@ -1287,10 +1287,10 @@ module.exports = function setupWebSocketBridge(server) {
 
             // Disconnect backend immediately
             setTimeout(() => {
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.close();
+              if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CLOSING) {
+                ws.terminate();
               }
-            }, 250);
+            }, 500);
           }
         }, MAX_CALL_DURATION_MS);
       }
