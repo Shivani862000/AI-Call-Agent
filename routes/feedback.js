@@ -99,7 +99,9 @@ router.get('/', async (req, res) => {
         calls.analysis_status,
         calls.analysis_completed_at,
         calls.feedback_saved_at,
-        calls.called_at
+        calls.called_at,
+        calls.call_type,
+        calls.analysis_json
       FROM calls
       JOIN customers ON customers.id = calls.customer_id
       WHERE calls.extracted_rating IS NOT NULL 
@@ -130,6 +132,7 @@ router.get('/', async (req, res) => {
     const analysisFeedback = analyzedCalls.map((row) => {
       const reviewText = row.extracted_review_text || row.analysis_summary || row.summary || row.report_excerpt || '';
       const sentiment = normalizeSentiment(row.sentiment_label || row.sentiment);
+      const analysisJson = row.analysis_json ? JSON.parse(row.analysis_json) : {};
       return {
         id: `analysis-${row.call_id}`,
         customer_id: row.customer_id,
@@ -139,11 +142,14 @@ router.get('/', async (req, res) => {
         category: categoryFromAnalysis({ stars: row.stars, sentiment }),
         stars: normalizeRating(row.stars),
         sentiment,
+        call_type: row.call_type,
+        blood_donated_last_3_months: analysisJson.blood_donated_last_3_months || null,
+        willing_to_donate_future: analysisJson.willing_to_donate_future || null,
         analysis_status: row.analysis_status,
         source: 'call_analysis',
         submitted_at: row.analysis_completed_at || row.feedback_saved_at || row.called_at
       };
-    }).filter((row) => row.review_text || row.stars || row.sentiment !== 'neutral');
+    }).filter((row) => row.review_text || row.stars || row.sentiment !== 'neutral' || row.call_type === 'THREE_MONTH_FOLLOWUP');
 
     const feedback = [...analysisFeedback, ...manualFeedback]
       .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));

@@ -501,15 +501,31 @@
         return;
       }
 
-      container.innerHTML = items.map((item) => `
-        <div class="compact-row">
-          <div>
-            <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
-            <div class="muted">${AppShell.formatDateTime(item.submitted_at)}${item.stars ? ` · ${item.stars}/5` : ''}</div>
+      container.innerHTML = items.map((item) => {
+        const isFollowUp = String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP';
+        if (isFollowUp) {
+          const q1 = item.blood_donated_last_3_months || 'N/A';
+          const q2 = String(q1).toLowerCase() === 'no' ? (item.willing_to_donate_future || 'N/A') : null;
+          return `
+            <div class="compact-row">
+              <div>
+                <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
+                <div class="muted">${AppShell.formatDateTime(item.submitted_at)} · Blood Donated: ${AppShell.escapeHtml(q1)}</div>
+              </div>
+              <span class="status-badge neutral">Follow-up</span>
+            </div>
+          `;
+        }
+        return `
+          <div class="compact-row">
+            <div>
+              <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
+              <div class="muted">${AppShell.formatDateTime(item.submitted_at)}${item.stars ? ` · ${item.stars}/5` : ''}</div>
+            </div>
+            <span class="status-badge ${filterName}">${AppShell.formatStatusLabel(filterName)}</span>
           </div>
-          <span class="status-badge ${filterName}">${AppShell.formatStatusLabel(filterName)}</span>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
 
     function renderMobileFilteredList() {
@@ -539,19 +555,37 @@
 
         const paged = AppShell.Pagination.getPagedItems(feedback, currentFeedbackListPage);
         currentFeedbackListPage = paged.currentPage;
-        container.innerHTML = paged.items.map((item) => `
-          <article class="mobile-feedback-card mobile-feedback-card-inline">
-            <div class="mobile-feedback-head">
-              <div>
-                <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
-                <div class="mobile-subtext">${AppShell.formatDateTime(item.submitted_at)}</div>
+        container.innerHTML = paged.items.map((item) => {
+          if (String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP') {
+            const q1 = item.blood_donated_last_3_months || 'N/A';
+            const q2 = String(q1).toLowerCase() === 'no' ? (item.willing_to_donate_future || 'N/A') : null;
+            return `
+              <article class="mobile-feedback-card mobile-feedback-card-inline">
+                <div class="mobile-feedback-head">
+                  <div>
+                    <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
+                    <div class="mobile-subtext">${AppShell.formatDateTime(item.submitted_at)}</div>
+                  </div>
+                </div>
+                <div class="mobile-subtext" style="margin-top:10px;">Blood Donated: <strong>${AppShell.escapeHtml(q1)}</strong></div>
+                ${q2 ? `<div class="mobile-subtext" style="margin-top:4px;">Willing to Donate: <strong>${AppShell.escapeHtml(q2)}</strong></div>` : ''}
+              </article>
+            `;
+          }
+          return `
+            <article class="mobile-feedback-card mobile-feedback-card-inline">
+              <div class="mobile-feedback-head">
+                <div>
+                  <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
+                  <div class="mobile-subtext">${AppShell.formatDateTime(item.submitted_at)}</div>
+                </div>
+                <span class="status-badge ${activeFeedbackFilter}">${AppShell.formatStatusLabel(activeFeedbackFilter)}</span>
               </div>
-              <span class="status-badge ${activeFeedbackFilter}">${AppShell.formatStatusLabel(activeFeedbackFilter)}</span>
-            </div>
-            ${item.review_text ? `<div class="mobile-subtext" style="margin-top:10px;">${AppShell.escapeHtml(item.review_text)}</div>` : ''}
-            ${Number(item.stars || 0) ? `<div class="mobile-subtext" style="margin-top:8px;">Rating: ${item.stars}/5</div>` : ''}
-          </article>
-        `).join('');
+              ${item.review_text ? `<div class="mobile-subtext" style="margin-top:10px;">${AppShell.escapeHtml(item.review_text)}</div>` : ''}
+              ${Number(item.stars || 0) ? `<div class="mobile-subtext" style="margin-top:8px;">Rating: ${item.stars}/5</div>` : ''}
+            </article>
+          `;
+        }).join('');
         document.getElementById('mobileFeedbackListPagination').innerHTML = AppShell.Pagination.renderControls(paged.currentPage, paged.totalItems, 'changeFeedbackListPage');
         return;
       }
@@ -620,7 +654,26 @@
       currentFeedbackBoardPage = paged.currentPage;
 
       tableBody.innerHTML = paged.items.map((item) => {
-        const sentiment = item.is_pending_analysis ? 'pending' : feedbackSentiment(item);
+        const isFollowUp = String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP';
+        const sentiment = item.is_pending_analysis ? 'pending' : (isFollowUp ? 'neutral' : feedbackSentiment(item));
+        
+        if (isFollowUp) {
+          const q1 = item.blood_donated_last_3_months || 'N/A';
+          const q2 = String(q1).toLowerCase() === 'no' ? (item.willing_to_donate_future || 'N/A') : null;
+          return `
+            <tr>
+              <td>
+                <div class="row-title">${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</div>
+                <div class="row-subtitle">Follow-up</div>
+              </td>
+              <td><span class="status-badge ${sentiment}">Follow-up</span></td>
+              <td>--</td>
+              <td class="summary-cell">Blood Donated: <strong>${AppShell.escapeHtml(q1)}</strong> ${q2 ? `· Willing: <strong>${AppShell.escapeHtml(q2)}</strong>` : ''}</td>
+              <td>${AppShell.formatDateTime(item.submitted_at)}</td>
+            </tr>
+          `;
+        }
+
         return `
           <tr>
             <td>
@@ -636,7 +689,26 @@
       }).join('');
 
       mobileList.innerHTML = desktopFeedback.map((item) => {
-        const sentiment = item.is_pending_analysis ? 'pending' : feedbackSentiment(item);
+        const isFollowUp = String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP';
+        const sentiment = item.is_pending_analysis ? 'pending' : (isFollowUp ? 'neutral' : feedbackSentiment(item));
+        
+        if (isFollowUp) {
+          const q1 = item.blood_donated_last_3_months || 'N/A';
+          const q2 = String(q1).toLowerCase() === 'no' ? (item.willing_to_donate_future || 'N/A') : null;
+          return `
+            <article class="mobile-feedback-card">
+              <div class="mobile-feedback-head">
+                <div>
+                  <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
+                  <div class="mobile-subtext">${AppShell.formatDateTime(item.submitted_at)}</div>
+                </div>
+                <span class="status-badge ${sentiment}">Follow-up</span>
+              </div>
+              <div class="mobile-subtext" style="margin-top:10px;">Blood Donated: <strong>${AppShell.escapeHtml(q1)}</strong></div>
+              ${q2 ? `<div class="mobile-subtext" style="margin-top:4px;">Willing: <strong>${AppShell.escapeHtml(q2)}</strong></div>` : ''}
+            </article>
+          `;
+        }
         return `
           <article class="mobile-feedback-card">
             <div class="mobile-feedback-head">

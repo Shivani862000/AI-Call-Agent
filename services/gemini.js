@@ -164,7 +164,19 @@ async function analyzeCallTranscript(transcriptText, context = {}) {
     };
   }
 
-  const systemPrompt = `You are an expert patient care call analyst. Analyze the following call transcript and generate a JSON response strictly following this schema:
+  const isFollowUp = String(context.callType || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP';
+
+  const systemPrompt = isFollowUp
+    ? `You are an expert patient care call analyst. Analyze the following call transcript and generate a JSON response strictly following this schema:
+{
+  "summary": "1-2 sentences summarizing the call",
+  "sentiment": "positive", "neutral", or "negative",
+  "blood_donated_last_3_months": "Yes", "No", or null (if unknown),
+  "willing_to_donate_future": "Yes", "No", or null (if Q1 is Yes or unknown),
+  "language": "en" or "hi",
+  "report_excerpt": "1 sentence high-level excerpt"
+}`
+    : `You are an expert patient care call analyst. Analyze the following call transcript and generate a JSON response strictly following this schema:
 {
   "summary": "1-2 sentences summarizing the call",
   "sentiment": "positive", "neutral", or "negative",
@@ -198,6 +210,8 @@ RATING SCALE GUIDELINES:
       language: analysis.language || 'en',
       review_text: analysis.review_text || '',
       report_excerpt: analysis.report_excerpt || 'Call completed.',
+      blood_donated_last_3_months: analysis.blood_donated_last_3_months || null,
+      willing_to_donate_future: analysis.willing_to_donate_future || null,
       key_points: [],
       improvement_suggestions: []
     };

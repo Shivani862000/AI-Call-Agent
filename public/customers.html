@@ -203,7 +203,7 @@
       </div>
 
       <section class="poc-mini-grid" style="margin-bottom: 16px;">
-        <article class="mini-stat">
+        <article class="mini-stat" id="ratingMiniStat">
           <strong id="analysisRatingValue"></strong>
           <span>Rating</span>
         </article>
@@ -227,9 +227,21 @@
         <div id="analysisSummaryValue" class="poc-card-subtitle" style="margin-top:10px;"></div>
       </section>
 
-      <section class="poc-card" style="margin-bottom: 14px;">
+      <section class="poc-card" id="patientReviewSection" style="margin-bottom: 14px;">
         <h4 class="poc-card-title" style="font-size:16px;">Patient Review</h4>
         <div id="analysisReviewValue" class="poc-card-subtitle" style="margin-top:10px;"></div>
+      </section>
+
+      <section class="poc-card" id="followUpFeedbackSection" style="margin-bottom: 14px; display: none;">
+        <h4 class="poc-card-title" style="font-size:16px;">Follow-up Feedback</h4>
+        <div class="poc-card-subtitle" style="margin-top:10px;">
+          <div style="margin-bottom: 8px;">
+            Blood Donated Within Last 3 Months: <strong id="followUpQ1Value"></strong>
+          </div>
+          <div id="followUpQ2Container">
+            Interested in Future Blood Donation: <strong id="followUpQ2Value"></strong>
+          </div>
+        </div>
       </section>
 
       <section class="poc-card">
@@ -535,6 +547,18 @@
     }
 
     function buildAnalysisReview(call) {
+      const isFollowUp = String(call.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP';
+      if (isFollowUp) {
+        let analysisJson = {};
+        try { analysisJson = JSON.parse(call.analysis_json || '{}'); } catch(e) {}
+        const q1 = analysisJson.blood_donated_last_3_months || 'N/A';
+        const q2 = String(q1).toLowerCase() === 'no' ? (analysisJson.willing_to_donate_future || 'N/A') : null;
+        
+        return `<div style="font-size:13px; line-height:1.4;">
+          <div style="margin-bottom: 4px;">Donated within last 3 months: <strong>${AppShell.escapeHtml(q1)}</strong></div>
+          ${q2 ? `<div>Willing to donate in future: <strong>${AppShell.escapeHtml(q2)}</strong></div>` : ''}
+        </div>`;
+      }
       const rating = Number(call.extracted_rating || 0);
       const stars = rating ? ('★'.repeat(rating) + '☆'.repeat(Math.max(0, 5 - rating))) : 'No rating';
       const review = call.extracted_review_text ? `<div style="margin-top:8px;">${AppShell.escapeHtml(call.extracted_review_text)}</div>` : '';

@@ -439,9 +439,9 @@
     </section>
 
     <!-- ROW 3: KPI INSIGHTS -->
-    <section class="kpi-row">
-      <div class="kpi-card"><span>Quality</span><strong id="kpiQualityScore">--</strong></div>
-      <div class="kpi-card"><span>Sentiment</span><strong id="sentimentValue">--</strong></div>
+    <section class="kpi-row" id="kpiRow">
+      <div class="kpi-card" id="qualityCard"><span>Quality</span><strong id="kpiQualityScore">--</strong></div>
+      <div class="kpi-card" id="sentimentCard"><span>Sentiment</span><strong id="sentimentValue">--</strong></div>
       <div class="kpi-card"><span>Duration</span><strong id="kpiDuration">--</strong></div>
       <div class="kpi-card"><span>Outcome</span><strong id="overallOutcomeValue">--</strong></div>
       <div class="kpi-card"><span>Q's Answered</span><strong id="kpiQuestions">--</strong></div>
@@ -655,11 +655,32 @@
     }
 
     function renderOutcomes(call) {
+      const container = document.getElementById('outcomeCards');
+      const isFollowUp = String(call.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP';
+      
+      if (isFollowUp) {
+        let analysisJson = {};
+        try { analysisJson = JSON.parse(call.analysis_json || '{}'); } catch(e) {}
+        const q1 = analysisJson.blood_donated_last_3_months || 'N/A';
+        const q2 = String(q1).toLowerCase() === 'no' ? (analysisJson.willing_to_donate_future || 'N/A') : null;
+        
+        container.innerHTML = `
+          <div class="outcome-chip neutral">
+            Blood Donated: ${AppShell.escapeHtml(q1)}
+          </div>
+          ${q2 ? `
+            <div class="outcome-chip neutral">
+              Willing to Donate: ${AppShell.escapeHtml(q2)}
+            </div>
+          ` : ''}
+        `;
+        return;
+      }
+
       const cards = (call.analysis?.outcome_cards || []).filter((card) => {
         const value = String(card.value || '').trim().toUpperCase();
         return value && value !== 'UNKNOWN' && value !== '--';
       });
-      const container = document.getElementById('outcomeCards');
       if (!cards.length) {
         container.innerHTML = '';
         return;
@@ -786,15 +807,22 @@
       transcriptTurns = call.analysis?.transcript_turns?.length
         ? call.analysis.transcript_turns
         : parseTurnsFromText(call.transcript_text || '');
+      
+      const isFollowUp = String(call.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP';
+      document.getElementById('qualityCard').style.display = isFollowUp ? 'none' : '';
+      document.getElementById('sentimentCard').style.display = isFollowUp ? 'none' : '';
+      
       renderOverview(call);
       renderRecording(call);
       renderSummary(call);
       renderOutcomes(call);
-      renderSentiment(call);
+      if (!isFollowUp) {
+        renderSentiment(call);
+        renderQuality(call);
+      }
       renderTranscript();
       renderTimeline(call);
       renderMetrics(call);
-      renderQuality(call);
       updateActionLinks(call);
     }
 

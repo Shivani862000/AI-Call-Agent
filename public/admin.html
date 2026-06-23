@@ -658,6 +658,19 @@
         }
 
         const feedbackMarkup = paginatedItems.map((item) => {
+          if (String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP') {
+            const q1 = item.blood_donated_last_3_months || 'N/A';
+            const q2 = String(q1).toLowerCase() === 'no' ? (item.willing_to_donate_future || 'N/A') : null;
+            return `
+              <article class="mobile-recent-call-card">
+                <div>
+                  <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name))}</strong>
+                  <div class="mobile-subtext">Blood Donated: <strong>${AppShell.escapeHtml(q1)}</strong></div>
+                  ${q2 ? `<div class="mobile-subtext">Willing to Donate: <strong>${AppShell.escapeHtml(q2)}</strong></div>` : ''}
+                </div>
+              </article>
+            `;
+          }
           const tone = Number(item.stars || 0) >= 4 ? 'positive' : Number(item.stars || 0) <= 2 ? 'negative' : 'neutral';
           return `
             <article class="mobile-recent-call-card">
@@ -671,6 +684,18 @@
         }).join('') + renderOverviewMobilePagination(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
 
         const desktopFeedbackMarkup = paginatedItems.map((item) => {
+          if (String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP') {
+            const q1 = item.blood_donated_last_3_months || 'N/A';
+            const q2 = String(q1).toLowerCase() === 'no' ? (item.willing_to_donate_future || 'N/A') : null;
+            return `
+              <div class="simple-call-item">
+                <div>
+                  <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name))}</strong>
+                  <span>Blood Donated: <strong>${AppShell.escapeHtml(q1)}</strong> ${q2 ? `· Willing: <strong>${AppShell.escapeHtml(q2)}</strong>` : ''}</span>
+                </div>
+              </div>
+            `;
+          }
           const tone = Number(item.stars || 0) >= 4 ? 'positive' : Number(item.stars || 0) <= 2 ? 'negative' : 'neutral';
           return `
             <div class="simple-call-item">
