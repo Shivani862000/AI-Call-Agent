@@ -451,7 +451,7 @@
     function getComputedCustomerStatus(customer) {
       let status = String(customer.status || 'pending').toLowerCase();
       
-      if (status === 'called') {
+      if (['called', 'initiated', 'ringing', 'in_progress', 'connected'].includes(status)) {
         const latestCall = getLatestCall(customer.id);
         if (latestCall) {
           const callTime = new Date(latestCall.called_at || latestCall.created_at).getTime();

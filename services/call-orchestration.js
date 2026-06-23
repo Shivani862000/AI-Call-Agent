@@ -360,6 +360,8 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
     if (normalized === 'consent_given') {
       customerUpdates.consent_status = 'granted';
     }
+  } else if (['ringing', 'in_progress', 'queued', 'initiated', 'voicemail'].includes(normalized)) {
+    customerUpdates.status = normalized;
   }
 
   await dbRun(

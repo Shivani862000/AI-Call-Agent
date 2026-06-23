@@ -350,6 +350,12 @@ module.exports = function mountApiRoutes(app) {
         if (providerStatus === 'no-answer') mappedOutcome = 'no_answer';
         if (providerStatus === 'failed') mappedOutcome = 'failed';
         if (providerStatus === 'busy') mappedOutcome = 'busy';
+        if (providerStatus === 'ringing') mappedOutcome = 'ringing';
+        if (providerStatus === 'in-progress') mappedOutcome = 'in_progress';
+        if (providerStatus === 'queued') mappedOutcome = 'queued';
+        if (providerStatus === 'initiated') mappedOutcome = 'initiated';
+        if (providerStatus === 'voicemail') mappedOutcome = 'voicemail';
+        if (providerStatus === 'canceled' || providerStatus === 'cancelled') mappedOutcome = 'cancelled';
 
         const normalizedRecordingUrl = providerRecordingUrl
           ? String(providerRecordingUrl).endsWith('.mp3') ? providerRecordingUrl : `${providerRecordingUrl}.mp3`

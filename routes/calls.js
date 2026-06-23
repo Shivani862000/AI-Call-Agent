@@ -36,7 +36,7 @@ router.post('/initiate/:customerId', async (req, res) => {
     );
 
     // Update customer status
-    await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customerId]);
+    await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['initiated', customerId]);
 
     res.json({
       message: 'Call initiated',
@@ -61,10 +61,51 @@ router.post('/status', async (req, res) => {
     const call = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [callSid]);
 
     if (call) {
-      if (callStatus === 'no-answer' || callStatus === 'failed') {
-        await dbRun('UPDATE calls SET outcome = ? WHERE id = ?', ['no_answer', call.id]);
-        await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['no_answer', call.customer_id]);
-      } else if (callStatus === 'completed') {
+      const statusMap = {
+        'queued': 'queued',
+        'initiated': 'initiated',
+        'ringing': 'ringing',
+        'in-progress': 'in_progress',
+        'completed': 'completed',
+        'busy': 'busy',
+        'no-answer': 'no_answer',
+        'canceled': 'cancelled',
+        'failed': 'failed',
+        'voicemail': 'voicemail'
+      };
+      
+      const mappedStatus = statusMap[callStatus] || callStatus;
+      
+      // Update call table
+      await dbRun('UPDATE calls SET outcome = ?, status = ?, last_event = ? WHERE id = ?', [
+        ['completed', 'failed', 'busy', 'no_answer', 'cancelled'].includes(mappedStatus) ? mappedStatus : call.outcome,
+        mappedStatus,
+        callStatus,
+        call.id
+      ]);
+      
+      // Update customer table with the current state of the call
+      await dbRun('UPDATE customers SET status = ? WHERE id = ?', [mappedStatus, call.customer_id]);
+      
+      // Retry Logic
+      if (['failed', 'busy', 'no_answer'].includes(mappedStatus)) {
+        const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [call.customer_id]);
+        if (customer && customer.auto_retry_enabled !== 0) {
+          const attemptCount = (customer.attempt_count || 0);
+          if (attemptCount < 3) {
+            // Schedule Retry
+            const nextRetry = new Date(Date.now() + 3 * 60 * 60 * 1000);
+            await dbRun('UPDATE customers SET status = ?, next_retry_at = ?, retry_count = COALESCE(retry_count, 0) + 1 WHERE id = ?', ['retry_scheduled', nextRetry.toISOString(), customer.id]);
+            console.log(`Call retry scheduled for ${customer.phone} (Attempt ${attemptCount + 1})`);
+          } else {
+            // Max Retries Reached
+            await dbRun('UPDATE customers SET status = ?, failed_reason = ? WHERE id = ?', ['failed', 'Max retries reached', customer.id]);
+            console.log(`Max retries reached for ${customer.phone}`);
+          }
+        }
+      }
+
+      if (mappedStatus === 'completed') {
         console.log(`Call completed: ${callSid}`);
       }
     }

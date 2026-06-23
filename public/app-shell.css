@@ -1157,25 +1157,34 @@ body.role-agent .poc-metrics-grid {
 .status-badge.retry_scheduled,
 .status-badge.initiated,
 .status-badge.waiting,
-.status-badge.ringing {
+.status-badge.ringing,
+.status-badge.scheduled,
+.status-badge.queued,
+.status-badge.draft,
+.status-badge.rescheduled {
   background: #dbeafe;
   color: #1d4ed8;
 }
 
 .status-badge.completed,
-.status-badge.active {
+.status-badge.active,
+.status-badge.answered,
+.status-badge.connected,
+.status-badge.in_progress {
   background: #dcfce7;
   color: #15803d;
 }
 
 .status-badge.failed,
 .status-badge.no_answer,
-.status-badge.busy {
+.status-badge.busy,
+.status-badge.cancelled {
   background: #fee2e2;
   color: #b91c1c;
 }
 
-.status-badge.needs_review {
+.status-badge.needs_review,
+.status-badge.voicemail {
   background: #fef3c7;
   color: #b45309;
 }

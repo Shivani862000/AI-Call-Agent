@@ -35,12 +35,22 @@ const RESCHEDULABLE_STATUSES = new Set([
   'callback_scheduled',
   'hot_lead',
   'churn_watch',
-  'admin_review'
+  'admin_review',
+  'draft',
+  'queued',
+  'initiated',
+  'ringing',
+  'answered',
+  'connected',
+  'in_progress',
+  'voicemail',
+  'cancelled',
+  'rescheduled'
 ]);
 function toBooleanFlag(value) {
   if (typeof value === 'boolean') return value ? 1 : 0;
   const normalized = String(value || '').trim().toLowerCase();
-  return ['1', 'true', 'yes', 'on'].includes(normalized) ? 1 : 0;
+
 }
 
 function getNextIsoForPreferredSlot(slot, now = new Date()) {
