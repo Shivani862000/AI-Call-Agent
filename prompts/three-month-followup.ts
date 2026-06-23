@@ -43,6 +43,23 @@ If NO:
 Say:
 "Hamare yahan garbhvati mahilaon aur thalassemia se grast bachchon ko free blood diya jata hai."
 
+Ask:
+"Kya aap bhavishya mein blood donate karne mein ruchi rakhte hain?"
+
+Capture Response:
+
+* Yes
+* No
+
+If YES:
+Say:
+"Bahut achhi baat hai. Aapka yogdaan kisi ki jaan bacha sakta hai."
+
+If NO:
+Say:
+"Theek hai, aapka samay dene ke liye dhanyavaad."
+
+Then say (for both Yes and No responses):
 "Yadi sambhav ho to kisi bhi din nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain."
 
 End:
