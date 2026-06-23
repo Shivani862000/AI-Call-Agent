@@ -675,36 +675,61 @@
       const customDate = document.getElementById('customDateFilter').value || document.getElementById('mobileCustomDateFilter').value;
       const callType = document.getElementById('callTypeFilter').value;
       const pendingStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
-      return customerCache.filter((customer) => {
-        const matchesSearch = !search || `${AppShell.formatName(customer.name)} ${customer.phone}`.toLowerCase().includes(search);
-        const matchesCallType = !callType || normalizeCallType(customer.call_type) === callType;
+      const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
+
+      const matchesCommonFilters = (record) => {
+        const namePhone = `${AppShell.formatName(record.name || record.customer_name)} ${record.phone || record.customer_phone}`.toLowerCase();
+        const matchesSearch = !search || namePhone.includes(search);
+        const matchesCallType = !callType || normalizeCallType(record.call_type) === callType;
 
         let matchesDateFilter = true;
+        const targetDate = record.isCallRecord ? (record.called_at || new Date().toISOString()) : getScheduleMetricDate(record);
+        
         if (dateFilter === 'today') {
-          matchesDateFilter = isToday(getScheduleMetricDate(customer));
+          matchesDateFilter = isToday(targetDate);
         } else if (dateFilter === 'tomorrow') {
-          matchesDateFilter = isTomorrow(getScheduleMetricDate(customer));
+          matchesDateFilter = isTomorrow(targetDate);
         } else if (dateFilter === 'custom' && customDate) {
-          matchesDateFilter = isSameDate(getScheduleMetricDate(customer), customDate);
+          matchesDateFilter = isSameDate(targetDate, customDate);
         }
 
-        let matchesMetricFilter = true;
+        return matchesSearch && matchesCallType && matchesDateFilter;
+      };
 
+      if (activeCustomerMetricFilter === 'completed' || activeCustomerMetricFilter === 'failed') {
+        const targetState = activeCustomerMetricFilter === 'completed' 
+          ? (c) => String(c.outcome || '').toLowerCase() === 'completed'
+          : (c) => failedOutcomes.has(String(c.outcome || '').toLowerCase());
+          
+        return recentCallsCache
+          .filter(targetState)
+          .map(c => ({
+            isCallRecord: true,
+            call_id: c.call_id || c.id,
+            id: c.customer_id,
+            name: c.customer_name,
+            phone: c.customer_phone,
+            call_type: c.call_type,
+            status: c.outcome,
+            called_at: c.called_at,
+            scheduled_date: c.called_at,
+            preferred_slot: c.called_at ? new Date(c.called_at).toTimeString().slice(0,5) : '',
+            auto_retry_enabled: 0
+          }))
+          .filter(matchesCommonFilters);
+      }
+
+      return customerCache.filter((customer) => {
         let computedStatus = getComputedCustomerStatus(customer);
+        let matchesMetricFilter = true;
 
         if (activeCustomerMetricFilter === 'scheduled') {
           matchesMetricFilter = ['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled'].includes(computedStatus);
         } else if (activeCustomerMetricFilter === 'pending') {
           matchesMetricFilter = pendingStatuses.has(computedStatus);
-        } else if (activeCustomerMetricFilter === 'completed') {
-          matchesMetricFilter = Boolean(getLatestCompletedCall(customer.id)) || computedStatus === 'completed';
-        } else if (activeCustomerMetricFilter === 'failed') {
-          const hasCompleted = Boolean(getLatestCompletedCall(customer.id)) || computedStatus === 'completed';
-          const isScheduledOrCompleted = ['scheduled', 'pending', 'completed', 'retry_scheduled', 'callback_scheduled'].includes(computedStatus);
-          matchesMetricFilter = (hasFailedCall(customer.id) || computedStatus === 'failed') && !hasCompleted && !isScheduledOrCompleted;
         }
-
-        return matchesSearch && matchesDateFilter && matchesCallType && matchesMetricFilter;
+        
+        return matchesMetricFilter && matchesCommonFilters(customer);
       });
     }
 
@@ -739,7 +764,9 @@
       }
 
       tbody.innerHTML = customers.map((customer) => {
-        const completedCall = getLatestCompletedCall(customer.id);
+        const completedCall = customer.isCallRecord 
+          ? { id: customer.call_id } 
+          : getLatestCompletedCall(customer.id);
         const contextButton = completedCall
           ? `<button class="secondary analysis-cta-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
           : `<button class="secondary" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
@@ -782,8 +809,9 @@
       }
 
       container.innerHTML = customers.map((customer) => {
-        const latestCall = getLatestCall(customer.id);
-        const completedCall = getLatestCompletedCall(customer.id);
+        const completedCall = customer.isCallRecord 
+          ? { id: customer.call_id } 
+          : getLatestCompletedCall(customer.id);
         const actionButton = completedCall
           ? `<button class="secondary mobile-action-button analysis-cta-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
           : `<button class="secondary mobile-action-button" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
