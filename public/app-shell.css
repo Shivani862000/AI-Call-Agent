@@ -1381,6 +1381,7 @@ body.role-agent .poc-metrics-grid {
   .pagination-controls.desktop-only {
     display: none !important;
   }
+
   .pagination-controls.mobile-only {
     display: flex !important;
   }
@@ -5465,6 +5466,10 @@ a[href="/incoming-calls.html"] {
     box-sizing: border-box;
   }
 
+  .modal-close-icon {
+    width: auto !important;
+  }
+
   input[type="date"],
   input[type="time"],
   input,
@@ -6429,22 +6434,28 @@ a[href="/incoming-calls.html"] {
   cursor: pointer;
   border-bottom: 1px solid #f1f5f9;
 }
-.autocomplete-item:hover, .autocomplete-item.active {
+
+.autocomplete-item:hover,
+.autocomplete-item.active {
   background: #f8fafc;
 }
+
 .autocomplete-item:last-child {
   border-bottom: none;
 }
+
 .autocomplete-item-title {
   font-weight: 500;
   font-size: 14px;
   color: var(--text-main);
 }
+
 .autocomplete-item-subtitle {
   font-size: 12px;
   color: var(--text-secondary);
   margin-top: 2px;
 }
+
 .autocomplete-create-new {
   padding: 10px 12px;
   cursor: pointer;
@@ -6455,10 +6466,13 @@ a[href="/incoming-calls.html"] {
   border-top: 1px solid #e2e8f0;
   background: #f8fafc;
 }
+
 .autocomplete-create-new:hover {
   background: #f0f9ff;
 }
-.autocomplete-loading, .autocomplete-empty {
+
+.autocomplete-loading,
+.autocomplete-empty {
   padding: 12px;
   text-align: center;
   font-size: 13px;
@@ -6472,11 +6486,13 @@ a[href="/incoming-calls.html"] {
   gap: 16px;
   margin-bottom: 24px;
 }
+
 @media (max-width: 768px) {
   .saas-selection-cards {
     grid-template-columns: 1fr;
   }
 }
+
 .saas-selection-card {
   display: flex;
   flex-direction: column;
@@ -6491,21 +6507,25 @@ a[href="/incoming-calls.html"] {
   transition: all 0.2s ease;
   min-height: 140px;
 }
+
 .saas-selection-card:hover {
   border-color: #3b82f6;
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
   transform: translateY(-2px);
 }
+
 .saas-selection-card-icon {
   margin-bottom: 12px;
   color: #3b82f6;
 }
+
 .saas-selection-card-title {
   font-weight: 600;
   font-size: 16px;
   color: #0f172a;
   margin-bottom: 4px;
 }
+
 .saas-selection-card-subtitle {
   font-size: 13px;
   color: #64748b;
