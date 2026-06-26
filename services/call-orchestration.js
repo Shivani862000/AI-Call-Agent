@@ -275,7 +275,8 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
     wrong_number_flag: customer?.wrong_number_flag || 0,
     admin_review_required: customer?.admin_review_required || 0,
     callback_requested_at: customer?.callback_requested_at || null,
-    consent_status: customer?.consent_status || 'unknown'
+    consent_status: customer?.consent_status || 'unknown',
+    auto_retry_enabled: customer?.auto_retry_enabled !== undefined ? customer.auto_retry_enabled : 0
   };
 
   const callUpdates = {
@@ -309,16 +310,11 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
     customerUpdates.do_not_call = 1;
   } else if (normalized === 'busy' || normalized === 'no_answer' || normalized === 'failed') {
     customerUpdates.retry_count = attemptsToday;
-    if (customer.auto_retry_enabled === 0) {
-      customerUpdates.status = normalized;
-      customerUpdates.next_retry_at = null;
-      customerUpdates.failed_reason = 'Auto-retry disabled';
-      callUpdates.outcome = normalized;
-      callUpdates.outcome_detail = 'Auto-retry disabled';
-    } else if (attemptsToday >= 3) {
+    if (attemptsToday >= 3) {
       customerUpdates.status = 'failed';
       customerUpdates.next_retry_at = null;
       customerUpdates.failed_reason = 'Maximum 3 attempts completed for the day';
+      customerUpdates.auto_retry_enabled = 0;
       callUpdates.outcome = 'failed';
       callUpdates.outcome_detail = 'Maximum 3 attempts completed for the day';
 
@@ -326,8 +322,8 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
       logger.error('CALL_FAILED_MAX_ATTEMPTS', { phone: customer.phone, attempts: 3, reason: customerUpdates.failed_reason });
     } else {
       customerUpdates.status = 'retry_scheduled';
-      const { MIN_RETRY_GAP_MINUTES } = require('./config');
-      const retryAt = new Date(Date.now() + MIN_RETRY_GAP_MINUTES * 60 * 1000);
+      customerUpdates.auto_retry_enabled = 1;
+      const retryAt = new Date(Date.now() + 3 * 60 * 60 * 1000); // 3 hours gap
       customerUpdates.next_retry_at = enforceBusinessHours(retryAt.toISOString());
       callUpdates.next_action_at = customerUpdates.next_retry_at;
       if (normalized !== 'busy') {
@@ -357,6 +353,7 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
     customerUpdates.do_not_call = 1;
   } else if (normalized === 'completed' || normalized === 'answered' || normalized === 'consent_given') {
     customerUpdates.status = 'completed';
+    customerUpdates.auto_retry_enabled = 0;
     if (normalized === 'consent_given') {
       customerUpdates.consent_status = 'granted';
     }
@@ -377,7 +374,8 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
             consent_status = ?,
             priority_score = ?,
             ai_score = ?,
-            failed_reason = COALESCE(?, failed_reason)
+            failed_reason = COALESCE(?, failed_reason),
+            auto_retry_enabled = ?
       WHERE id = ?`,
     [
       customerUpdates.status,
@@ -392,6 +390,7 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
       priorityScore,
       priorityScore,
       customerUpdates.failed_reason || null,
+      customerUpdates.auto_retry_enabled,
       customer.id
     ]
   );
