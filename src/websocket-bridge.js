@@ -49,6 +49,8 @@ const {
   parsePcmRate
 } = require('./speech-utils');
 
+const { AudioRecorder } = require('./audio-mixer');
+
 const {
   shouldAutoHangupAfterAgentTurn,
   estimateHangupDelayMs,
@@ -730,7 +732,9 @@ module.exports = function setupWebSocketBridge(server) {
                 while (session.geminiLiveRawBuffer.length >= 4800) {
                   const chunkToResample = session.geminiLiveRawBuffer.subarray(0, 4800);
                   session.geminiLiveRawBuffer = session.geminiLiveRawBuffer.subarray(4800);
-                  sendIcallMateReverseMedia(ws, session, resamplePcm16(chunkToResample, sampleRate, 8000));
+                  const resampled = resamplePcm16(chunkToResample, sampleRate, 8000);
+                  session.audioRecorder.addAiAudio(resampled);
+                  sendIcallMateReverseMedia(ws, session, resampled);
                 }
               });
 
@@ -1255,6 +1259,7 @@ module.exports = function setupWebSocketBridge(server) {
       answered: false,
       contextHydrated: false,
       contextHydrating: false,
+      audioRecorder: new AudioRecorder('pending'),
       customerId: null,
       callId: null,
       providerCallId: '',
@@ -1415,6 +1420,9 @@ module.exports = function setupWebSocketBridge(server) {
             notes: 'Audio streaming'
           });
         }
+        if (message.payload) {
+          session.audioRecorder.addUserAudio(Buffer.from(message.payload, 'base64'));
+        }
         aiBridge.sendCallerAudio(message.payload);
         return;
       }
@@ -1504,14 +1512,32 @@ module.exports = function setupWebSocketBridge(server) {
           // Safety net: save transcript if not already saved
           if (session.callId && session.answered) {
             const transcriptText = aiBridge.getTranscriptText();
+            
+            // Save Audio Recording
+            const recordingFilename = `${session.streamId}.wav`;
+            const recordingPath = require('path').join(process.cwd(), 'recordings', recordingFilename);
+            try {
+               await session.audioRecorder.saveToFile(recordingPath);
+               console.log(`[AUDIO RECORDER] Saved call ${session.callId} to ${recordingPath}`);
+            } catch (err) {
+               console.error('[AUDIO RECORDER ERROR]', err.message);
+            }
+
             if (transcriptText) {
               try {
                 await dbRun(
-                  `UPDATE calls SET outcome = 'completed', transcript_text = COALESCE(NULLIF(?, ''), transcript_text), transcript_status = COALESCE(NULLIF(transcript_status, 'pending'), 'completed'), ended_at = COALESCE(ended_at, ?) WHERE id = ?`,
-                  [transcriptText, closeTimestamp, session.callId]
+                  `UPDATE calls SET outcome = 'completed', transcript_text = COALESCE(NULLIF(?, ''), transcript_text), transcript_status = COALESCE(NULLIF(transcript_status, 'pending'), 'completed'), ended_at = COALESCE(ended_at, ?), recording_local_path = ? WHERE id = ?`,
+                  [transcriptText, closeTimestamp, recordingPath, session.callId]
                 );
                 console.log(`[TRANSCRIPT] Saved from ws close (callId=${session.callId}, length=${transcriptText.length})`);
               } catch (e) { console.error('[TRANSCRIPT SAVE ERROR ws close]', e.message); }
+            } else {
+              try {
+                await dbRun(
+                  `UPDATE calls SET outcome = 'completed', ended_at = COALESCE(ended_at, ?), recording_local_path = ? WHERE id = ?`,
+                  [closeTimestamp, recordingPath, session.callId]
+                );
+              } catch (e) { console.error('[CALL UPDATE ERROR ws close]', e.message); }
             }
           }
           // Safety net: update customer status if still 'called'

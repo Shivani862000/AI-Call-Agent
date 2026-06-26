@@ -778,9 +778,10 @@ module.exports = function mountApiRoutes(app) {
           `, [cleanPhone]);
 
           if (callRecord) {
-            await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ? WHERE id = ?', [
+            await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ?, recording_url = COALESCE(NULLIF(?, \'\'), recording_url) WHERE id = ?', [
               mappedOutcome,
               payload.call_status || 'callback',
+              payload.recording_filename || '',
               callRecord.id
             ]);
 
@@ -1451,7 +1452,16 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId/recording', async (req, res) => {
     try {
-      const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status FROM calls WHERE id = ?', [req.params.callId]);
+      const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status, recording_local_path FROM calls WHERE id = ?', [req.params.callId]);
+
+      if (call?.recording_local_path) {
+        const fs = require('fs');
+        if (fs.existsSync(call.recording_local_path)) {
+          res.setHeader('Content-Type', 'audio/wav');
+          res.setHeader('Cache-Control', 'private, max-age=300');
+          return res.sendFile(call.recording_local_path);
+        }
+      }
 
       if (!call?.recording_url && !call?.provider_call_id) {
         return res.status(404).json({ error: 'Recording not available yet' });

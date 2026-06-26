@@ -433,6 +433,14 @@
 
     <div id="alertContainer" class="alert-stack"></div>
 
+    <!-- ROW 1.5: RECORDING -->
+    <section id="recordingSection" class="summary-card" style="display: none; margin-bottom: 16px;">
+      <strong style="display: block; margin-bottom: 12px; font-size: 12px; font-weight: 700; color: var(--analysis-muted); text-transform: uppercase;">Call Recording</strong>
+      <div id="recordingContainer"></div>
+      <a id="downloadRecordingButton" href="#" style="display: none;">Download</a>
+      <span id="recordingQualityValue" style="display: none;"></span>
+    </section>
+
     <!-- ROW 2: SUMMARY -->
     <section id="summarySection" class="summary-card">
       <div id="summaryValue">Loading summary...</div>
@@ -467,13 +475,7 @@
     <details id="advancedDetailsSection" class="advanced-accordion">
       <summary>Advanced Details</summary>
       <div class="advanced-content">
-        <!-- Recording (hidden if none) -->
-        <div id="recordingSection" style="display: none;">
-          <strong style="display: block; margin-bottom: 8px; font-size: 13px;">Call Recording</strong>
-          <div id="recordingContainer"></div>
-          <a id="downloadRecordingButton" href="#" style="display: none;">Download</a>
-          <span id="recordingQualityValue" style="display: none;"></span>
-        </div>
+        <!-- (Recording section moved to top) -->
 
         <!-- Metrics Grid -->
         <strong style="display: block; font-size: 13px;">Technical Metrics</strong>
@@ -632,7 +634,7 @@
 
     function renderRecording(call) {
       const container = document.getElementById('recordingContainer');
-      const hasRecording = call.recording_url || call.recording_sid || String(call.recording_status || '').toLowerCase() === 'completed';
+      const hasRecording = true; // Always show the recording section
 
       setSectionVisible('recordingSection', hasRecording);
 
