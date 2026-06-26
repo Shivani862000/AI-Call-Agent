@@ -31,6 +31,8 @@ spec:
               value: "Asia/Kolkata"
             - name: DATABASE_URL
               value: /app/data/feedback.db
+            - name: RECORDINGS_DIR
+              value: /tmp/feedback-call-recordings
           envFrom:
             - secretRef:
                 name: feedback-agent-env

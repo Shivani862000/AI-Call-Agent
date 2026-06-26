@@ -1515,7 +1515,12 @@ module.exports = function setupWebSocketBridge(server) {
             
             // Save Audio Recording
             const recordingFilename = `${session.streamId}.wav`;
-            const recordingPath = require('path').join(process.cwd(), 'recordings', recordingFilename);
+            const recordingsDir = process.env.RECORDINGS_DIR || require('path').join(process.cwd(), 'recordings');
+            // Ensure the directory exists
+            if (!require('fs').existsSync(recordingsDir)) {
+              require('fs').mkdirSync(recordingsDir, { recursive: true });
+            }
+            const recordingPath = require('path').join(recordingsDir, recordingFilename);
             try {
                await session.audioRecorder.saveToFile(recordingPath);
                console.log(`[AUDIO RECORDER] Saved call ${session.callId} to ${recordingPath}`);
