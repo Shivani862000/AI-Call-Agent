@@ -917,10 +917,10 @@
             <button class="secondary" style="padding: 4px 12px; border-radius: 4px;" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
           </div>
         </div>
-        <div class="pagination-controls mobile-only" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light); width: 100%;">
-          <button class="secondary" style="padding: 6px 12px; border-radius: 4px; flex-shrink: 0; min-width: 80px;" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
+        <div class="pagination-controls mobile-only" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light); width: 100%; box-sizing: border-box;">
+          <button class="secondary" style="padding: 6px 12px; border-radius: 4px; flex-shrink: 0; min-width: 80px; width: auto !important; max-width: fit-content !important;" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
           <span style="font-size: 14px; white-space: nowrap; text-align: center; flex: 1;">Page ${currentPage} of ${totalPages}</span>
-          <button class="secondary" style="padding: 6px 12px; border-radius: 4px; flex-shrink: 0; min-width: 80px;" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
+          <button class="secondary" style="padding: 6px 12px; border-radius: 4px; flex-shrink: 0; min-width: 80px; width: auto !important; max-width: fit-content !important;" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
         </div>
       `;
     }
