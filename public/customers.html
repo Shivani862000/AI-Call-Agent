@@ -355,14 +355,21 @@
 
 
     function getScheduledDate(customer) {
-      if (activeCustomerMetricFilter === 'failed') {
+      if (activeCustomerMetricFilter === 'failed' || getComputedCustomerStatus(customer) === 'failed') {
         const failedCall = getLatestFailedCall(customer.id);
         if (failedCall) return new Date(failedCall.called_at || failedCall.created_at);
+      }
+      if (activeCustomerMetricFilter === 'completed' || getComputedCustomerStatus(customer) === 'completed') {
+        if (customer.isCallRecord && (customer.ended_at || customer.called_at)) return new Date(customer.ended_at || customer.called_at);
+        const completedCall = getLatestCompletedCall(customer.id);
+        if (completedCall) return new Date(completedCall.ended_at || completedCall.called_at || completedCall.created_at);
+        if (customer.last_called_at) return new Date(customer.last_called_at);
+        if (customer.updated_at) return new Date(customer.updated_at);
       }
       const scheduledValue = ['retry_scheduled', 'callback_scheduled'].includes(customer.status)
         ? (customer.next_retry_at || customer.scheduled_datetime || '')
         : (customer.scheduled_datetime || customer.next_retry_at || '');
-      return scheduledValue ? new Date(scheduledValue) : new Date();
+      return scheduledValue ? new Date(scheduledValue) : new Date(customer.created_at || Date.now());
     }
 
     function formatScheduledDate(customer) {
@@ -372,11 +379,29 @@
     }
 
     function formatScheduledTime(customer) {
-      if (activeCustomerMetricFilter === 'failed') {
+      if (activeCustomerMetricFilter === 'failed' || getComputedCustomerStatus(customer) === 'failed') {
         const failedCall = getLatestFailedCall(customer.id);
         if (failedCall) {
           const date = new Date(failedCall.called_at || failedCall.created_at);
           return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+        }
+      }
+      if (activeCustomerMetricFilter === 'completed' || getComputedCustomerStatus(customer) === 'completed') {
+        let dateVal = null;
+        if (customer.isCallRecord && (customer.ended_at || customer.called_at)) {
+          dateVal = new Date(customer.ended_at || customer.called_at);
+        } else {
+          const completedCall = getLatestCompletedCall(customer.id);
+          if (completedCall) {
+            dateVal = new Date(completedCall.ended_at || completedCall.called_at || completedCall.created_at);
+          } else if (customer.last_called_at) {
+            dateVal = new Date(customer.last_called_at);
+          } else if (customer.updated_at) {
+            dateVal = new Date(customer.updated_at);
+          }
+        }
+        if (dateVal) {
+          return `${String(dateVal.getHours()).padStart(2, '0')}:${String(dateVal.getMinutes()).padStart(2, '0')}`;
         }
       }
       const scheduledValue = ['retry_scheduled', 'callback_scheduled'].includes(customer.status)
