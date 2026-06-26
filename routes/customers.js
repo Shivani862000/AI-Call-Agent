@@ -495,6 +495,7 @@ router.put('/:id', async (req, res) => {
               campaign_name = ?,
               service_interest = ?,
               call_type = ?,
+              attempt_count = ?,
               is_manual = 1,
               locked_at = NULL
         WHERE id = ?`,
@@ -518,6 +519,7 @@ router.put('/:id', async (req, res) => {
         payload.campaign_name || null,
         payload.service_interest || null,
         payload.call_type,
+        shouldRescheduleStatus ? 0 : (existing.attempt_count || 0),
         req.params.id
       ]
     );

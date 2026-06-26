@@ -296,9 +296,11 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     dbRun,
     callId: callRecord.id,
     analysis: {
+      ...analysis,
       ...productAnalysis,
       sentiment: productAnalysis.sentiment || sentimentLabel,
-      sentiment_score: sentimentScore
+      sentiment_score: sentimentScore,
+      product_analysis: productAnalysis
     }
   });
 

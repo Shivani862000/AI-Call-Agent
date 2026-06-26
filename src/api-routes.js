@@ -1281,7 +1281,13 @@ module.exports = function mountApiRoutes(app) {
         phone: call.customer_phone,
         source: 'manual_rerun'
       });
-      const analysis = buildCallAnalysis(call);
+      const existingAnalysisJson = call.analysis_json ? (typeof safeJsonParse === 'function' ? safeJsonParse(call.analysis_json, {}) : JSON.parse(call.analysis_json)) : {};
+      const productAnalysis = buildCallAnalysis(call);
+      const analysis = {
+        ...existingAnalysisJson,
+        ...productAnalysis,
+        product_analysis: productAnalysis
+      };
       await storeCallAnalysis({ dbRun, callId: call.id, analysis });
       const updatedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [call.id]);
       const sentiment = updatedCall.sentiment || updatedCall.sentiment_label || analysis.sentiment || 'neutral';
