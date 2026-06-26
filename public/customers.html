@@ -51,6 +51,7 @@
         </div>
         <div class="header-actions">
           <!-- <button id="deleteAllCustomersButton" class="danger desktop-only" type="button" style="background-color: var(--color-danger); color: white; margin-right: 8px;">Delete All Records</button> -->
+          <button id="refreshDataButton" class="secondary desktop-only" type="button" style="margin-right: 8px;">Refresh Data</button>
           <button id="newCallButton" class="primary" type="button">New Call</button>
           <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
@@ -943,6 +944,22 @@
         onSaved: loadPageData
       });
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
+      document.getElementById('refreshDataButton').addEventListener('click', async (event) => {
+        const btn = event.currentTarget;
+        const originalText = btn.textContent;
+        btn.textContent = 'Refreshing...';
+        btn.disabled = true;
+        try {
+          await loadPageData();
+        } finally {
+          btn.textContent = originalText;
+          btn.disabled = false;
+        }
+      });
+
+      setInterval(() => {
+        loadPageData().catch(console.error);
+      }, 30000);
       document.getElementById('newCallButton').addEventListener('click', () => openNewCallModal());
       // document.getElementById('deleteAllCustomersButton').addEventListener('click', async () => {
       //   if (!confirm('Are you sure you want to delete all patient and call records? This action cannot be undone.')) return;

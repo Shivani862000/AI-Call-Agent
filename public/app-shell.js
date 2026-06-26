@@ -26,7 +26,11 @@
 
     let payload = null;
     try {
-      payload = await response.json();
+      const text = await response.text();
+      const sanitizedText = text ? text.replace(/iCallMate/ig, 'Service provider') : '';
+      if (sanitizedText) {
+        payload = JSON.parse(sanitizedText);
+      }
     } catch (error) {
       payload = null;
     }
