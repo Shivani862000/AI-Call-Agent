@@ -199,9 +199,6 @@
               <tbody id="feedbackTableBody"></tbody>
             </table>
           </div>
-          </div>
-
-          <div id="mobileFeedbackList" class="mobile-feedback-stack mobile-only"></div>
           <div id="feedbackBoardPagination"></div>
         </article>
       </section>
@@ -629,7 +626,6 @@
 
     function renderFeedbackBoard(feedback) {
       const tableBody = document.getElementById('feedbackTableBody');
-      const mobileList = document.getElementById('mobileFeedbackList');
       const desktopFeedback = (() => {
         if (activeFeedbackFilter === 'positive') return getFilteredPositiveFeedback('desktop');
         if (activeFeedbackFilter === 'negative') return getFilteredNegativeFeedback('desktop');
@@ -646,7 +642,6 @@
           </div>
         `;
         tableBody.innerHTML = `<tr><td colspan="5">${emptyMarkup}</td></tr>`;
-        mobileList.innerHTML = emptyMarkup;
         return;
       }
 

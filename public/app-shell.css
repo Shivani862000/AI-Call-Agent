@@ -6021,15 +6021,14 @@ a[href="/incoming-calls.html"] {
     margin-bottom: 12px;
   }
 
-  /* .customers-page .mobile-stat-strip {
+  .customers-page .mobile-stat-strip {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin: 0 0 12px;
     padding: 2px 0 4px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
-  } */
+    overflow: visible;
+  }
 
   .mobile-stat-strip::-webkit-scrollbar {
     display: none;
