@@ -793,7 +793,7 @@
           : getLatestCompletedCall(customer.id);
         const contextButton = completedCall
           ? `<button class="secondary analysis-cta-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
-          : `<button class="secondary" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
+          : `<!-- <button class="secondary" type="button" onclick="scheduleRetry(${customer.id})">Retry</button> -->`;
 
         return `
           <tr>
@@ -812,7 +812,7 @@
             </td>
             <td>
               <div class="table-actions">
-                <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
+                <!-- <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button> -->
                 ${contextButton}
                 <button class="secondary desktop-action-button" type="button" onclick="openNewCallModal(${customer.id})">Edit</button>
                 <button class="secondary desktop-action-button" type="button" onclick="toggleAutoRetry(${customer.id}, ${customer.auto_retry_enabled === 0 ? 'true' : 'false'})">Auto Retry: ${customer.auto_retry_enabled === 0 ? 'OFF' : 'ON'}</button>
@@ -842,7 +842,7 @@
           : getLatestCompletedCall(customer.id);
         const actionButton = completedCall
           ? `<button class="secondary mobile-action-button analysis-cta-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
-          : `<button class="secondary mobile-action-button" type="button" onclick="scheduleRetry(${customer.id})">Retry</button>`;
+          : `<!-- <button class="secondary mobile-action-button" type="button" onclick="scheduleRetry(${customer.id})">Retry</button> -->`;
         return `
           <article class="mobile-call-card">
             <div class="mobile-call-head">
@@ -860,7 +860,7 @@
             <div class="mobile-subtext">Date: ${AppShell.escapeHtml(formatScheduledDate(customer))}</div>
             <div class="mobile-subtext">Time: ${AppShell.escapeHtml(formatScheduledTime(customer))}</div>
             <div class="mobile-call-actions">
-              <button class="warning mobile-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
+              <!-- <button class="warning mobile-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button> -->
               ${actionButton}
               <button class="secondary mobile-more-button" type="button" onclick="openMobileActionSheet(${customer.id}, ${completedCall ? completedCall.id : 'null'}, ${customer.auto_retry_enabled === 0 ? 0 : 1})">More</button>
             </div>

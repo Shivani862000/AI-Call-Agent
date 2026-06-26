@@ -6085,6 +6085,7 @@ a[href="/incoming-calls.html"] {
   }
 
   .customers-page .mobile-call-head>div {
+    flex: 1;
     min-width: 0;
   }
 
@@ -6106,7 +6107,6 @@ a[href="/incoming-calls.html"] {
 
   .customers-page .mobile-call-head .status-badge {
     flex: 0 0 auto;
-    max-width: 44%;
     min-height: 34px;
     padding: 0 12px;
     display: inline-flex;
