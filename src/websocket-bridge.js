@@ -1350,7 +1350,7 @@ module.exports = function setupWebSocketBridge(server) {
       await hydrateIcallMateSessionContext(session, message, extraParams);
 
       if (eventName === 'connected') {
-        await upsertIcallMateCallFromMedia(message, session, { status: 'active', notes: 'iCallMate connected' });
+        await upsertIcallMateCallFromMedia(message, session, { status: 'active', notes: 'Service provider connected' });
         logRealCallStarted('media_connected');
         sendIcallMateMark(ws, message, 'connected-received');
         return;
@@ -1367,7 +1367,7 @@ module.exports = function setupWebSocketBridge(server) {
 
         await upsertIcallMateCallFromMedia(message, session, {
           status: 'active',
-          notes: isExpectedAudio ? 'iCallMate media stream started' : 'iCallMate media stream started with unexpected audio format'
+          notes: isExpectedAudio ? 'Service provider media stream started' : 'Service provider media stream started with unexpected audio format'
         });
         logRealCallStarted('media_started');
         sendIcallMateMark(ws, message, 'start-received');
