@@ -1095,6 +1095,7 @@ module.exports = function mountApiRoutes(app) {
          agents.slug AS agent_slug,
          calls.called_at,
          calls.outcome,
+         calls.outcome_detail,
          calls.call_type,
          calls.call_direction,
          calls.call_source,

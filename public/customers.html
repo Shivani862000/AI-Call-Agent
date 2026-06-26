@@ -660,7 +660,7 @@
     function openMobileActionSheet(customerId, callId = null, autoRetryEnabled = 1) {
       activeMobileActionCustomerId = Number(customerId) || null;
       activeMobileActionCallId = Number(callId) || null;
-      document.getElementById('mobileActionAnalysis').disabled = !activeMobileActionCallId;
+      document.getElementById('mobileActionAnalysis').style.display = activeMobileActionCallId ? 'block' : 'none';
       const isAutoRetryOn = autoRetryEnabled !== 0;
       document.getElementById('mobileActionToggleRetry').textContent = `Auto Retry: ${isAutoRetryOn ? 'ON' : 'OFF'}`;
       document.getElementById('mobileActionToggleRetry').onclick = () => {
@@ -763,6 +763,7 @@
             called_at: c.called_at,
             scheduled_date: c.called_at,
             preferred_slot: c.called_at ? new Date(c.called_at).toTimeString().slice(0,5) : '',
+            failed_reason: c.outcome_detail,
             auto_retry_enabled: 0
           }))
           .filter(matchesCommonFilters);
@@ -813,12 +814,20 @@
       }
 
       tbody.innerHTML = customers.map((customer) => {
+        const isFailed = activeCustomerMetricFilter === 'failed' || getComputedCustomerStatus(customer) === 'failed';
         const completedCall = customer.isCallRecord 
-          ? { id: customer.call_id } 
+          ? (String(customer.status || '').toLowerCase() === 'completed' ? { id: customer.call_id } : null)
           : getLatestCompletedCall(customer.id);
-        const contextButton = completedCall
-          ? `<button class="secondary analysis-cta-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
-          : `<!-- <button class="secondary" type="button" onclick="scheduleRetry(${customer.id})">Retry</button> -->`;
+        
+        let contextButton = '';
+        if (isFailed) {
+          const reason = customer.failed_reason || (customer.status === 'busy' ? 'User is busy' : customer.status === 'no_answer' ? 'User did not pick up' : 'Call failed');
+          contextButton = `<span style="font-size: 13px; color: var(--text-muted);">${AppShell.escapeHtml(reason)}</span>`;
+        } else if (completedCall) {
+          contextButton = `<button class="secondary analysis-cta-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`;
+        } else {
+          contextButton = `<!-- <button class="secondary" type="button" onclick="scheduleRetry(${customer.id})">Retry</button> -->`;
+        }
 
         return `
           <tr>
@@ -833,7 +842,6 @@
             <td>
               <span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(getComputedCustomerStatus(customer))}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel(getComputedCustomerStatus(customer))}</span>
               ${customer.last_contact_outcome && customer.last_contact_outcome !== 'completed' ? `<div style="font-size: 11px; color: var(--error); margin-top: 4px; font-weight: 600; text-transform: capitalize;">${AppShell.escapeHtml(customer.last_contact_outcome).replace('_', ' ')}</div>` : ''}
-              ${customer.failed_reason && (getComputedCustomerStatus(customer) === 'failed' || activeCustomerMetricFilter === 'failed') ? `<div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">${AppShell.escapeHtml(customer.failed_reason)}</div>` : ''}
             </td>
             <td>
               <div class="table-actions">
@@ -862,12 +870,20 @@
       }
 
       container.innerHTML = customers.map((customer) => {
+        const isFailed = activeCustomerMetricFilter === 'failed' || getComputedCustomerStatus(customer) === 'failed';
         const completedCall = customer.isCallRecord 
-          ? { id: customer.call_id } 
+          ? (String(customer.status || '').toLowerCase() === 'completed' ? { id: customer.call_id } : null)
           : getLatestCompletedCall(customer.id);
-        const actionButton = completedCall
-          ? `<button class="secondary mobile-action-button analysis-cta-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`
-          : `<!-- <button class="secondary mobile-action-button" type="button" onclick="scheduleRetry(${customer.id})">Retry</button> -->`;
+        
+        let actionButton = '';
+        if (isFailed) {
+          const reason = customer.failed_reason || (customer.status === 'busy' ? 'User is busy' : customer.status === 'no_answer' ? 'User did not pick up' : 'Call failed');
+          actionButton = `<span style="font-size: 13px; color: var(--text-muted);">${AppShell.escapeHtml(reason)}</span>`;
+        } else if (completedCall) {
+          actionButton = `<button class="secondary mobile-action-button analysis-cta-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`;
+        } else {
+          actionButton = `<!-- <button class="secondary mobile-action-button" type="button" onclick="scheduleRetry(${customer.id})">Retry</button> -->`;
+        }
         return `
           <article class="mobile-call-card">
             <div class="mobile-call-head">
@@ -878,7 +894,6 @@
               <div style="display: flex; flex-direction: column; align-items: flex-end;">
                 <span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(getComputedCustomerStatus(customer))}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel(getComputedCustomerStatus(customer))}</span>
                 ${customer.last_contact_outcome && customer.last_contact_outcome !== 'completed' ? `<div style="font-size: 11px; color: var(--error); margin-top: 4px; font-weight: 600; text-transform: capitalize;">${AppShell.escapeHtml(customer.last_contact_outcome).replace('_', ' ')}</div>` : ''}
-                ${customer.failed_reason && (getComputedCustomerStatus(customer) === 'failed' || activeCustomerMetricFilter === 'failed') ? `<div style="font-size: 11px; color: var(--text-muted); margin-top: 2px; max-width: 120px; text-align: right;">${AppShell.escapeHtml(customer.failed_reason)}</div>` : ''}
               </div>
             </div>
             <div class="mobile-subtext">${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type))}</div>

@@ -216,9 +216,9 @@ module.exports = function setupWebSocketBridge(server) {
           return;
         }
 
-        if (session.audioBuffer.length >= 320) {
-          const chunk = session.audioBuffer.subarray(0, 320);
-          session.audioBuffer = session.audioBuffer.subarray(320);
+        if (session.audioBuffer.length >= 640) {
+          const chunk = session.audioBuffer.subarray(0, 640);
+          session.audioBuffer = session.audioBuffer.subarray(640);
 
           session.outChunkCount++;
           if (session.outChunkCount % 100 === 0) {
@@ -257,7 +257,7 @@ module.exports = function setupWebSocketBridge(server) {
 
           sendIcallMateJson(ws, {
             event: 'reverse-media',
-            encoding: 'LINEAR16',
+            encoding: 'LINEAR',
             streamId: session.streamId,
             callerId: session.callerId,
             did: session.did,
@@ -276,7 +276,7 @@ module.exports = function setupWebSocketBridge(server) {
 
           sendIcallMateJson(ws, {
             event: 'reverse-media',
-            encoding: 'LINEAR16',
+            encoding: 'LINEAR',
             streamId: session.streamId,
             callerId: session.callerId,
             did: session.did,
@@ -302,7 +302,7 @@ module.exports = function setupWebSocketBridge(server) {
           session.geminiLiveFirstAudioAt = null;
           session.sttProducedAt = null;
         }
-      }, 20); // Match ~8kHz chunk rate
+      }, 40); // Match ~8kHz chunk rate for 640 bytes (40ms)
     }
   }
 
