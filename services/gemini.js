@@ -67,7 +67,8 @@ async function generateGeminiReply({
   userText = '',
   model = DEFAULT_GEMINI_MODEL,
   apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
-  responseMimeType = null
+  responseMimeType = null,
+  maxTokens = null
 } = {}) {
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is not configured');
@@ -87,7 +88,7 @@ async function generateGeminiReply({
       contents: buildGeminiConversationContents(transcript, userText),
       generationConfig: {
         temperature: Number(process.env.GEMINI_TEMPERATURE || process.env.LIVE_TEMPERATURE || 0.3),
-        maxOutputTokens: Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || process.env.LIVE_MAX_RESPONSE_TOKENS || 60),
+        maxOutputTokens: maxTokens || Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || process.env.LIVE_MAX_RESPONSE_TOKENS || 60),
         thinkingConfig: {
           thinkingBudget: Number(process.env.GEMINI_THINKING_BUDGET || 0)
         },
@@ -198,7 +199,8 @@ RATING SCALE GUIDELINES:
       systemPrompt,
       userText: transcriptText || '(No transcript provided)',
       responseMimeType: 'application/json',
-      model: 'gemini-2.5-flash'
+      model: 'gemini-2.5-flash',
+      maxTokens: 800
     });
 
     const analysis = JSON.parse(rawAiResponse);
