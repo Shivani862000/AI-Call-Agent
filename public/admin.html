@@ -380,7 +380,7 @@
 
       const items = [...callLinkedFeedbackItems, ...analysisFeedback].filter((item) => {
         const rating = Number(item.stars || 0);
-        return rating >= 1 && rating <= 5;
+        return (rating >= 1 && rating <= 5) || String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP';
       });
       const positive = items.filter((item) => Number(item.stars || 0) >= 4).length;
       const neutral = items.filter((item) => Number(item.stars || 0) === 3).length;

@@ -69,6 +69,10 @@
           <span class="desktop-filter-count" id="desktopMetricPendingAnalysis">0</span>
           <span class="desktop-filter-label">Pending</span>
         </button>
+        <button class="desktop-filter-pill" type="button" data-feedback-filter="followup" aria-pressed="false">
+          <span class="desktop-filter-count" id="desktopMetricFollowupFeedback">0</span>
+          <span class="desktop-filter-label">Follow-up</span>
+        </button>
       </section>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Feedback stats">
@@ -83,6 +87,10 @@
         <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="pending" aria-pressed="false">
           <span class="mobile-stat-count" id="mobileMetricPendingAnalysis">0</span>
           <span class="mobile-stat-label">Pending</span>
+        </button>
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="followup" aria-pressed="false">
+          <span class="mobile-stat-count" id="mobileMetricFollowupFeedback">0</span>
+          <span class="mobile-stat-label">Follow-up</span>
         </button>
       </section>
 
@@ -150,6 +158,11 @@
           <div class="metric-label">Pending Analysis</div>
           <div class="metric-value" id="metricPendingAnalysis">0</div>
           <div class="metric-note">Calls waiting for transcript or analysis to finish.</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Follow-up Calls</div>
+          <div class="metric-value" id="metricFollowupFeedback">0</div>
+          <div class="metric-note">3-Month follow-up call feedback.</div>
         </article>
       </section>
 
@@ -446,6 +459,14 @@
       return negativeFeedbackEntries().filter((item) => matchesDateFilter(item.submitted_at, prefix));
     }
 
+    function followUpFeedbackEntries() {
+      return feedbackCache.filter((item) => String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP');
+    }
+
+    function getFilteredFollowUpFeedback(prefix) {
+      return followUpFeedbackEntries().filter((item) => matchesDateFilter(item.submitted_at, prefix));
+    }
+
     function pendingCallToBoardItem(call) {
       return {
         is_pending_analysis: true,
@@ -486,7 +507,8 @@
     function buildDesktopFeedbackReviewList(items, filterName) {
       const container = document.getElementById('feedbackSectionList');
       const title = document.querySelector('.poc-grid-2 .poc-card .poc-card-title');
-      if (title) title.textContent = filterName === 'positive' ? 'Positive Feedback' : 'Negative Feedback';
+      const titleText = filterName === 'positive' ? 'Positive Feedback' : (filterName === 'negative' ? 'Negative Feedback' : 'Follow-up Calls');
+      if (title) title.textContent = titleText;
 
       if (!items.length) {
         container.innerHTML = `
@@ -531,14 +553,17 @@
       const titleByFilter = {
         pending: 'Pending Analysis',
         positive: 'Positive Feedback',
-        negative: 'Negative Feedback'
+        negative: 'Negative Feedback',
+        followup: 'Follow-up Calls'
       };
       title.textContent = titleByFilter[activeFeedbackFilter] || 'Positive Feedback';
 
-      if (activeFeedbackFilter === 'positive' || activeFeedbackFilter === 'negative') {
-        const feedback = activeFeedbackFilter === 'positive'
-          ? getFilteredPositiveFeedback('mobile')
-          : getFilteredNegativeFeedback('mobile');
+      if (activeFeedbackFilter === 'positive' || activeFeedbackFilter === 'negative' || activeFeedbackFilter === 'followup') {
+        let feedback = [];
+        if (activeFeedbackFilter === 'positive') feedback = getFilteredPositiveFeedback('mobile');
+        else if (activeFeedbackFilter === 'negative') feedback = getFilteredNegativeFeedback('mobile');
+        else feedback = getFilteredFollowUpFeedback('mobile');
+        
         if (!feedback.length) {
           document.getElementById('mobileFeedbackListPagination').innerHTML = '';
           container.innerHTML = `
@@ -629,6 +654,7 @@
       const desktopFeedback = (() => {
         if (activeFeedbackFilter === 'positive') return getFilteredPositiveFeedback('desktop');
         if (activeFeedbackFilter === 'negative') return getFilteredNegativeFeedback('desktop');
+        if (activeFeedbackFilter === 'followup') return getFilteredFollowUpFeedback('desktop');
         if (activeFeedbackFilter === 'pending') return getFilteredPendingAnalysisCalls('desktop').map(pendingCallToBoardItem);
         return feedback.filter((item) => matchesDateFilter(item.submitted_at, 'desktop'));
       })();
@@ -696,34 +722,42 @@
     function renderMetrics() {
       const positiveFeedback = positiveFeedbackEntries().length;
       const negativeFeedback = negativeFeedbackEntries().length;
+      const followupFeedback = followUpFeedbackEntries().length;
       const pendingAnalysis = pendingAnalysisCalls().length;
+      
       const mobilePendingAnalysis = getFilteredPendingAnalysisCalls('mobile');
       const mobilePositiveFeedback = getFilteredPositiveFeedback('mobile');
       const mobileNegativeFeedback = getFilteredNegativeFeedback('mobile');
+      const mobileFollowupFeedback = getFilteredFollowUpFeedback('mobile');
+      
       const desktopPendingAnalysis = getFilteredPendingAnalysisCalls('desktop');
       const desktopPositiveFeedback = getFilteredPositiveFeedback('desktop');
       const desktopNegativeFeedback = getFilteredNegativeFeedback('desktop');
-      
-      console.log('[FEEDBACK_FILTER_APPLIED]', activeFeedbackFilter);
-      console.log('[POSITIVE_FEEDBACK_COUNT]', positiveFeedback);
-      console.log('[NEGATIVE_FEEDBACK_COUNT]', negativeFeedback);
+      const desktopFollowupFeedback = getFilteredFollowUpFeedback('desktop');
 
       document.getElementById('metricFeedbackTotal').textContent = feedbackCache.length;
       document.getElementById('metricPositiveFeedback').textContent = positiveFeedback;
       document.getElementById('metricNegativeFeedback').textContent = negativeFeedback;
+      document.getElementById('metricFollowupFeedback').textContent = followupFeedback;
       document.getElementById('metricPendingAnalysis').textContent = pendingAnalysis;
+      
       document.getElementById('desktopMetricPendingAnalysis').textContent = desktopPendingAnalysis.length;
       document.getElementById('desktopMetricPositiveFeedback').textContent = desktopPositiveFeedback.length;
       document.getElementById('desktopMetricNegativeFeedback').textContent = desktopNegativeFeedback.length;
+      document.getElementById('desktopMetricFollowupFeedback').textContent = desktopFollowupFeedback.length;
+      
       document.getElementById('mobileMetricPendingAnalysis').textContent = mobilePendingAnalysis.length;
       document.getElementById('mobileMetricPositiveFeedback').textContent = mobilePositiveFeedback.length;
       document.getElementById('mobileMetricNegativeFeedback').textContent = mobileNegativeFeedback.length;
+      document.getElementById('mobileMetricFollowupFeedback').textContent = mobileFollowupFeedback.length;
 
-      if (activeFeedbackFilter === 'positive' || activeFeedbackFilter === 'negative') {
-        const paged = AppShell.Pagination.getPagedItems(
-          activeFeedbackFilter === 'positive' ? desktopPositiveFeedback : desktopNegativeFeedback,
-          currentFeedbackListPage
-        );
+      if (activeFeedbackFilter === 'positive' || activeFeedbackFilter === 'negative' || activeFeedbackFilter === 'followup') {
+        let itemsForList = [];
+        if (activeFeedbackFilter === 'positive') itemsForList = desktopPositiveFeedback;
+        else if (activeFeedbackFilter === 'negative') itemsForList = desktopNegativeFeedback;
+        else itemsForList = desktopFollowupFeedback;
+        
+        const paged = AppShell.Pagination.getPagedItems(itemsForList, currentFeedbackListPage);
         currentFeedbackListPage = paged.currentPage;
         buildDesktopFeedbackReviewList(
           paged.items,
