@@ -805,7 +805,11 @@
             <td>${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type))}</td>
             <td>${AppShell.escapeHtml(formatScheduledDate(customer))}</td>
             <td>${AppShell.escapeHtml(formatScheduledTime(customer))}</td>
-            <td><span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(getComputedCustomerStatus(customer))}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel(getComputedCustomerStatus(customer))}</span></td>
+            <td>
+              <span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(getComputedCustomerStatus(customer))}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel(getComputedCustomerStatus(customer))}</span>
+              ${customer.last_contact_outcome && customer.last_contact_outcome !== 'completed' ? `<div style="font-size: 11px; color: var(--error); margin-top: 4px; font-weight: 600; text-transform: capitalize;">${AppShell.escapeHtml(customer.last_contact_outcome).replace('_', ' ')}</div>` : ''}
+              ${customer.failed_reason && (getComputedCustomerStatus(customer) === 'failed' || activeCustomerMetricFilter === 'failed') ? `<div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">${AppShell.escapeHtml(customer.failed_reason)}</div>` : ''}
+            </td>
             <td>
               <div class="table-actions">
                 <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button>
@@ -846,7 +850,11 @@
                 <strong>${AppShell.escapeHtml(AppShell.formatName(customer.name) || 'Patient')}</strong>
                 <div class="mobile-subtext">${AppShell.escapeHtml(formatDisplayPhone(customer.phone))}</div>
               </div>
-              <span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(getComputedCustomerStatus(customer))}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel(getComputedCustomerStatus(customer))}</span>
+              <div style="display: flex; flex-direction: column; align-items: flex-end;">
+                <span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(getComputedCustomerStatus(customer))}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel(getComputedCustomerStatus(customer))}</span>
+                ${customer.last_contact_outcome && customer.last_contact_outcome !== 'completed' ? `<div style="font-size: 11px; color: var(--error); margin-top: 4px; font-weight: 600; text-transform: capitalize;">${AppShell.escapeHtml(customer.last_contact_outcome).replace('_', ' ')}</div>` : ''}
+                ${customer.failed_reason && (getComputedCustomerStatus(customer) === 'failed' || activeCustomerMetricFilter === 'failed') ? `<div style="font-size: 11px; color: var(--text-muted); margin-top: 2px; max-width: 120px; text-align: right;">${AppShell.escapeHtml(customer.failed_reason)}</div>` : ''}
+              </div>
             </div>
             <div class="mobile-subtext">${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type))}</div>
             <div class="mobile-subtext">Date: ${AppShell.escapeHtml(formatScheduledDate(customer))}</div>
