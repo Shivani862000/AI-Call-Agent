@@ -896,10 +896,10 @@
 
       if (isMobile) {
         return `
-          <div class="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light); width: 100%;">
-            <button class="secondary" style="padding: 6px 12px; border-radius: 4px;" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
-            <span style="font-size: 14px;">Page ${currentPage} of ${totalPages}</span>
-            <button class="secondary" style="padding: 6px 12px; border-radius: 4px;" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
+          <div class="pagination-controls" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light); width: 100%;">
+            <button class="secondary" style="padding: 6px 12px; border-radius: 4px; flex-shrink: 0; min-width: 80px;" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
+            <span style="font-size: 14px; white-space: nowrap; text-align: center; flex: 1;">Page ${currentPage} of ${totalPages}</span>
+            <button class="secondary" style="padding: 6px 12px; border-radius: 4px; flex-shrink: 0; min-width: 80px;" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
           </div>
         `;
       }
