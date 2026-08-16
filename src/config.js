@@ -14,14 +14,14 @@ const CALL_MODE = AI_PROVIDER;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || (AI_PROVIDER === 'gemini-live' ? 'gemini-3.1-flash-live-preview' : 'gemini-2.5-flash');
 const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
 const GEMINI_LIVE_THINKING_LEVEL = process.env.GEMINI_LIVE_THINKING_LEVEL || 'minimal';
-const GEMINI_LIVE_SILENCE_DURATION_MS = Math.max(Number(process.env.GEMINI_LIVE_SILENCE_DURATION_MS || 500) || 500, 500);
-const GEMINI_LIVE_PREFIX_PADDING_MS = Math.max(Number(process.env.GEMINI_LIVE_PREFIX_PADDING_MS || 200) || 200, 200);
-const GEMINI_LIVE_DIRECT_AUDIO = String(process.env.GEMINI_LIVE_DIRECT_AUDIO || 'false').toLowerCase() === 'true';
+const GEMINI_LIVE_SILENCE_DURATION_MS = Math.max(Number(process.env.GEMINI_LIVE_SILENCE_DURATION_MS || 600) || 600, 100);
+const GEMINI_LIVE_PREFIX_PADDING_MS = Math.max(Number(process.env.GEMINI_LIVE_PREFIX_PADDING_MS || 100) || 100, 20);
+const GEMINI_LIVE_DIRECT_AUDIO = String(process.env.GEMINI_LIVE_DIRECT_AUDIO || (AI_PROVIDER === 'gemini-live' ? 'true' : 'false')).toLowerCase() === 'true';
 const DEEPGRAM_ENDPOINTING_MS = Math.max(Number(process.env.DEEPGRAM_ENDPOINTING_MS || 250) || 250, 80);
-const LIVE_MAX_RESPONSE_TOKENS = Math.max(Number(process.env.LIVE_MAX_RESPONSE_TOKENS || 150) || 150, 24);
-const GEMINI_LIVE_MAX_OUTPUT_TOKENS = Math.max(Number(process.env.GEMINI_LIVE_MAX_OUTPUT_TOKENS || 1024) || 1024, 512);
-const LIVE_TEMPERATURE = Number(process.env.LIVE_TEMPERATURE || 0.3);
-const FINAL_AUDIO_GRACE_MS = Math.max(Number(process.env.FINAL_AUDIO_GRACE_MS || 1100) || 1100, 600);
+const LIVE_MAX_RESPONSE_TOKENS = Math.max(Number(process.env.LIVE_MAX_RESPONSE_TOKENS || process.env.GEMINI_MAX_OUTPUT_TOKENS || 180) || 180, 24);
+const GEMINI_LIVE_MAX_OUTPUT_TOKENS = Math.max(Number(process.env.GEMINI_LIVE_MAX_OUTPUT_TOKENS || 340) || 340, 64);
+const LIVE_TEMPERATURE = Number(process.env.LIVE_TEMPERATURE || process.env.GEMINI_TEMPERATURE || 0.35);
+const FINAL_AUDIO_GRACE_MS = Math.max(Number(process.env.FINAL_AUDIO_GRACE_MS || 3000) || 3000, 1000);
 const DEEPGRAM_TTS_MODEL = process.env.DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
 const REALTIME_MODEL = GEMINI_MODEL;
 const MAX_PRECONNECT_MEDIA_CHUNKS = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_CHUNKS || 60) || 60, 10);
@@ -98,11 +98,13 @@ function logConfigSnapshot(scope = 'CONFIG') {
     GEMINI_VOICE,
     GEMINI_LIVE_THINKING_LEVEL,
     GEMINI_LIVE_SILENCE_DURATION_MS,
+    GEMINI_LIVE_PREFIX_PADDING_MS,
     DEEPGRAM_ENDPOINTING_MS,
     LIVE_MAX_RESPONSE_TOKENS,
     GEMINI_LIVE_MAX_OUTPUT_TOKENS,
     LIVE_TEMPERATURE,
     GEMINI_LIVE_DIRECT_AUDIO,
+    FINAL_AUDIO_GRACE_MS,
     DEEPGRAM_TTS_MODEL,
     DISABLE_SCHEDULER,
     DISABLE_OWNER_DIGEST,

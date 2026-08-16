@@ -5,6 +5,323 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Feedback</title>
   <link rel="stylesheet" href="/app-shell.css">
+  <style>
+    .feedback-workspace { display: grid; gap: 20px; }
+    .feedback-tabs {
+      display: inline-grid;
+      grid-template-columns: repeat(3, minmax(120px, 1fr));
+      width: min(100%, 520px);
+      padding: 4px;
+      border: 1px solid #d9e1e8;
+      border-radius: 8px;
+      background: #eef2f5;
+    }
+    .feedback-tab {
+      min-height: 40px;
+      padding: 8px 14px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: #52606d;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .feedback-tab.active {
+      background: #ffffff;
+      color: #172b4d;
+      box-shadow: 0 1px 3px rgba(23, 43, 77, 0.14);
+    }
+    .feedback-view[hidden] { display: none; }
+    .feedback-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .feedback-metric {
+      min-width: 0;
+      padding: 18px;
+      border: 1px solid #dce3e9;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+    .feedback-metric-label {
+      color: #617180;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .feedback-metric-value {
+      display: block;
+      margin-top: 8px;
+      color: #14213d;
+      font-size: 30px;
+      line-height: 1;
+    }
+    .feedback-insight-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 24px;
+      padding: 20px 0;
+      border-top: 1px solid #e1e7ec;
+      border-bottom: 1px solid #e1e7ec;
+    }
+    .feedback-section-title {
+      margin: 0 0 16px;
+      color: #172b4d;
+      font-size: 15px;
+    }
+    .breakdown-list { display: grid; gap: 13px; }
+    .breakdown-row {
+      display: grid;
+      grid-template-columns: 82px minmax(80px, 1fr) 36px;
+      align-items: center;
+      gap: 10px;
+      color: #52606d;
+      font-size: 13px;
+    }
+    .breakdown-track {
+      height: 8px;
+      overflow: hidden;
+      border-radius: 4px;
+      background: #e9eef2;
+    }
+    .breakdown-fill {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: #5c6ac4;
+    }
+    .breakdown-fill.positive { background: #16845b; }
+    .breakdown-fill.neutral { background: #d08b12; }
+    .breakdown-fill.negative { background: #c44343; }
+    .feedback-table-section { min-width: 0; }
+    .feedback-section-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .feedback-section-heading h3 {
+      margin: 0;
+      color: #172b4d;
+      font-size: 16px;
+    }
+    .feedback-toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(130px, 180px));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .feedback-toolbar input,
+    .feedback-toolbar select,
+    .manual-form select,
+    .manual-form textarea,
+    .transcript-search {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid #cbd5df;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #22303c;
+      font: inherit;
+      font-size: 14px;
+    }
+    .feedback-toolbar input,
+    .transcript-search,
+    .manual-form textarea { padding: 10px 12px; }
+    .feedback-toolbar select,
+    .manual-form select { padding: 8px 32px 8px 10px; }
+    .feedback-data-table { width: 100%; table-layout: fixed; }
+    .feedback-data-table th:nth-child(1) { width: 17%; }
+    .feedback-data-table th:nth-child(2) { width: 14%; }
+    .feedback-data-table th:nth-child(3) { width: 13%; }
+    .feedback-data-table th:nth-child(4) { width: 9%; }
+    .feedback-data-table th:nth-child(5) { width: 29%; }
+    .feedback-data-table th:nth-child(6) { width: 18%; }
+    .feedback-summary {
+      display: -webkit-box;
+      overflow: hidden;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      color: #52606d;
+      line-height: 1.45;
+    }
+    .feedback-row-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 0;
+      background: transparent;
+      color: #2456a6;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .feedback-row-action::after { content: '\2192'; font-size: 16px; }
+    .feedback-mobile-list { display: none; }
+    .feedback-empty {
+      padding: 40px 16px;
+      border: 1px dashed #cbd5df;
+      border-radius: 8px;
+      color: #687786;
+      text-align: center;
+    }
+    .feedback-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      min-height: 40px;
+      margin-top: 12px;
+      color: #617180;
+      font-size: 13px;
+    }
+    .feedback-pagination button {
+      width: 36px;
+      height: 36px;
+      border: 1px solid #cbd5df;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #314256;
+      font-size: 18px;
+      cursor: pointer;
+    }
+    .feedback-pagination button:disabled { opacity: 0.45; cursor: default; }
+    .manual-form-wrap { max-width: 760px; }
+    .manual-form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 180px;
+      gap: 16px;
+      padding-top: 6px;
+    }
+    .manual-form label {
+      display: grid;
+      gap: 7px;
+      color: #3e4c59;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .manual-form .span-2 { grid-column: 1 / -1; }
+    .manual-form textarea { min-height: 150px; resize: vertical; }
+    .manual-actions { display: flex; justify-content: flex-start; margin-top: 2px; }
+    .feedback-detail-panel {
+      width: min(920px, calc(100vw - 32px));
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+    }
+    .feedback-detail-panel [hidden] { display: none !important; }
+    .feedback-detail-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+    .feedback-detail-stat {
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid #dce3e9;
+      border-radius: 6px;
+      background: #f7f9fb;
+    }
+    .feedback-detail-stat span,
+    .feedback-detail-stat strong { display: block; overflow-wrap: anywhere; }
+    .feedback-detail-stat span {
+      margin-bottom: 5px;
+      color: #687786;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .feedback-detail-stat strong { color: #243746; font-size: 14px; }
+    .feedback-detail-section { padding: 18px 0; border-top: 1px solid #e1e7ec; }
+    .feedback-detail-section h4 { margin: 0 0 10px; color: #172b4d; font-size: 14px; }
+    .feedback-detail-copy {
+      margin: 0;
+      color: #455666;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+    .transcript-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .transcript-list {
+      display: grid;
+      gap: 10px;
+      max-height: 380px;
+      overflow-y: auto;
+      padding: 14px;
+      border: 1px solid #dce3e9;
+      border-radius: 8px;
+      background: #f4f7f9;
+    }
+    .transcript-turn { max-width: 82%; }
+    .transcript-turn.agent { justify-self: start; }
+    .transcript-turn.customer { justify-self: end; }
+    .transcript-role {
+      margin-bottom: 4px;
+      color: #687786;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .transcript-turn.customer .transcript-role { text-align: right; }
+    .transcript-bubble {
+      padding: 10px 12px;
+      border: 1px solid #d8e0e7;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #314256;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    .transcript-turn.customer .transcript-bubble {
+      border-color: #b9d9cc;
+      background: #edf8f3;
+    }
+    @media (max-width: 980px) {
+      .feedback-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .feedback-toolbar { grid-template-columns: minmax(0, 1fr) minmax(130px, 1fr); }
+      .feedback-table-desktop { display: none; }
+      .feedback-mobile-list { display: grid; gap: 10px; }
+      .feedback-mobile-item {
+        padding: 14px;
+        border: 1px solid #dce3e9;
+        border-radius: 8px;
+        background: #ffffff;
+      }
+      .feedback-mobile-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .feedback-mobile-meta { margin-top: 4px; color: #687786; font-size: 12px; }
+      .feedback-mobile-item .feedback-summary { margin: 12px 0; }
+    }
+    @media (max-width: 700px) {
+      .feedback-workspace { gap: 16px; }
+      .feedback-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+      .feedback-tab { min-width: 0; padding: 8px 6px; }
+      .feedback-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .feedback-metric { padding: 14px; }
+      .feedback-metric-value { font-size: 25px; }
+      .feedback-insight-grid { grid-template-columns: 1fr; gap: 22px; }
+      .feedback-toolbar { grid-template-columns: 1fr 1fr; }
+      .feedback-toolbar input { grid-column: 1 / -1; }
+      .manual-form { grid-template-columns: 1fr; }
+      .manual-form .span-2 { grid-column: auto; }
+      .feedback-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .feedback-detail-panel { width: 100%; max-height: calc(100vh - 16px); }
+      .transcript-toolbar { align-items: stretch; flex-direction: column; }
+      .transcript-turn { max-width: 92%; }
+    }
+  </style>
 </head>
 <body class="poc-page feedback-page">
   <div class="app-shell">
@@ -12,957 +329,347 @@
       <div>
         <div class="brand">
           <div class="brand-mark">PL</div>
-          <div class="brand-copy">
-            <h1>Path Lab Console</h1>
-            <p>Patient follow-up operations</p>
-          </div>
+          <div class="brand-copy"><h1>Path Lab Console</h1><p>Patient follow-up operations</p></div>
         </div>
-
         <nav class="nav-list">
           <a href="/admin.html" class="nav-link">Overview</a>
-          <!-- Incoming Calls page disabled. -->
-          <!-- <a href="/incoming-calls.html" class="nav-link">Incoming Calls</a> -->
           <a href="/customers.html" class="nav-link">Outbound Calls</a>
           <a href="/feedback.html" class="nav-link active">Feedback</a>
-          <!-- Reports page disabled. -->
-          <!-- <a href="/reports.html" class="nav-link">Reports</a> -->
         </nav>
       </div>
     </aside>
 
     <main class="main-panel">
-      <section class="mobile-ops-header mobile-only">
-        <div class="mobile-ops-bar">
-          <div>
-            <div class="mobile-ops-title">Feedback</div>
-            <div class="mobile-ops-subtitle">Review follow-up calls and captured feedback</div>
-          </div>
-          <div class="mobile-ops-actions">
-            <button id="mobileFeedbackMenuButton" class="mobile-icon-button" type="button" aria-label="Open menu">...</button>
-          </div>
-        </div>
-      </section>
-
       <header class="page-header desktop-page-header">
-        <div class="page-title-wrap">
-          <h2>Feedback</h2>
-          <div class="page-subtitle">Review patient feedback, transcripts, and call outcomes.</div>
-        </div>
+        <div class="page-title-wrap"><h2>Feedback</h2><div class="page-subtitle">Patient experience intelligence</div></div>
         <div class="header-actions">
-          <button id="openManualFeedbackButton" class="primary" type="button">Add Manual Feedback</button>
+          <button id="headerManualButton" class="primary" type="button">Add Feedback</button>
           <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
       </header>
 
+      <section class="mobile-ops-header mobile-only">
+        <div class="mobile-ops-bar">
+          <div><div class="mobile-ops-title">Feedback</div><div class="mobile-ops-subtitle">Patient experience intelligence</div></div>
+          <button id="mobileManualButton" class="primary" type="button">Add</button>
+        </div>
+      </section>
+
       <div id="alertContainer" class="alert-stack"></div>
-
-      <section class="desktop-filter-strip desktop-only" aria-label="Feedback filters">
-        <button class="desktop-filter-pill active" type="button" data-feedback-filter="positive" aria-pressed="true">
-          <span class="desktop-filter-count" id="desktopMetricPositiveFeedback">0</span>
-          <span class="desktop-filter-label">Positive</span>
-        </button>
-        <button class="desktop-filter-pill" type="button" data-feedback-filter="negative" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricNegativeFeedback">0</span>
-          <span class="desktop-filter-label">Negative</span>
-        </button>
-        <button class="desktop-filter-pill" type="button" data-feedback-filter="pending" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricPendingAnalysis">0</span>
-          <span class="desktop-filter-label">Pending</span>
-        </button>
-        <button class="desktop-filter-pill" type="button" data-feedback-filter="followup" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricFollowupFeedback">0</span>
-          <span class="desktop-filter-label">Follow-up</span>
-        </button>
-      </section>
-
-      <section class="mobile-stat-strip mobile-only" aria-label="Feedback stats">
-        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-mobile-filter="positive" aria-pressed="true">
-          <span class="mobile-stat-count" id="mobileMetricPositiveFeedback">0</span>
-          <span class="mobile-stat-label">Positive</span>
-        </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="negative" aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricNegativeFeedback">0</span>
-          <span class="mobile-stat-label">Negative</span>
-        </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="pending" aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricPendingAnalysis">0</span>
-          <span class="mobile-stat-label">Pending</span>
-        </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-mobile-filter="followup" aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricFollowupFeedback">0</span>
-          <span class="mobile-stat-label">Follow-up</span>
-        </button>
-      </section>
-
-      <section class="mobile-feedback-filter-bar mobile-only" aria-label="Filter feedback by date">
-        <select id="mobileDateFilter" class="table-filter">
-          <option value="all">All dates</option>
-          <option value="today">Today</option>
-          <option value="yesterday">Yesterday</option>
-          <option value="last_week">Last week</option>
-          <option value="last_month">Last month</option>
-          <option value="custom">Custom</option>
-        </select>
-        <div id="mobileCustomDateRange" class="mobile-custom-date-range" hidden>
-          <label>
-            Start date
-            <input id="mobileStartDate" type="date">
-            <span class="mobile-date-helper">Tap to select start date</span>
-          </label>
-          <label>
-            End date
-            <input id="mobileEndDate" type="date">
-            <span class="mobile-date-helper">Tap to select end date</span>
-          </label>
+      <div class="feedback-workspace">
+        <div class="feedback-tabs" role="tablist" aria-label="Feedback views">
+          <button id="overallTab" class="feedback-tab active" type="button" role="tab" aria-selected="true" data-view="overall">Overall</button>
+          <button id="individualTab" class="feedback-tab" type="button" role="tab" aria-selected="false" data-view="individual">Individual</button>
+          <button id="manualTab" class="feedback-tab" type="button" role="tab" aria-selected="false" data-view="manual">Manual Entry</button>
         </div>
-      </section>
 
-      <section class="desktop-feedback-filter-bar desktop-only" aria-label="Filter feedback by date">
-        <select id="desktopDateFilter" class="table-filter">
-          <option value="all">All dates</option>
-          <option value="today">Today</option>
-          <option value="yesterday">Yesterday</option>
-          <option value="last_week">Last week</option>
-          <option value="last_month">Last month</option>
-          <option value="custom">Custom</option>
-        </select>
-        <div id="desktopCustomDateRange" class="desktop-custom-date-range" hidden>
-          <label>
-            Start date
-            <input id="desktopStartDate" type="date">
-          </label>
-          <label>
-            End date
-            <input id="desktopEndDate" type="date">
-          </label>
-        </div>
-      </section>
-
-      <section class="poc-metrics-grid">
-        <article class="metric-card">
-          <div class="metric-label">Feedback Captured</div>
-          <div class="metric-value" id="metricFeedbackTotal">0</div>
-          <div class="metric-note">Feedback entries captured from calls and manual updates.</div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-label">Positive Feedback</div>
-          <div class="metric-value" id="metricPositiveFeedback">0</div>
-          <div class="metric-note">Positive patient feedback received so far.</div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-label">Negative Feedback</div>
-          <div class="metric-value" id="metricNegativeFeedback">0</div>
-          <div class="metric-note">Negative patient feedback received so far.</div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-label">Pending Analysis</div>
-          <div class="metric-value" id="metricPendingAnalysis">0</div>
-          <div class="metric-note">Calls waiting for transcript or analysis to finish.</div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-label">Follow-up Calls</div>
-          <div class="metric-value" id="metricFollowupFeedback">0</div>
-          <div class="metric-note">3-Month follow-up call feedback.</div>
-        </article>
-      </section>
-
-      <section class="mobile-feedback-stack mobile-only">
-        <article class="poc-card mobile-feedback-review-card">
-          <div class="poc-card-header compact-overview-header">
-            <div>
-              <h3 id="mobileFeedbackSectionTitle" class="poc-card-title">Positive Feedback</h3>
-            </div>
-          </div>
-          <div id="mobileFeedbackSectionList" class="mobile-review-list"></div>
-          <div id="mobileFeedbackListPagination"></div>
-        </article>
-      </section>
-
-      <section class="poc-grid-2">
-        <article class="poc-card desktop-only">
-          <div class="poc-card-header">
-            <div>
-              <h3 class="poc-card-title">Positive Feedback</h3>
-              <div class="poc-card-subtitle">Open feedback captured from completed call analysis.</div>
-            </div>
-          </div>
-          <div id="feedbackSectionList" class="compact-list"></div>
-          <div id="feedbackSectionPagination"></div>
-        </article>
-
-        <article class="poc-card">
-          <div class="poc-card-header">
-            <div>
-              <h3 class="poc-card-title">Feedback Board</h3>
-              <div class="poc-card-subtitle">Recently captured feedback and review summaries.</div>
-            </div>
+        <section id="overallView" class="feedback-view" role="tabpanel" aria-labelledby="overallTab">
+          <div class="feedback-metrics">
+            <article class="feedback-metric"><span class="feedback-metric-label">Total Feedback</span><strong id="overallTotal" class="feedback-metric-value">0</strong></article>
+            <article class="feedback-metric"><span class="feedback-metric-label">Average Rating</span><strong id="overallAverage" class="feedback-metric-value">0.0</strong></article>
+            <article class="feedback-metric"><span class="feedback-metric-label">Positive Rate</span><strong id="overallPositiveRate" class="feedback-metric-value">0%</strong></article>
+            <article class="feedback-metric"><span class="feedback-metric-label">With Transcript</span><strong id="overallTranscriptCount" class="feedback-metric-value">0</strong></article>
           </div>
 
-          <div class="table-wrap desktop-only feedback-board-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Patient</th>
-                  <th>Sentiment</th>
-                  <th>Rating</th>
-                  <th>Summary</th>
-                  <th>Date</th>
-                </tr>
-              </thead>
-              <tbody id="feedbackTableBody"></tbody>
+          <div class="feedback-insight-grid">
+            <section><h3 class="feedback-section-title">Sentiment Distribution</h3><div id="sentimentBreakdown" class="breakdown-list"></div></section>
+            <section><h3 class="feedback-section-title">Rating Breakdown</h3><div id="ratingBreakdown" class="breakdown-list"></div></section>
+          </div>
+
+          <section class="feedback-table-section" style="margin-top: 22px;">
+            <div class="feedback-section-heading"><h3>Recent Feedback</h3><button id="viewAllFeedbackButton" class="secondary" type="button">View All</button></div>
+            <div class="table-wrap feedback-table-desktop">
+              <table class="feedback-data-table">
+                <thead><tr><th>Patient</th><th>Type</th><th>Sentiment</th><th>Rating</th><th>Feedback</th><th>Date</th></tr></thead>
+                <tbody id="recentFeedbackBody"></tbody>
+              </table>
+            </div>
+            <div id="recentFeedbackMobile" class="feedback-mobile-list"></div>
+          </section>
+        </section>
+
+        <section id="individualView" class="feedback-view" role="tabpanel" aria-labelledby="individualTab" hidden>
+          <div class="feedback-toolbar">
+            <input id="feedbackSearch" type="search" placeholder="Search patient or feedback" aria-label="Search feedback">
+            <select id="sentimentFilter" aria-label="Filter by sentiment"><option value="all">All sentiments</option><option value="positive">Positive</option><option value="neutral">Neutral</option><option value="negative">Negative</option></select>
+            <select id="sourceFilter" aria-label="Filter by source"><option value="all">All sources</option><option value="call">Call feedback</option><option value="manual">Manual feedback</option></select>
+            <select id="dateFilter" aria-label="Filter by date"><option value="all">All dates</option><option value="today">Today</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select>
+          </div>
+          <div class="feedback-section-heading"><h3>Individual Feedback</h3><span id="individualCount" class="muted">0 records</span></div>
+          <div class="table-wrap feedback-table-desktop">
+            <table class="feedback-data-table">
+              <thead><tr><th>Patient</th><th>Type</th><th>Sentiment</th><th>Rating</th><th>Feedback</th><th>Date</th></tr></thead>
+              <tbody id="individualFeedbackBody"></tbody>
             </table>
           </div>
-          <div id="feedbackBoardPagination"></div>
-        </article>
-      </section>
+          <div id="individualFeedbackMobile" class="feedback-mobile-list"></div>
+          <div id="individualPagination" class="feedback-pagination"></div>
+        </section>
+
+        <section id="manualView" class="feedback-view" role="tabpanel" aria-labelledby="manualTab" hidden>
+          <div class="manual-form-wrap">
+            <div class="feedback-section-heading"><h3>Add Manual Feedback</h3></div>
+            <form id="manualFeedbackForm" class="manual-form" novalidate>
+              <label>Patient<select id="feedbackCustomer" required></select><span class="error-text" id="feedbackCustomerError"></span></label>
+              <label>Rating<select id="reviewStars" required><option value="5">5 stars</option><option value="4">4 stars</option><option value="3">3 stars</option><option value="2">2 stars</option><option value="1">1 star</option></select><span class="error-text" id="reviewStarsError"></span></label>
+              <label class="span-2">Review<textarea id="reviewText" maxlength="1000" placeholder="Patient feedback" required></textarea><span class="error-text" id="reviewTextError"></span></label>
+              <div class="manual-actions span-2"><button id="submitFeedbackButton" class="primary" type="submit">Submit Feedback</button></div>
+            </form>
+          </div>
+        </section>
+      </div>
     </main>
   </div>
 
-  <!-- <button id="mobileManualFeedbackFab" class="mobile-floating-cta mobile-only" type="button">+ Add Feedback</button> -->
-
   <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
     <a href="/admin.html" class="mobile-dock-link">Overview</a>
-    <!-- Incoming Calls page disabled. -->
-    <!-- <a href="/incoming-calls.html" class="mobile-dock-link">Calls</a> -->
     <a href="/customers.html" class="mobile-dock-link">Outbound</a>
     <a href="/feedback.html" class="mobile-dock-link active">Feedback</a>
-    <!-- Reports page disabled. -->
-    <!-- <a href="/reports.html" class="mobile-dock-link">Reports</a> -->
   </nav>
 
-  <div id="manualFeedbackModal" class="modal-backdrop" aria-hidden="true">
-    <div class="modal-panel modal-panel--narrow" role="dialog" aria-modal="true" aria-labelledby="manualFeedbackTitle">
-      <div class="mobile-sheet-handle mobile-only"></div>
+  <div id="feedbackDetailModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-panel feedback-detail-panel" role="dialog" aria-modal="true" aria-labelledby="feedbackDetailTitle">
       <div class="poc-card-header modal-sheet-header">
-        <div>
-          <h3 id="manualFeedbackTitle" class="poc-card-title">Add Manual Feedback</h3>
-          <div class="poc-card-subtitle">Use this when feedback is shared by phone or in person.</div>
-        </div>
-        <button id="closeManualFeedbackModal" class="secondary modal-close modal-close-icon" type="button" aria-label="Close add feedback modal">&times;</button>
+        <div><h3 id="feedbackDetailTitle" class="poc-card-title">Feedback Details</h3><div id="feedbackDetailSubtitle" class="poc-card-subtitle"></div></div>
+        <button id="closeFeedbackDetail" class="secondary modal-close modal-close-icon" type="button" aria-label="Close feedback details">&times;</button>
       </div>
-
-      <div class="poc-form-grid">
-        <label class="span-2">
-          Patient
-          <select id="feedbackCustomer"></select>
-          <span class="error-text" id="feedbackCustomerError"></span>
-        </label>
-        <label>
-          Rating
-          <select id="reviewStars">
-            <option value="5">5 stars</option>
-            <option value="4">4 stars</option>
-            <option value="3">3 stars</option>
-            <option value="2">2 stars</option>
-            <option value="1">1 star</option>
-          </select>
-          <span class="error-text" id="reviewStarsError"></span>
-        </label>
-        <label class="span-2">
-          Review
-          <textarea id="reviewText" placeholder="Write the patient's feedback here..."></textarea>
-          <span class="error-text" id="reviewTextError"></span>
-        </label>
-      </div>
-
-      <div class="button-row" style="margin-top: 18px;">
-        <button id="submitFeedbackButton" class="primary" type="button">Submit Feedback</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="analysisModal" class="modal-backdrop" aria-hidden="true">
-    <div class="modal-panel analysis-modal-panel" role="dialog" aria-modal="true" aria-labelledby="analysisModalTitle">
-      <div class="mobile-sheet-handle mobile-only"></div>
-      <div class="poc-card-header modal-sheet-header analysis-modal-header">
-        <div>
-          <h3 id="analysisModalTitle" class="poc-card-title">Call Analysis</h3>
-          <div id="analysisModalSubtitle" class="poc-card-subtitle">Loading details...</div>
-        </div>
-        <button id="analysisModalClose" class="secondary modal-close modal-close-icon" type="button" aria-label="Close analysis modal">&times;</button>
-      </div>
-
-      <section class="analysis-primary-stack">
-        <section class="poc-card analysis-section-card">
-          <div class="analysis-section-header">
-            <h4 class="poc-card-title analysis-section-title">Outcome</h4>
-            <span id="analysisOutcomeValue" class="status-badge pending"></span>
-          </div>
-          <div class="analysis-meta-grid">
-            <div class="analysis-meta-item">
-              <span>Rating</span>
-              <strong id="analysisRatingValue"></strong>
-            </div>
-            <div class="analysis-meta-item">
-              <span>Processing</span>
-              <strong id="analysisStatusValue"></strong>
-            </div>
-          </div>
-        </section>
-
-        <section class="poc-card analysis-section-card">
-          <h4 class="poc-card-title analysis-section-title">Summary</h4>
-          <div id="analysisSummaryValue" class="poc-card-subtitle analysis-section-copy"></div>
-        </section>
+      <div id="feedbackDetailStats" class="feedback-detail-grid"></div>
+      <section class="feedback-detail-section"><h4>Feedback</h4><p id="feedbackDetailReview" class="feedback-detail-copy"></p></section>
+      <section id="feedbackDetailSummarySection" class="feedback-detail-section"><h4>Call Summary</h4><p id="feedbackDetailSummary" class="feedback-detail-copy"></p></section>
+      <section class="feedback-detail-section">
+        <div class="feedback-section-heading"><h4 style="margin:0;">Transcript</h4><a id="downloadTranscriptLink" class="secondary button-link" href="#" hidden>Download</a></div>
+        <div class="transcript-toolbar"><input id="transcriptSearch" class="transcript-search" type="search" placeholder="Search transcript" aria-label="Search transcript"></div>
+        <div id="feedbackTranscript" class="transcript-list"></div>
       </section>
-
-      <details class="details-toggle analysis-details-toggle">
-        <summary>Patient Review</summary>
-        <div class="details-content">
-          <section class="poc-card analysis-section-card analysis-section-card--nested">
-            <div id="analysisReviewValue" class="poc-card-subtitle analysis-section-copy"></div>
-          </section>
-        </div>
-      </details>
-
-      <details class="details-toggle analysis-details-toggle">
-        <summary>Full Transcript</summary>
-        <div class="details-content">
-          <section class="poc-card analysis-section-card analysis-section-card--nested">
-            <div id="analysisTranscriptValue" class="poc-card-subtitle analysis-section-copy"></div>
-          </section>
-        </div>
-      </details>
-    </div>
-  </div>
-
-  <div id="feedbackMobileMenuSheet" class="modal-backdrop mobile-sheet-backdrop" aria-hidden="true">
-    <div class="modal-panel mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="feedbackMobileMenuTitle">
-      <div class="mobile-sheet-handle"></div>
-      <div class="mobile-sheet-title-row">
-        <h3 id="feedbackMobileMenuTitle" class="poc-card-title">Menu</h3>
-        <button id="closeFeedbackMobileMenuSheet" class="secondary modal-close modal-close-icon" type="button" aria-label="Close menu">&times;</button>
-      </div>
-      <div class="mobile-sheet-actions">
-        <button id="feedbackMobileMenuLogout" class="mobile-sheet-action" type="button">Logout</button>
-      </div>
     </div>
   </div>
 
   <script src="/app-shell.js"></script>
   <script>
-    let customerCache = [];
-    let feedbackCache = [];
-    let recentCallsCache = [];
-    let activeFeedbackFilter = 'positive';
-    let currentFeedbackListPage = 1;
-    let currentFeedbackBoardPage = 1;
+    const state = { customers: [], items: [], overview: null, activeView: 'overall', currentPage: 1, pageSize: 10, activeItem: null, transcriptTurns: [] };
 
-    function normalizeRating(stars) {
-      if (!stars) return 0;
-      const str = String(stars);
-      const match = str.match(/^(\d+)/);
-      return match ? Number(match[1]) : 0;
+    function feedbackType(item) {
+      if (!item.call_id) return 'Manual';
+      return String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP' ? '3 Month Follow-up' : 'Review Call';
     }
-
-    function feedbackSentiment(feedback) {
-      const sentiment = String(feedback.sentiment || feedback.category || '').toLowerCase();
-      const rating = normalizeRating(feedback.stars);
-      if (rating >= 4 || sentiment.includes('positive') || sentiment.includes('good')) return 'positive';
-      if ((rating > 0 && rating <= 2) || sentiment.includes('negative') || sentiment.includes('bad')) return 'negative';
-      return 'neutral';
+    function formatRating(value) {
+      const rating = Number(value || 0);
+      return rating ? `${rating}/5` : '--';
     }
-
-    function pendingAnalysisCalls() {
-      return recentCallsCache.filter((call) => String(call.analysis_status || '').toLowerCase() !== 'completed');
+    function sourceLabel(item) {
+      if (String(item.source || '').toLowerCase() === 'manual') return 'Manual entry';
+      return item.call_id ? 'Call analysis' : AppShell.formatStatusLabel(item.source || 'Manual entry');
     }
-
-    function positiveFeedbackEntries() {
-      return feedbackCache.filter((item) => feedbackSentiment(item) === 'positive');
+    function sentimentBadge(item) {
+      const sentiment = ['positive', 'neutral', 'negative'].includes(item.sentiment) ? item.sentiment : 'neutral';
+      return `<span class="status-badge ${sentiment}">${AppShell.formatStatusLabel(sentiment)}</span>`;
     }
-
-    function negativeFeedbackEntries() {
-      return feedbackCache.filter((item) => feedbackSentiment(item) === 'negative');
+    function emptyMarkup(message) {
+      return `<div class="feedback-empty">${AppShell.escapeHtml(message)}</div>`;
     }
-
-    function parseRecordDate(value) {
-      if (!value) return null;
-      const normalized = String(value).replace(' ', 'T');
-      const parsed = new Date(normalized);
-      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    function rowMarkup(item) {
+      const key = AppShell.escapeHtml(String(item.id));
+      return `<tr>
+        <td><button class="feedback-row-action" type="button" data-feedback-id="${key}">${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</button></td>
+        <td>${AppShell.escapeHtml(feedbackType(item))}</td><td>${sentimentBadge(item)}</td><td>${formatRating(item.stars)}</td>
+        <td><div class="feedback-summary">${AppShell.escapeHtml(item.review_text || 'No review captured')}</div></td><td>${AppShell.formatDateTime(item.submitted_at)}</td>
+      </tr>`;
     }
-
-    function startOfDay(date) {
-      const value = new Date(date);
-      value.setHours(0, 0, 0, 0);
-      return value;
+    function mobileItemMarkup(item) {
+      const key = AppShell.escapeHtml(String(item.id));
+      return `<article class="feedback-mobile-item">
+        <div class="feedback-mobile-head"><div><strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong><div class="feedback-mobile-meta">${AppShell.escapeHtml(feedbackType(item))} · ${AppShell.formatDateTime(item.submitted_at)}</div></div>${sentimentBadge(item)}</div>
+        <div class="feedback-summary">${AppShell.escapeHtml(item.review_text || 'No review captured')}</div>
+        <button class="feedback-row-action" type="button" data-feedback-id="${key}">View details</button>
+      </article>`;
     }
-
-    function endOfDay(date) {
-      const value = new Date(date);
-      value.setHours(23, 59, 59, 999);
-      return value;
+    function renderBreakdown(containerId, entries, total, toneByLabel = {}) {
+      document.getElementById(containerId).innerHTML = entries.map(([label, count]) => {
+        const percentage = total ? Math.round((Number(count || 0) / total) * 100) : 0;
+        return `<div class="breakdown-row"><span>${AppShell.escapeHtml(label)}</span><span class="breakdown-track"><span class="breakdown-fill ${toneByLabel[label] || ''}" style="width:${percentage}%"></span></span><strong>${Number(count || 0)}</strong></div>`;
+      }).join('');
     }
-
-    function getDateRange(prefix) {
-      const filter = document.getElementById(`${prefix}DateFilter`)?.value || 'all';
+    function renderOverall() {
+      const overview = state.overview || { metrics: {}, sentiment: {}, ratings: {}, recent: [] };
+      document.getElementById('overallTotal').textContent = overview.metrics.total || 0;
+      document.getElementById('overallAverage').textContent = `${Number(overview.metrics.average_rating || 0).toFixed(1)}/5`;
+      document.getElementById('overallPositiveRate').textContent = `${overview.metrics.positive_rate || 0}%`;
+      document.getElementById('overallTranscriptCount').textContent = overview.metrics.with_transcript || 0;
+      renderBreakdown('sentimentBreakdown', [['Positive', overview.sentiment.positive || 0], ['Neutral', overview.sentiment.neutral || 0], ['Negative', overview.sentiment.negative || 0]], overview.metrics.total || 0, { Positive: 'positive', Neutral: 'neutral', Negative: 'negative' });
+      const ratedTotal = Object.values(overview.ratings || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+      renderBreakdown('ratingBreakdown', [5, 4, 3, 2, 1].map((rating) => [`${rating} stars`, overview.ratings[rating] || 0]), ratedTotal);
+      const recent = overview.recent || [];
+      document.getElementById('recentFeedbackBody').innerHTML = recent.length ? recent.map(rowMarkup).join('') : `<tr><td colspan="6">${emptyMarkup('No feedback recorded yet')}</td></tr>`;
+      document.getElementById('recentFeedbackMobile').innerHTML = recent.length ? recent.map(mobileItemMarkup).join('') : emptyMarkup('No feedback recorded yet');
+    }
+    function matchesDate(item, value) {
+      if (value === 'all') return true;
+      const date = new Date(item.submitted_at);
+      if (Number.isNaN(date.getTime())) return false;
       const now = new Date();
-      const todayStart = startOfDay(now);
-      const todayEnd = endOfDay(now);
-
-      if (filter === 'today') {
-        return { start: todayStart, end: todayEnd };
-      }
-
-      if (filter === 'yesterday') {
-        const yesterday = new Date(todayStart);
-        yesterday.setDate(yesterday.getDate() - 1);
-        return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
-      }
-
-      if (filter === 'last_week') {
-        const start = new Date(todayStart);
-        start.setDate(start.getDate() - 6);
-        return { start, end: todayEnd };
-      }
-
-      if (filter === 'last_month') {
-        const start = new Date(todayStart);
-        start.setMonth(start.getMonth() - 1);
-        return { start, end: todayEnd };
-      }
-
-      if (filter === 'custom') {
-        const startInput = document.getElementById(`${prefix}StartDate`)?.value;
-        const endInput = document.getElementById(`${prefix}EndDate`)?.value;
-        if (!startInput && !endInput) {
-          return null;
-        }
-
-        const start = startInput ? startOfDay(new Date(`${startInput}T00:00:00`)) : null;
-        const end = endInput ? endOfDay(new Date(`${endInput}T00:00:00`)) : null;
-        return { start, end };
-      }
-
-      return null;
+      if (value === 'today') return date.toDateString() === now.toDateString();
+      const cutoff = new Date(now);
+      cutoff.setDate(cutoff.getDate() - Number(value));
+      return date >= cutoff;
     }
-
-    function matchesDateFilter(value, prefix) {
-      const range = getDateRange(prefix);
-      if (!range) return true;
-      const parsed = parseRecordDate(value);
-      if (!parsed) return false;
-      if (range.start && parsed < range.start) return false;
-      if (range.end && parsed > range.end) return false;
-      return true;
-    }
-
-    function getFilteredPendingAnalysisCalls(prefix) {
-      return pendingAnalysisCalls().filter((call) => matchesDateFilter(call.called_at, prefix));
-    }
-
-    function getFilteredPositiveFeedback(prefix) {
-      return positiveFeedbackEntries().filter((item) => matchesDateFilter(item.submitted_at, prefix));
-    }
-
-    function getFilteredNegativeFeedback(prefix) {
-      return negativeFeedbackEntries().filter((item) => matchesDateFilter(item.submitted_at, prefix));
-    }
-
-    function followUpFeedbackEntries() {
-      return feedbackCache.filter((item) => String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP');
-    }
-
-    function getFilteredFollowUpFeedback(prefix) {
-      return followUpFeedbackEntries().filter((item) => matchesDateFilter(item.submitted_at, prefix));
-    }
-
-    function pendingCallToBoardItem(call) {
-      return {
-        is_pending_analysis: true,
-        customer_name: AppShell.formatName(call.customer_name) || 'Patient',
-        sentiment: 'pending',
-        stars: null,
-        review_text: AppShell.formatStatusLabel(call.analysis_status || 'pending'),
-        submitted_at: call.called_at
-      };
-    }
-
-    function buildPendingList(calls, titleText = 'Pending Analysis') {
-      const container = document.getElementById('feedbackSectionList');
-      const title = document.querySelector('.poc-grid-2 .poc-card .poc-card-title');
-      if (title) title.textContent = titleText;
-      if (!calls.length) {
-        const emptyMarkup = `
-          <div class="empty-state">
-            <strong>No pending analysis found</strong>
-            <div class="supporting-text">Try another status or date range to see matching records.</div>
-          </div>
-        `;
-        container.innerHTML = emptyMarkup;
-        return;
-      }
-
-      container.innerHTML = calls.map((call) => `
-        <div class="compact-row">
-          <div>
-            <strong>${AppShell.escapeHtml(AppShell.formatName(call.customer_name) || 'Patient')}</strong>
-            <div class="muted">${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.outcome || 'completed')}</div>
-          </div>
-          <button class="secondary" type="button" onclick="openAnalysisPage(${call.id})">View Analysis</button>
-        </div>
-      `).join('');
-    }
-
-    function buildDesktopFeedbackReviewList(items, filterName) {
-      const container = document.getElementById('feedbackSectionList');
-      const title = document.querySelector('.poc-grid-2 .poc-card .poc-card-title');
-      const titleText = filterName === 'positive' ? 'Positive Feedback' : (filterName === 'negative' ? 'Negative Feedback' : 'Follow-up Calls');
-      if (title) title.textContent = titleText;
-
-      if (!items.length) {
-        container.innerHTML = `
-          <div class="empty-state">
-            <strong>No matching feedback found</strong>
-            <div class="supporting-text">Try another status or date range to see matching records.</div>
-          </div>
-        `;
-        return;
-      }
-
-      container.innerHTML = items.map((item) => {
-        const isFollowUp = String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP';
-        if (isFollowUp) {
-          const q1 = item.blood_donated_last_3_months || 'N/A';
-          const q2 = String(q1).toLowerCase() === 'no' ? (item.willing_to_donate_future || 'N/A') : null;
-          return `
-            <div class="compact-row">
-              <div>
-                <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
-                <div class="muted">${AppShell.formatDateTime(item.submitted_at)} · Blood Donated: ${AppShell.escapeHtml(q1)}</div>
-              </div>
-              <span class="status-badge neutral">Follow-up</span>
-            </div>
-          `;
-        }
-        return `
-          <div class="compact-row">
-            <div>
-              <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
-              <div class="muted">${AppShell.formatDateTime(item.submitted_at)}${item.stars ? ` · ${item.stars}/5` : ''}</div>
-            </div>
-            <span class="status-badge ${filterName}">${AppShell.formatStatusLabel(filterName)}</span>
-          </div>
-        `;
-      }).join('');
-    }
-
-    function renderMobileFilteredList() {
-      const container = document.getElementById('mobileFeedbackSectionList');
-      const title = document.getElementById('mobileFeedbackSectionTitle');
-      const titleByFilter = {
-        pending: 'Pending Analysis',
-        positive: 'Positive Feedback',
-        negative: 'Negative Feedback',
-        followup: 'Follow-up Calls'
-      };
-      title.textContent = titleByFilter[activeFeedbackFilter] || 'Positive Feedback';
-
-      if (activeFeedbackFilter === 'positive' || activeFeedbackFilter === 'negative' || activeFeedbackFilter === 'followup') {
-        let feedback = [];
-        if (activeFeedbackFilter === 'positive') feedback = getFilteredPositiveFeedback('mobile');
-        else if (activeFeedbackFilter === 'negative') feedback = getFilteredNegativeFeedback('mobile');
-        else feedback = getFilteredFollowUpFeedback('mobile');
-        
-        if (!feedback.length) {
-          document.getElementById('mobileFeedbackListPagination').innerHTML = '';
-          container.innerHTML = `
-            <div class="empty-state">
-              <strong>No ${activeFeedbackFilter} feedback found</strong>
-              <div class="supporting-text">Try another date range to see reviewed patient feedback.</div>
-            </div>
-          `;
-          return;
-        }
-
-        const paged = AppShell.Pagination.getPagedItems(feedback, currentFeedbackListPage);
-        currentFeedbackListPage = paged.currentPage;
-        container.innerHTML = paged.items.map((item) => {
-          if (String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP') {
-            const q1 = item.blood_donated_last_3_months || 'N/A';
-            const q2 = String(q1).toLowerCase() === 'no' ? (item.willing_to_donate_future || 'N/A') : null;
-            return `
-              <article class="mobile-feedback-card mobile-feedback-card-inline">
-                <div class="mobile-feedback-head">
-                  <div>
-                    <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
-                    <div class="mobile-subtext">${AppShell.formatDateTime(item.submitted_at)}</div>
-                  </div>
-                </div>
-                <div class="mobile-subtext" style="margin-top:10px;">Blood Donated: <strong>${AppShell.escapeHtml(q1)}</strong></div>
-                ${q2 ? `<div class="mobile-subtext" style="margin-top:4px;">Willing to Donate: <strong>${AppShell.escapeHtml(q2)}</strong></div>` : ''}
-              </article>
-            `;
-          }
-          return `
-            <article class="mobile-feedback-card mobile-feedback-card-inline">
-              <div class="mobile-feedback-head">
-                <div>
-                  <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</strong>
-                  <div class="mobile-subtext">${AppShell.formatDateTime(item.submitted_at)}</div>
-                </div>
-                <span class="status-badge ${activeFeedbackFilter}">${AppShell.formatStatusLabel(activeFeedbackFilter)}</span>
-              </div>
-              ${item.review_text ? `<div class="mobile-subtext" style="margin-top:10px;">${AppShell.escapeHtml(item.review_text)}</div>` : ''}
-              ${Number(item.stars || 0) ? `<div class="mobile-subtext" style="margin-top:8px;">Rating: ${item.stars}/5</div>` : ''}
-            </article>
-          `;
-        }).join('');
-        document.getElementById('mobileFeedbackListPagination').innerHTML = AppShell.Pagination.renderControls(paged.currentPage, paged.totalItems, 'changeFeedbackListPage');
-        return;
-      }
-
-      const calls = getFilteredPendingAnalysisCalls('mobile');
-
-      if (!calls.length) {
-        document.getElementById('mobileFeedbackListPagination').innerHTML = '';
-        const emptyState = {
-          title: 'No pending calls found',
-          text: 'Calls waiting for transcript or analysis will appear here.'
-        };
-
-        container.innerHTML = `
-          <div class="empty-state">
-            <strong>${emptyState.title}</strong>
-            <div class="supporting-text">${emptyState.text}</div>
-          </div>
-        `;
-        return;
-      }
-
-      const paged = AppShell.Pagination.getPagedItems(calls, currentFeedbackListPage);
-      currentFeedbackListPage = paged.currentPage;
-      container.innerHTML = paged.items.map((call) => `
-        <article class="mobile-review-card">
-          <div class="mobile-review-head">
-            <div>
-              <strong>${AppShell.escapeHtml(AppShell.formatName(call.customer_name) || 'Patient')}</strong>
-              <div class="mobile-subtext">${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.outcome || 'completed')}</div>
-            </div>
-          </div>
-          <div class="mobile-review-status-row">
-            <span class="mobile-review-status pending">Pending</span>
-            <button class="mobile-review-button" type="button" onclick="openAnalysisPage(${call.id})">View Analysis</button>
-          </div>
-        </article>
-      `).join('');
-      document.getElementById('mobileFeedbackListPagination').innerHTML = AppShell.Pagination.renderControls(paged.currentPage, paged.totalItems, 'changeFeedbackListPage');
-    }
-
-    function renderFeedbackBoard(feedback) {
-      const tableBody = document.getElementById('feedbackTableBody');
-      const desktopFeedback = (() => {
-        if (activeFeedbackFilter === 'positive') return getFilteredPositiveFeedback('desktop');
-        if (activeFeedbackFilter === 'negative') return getFilteredNegativeFeedback('desktop');
-        if (activeFeedbackFilter === 'followup') return getFilteredFollowUpFeedback('desktop');
-        if (activeFeedbackFilter === 'pending') return getFilteredPendingAnalysisCalls('desktop').map(pendingCallToBoardItem);
-        return feedback.filter((item) => matchesDateFilter(item.submitted_at, 'desktop'));
-      })();
-
-      if (!desktopFeedback.length) {
-        document.getElementById('feedbackBoardPagination').innerHTML = '';
-        const emptyMarkup = `
-          <div class="empty-state">
-            <strong>No feedback recorded yet.</strong>
-            <div class="supporting-text">Manual or AI-extracted reviews will appear here as soon as calls are processed.</div>
-          </div>
-        `;
-        tableBody.innerHTML = `<tr><td colspan="5">${emptyMarkup}</td></tr>`;
-        return;
-      }
-
-      const paged = AppShell.Pagination.getPagedItems(desktopFeedback, currentFeedbackBoardPage);
-      currentFeedbackBoardPage = paged.currentPage;
-
-      tableBody.innerHTML = paged.items.map((item) => {
-        const isFollowUp = String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP';
-        const sentiment = item.is_pending_analysis ? 'pending' : (isFollowUp ? 'neutral' : feedbackSentiment(item));
-        
-        if (isFollowUp) {
-          const q1 = item.blood_donated_last_3_months || 'N/A';
-          const q2 = String(q1).toLowerCase() === 'no' ? (item.willing_to_donate_future || 'N/A') : null;
-          return `
-            <tr>
-              <td>
-                <div class="row-title">${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</div>
-                <div class="row-subtitle">Follow-up</div>
-              </td>
-              <td><span class="status-badge ${sentiment}">Follow-up</span></td>
-              <td>--</td>
-              <td class="summary-cell">Blood Donated: <strong>${AppShell.escapeHtml(q1)}</strong> ${q2 ? `· Willing: <strong>${AppShell.escapeHtml(q2)}</strong>` : ''}</td>
-              <td>${AppShell.formatDateTime(item.submitted_at)}</td>
-            </tr>
-          `;
-        }
-
-        return `
-          <tr>
-            <td>
-              <div class="row-title">${AppShell.escapeHtml(AppShell.formatName(item.customer_name) || 'Patient')}</div>
-              <div class="row-subtitle">${AppShell.escapeHtml(AppShell.formatSentence(item.source || 'call'))}</div>
-            </td>
-            <td><span class="status-badge ${sentiment}">${AppShell.formatStatusLabel(sentiment)}</span></td>
-            <td>${Number(item.stars || 0) ? `${item.stars}/5` : ''}</td>
-            <td class="summary-cell">${AppShell.escapeHtml(item.review_text || '')}</td>
-            <td>${AppShell.formatDateTime(item.submitted_at)}</td>
-          </tr>
-        `;
-      }).join('');
-
-      document.getElementById('feedbackBoardPagination').innerHTML = AppShell.Pagination.renderControls(paged.currentPage, paged.totalItems, 'changeFeedbackBoardPage');
-    }
-
-    function populateCustomerSelect() {
-      const select = document.getElementById('feedbackCustomer');
-      select.innerHTML = '<option value="">Select customer</option>' + customerCache.map((customer) => `
-        <option value="${customer.id}">${AppShell.escapeHtml(AppShell.formatName(customer.name))} · ${AppShell.escapeHtml(customer.phone)}</option>
-      `).join('');
-    }
-
-    function renderMetrics() {
-      const positiveFeedback = positiveFeedbackEntries().length;
-      const negativeFeedback = negativeFeedbackEntries().length;
-      const followupFeedback = followUpFeedbackEntries().length;
-      const pendingAnalysis = pendingAnalysisCalls().length;
-      
-      const mobilePendingAnalysis = getFilteredPendingAnalysisCalls('mobile');
-      const mobilePositiveFeedback = getFilteredPositiveFeedback('mobile');
-      const mobileNegativeFeedback = getFilteredNegativeFeedback('mobile');
-      const mobileFollowupFeedback = getFilteredFollowUpFeedback('mobile');
-      
-      const desktopPendingAnalysis = getFilteredPendingAnalysisCalls('desktop');
-      const desktopPositiveFeedback = getFilteredPositiveFeedback('desktop');
-      const desktopNegativeFeedback = getFilteredNegativeFeedback('desktop');
-      const desktopFollowupFeedback = getFilteredFollowUpFeedback('desktop');
-
-      document.getElementById('metricFeedbackTotal').textContent = feedbackCache.length;
-      document.getElementById('metricPositiveFeedback').textContent = positiveFeedback;
-      document.getElementById('metricNegativeFeedback').textContent = negativeFeedback;
-      document.getElementById('metricFollowupFeedback').textContent = followupFeedback;
-      document.getElementById('metricPendingAnalysis').textContent = pendingAnalysis;
-      
-      document.getElementById('desktopMetricPendingAnalysis').textContent = desktopPendingAnalysis.length;
-      document.getElementById('desktopMetricPositiveFeedback').textContent = desktopPositiveFeedback.length;
-      document.getElementById('desktopMetricNegativeFeedback').textContent = desktopNegativeFeedback.length;
-      document.getElementById('desktopMetricFollowupFeedback').textContent = desktopFollowupFeedback.length;
-      
-      document.getElementById('mobileMetricPendingAnalysis').textContent = mobilePendingAnalysis.length;
-      document.getElementById('mobileMetricPositiveFeedback').textContent = mobilePositiveFeedback.length;
-      document.getElementById('mobileMetricNegativeFeedback').textContent = mobileNegativeFeedback.length;
-      document.getElementById('mobileMetricFollowupFeedback').textContent = mobileFollowupFeedback.length;
-
-      if (activeFeedbackFilter === 'positive' || activeFeedbackFilter === 'negative' || activeFeedbackFilter === 'followup') {
-        let itemsForList = [];
-        if (activeFeedbackFilter === 'positive') itemsForList = desktopPositiveFeedback;
-        else if (activeFeedbackFilter === 'negative') itemsForList = desktopNegativeFeedback;
-        else itemsForList = desktopFollowupFeedback;
-        
-        const paged = AppShell.Pagination.getPagedItems(itemsForList, currentFeedbackListPage);
-        currentFeedbackListPage = paged.currentPage;
-        buildDesktopFeedbackReviewList(
-          paged.items,
-          activeFeedbackFilter
-        );
-        document.getElementById('feedbackSectionPagination').innerHTML = AppShell.Pagination.renderControls(paged.currentPage, paged.totalItems, 'changeFeedbackListPage');
-      } else {
-        const paged = AppShell.Pagination.getPagedItems(desktopPendingAnalysis, currentFeedbackListPage);
-        currentFeedbackListPage = paged.currentPage;
-        buildPendingList(paged.items, 'Pending Analysis');
-        document.getElementById('feedbackSectionPagination').innerHTML = AppShell.Pagination.renderControls(paged.currentPage, paged.totalItems, 'changeFeedbackListPage');
-      }
-      renderFeedbackBoard(feedbackCache);
-      renderMobileFilteredList();
-      updateFeedbackFilterButtons();
-    }
-
-    function updateFeedbackFilterButtons() {
-      document.querySelectorAll('[data-mobile-filter], [data-feedback-filter]').forEach((button) => {
-        const filterName = button.dataset.mobileFilter || button.dataset.feedbackFilter;
-        const isActive = filterName === activeFeedbackFilter;
-        button.classList.toggle('active', isActive);
-        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    function filteredItems() {
+      const query = document.getElementById('feedbackSearch').value.trim().toLowerCase();
+      const sentiment = document.getElementById('sentimentFilter').value;
+      const source = document.getElementById('sourceFilter').value;
+      const date = document.getElementById('dateFilter').value;
+      return state.items.filter((item) => {
+        const haystack = `${item.customer_name || ''} ${item.customer_phone || ''} ${item.review_text || ''}`.toLowerCase();
+        if (query && !haystack.includes(query)) return false;
+        if (sentiment !== 'all' && item.sentiment !== sentiment) return false;
+        if (source === 'manual' && String(item.source || '').toLowerCase() !== 'manual') return false;
+        if (source === 'call' && String(item.source || '').toLowerCase() === 'manual') return false;
+        return matchesDate(item, date);
       });
     }
-
-    function toggleCustomDateRange(prefix) {
-      const isCustom = (document.getElementById(`${prefix}DateFilter`)?.value || 'all') === 'custom';
-      document.getElementById(`${prefix}CustomDateRange`).hidden = !isCustom;
+    function renderIndividual() {
+      const items = filteredItems();
+      const totalPages = Math.max(1, Math.ceil(items.length / state.pageSize));
+      state.currentPage = Math.min(state.currentPage, totalPages);
+      const pageItems = items.slice((state.currentPage - 1) * state.pageSize, state.currentPage * state.pageSize);
+      document.getElementById('individualCount').textContent = `${items.length} ${items.length === 1 ? 'record' : 'records'}`;
+      document.getElementById('individualFeedbackBody').innerHTML = pageItems.length ? pageItems.map(rowMarkup).join('') : `<tr><td colspan="6">${emptyMarkup('No feedback matches these filters')}</td></tr>`;
+      document.getElementById('individualFeedbackMobile').innerHTML = pageItems.length ? pageItems.map(mobileItemMarkup).join('') : emptyMarkup('No feedback matches these filters');
+      document.getElementById('individualPagination').innerHTML = items.length > state.pageSize ? `<button type="button" data-page-action="previous" aria-label="Previous page" ${state.currentPage === 1 ? 'disabled' : ''}>&larr;</button><span>Page ${state.currentPage} of ${totalPages}</span><button type="button" data-page-action="next" aria-label="Next page" ${state.currentPage === totalPages ? 'disabled' : ''}>&rarr;</button>` : '';
     }
-
-    function applyFeedbackFilter(filterName) {
-      activeFeedbackFilter = filterName || 'positive';
-      currentFeedbackListPage = 1;
-      currentFeedbackBoardPage = 1;
-      renderMetrics();
+    function setActiveView(view, updateHash = true) {
+      state.activeView = ['overall', 'individual', 'manual'].includes(view) ? view : 'overall';
+      document.querySelectorAll('[data-view]').forEach((button) => {
+        const active = button.dataset.view === state.activeView;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      ['overall', 'individual', 'manual'].forEach((name) => { document.getElementById(`${name}View`).hidden = name !== state.activeView; });
+      if (updateHash) window.history.replaceState(null, '', `#${state.activeView}`);
+      if (state.activeView === 'individual') renderIndividual();
     }
-
-    function changeFeedbackListPage(pageNumber) {
-      currentFeedbackListPage = pageNumber;
-      renderMetrics();
+    function populateCustomers() {
+      document.getElementById('feedbackCustomer').innerHTML = '<option value="">Select patient</option>' + state.customers.map((customer) => `<option value="${customer.id}">${AppShell.escapeHtml(AppShell.formatName(customer.name))} · ${AppShell.escapeHtml(customer.phone)}</option>`).join('');
     }
-
-    function changeFeedbackBoardPage(pageNumber) {
-      currentFeedbackBoardPage = pageNumber;
-      renderMetrics();
+    function parseTranscript(text) {
+      return String(text || '').split('\n').map((line) => line.trim()).filter(Boolean).map((line) => {
+        const match = line.match(/^\[?([a-zA-Z_]+)\]?\s*:\s*(.*)$/);
+        if (!match) return { role: 'NOTE', text: line };
+        const rawRole = match[1].toUpperCase();
+        const role = ['AGENT', 'AI', 'BOT'].includes(rawRole) ? 'AGENT' : ['CUSTOMER', 'PATIENT', 'USER'].includes(rawRole) ? 'CUSTOMER' : rawRole;
+        return { role, text: match[2] || '' };
+      });
     }
-
-    function openManualFeedbackModal() {
-      document.getElementById('manualFeedbackModal').classList.add('open');
-      document.getElementById('manualFeedbackModal').setAttribute('aria-hidden', 'false');
+    function renderTranscript() {
+      const query = document.getElementById('transcriptSearch').value.trim().toLowerCase();
+      const turns = query ? state.transcriptTurns.filter((turn) => `${turn.role} ${turn.text}`.toLowerCase().includes(query)) : state.transcriptTurns;
+      const container = document.getElementById('feedbackTranscript');
+      if (!state.transcriptTurns.length) { container.innerHTML = emptyMarkup('No transcript is available for this feedback'); return; }
+      if (!turns.length) { container.innerHTML = emptyMarkup('No transcript lines match your search'); return; }
+      container.innerHTML = turns.map((turn) => {
+        const customer = turn.role === 'CUSTOMER';
+        return `<div class="transcript-turn ${customer ? 'customer' : 'agent'}"><div class="transcript-role">${customer ? 'Patient' : AppShell.escapeHtml(AppShell.formatStatusLabel(turn.role))}</div><div class="transcript-bubble">${AppShell.escapeHtml(turn.text)}</div></div>`;
+      }).join('');
     }
-
-    function closeManualFeedbackModal() {
-      document.getElementById('manualFeedbackModal').classList.remove('open');
-      document.getElementById('manualFeedbackModal').setAttribute('aria-hidden', 'true');
+    async function openFeedbackDetail(id) {
+      const item = state.items.find((entry) => String(entry.id) === String(id));
+      if (!item) return;
+      state.activeItem = item;
+      state.transcriptTurns = [];
+      document.getElementById('transcriptSearch').value = '';
+      document.getElementById('feedbackDetailTitle').textContent = AppShell.formatName(item.customer_name) || 'Patient';
+      document.getElementById('feedbackDetailSubtitle').textContent = AppShell.formatDateTime(item.submitted_at);
+      document.getElementById('feedbackDetailReview').textContent = item.review_text || 'No review captured.';
+      document.getElementById('feedbackDetailSummary').textContent = 'Loading call summary...';
+      document.getElementById('feedbackDetailStats').innerHTML = [['Type', feedbackType(item)], ['Sentiment', AppShell.formatStatusLabel(item.sentiment)], ['Rating', formatRating(item.stars)], ['Source', sourceLabel(item)]].map(([label, value]) => `<div class="feedback-detail-stat"><span>${label}</span><strong>${AppShell.escapeHtml(value)}</strong></div>`).join('');
+      document.getElementById('feedbackTranscript').innerHTML = emptyMarkup(item.call_id ? 'Loading transcript...' : 'Manual feedback has no call transcript');
+      document.getElementById('feedbackDetailSummarySection').hidden = !item.call_id;
+      document.getElementById('transcriptSearch').disabled = !item.call_id;
+      document.getElementById('downloadTranscriptLink').hidden = true;
+      const modal = document.getElementById('feedbackDetailModal');
+      modal.classList.add('open');
+      modal.setAttribute('aria-hidden', 'false');
+      if (!item.call_id) return;
+      try {
+        const call = await AppShell.fetchJson(`${AppShell.API_BASE}/calls/${item.call_id}`);
+        if (state.activeItem !== item) return;
+        document.getElementById('feedbackDetailSummary').textContent = call.summary || call.analysis_summary || 'No call summary available.';
+        state.transcriptTurns = call.analysis?.transcript_turns?.length ? call.analysis.transcript_turns.map((turn) => {
+          const role = String(turn.role || '').toUpperCase();
+          return { role: ['CUSTOMER', 'PATIENT', 'USER'].includes(role) ? 'CUSTOMER' : 'AGENT', text: turn.text || '' };
+        }) : parseTranscript(call.transcript_text);
+        document.getElementById('transcriptSearch').disabled = !state.transcriptTurns.length;
+        const downloadLink = document.getElementById('downloadTranscriptLink');
+        if (state.transcriptTurns.length) { downloadLink.href = `${AppShell.API_BASE}/calls/${item.call_id}/transcript?raw=1`; downloadLink.hidden = false; }
+        renderTranscript();
+      } catch (error) {
+        document.getElementById('feedbackDetailSummary').textContent = 'Call details could not be loaded.';
+        document.getElementById('feedbackTranscript').innerHTML = emptyMarkup('Transcript could not be loaded');
+      }
     }
-
-    function clearManualFeedbackErrors() {
+    function closeFeedbackDetail() {
+      state.activeItem = null;
+      const modal = document.getElementById('feedbackDetailModal');
+      modal.classList.remove('open');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+    async function loadFeedbackData() {
+      const [customers, items, overview] = await Promise.all([
+        AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
+        AppShell.fetchJson(`${AppShell.API_BASE}/feedback/items`),
+        AppShell.fetchJson(`${AppShell.API_BASE}/feedback/overview`)
+      ]);
+      state.customers = Array.isArray(customers) ? customers : [];
+      state.items = Array.isArray(items) ? items : [];
+      state.overview = overview;
+      populateCustomers();
+      renderOverall();
+      renderIndividual();
+    }
+    async function submitManualFeedback(event) {
+      event.preventDefault();
       AppShell.clearFieldErrors(['feedbackCustomer', 'reviewStars', 'reviewText']);
-    }
-
-    async function submitManualFeedback() {
-      clearManualFeedbackErrors();
-      const payload = {
-        customer_id: Number(document.getElementById('feedbackCustomer').value || 0),
-        stars: Number(document.getElementById('reviewStars').value || 0),
-        review_text: document.getElementById('reviewText').value.trim()
-      };
-
+      const button = document.getElementById('submitFeedbackButton');
+      button.disabled = true;
       try {
         await AppShell.fetchJson(`${AppShell.API_BASE}/feedback/manual`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customer_id: Number(document.getElementById('feedbackCustomer').value || 0), stars: Number(document.getElementById('reviewStars').value || 0), review_text: document.getElementById('reviewText').value.trim() })
         });
-        AppShell.showAlert('Manual feedback added successfully');
-        document.getElementById('feedbackCustomer').value = '';
+        document.getElementById('manualFeedbackForm').reset();
         document.getElementById('reviewStars').value = '5';
-        document.getElementById('reviewText').value = '';
-        closeManualFeedbackModal();
-        await loadPageData();
+        await loadFeedbackData();
+        setActiveView('individual');
+        AppShell.showAlert('Feedback added successfully');
       } catch (error) {
+        if (error.fieldErrors) AppShell.applyFieldErrors(error.fieldErrors, { customer_id: 'feedbackCustomer', stars: 'reviewStars', review_text: 'reviewText' });
         AppShell.showAlert(error.message, 'error');
-      }
-    }
-
-    async function loadTranscriptForCall(callId) {
-      try {
-        const response = await fetch(`${AppShell.API_BASE}/calls/${callId}/transcript?raw=1`, { cache: 'no-store' });
-        if (response.status === 401) {
-          AppShell.redirectToLogin();
-          throw new Error('Authentication required');
-        }
-        if (!response.ok) return '';
-        return response.text();
-      } catch (error) {
-        return '';
-      }
-    }
-
-    async function openAnalysisModal(callId) {
-      openAnalysisPage(callId);
-    }
-
-    function closeAnalysisModal() {
-      document.getElementById('analysisModal').classList.remove('open');
-      document.getElementById('analysisModal').setAttribute('aria-hidden', 'true');
-    }
-
-    function openFeedbackSheet(id) {
-      const element = document.getElementById(id);
-      if (!element) return;
-      element.classList.add('open');
-      element.setAttribute('aria-hidden', 'false');
-    }
-
-    function openAnalysisPage(callId) {
-      window.location.href = `/feedback-analysis.html?callId=${encodeURIComponent(callId)}`;
-    }
-
-    function closeFeedbackSheet(id) {
-      const element = document.getElementById(id);
-      if (!element) return;
-      element.classList.remove('open');
-      element.setAttribute('aria-hidden', 'true');
-    }
-
-    async function loadPageData() {
-      let [customers, feedback, recentCalls] = await Promise.all([
-        AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/feedback`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
-      ]);
-      customerCache = customers;
-      feedbackCache = feedback;
-      recentCallsCache = recentCalls;
-      populateCustomerSelect();
-      renderMetrics();
+      } finally { button.disabled = false; }
     }
 
     document.addEventListener('DOMContentLoaded', async () => {
       await AppShell.ensureAuthenticatedSession();
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
-      document.getElementById('openManualFeedbackButton').addEventListener('click', openManualFeedbackModal);
-      // document.getElementById('mobileManualFeedbackFab').addEventListener('click', openManualFeedbackModal);
-      document.getElementById('mobileFeedbackMenuButton').addEventListener('click', () => openFeedbackSheet('feedbackMobileMenuSheet'));
-      document.querySelectorAll('[data-mobile-filter]').forEach((button) => {
-        button.addEventListener('click', () => applyFeedbackFilter(button.dataset.mobileFilter));
+      document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => setActiveView(button.dataset.view)));
+      document.getElementById('headerManualButton').addEventListener('click', () => setActiveView('manual'));
+      document.getElementById('mobileManualButton').addEventListener('click', () => setActiveView('manual'));
+      document.getElementById('viewAllFeedbackButton').addEventListener('click', () => setActiveView('individual'));
+      ['feedbackSearch', 'sentimentFilter', 'sourceFilter', 'dateFilter'].forEach((id) => {
+        document.getElementById(id).addEventListener(id === 'feedbackSearch' ? 'input' : 'change', () => { state.currentPage = 1; renderIndividual(); });
       });
-      document.querySelectorAll('[data-feedback-filter]').forEach((button) => {
-        button.addEventListener('click', () => applyFeedbackFilter(button.dataset.feedbackFilter));
+      document.addEventListener('click', (event) => {
+        const detailButton = event.target.closest('[data-feedback-id]');
+        if (detailButton) openFeedbackDetail(detailButton.dataset.feedbackId);
+        const pageButton = event.target.closest('[data-page-action]');
+        if (pageButton && !pageButton.disabled) { state.currentPage += pageButton.dataset.pageAction === 'next' ? 1 : -1; renderIndividual(); }
       });
-      document.getElementById('mobileDateFilter').addEventListener('change', () => {
-        toggleCustomDateRange('mobile');
-        currentFeedbackListPage = 1;
-        currentFeedbackBoardPage = 1;
-        renderMetrics();
-      });
-      document.getElementById('desktopDateFilter').addEventListener('change', () => {
-        toggleCustomDateRange('desktop');
-        currentFeedbackListPage = 1;
-        currentFeedbackBoardPage = 1;
-        renderMetrics();
-      });
-      document.getElementById('mobileStartDate').addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
-      document.getElementById('mobileEndDate').addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
-      document.getElementById('desktopStartDate').addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
-      document.getElementById('desktopEndDate').addEventListener('change', () => { currentFeedbackListPage = 1; currentFeedbackBoardPage = 1; renderMetrics(); });
-      document.getElementById('closeFeedbackMobileMenuSheet').addEventListener('click', () => closeFeedbackSheet('feedbackMobileMenuSheet'));
-      document.getElementById('feedbackMobileMenuLogout').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
-      document.getElementById('closeManualFeedbackModal').addEventListener('click', closeManualFeedbackModal);
-      document.getElementById('submitFeedbackButton').addEventListener('click', submitManualFeedback);
-      document.getElementById('analysisModalClose').addEventListener('click', closeAnalysisModal);
-      document.getElementById('manualFeedbackModal').addEventListener('click', (event) => {
-        if (event.target.id === 'manualFeedbackModal') closeManualFeedbackModal();
-      });
-      document.getElementById('analysisModal').addEventListener('click', (event) => {
-        if (event.target.id === 'analysisModal') closeAnalysisModal();
-      });
-      document.getElementById('feedbackMobileMenuSheet').addEventListener('click', (event) => {
-        if (event.target.id === 'feedbackMobileMenuSheet') closeFeedbackSheet('feedbackMobileMenuSheet');
-      });
-      document.addEventListener('keydown', (event) => {
-        if (event.key !== 'Escape') return;
-        if (document.getElementById('manualFeedbackModal').classList.contains('open')) closeManualFeedbackModal();
-        if (document.getElementById('analysisModal').classList.contains('open')) closeAnalysisModal();
-        if (document.getElementById('feedbackMobileMenuSheet').classList.contains('open')) closeFeedbackSheet('feedbackMobileMenuSheet');
-      });
-
-      window.addEventListener('app:pagination:resize', renderMetrics);
-
-      try {
-        toggleCustomDateRange('mobile');
-        toggleCustomDateRange('desktop');
-        await loadPageData();
-      } catch (error) {
-        AppShell.showAlert(error.message, 'error');
-      }
+      document.getElementById('manualFeedbackForm').addEventListener('submit', submitManualFeedback);
+      document.getElementById('closeFeedbackDetail').addEventListener('click', closeFeedbackDetail);
+      document.getElementById('feedbackDetailModal').addEventListener('click', (event) => { if (event.target.id === 'feedbackDetailModal') closeFeedbackDetail(); });
+      document.getElementById('transcriptSearch').addEventListener('input', renderTranscript);
+      document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeFeedbackDetail(); });
+      setActiveView(window.location.hash.replace('#', '') || 'overall', false);
+      try { await loadFeedbackData(); } catch (error) { AppShell.showAlert(error.message, 'error'); }
     });
-
-    window.openAnalysisModal = openAnalysisModal;
-    window.openAnalysisPage = openAnalysisPage;
-    window.changeFeedbackListPage = changeFeedbackListPage;
-    window.changeFeedbackBoardPage = changeFeedbackBoardPage;
   </script>
 </body>
 </html>

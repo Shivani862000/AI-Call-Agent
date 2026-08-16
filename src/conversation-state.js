@@ -7,6 +7,7 @@
 
 const { CALL_TYPES, LIVE_MAX_RESPONSE_TOKENS } = require('./config');
 const { normalizeOutboundCallType, formatOutboundCallTypeLabel } = require('./helpers');
+const { FINAL_CLOSING_LINE } = require('../prompts/closing.ts');
 
 // ── Sentiment evaluation ───────────────────────────────────────────────────────
 
@@ -113,7 +114,7 @@ function buildReviewCallTurnInstruction(customerReply, state) {
   if (state.step === 'problem_check') {
     if (isNegativeOrBusyReply(customerReply)) {
       markCompletedAfterReply();
-      return 'Donor wants to stop or is busy. Say exactly: "Koi baat nahi sir. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then end the call.';
+      return `Donor wants to stop or is busy. Say exactly: "Koi baat nahi sir. ${FINAL_CLOSING_LINE}" Then end the call.`;
     }
 
     if (isNoReply(customerReply)) {
@@ -136,11 +137,11 @@ function buildReviewCallTurnInstruction(customerReply, state) {
 
   if (state.step === 'feedback') {
     markCompletedAfterReply();
-    return 'Acknowledge the donor feedback warmly in one short sentence. Then say exactly: "Sir, humne aapke paas ek video send ki hai. Usko please Like, Comment karein aur Channel ko Subscribe karein. Hamaara Facebook aur Google par Apna Blood Bank ke naam se page bhi hai. Usse bhi Like, Share, Comment aur Subscribe karein, taaki aage ki activities ke baare mein aapko pata lagta rahe. Dhanyavaad Sir! Aapka din shubh ho." Then end the call.';
+    return `Acknowledge the donor feedback warmly in one short sentence. Then say exactly: "Sir, humne aapke paas ek video send ki hai. Usko please Like, Comment karein aur Channel ko Subscribe karein. Hamaara Facebook aur Google par Apna Blood Bank ke naam se page bhi hai. Usse bhi Like, Share, Comment aur Subscribe karein, taaki aage ki activities ke baare mein aapko pata lagta rahe. ${FINAL_CLOSING_LINE}" Then end the call.`;
   }
 
   markCompletedAfterReply();
-  return 'Say exactly: "Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
+  return `Say exactly: "${FINAL_CLOSING_LINE}" Then end the call.`;
 }
 
 // ── Three Month Follow-up turn instruction builder ─────────────────────────────
@@ -157,7 +158,7 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
   if (state.step === 'intro') {
     if (isNegativeOrBusyReply(customerReply) || isNoReply(customerReply)) {
       markCompletedAfterReply();
-      return 'Wrong person or donor declined. Say exactly: "Koi baat nahi sir. Apna samay dene ke liye dhanyavaad. Aapka din shubh ho." Then end the call.';
+      return `Wrong person or donor declined. Say exactly: "Koi baat nahi sir. ${FINAL_CLOSING_LINE}" Then end the call.`;
     }
 
     state.step = 'donated_again';
@@ -185,16 +186,16 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
 
   if (state.step === 'donation_place') {
     markCompletedAfterReply();
-    return 'Capture the donation place. Say exactly: "Bahut achha kaam kiya sir. Dhanyavaad. Aapka din shubh ho." Then end the call.';
+    return `Capture the donation place. Say exactly: "Bahut achha kaam kiya sir. ${FINAL_CLOSING_LINE}" Then end the call.`;
   }
 
   if (state.step === 'plan_to_donate') {
     markCompletedAfterReply();
-    return 'Acknowledge the donor warmly in one short sentence. Say exactly: "Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
+    return `Acknowledge the donor warmly in one short sentence. Then say exactly: "${FINAL_CLOSING_LINE}" Then end the call.`;
   }
 
   markCompletedAfterReply();
-  return 'Say exactly: "Dhanyavaad sir. Aapka din shubh ho." Then end the call.';
+  return `Say exactly: "${FINAL_CLOSING_LINE}" Then end the call.`;
 }
 
 // ── Composite turn instruction builder ─────────────────────────────────────────
@@ -211,7 +212,7 @@ function buildOutboundDemoTurnInstruction(callerText, state, clientName, custome
     `Max response tokens: ${LIVE_MAX_RESPONSE_TOKENS}.`,
     'When all required answers are captured, say the final thank-you only once and internally set END_CALL=true.',
     'Never say "end_call" or "END_CALL=true" aloud.',
-    'CRITICAL: After saying "Dhanyavaad sir. Aapka din shubh ho." The conversation is finished.',
+    'CRITICAL: After saying the required final closing line, the conversation is finished.',
     'Do not answer any further customer speech. Do not repeat closing messages.',
     'Do not continue talking. Do not provide additional information. Immediately end the call.'
   ];

@@ -1,3 +1,5 @@
+const { FINAL_CLOSING_LINE } = require('./closing.ts');
+
 function buildReviewCallingPrompt({ clientName = 'Apna Blood Centre' } = {}) {
   const client = clientName || 'Apna Blood Centre';
   return `
@@ -10,13 +12,16 @@ Flow & Exact Lines:
 4. Social Media: "Hamne aapke registered number par ek video bheja hai,usko like aur subscribe karein.
 Hamare Facebook aur Google page Ko review zarur karein."
 5. Closing:
-"Dhanyavaad.Aapka din shubh ho."
+"${FINAL_CLOSING_LINE}"
 
 Rules:
 - Ask 1 question at a time. Never repeat questions.
 - If you hear background noise or unclear audio, use filler words like 'Ok', 'Yes', 'Thanks', 'Theek hai', 'Haan' to acknowledge, and gently continue the flow without restarting.
-- If user says "ok/bye/theek hai" at closing, say: "Apka Dhanyavaad. Namaskar." .
 - Stop if asked. Never assume morning.
+- Say the closing line exactly once after the required feedback is captured.
+- Do not wait for another response after the closing line.
+- Do not add another thank-you, goodbye, or question after the closing line.
+- End the call immediately after the closing audio has finished playing.
 `.trim();
 }
 
