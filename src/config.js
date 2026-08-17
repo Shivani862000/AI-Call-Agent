@@ -17,25 +17,33 @@ const GEMINI_LIVE_THINKING_LEVEL = process.env.GEMINI_LIVE_THINKING_LEVEL || 'mi
 const GEMINI_LIVE_SILENCE_DURATION_MS = Math.max(Number(process.env.GEMINI_LIVE_SILENCE_DURATION_MS || 600) || 600, 100);
 const GEMINI_LIVE_PREFIX_PADDING_MS = Math.max(Number(process.env.GEMINI_LIVE_PREFIX_PADDING_MS || 100) || 100, 20);
 const GEMINI_LIVE_DIRECT_AUDIO = String(process.env.GEMINI_LIVE_DIRECT_AUDIO || (AI_PROVIDER === 'gemini-live' ? 'true' : 'false')).toLowerCase() === 'true';
-const DEEPGRAM_ENDPOINTING_MS = Math.max(Number(process.env.DEEPGRAM_ENDPOINTING_MS || 250) || 250, 80);
+const DEEPGRAM_ENDPOINTING_MS = Math.max(Number(process.env.DEEPGRAM_ENDPOINTING_MS || 220) || 220, 80);
+const DEEPGRAM_FINAL_FLUSH_MS = Math.max(Number(process.env.DEEPGRAM_FINAL_FLUSH_MS || 180) || 180, 50);
 const LIVE_MAX_RESPONSE_TOKENS = Math.max(Number(process.env.LIVE_MAX_RESPONSE_TOKENS || process.env.GEMINI_MAX_OUTPUT_TOKENS || 180) || 180, 24);
 const GEMINI_LIVE_MAX_OUTPUT_TOKENS = Math.max(Number(process.env.GEMINI_LIVE_MAX_OUTPUT_TOKENS || 340) || 340, 64);
 const LIVE_TEMPERATURE = Number(process.env.LIVE_TEMPERATURE || process.env.GEMINI_TEMPERATURE || 0.35);
 const FINAL_AUDIO_GRACE_MS = Math.max(Number(process.env.FINAL_AUDIO_GRACE_MS || 3000) || 3000, 1000);
 const DEEPGRAM_TTS_MODEL = process.env.DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en';
+const requestedReverseMediaChunkBytes = Math.min(
+  Math.max(Number(process.env.ICALLMATE_REVERSE_MEDIA_CHUNK_BYTES || 1600) || 1600, 640),
+  3200
+);
+const ICALLMATE_REVERSE_MEDIA_CHUNK_BYTES = requestedReverseMediaChunkBytes - (requestedReverseMediaChunkBytes % 2);
+const ICALLMATE_REVERSE_MEDIA_INTERVAL_MS = Math.round(ICALLMATE_REVERSE_MEDIA_CHUNK_BYTES / 16);
 const REALTIME_MODEL = GEMINI_MODEL;
 const MAX_PRECONNECT_MEDIA_CHUNKS = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_CHUNKS || 60) || 60, 10);
 const MAX_PRECONNECT_MEDIA_BYTES = Math.max(Number(process.env.MAX_PRECONNECT_MEDIA_BYTES || 512000) || 512000, 64000);
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
-const HARDCODED_PUBLIC_BASE_URL = 'https://winter-undeclamatory-unstammeringly.ngrok-free.dev';
 const SERVER_NAME_BASE_URL = process.env.SERVER_NAME ? `https://${String(process.env.SERVER_NAME).replace(/^https?:\/\//i, '').replace(/\/+$/g, '')}` : '';
-const PUBLIC_BASE_URL = (
+const CONFIGURED_PUBLIC_BASE_URL = (
   SERVER_NAME_BASE_URL
   || process.env.APP_BASE_URL
   || process.env.NGROK_URL
   || process.env.WEBHOOK_URL
-  || HARDCODED_PUBLIC_BASE_URL
+  || ''
 ).replace(/\/$/, '');
+const HAS_CONFIGURED_PUBLIC_BASE_URL = Boolean(CONFIGURED_PUBLIC_BASE_URL);
+const PUBLIC_BASE_URL = CONFIGURED_PUBLIC_BASE_URL || `http://localhost:${PORT}`;
 const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
 const DISABLE_SCHEDULER = String(process.env.DISABLE_SCHEDULER || '').toLowerCase() === 'true';
@@ -100,12 +108,15 @@ function logConfigSnapshot(scope = 'CONFIG') {
     GEMINI_LIVE_SILENCE_DURATION_MS,
     GEMINI_LIVE_PREFIX_PADDING_MS,
     DEEPGRAM_ENDPOINTING_MS,
+    DEEPGRAM_FINAL_FLUSH_MS,
     LIVE_MAX_RESPONSE_TOKENS,
     GEMINI_LIVE_MAX_OUTPUT_TOKENS,
     LIVE_TEMPERATURE,
     GEMINI_LIVE_DIRECT_AUDIO,
     FINAL_AUDIO_GRACE_MS,
     DEEPGRAM_TTS_MODEL,
+    ICALLMATE_REVERSE_MEDIA_CHUNK_BYTES,
+    ICALLMATE_REVERSE_MEDIA_INTERVAL_MS,
     DISABLE_SCHEDULER,
     DISABLE_OWNER_DIGEST,
     APP_BASE_URL: describeEnvValue(process.env.APP_BASE_URL || ''),
@@ -119,6 +130,8 @@ function logConfigSnapshot(scope = 'CONFIG') {
     ICALLMATE_IVR_TEMPLATE_ID: process.env.ICALLMATE_IVR_TEMPLATE_ID || '',
     ICALLMATE_AGENT_ID: process.env.ICALLMATE_AGENT_ID || '',
     ICALLMATE_UKEY_PRESENT: Boolean(process.env.ICALLMATE_UKEY),
+    ICALLMATE_WEBHOOK_SECRET_PRESENT: Boolean(process.env.ICALLMATE_WEBHOOK_SECRET || process.env.WEBHOOK_SECRET),
+    ICALLMATE_MEDIA_SHARED_SECRET_PRESENT: Boolean(process.env.ICALLMATE_MEDIA_SHARED_SECRET),
     GEMINI_API_KEY_PRESENT: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
     DEEPGRAM_API_KEY_PRESENT: Boolean(process.env.DEEPGRAM_API_KEY),
     DATABASE_URL: process.env.DATABASE_URL || ''
@@ -142,11 +155,26 @@ function validateConfig() {
     missing.push('DEEPGRAM_API_KEY');
   }
 
+  if (
+    String(process.env.NODE_ENV || '').toLowerCase() === 'production'
+    && !process.env.ICALLMATE_WEBHOOK_SECRET
+    && !process.env.WEBHOOK_SECRET
+  ) {
+    missing.push('ICALLMATE_WEBHOOK_SECRET');
+  }
+
+  if (
+    String(process.env.NODE_ENV || '').toLowerCase() === 'production'
+    && Buffer.byteLength(String(process.env.ICALLMATE_MEDIA_SHARED_SECRET || ''), 'utf8') < 32
+  ) {
+    missing.push('ICALLMATE_MEDIA_SHARED_SECRET (at least 32 bytes)');
+  }
+
   if (USE_ORCHESTRATED_PIPELINE) {
     throw new Error('VOICE_PIPELINE=orchestrated is no longer supported. iCallMate media is the only voice stream path.');
   }
 
-  if (!PUBLIC_BASE_URL) {
+  if (!HAS_CONFIGURED_PUBLIC_BASE_URL) {
     missing.push('APP_BASE_URL or NGROK_URL or WEBHOOK_URL or SERVER_NAME');
   }
 
@@ -166,16 +194,20 @@ module.exports = {
   GEMINI_LIVE_PREFIX_PADDING_MS,
   GEMINI_LIVE_DIRECT_AUDIO,
   DEEPGRAM_ENDPOINTING_MS,
+  DEEPGRAM_FINAL_FLUSH_MS,
   LIVE_MAX_RESPONSE_TOKENS,
   GEMINI_LIVE_MAX_OUTPUT_TOKENS,
   LIVE_TEMPERATURE,
   FINAL_AUDIO_GRACE_MS,
   DEEPGRAM_TTS_MODEL,
+  ICALLMATE_REVERSE_MEDIA_CHUNK_BYTES,
+  ICALLMATE_REVERSE_MEDIA_INTERVAL_MS,
   REALTIME_MODEL,
   MAX_PRECONNECT_MEDIA_CHUNKS,
   MAX_PRECONNECT_MEDIA_BYTES,
   CLIENT_NAME,
   PUBLIC_BASE_URL,
+  HAS_CONFIGURED_PUBLIC_BASE_URL,
   VOICE_PIPELINE,
   USE_ORCHESTRATED_PIPELINE,
   DISABLE_SCHEDULER,

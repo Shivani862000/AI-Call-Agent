@@ -24,6 +24,7 @@ const { getAgentConfigById, getDefaultAgentConfig } = require('./prompt-builder'
 const { computePriorityScore, getCurrentSlotLabel } = require('../services/call-orchestration');
 const { buildOwnerDashboardData } = require('../services/reporting');
 const logger = require('../services/system-logger');
+const { ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE } = require('../services/icallmate');
 
 let ownerDigestRunning = false;
 let schedulerRunning = false;
@@ -71,19 +72,20 @@ async function markSubmittedCallsWithoutMediaFailed() {
             customers.phone,
             customers.status AS customer_status,
             COALESCE(customers.auto_retry_enabled, 1) AS auto_retry_enabled,
-            COALESCE(customers.attempt_count, 0) AS attempt_count
+            COALESCE(customers.attempt_count, 0) AS attempt_count,
+            EXISTS (
+              SELECT 1
+                FROM calls newer_call
+               WHERE newer_call.customer_id = calls.customer_id
+                 AND DATETIME(newer_call.called_at) > DATETIME(calls.called_at)
+            ) AS has_newer_call
        FROM calls
        LEFT JOIN customers ON customers.id = calls.customer_id
       WHERE calls.call_direction = 'outbound'
         AND calls.outcome IN ('initiated', 'scheduled_initiated')
         AND COALESCE(calls.media_packets, 0) = 0
         AND DATETIME(calls.called_at) <= DATETIME(?)
-        AND NOT EXISTS (
-          SELECT 1
-            FROM calls newer_call
-           WHERE newer_call.customer_id = calls.customer_id
-             AND DATETIME(newer_call.called_at) > DATETIME(calls.called_at)
-        )`,
+      ORDER BY DATETIME(calls.called_at) ASC`,
     [cutoffIso]
   );
 
@@ -109,6 +111,11 @@ async function markSubmittedCallsWithoutMediaFailed() {
     );
 
     if (!failResult.changes) {
+      continue;
+    }
+
+    // Finalize every stale attempt, but let only the newest one alter customer retry state.
+    if (call.has_newer_call) {
       continue;
     }
 
@@ -276,7 +283,7 @@ async function triggerScheduledCalls() {
     if (uniqueByPhone.has(phoneKey)) {
       const existing = uniqueByPhone.get(phoneKey);
       console.log(
-        `[SCHEDULER] Skipping duplicate customer row id=${customer.id} phone=${customer.phone} ` +
+        `[SCHEDULER] Skipping duplicate customer row id=${customer.id} ` +
         `because row id=${existing.id} already queued`
       );
       continue;
@@ -298,7 +305,7 @@ async function triggerScheduledCalls() {
       const agentConfig = customer.default_agent_id ? await getAgentConfigById(customer.default_agent_id) : await getDefaultAgentConfig();
       const blockedReason = await shouldBlockCustomerCall(customer);
       if (blockedReason) {
-        console.log(`[SCHEDULER] Skipping ${customer.name}: ${blockedReason.reason}`);
+        console.log(`[SCHEDULER] Skipping customerId=${customer.id}: ${blockedReason.reason}`);
         if (blockedReason.code === 'CALL_SKIPPED_QUIET_HOURS') {
           const nextRetry = new Date();
           nextRetry.setHours(7, 0, 0, 0);
@@ -371,16 +378,32 @@ async function triggerScheduledCalls() {
       } catch (error) {
         logger.error('CALL_PROVIDER_FAILED', { callId: customer.id, provider: 'icallmate', reason: error.message || 'provider unavailable' });
 
-        global.providerFailureCooldownUntil = Date.now() + 15 * 60 * 1000;
-        logger.error('SCHEDULER_PAUSED_PROVIDER_DOWN', { reason: 'Provider failed, pausing scheduler for 15 minutes' });
+        const mediaEndpointUnavailable = error.code === ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE;
+        const retryDelayMs = mediaEndpointUnavailable
+          ? Math.max(Number(process.env.ICALLMATE_PREFLIGHT_RETRY_MS || 60000) || 60000, 10000)
+          : require('./config').MIN_RETRY_GAP_MINUTES * 60 * 1000;
+        const nextRetry = new Date(Date.now() + retryDelayMs);
 
-        const { MIN_RETRY_GAP_MINUTES } = require('./config');
-        const nextRetry = new Date(Date.now() + MIN_RETRY_GAP_MINUTES * 60 * 1000);
+        if (!mediaEndpointUnavailable) {
+          global.providerFailureCooldownUntil = Date.now() + 15 * 60 * 1000;
+          logger.error('SCHEDULER_PAUSED_PROVIDER_DOWN', { reason: 'Provider failed, pausing scheduler for 15 minutes' });
+        }
+
         await dbRun(
-          `UPDATE customers SET status = ?, next_retry_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1, locked_at = NULL WHERE id = ?`,
-          ['retry_scheduled', nextRetry.toISOString(), customer.id]
+          `UPDATE customers
+              SET status = ?,
+                  next_retry_at = ?,
+                  attempt_count = COALESCE(attempt_count, 0) + ?,
+                  locked_at = NULL
+            WHERE id = ?`,
+          ['retry_scheduled', nextRetry.toISOString(), mediaEndpointUnavailable ? 0 : 1, customer.id]
         );
-        logger.info('CALL_RETRY_SCHEDULED', { callId: customer.id, nextAttemptAt: logger.formatHumanDateTime(nextRetry), attempt: (customer.attempt_count || 0) + 1 });
+        logger.info('CALL_RETRY_SCHEDULED', {
+          callId: customer.id,
+          nextAttemptAt: logger.formatHumanDateTime(nextRetry),
+          attempt: (customer.attempt_count || 0) + (mediaEndpointUnavailable ? 0 : 1),
+          reason: mediaEndpointUnavailable ? 'public_media_endpoint_unavailable' : 'provider_failure'
+        });
         logger.info('CALL_LOCK_RELEASED', { callId: customer.id });
         continue;
       }
@@ -433,8 +456,8 @@ async function triggerScheduledCalls() {
       });
       console.log(
         acceptedOnly
-          ? `[SCHEDULER] Scheduled call submitted for ${customer.name}; waiting for iCallMate media (${call.sid}) providerStatus=${call.status}`
-          : `[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`
+          ? `[SCHEDULER] Scheduled call submitted for customerId=${customer.id}; waiting for iCallMate media (${call.sid}) providerStatus=${call.status}`
+          : `[SCHEDULER] Scheduled call started for customerId=${customer.id} (${call.sid})`
       );
     } catch (error) {
       const retryAt = new Date(Date.now() + (5 * 60 * 1000)).toISOString();
@@ -497,7 +520,7 @@ async function triggerAnnualClientReminderCalls() {
       const hydratedCustomer = await hydratePreCallIntelligence(customer);
       const blockedReason = await shouldBlockCustomerCall(hydratedCustomer);
       if (blockedReason) {
-        console.log(`[CLIENT REMINDER] Skipping ${client.name}: ${blockedReason.reason}`);
+        console.log(`[CLIENT REMINDER] Skipping clientId=${client.id}: ${blockedReason.reason}`);
         if (blockedReason.code === 'CALL_SKIPPED_QUIET_HOURS') {
           const nextRetry = new Date();
           nextRetry.setHours(7, 0, 0, 0);
@@ -530,7 +553,7 @@ async function triggerAnnualClientReminderCalls() {
       );
 
       if (!claimResult.changes) {
-        console.log(`[CLIENT REMINDER] Skipping ${client.name}: customer row is already in use`);
+        console.log(`[CLIENT REMINDER] Skipping clientId=${client.id}: customer row is already in use`);
         continue;
       }
 
@@ -589,9 +612,9 @@ async function triggerAnnualClientReminderCalls() {
         ]
       );
 
-      console.log(`[CLIENT REMINDER] Annual reminder call started for ${client.name} (${call.sid})`);
+      console.log(`[CLIENT REMINDER] Annual reminder call started for clientId=${client.id} (${call.sid})`);
     } catch (error) {
-      console.error(`[CLIENT REMINDER ERROR] ${client.name}: ${error.message}`);
+      console.error(`[CLIENT REMINDER ERROR] clientId=${client.id}: ${error.message}`);
     }
   }
 }
@@ -611,6 +634,7 @@ async function runSchedulerTick() {
 }
 
 module.exports = {
+  markSubmittedCallsWithoutMediaFailed,
   runOwnerDigestTick,
   triggerScheduledCalls,
   triggerAnnualClientReminderCalls,

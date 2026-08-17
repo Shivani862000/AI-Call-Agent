@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { dbRun, dbGet, dbAll } = require('../db');
 const { initiateCall } = require('../services/icallmate');
-const { createMediaToken } = require('../src/auth');
+const { buildIcallMateCallbackUrl } = require('../src/icallmate-webhook');
+const logger = require('../services/system-logger');
 
 // Initiate call to a customer
 router.post('/initiate/:customerId', async (req, res) => {
@@ -24,8 +25,8 @@ router.post('/initiate/:customerId', async (req, res) => {
       {
         baseUrl,
         callType: customer.call_type || 'REVIEW_CALL',
-        wsurl: `${baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:')}/icallmate/media?token=${createMediaToken()}`,
-        callbackapi: `${baseUrl}/api/icallmate/callback`
+        wsurl: `${baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:')}/icallmate/media`,
+        callbackapi: buildIcallMateCallbackUrl(baseUrl)
       }
     );
 
@@ -96,11 +97,11 @@ router.post('/status', async (req, res) => {
             // Schedule Retry
             const nextRetry = new Date(Date.now() + 3 * 60 * 60 * 1000);
             await dbRun('UPDATE customers SET status = ?, next_retry_at = ?, retry_count = COALESCE(retry_count, 0) + 1 WHERE id = ?', ['retry_scheduled', nextRetry.toISOString(), customer.id]);
-            console.log(`Call retry scheduled for ${customer.phone} (Attempt ${attemptCount + 1})`);
+            console.log(`Call retry scheduled for customerId=${customer.id} (Attempt ${attemptCount + 1})`);
           } else {
             // Max Retries Reached
             await dbRun('UPDATE customers SET status = ?, failed_reason = ? WHERE id = ?', ['failed', 'Max retries reached', customer.id]);
-            console.log(`Max retries reached for ${customer.phone}`);
+            console.log(`Max retries reached for customerId=${customer.id}`);
           }
         }
       }

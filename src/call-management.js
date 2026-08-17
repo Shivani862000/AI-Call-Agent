@@ -27,7 +27,7 @@ const {
   getIncomingCallKey,
   normalizeIcallTimestamp
 } = require('./helpers');
-const { createMediaToken } = require('./auth');
+const { buildIcallMateCallbackUrl } = require('./icallmate-webhook');
 
 // ── Call Initiation ────────────────────────────────────────────────────────────
 
@@ -38,8 +38,8 @@ async function placeRealtimeCall({ customerPhone, customerName, customerId, clie
     clientName,
     agentId,
     callType: normalizeOutboundCallType(callType),
-    wsurl: toWssUrl(PUBLIC_BASE_URL, `/icallmate/media?token=${createMediaToken()}`),
-    callbackapi: `${PUBLIC_BASE_URL}/api/icallmate/callback`
+    wsurl: toWssUrl(PUBLIC_BASE_URL, '/icallmate/media'),
+    callbackapi: buildIcallMateCallbackUrl(PUBLIC_BASE_URL)
   });
 }
 

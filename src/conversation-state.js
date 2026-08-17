@@ -96,13 +96,21 @@ function isNoReply(text) {
     || /नहीं|नही/.test(text);
 }
 
+function isPositiveExperienceReply(text) {
+  const normalized = normalizeHindiEnglishText(text);
+  return /(ach+h?a|ac+h?a|badhiya|badiya|good|great|fine|excellent|smooth|sahi|satisfied|positive|bahut achhi)/i.test(normalized)
+    || /अच्छा|अच्छी|बढ़िया|सही|संतुष्ट/.test(text);
+}
+
+function isNegativeExperienceReply(text) {
+  const normalized = normalizeHindiEnglishText(text);
+  return /(kharab|bura|bekar|\bbad\b|\bpoor\b|not good|ach+h?a nahi|ac+h?a nahi|problem|dikkat|pareshani|complaint|unsatisfied|rude|dirty)/i.test(normalized)
+    || /खराब|बुरा|बेकार|समस्या|दिक्कत|परेशानी|शिकायत/.test(text);
+}
+
 // ── Review Call turn instruction builder ───────────────────────────────────────
 
 function buildReviewCallTurnInstruction(customerReply, state) {
-  if (state.step === 'intro') {
-    state.step = 'problem_check';
-  }
-
   const markCompletedAfterReply = () => {
     state.step = 'completed';
     state.conversationState = 'COMPLETED';
@@ -111,33 +119,28 @@ function buildReviewCallTurnInstruction(customerReply, state) {
     state.endCallAfterNextReply = true;
   };
 
-  if (state.step === 'problem_check') {
+  if (state.step === 'intro') {
     if (isNegativeOrBusyReply(customerReply)) {
       markCompletedAfterReply();
       return `Donor wants to stop or is busy. Say exactly: "Koi baat nahi sir. ${FINAL_CLOSING_LINE}" Then end the call.`;
     }
 
-    if (isNoReply(customerReply)) {
-      state.step = 'feedback';
-      return 'Donor had no problem. Say exactly: "OKK, Thankyou Sir! Sir, aapko hamare yahan blood donate karna kaisa laga?"';
-    }
-
-    if (isAffirmativeReply(customerReply)) {
+    if (isNegativeExperienceReply(customerReply)) {
       state.step = 'issue_detail';
-      return 'Donor had a problem. Say exactly: "Kya problem hui Sir?"';
+      return 'The donor reported a negative experience. Say exactly: "Maaf kijiye Sir. Kripya batayein aapko kya pareshani hui thi?"';
     }
 
-    return 'Clarify briefly. Say exactly: "Sir, blood donate karne ke baad aapko koi dikkat ya problem hui thi?"';
+    if (isPositiveExperienceReply(customerReply)) {
+      markCompletedAfterReply();
+      return `Acknowledge the positive experience briefly. Then say exactly: "Hamne aapke registered number par ek video bheja hai, usko Like karein aur channel ko Subscribe karein. Hamare Facebook aur Google page par review zarur karein. ${FINAL_CLOSING_LINE}" Then end the call.`;
+    }
+
+    return 'The experience answer was unclear. Say exactly: "Sir, blood donate karne ka aapka experience achha tha ya koi pareshani hui thi?"';
   }
 
   if (state.step === 'issue_detail') {
-    state.step = 'feedback';
-    return 'Capture the issue from the donor response. Say exactly: "Sir, hum apne adhikari ko batayenge. Next time poora dhyan rakhenge. Sorry Sir. Sir, aapko hamare yahan blood donate karna kaisa laga?"';
-  }
-
-  if (state.step === 'feedback') {
     markCompletedAfterReply();
-    return `Acknowledge the donor feedback warmly in one short sentence. Then say exactly: "Sir, humne aapke paas ek video send ki hai. Usko please Like, Comment karein aur Channel ko Subscribe karein. Hamaara Facebook aur Google par Apna Blood Bank ke naam se page bhi hai. Usse bhi Like, Share, Comment aur Subscribe karein, taaki aage ki activities ke baare mein aapko pata lagta rahe. ${FINAL_CLOSING_LINE}" Then end the call.`;
+    return `Capture the issue. Then say exactly: "Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge. Hamne aapke registered number par ek video bheja hai, usko Like karein aur channel ko Subscribe karein. Hamare Facebook aur Google page par review zarur karein. ${FINAL_CLOSING_LINE}" Then end the call.`;
   }
 
   markCompletedAfterReply();
@@ -173,7 +176,7 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
 
     if (isNoReply(customerReply)) {
       state.step = 'plan_to_donate';
-      return 'Donor has not donated again. Say exactly: "Hamare yahan garbhvati mahilaon aur thalassemia se grast bachchon ko free blood diya jata hai. Yadi sambhav ho to kisi bhi din nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain. Kya aap is baar donate karne ka plan kar sakte hain Sir?"';
+      return 'Donor has not donated again. Say exactly: "Hamare yahan garbhvati mahilaon aur thalassemia se grast bachchon ko free blood diya jata hai. Kya aap bhavishya mein blood donate karne mein ruchi rakhte hain?"';
     }
 
     return 'Clarify briefly. Say exactly: "Kya aapne 3 mahine ke baad dobara blood donate kiya hai?"';
@@ -191,7 +194,13 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
 
   if (state.step === 'plan_to_donate') {
     markCompletedAfterReply();
-    return `Acknowledge the donor warmly in one short sentence. Then say exactly: "${FINAL_CLOSING_LINE}" Then end the call.`;
+    if (isAffirmativeReply(customerReply)) {
+      return `Say exactly: "Bahut achhi baat hai Sir. Aapka yogdaan kisi ki jaan bacha sakta hai. Yadi sambhav ho to nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain. ${FINAL_CLOSING_LINE}" Then end the call.`;
+    }
+    if (isNoReply(customerReply) || isNegativeOrBusyReply(customerReply)) {
+      return `Say exactly: "Theek hai Sir. Yadi sambhav ho to nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain. ${FINAL_CLOSING_LINE}" Then end the call.`;
+    }
+    return `Acknowledge the donor's response briefly. Then say exactly: "${FINAL_CLOSING_LINE}" Then end the call.`;
   }
 
   markCompletedAfterReply();
@@ -233,6 +242,8 @@ module.exports = {
   isAffirmativeReply,
   isNegativeOrBusyReply,
   isNoReply,
+  isPositiveExperienceReply,
+  isNegativeExperienceReply,
   buildReviewCallTurnInstruction,
   buildThreeMonthFollowupTurnInstruction,
   buildOutboundDemoTurnInstruction

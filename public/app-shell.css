@@ -42,7 +42,8 @@ body {
 body.role-agent [href="/feedback.html"],
 body.role-agent [href="/reports.html"],
 body.role-agent [data-overview-filter="feedback"],
-body.role-agent .analysis-cta-button {
+body.role-agent .analysis-cta-button,
+body.role-agent .admin-only-control {
   display: none !important;
 }
 

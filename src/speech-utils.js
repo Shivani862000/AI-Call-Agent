@@ -134,11 +134,74 @@ function createDeepgramListenUrl() {
   url.searchParams.set('interim_results', 'true');
   url.searchParams.set('endpointing', String(DEEPGRAM_ENDPOINTING_MS));
   url.searchParams.set('utterance_end_ms', String(Math.max(DEEPGRAM_ENDPOINTING_MS + 820, 1000)));
+  url.searchParams.set('vad_events', 'true');
   url.searchParams.set('smart_format', 'true');
   url.searchParams.set('encoding', 'linear16');
   url.searchParams.set('sample_rate', '8000');
   url.searchParams.set('channels', '1');
   return url.toString();
+}
+
+function createDeepgramTranscriptBuffer({ onTranscript, flushDelayMs = 180 }) {
+  let finalParts = [];
+  let flushTimer = null;
+  let closed = false;
+
+  function clearFlushTimer() {
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+  }
+
+  function flush() {
+    clearFlushTimer();
+    if (closed || !finalParts.length) {
+      return '';
+    }
+
+    const merged = finalParts.join(' ').replace(/\s+/g, ' ').trim();
+    finalParts = [];
+    if (merged) {
+      onTranscript(merged);
+    }
+    return merged;
+  }
+
+  function scheduleFlush() {
+    clearFlushTimer();
+    flushTimer = setTimeout(flush, Math.max(Number(flushDelayMs) || 180, 50));
+  }
+
+  function handleResult(event) {
+    if (closed) {
+      return { hasSpeech: false, isFinal: false, isSpeechFinal: false };
+    }
+
+    const text = String(event?.channel?.alternatives?.[0]?.transcript || '').trim();
+    const isFinal = Boolean(event?.is_final);
+    const isSpeechFinal = Boolean(event?.speech_final);
+
+    if (text && isFinal) {
+      finalParts.push(text);
+    }
+
+    if (isSpeechFinal) {
+      flush();
+    } else if (text && isFinal) {
+      scheduleFlush();
+    }
+
+    return { hasSpeech: Boolean(text), isFinal, isSpeechFinal };
+  }
+
+  function close() {
+    clearFlushTimer();
+    finalParts = [];
+    closed = true;
+  }
+
+  return { handleResult, flush, close };
 }
 
 function createDeepgramSpeakUrl() {
@@ -213,6 +276,7 @@ module.exports = {
   parsePcmRate,
   createDeepgramListenUrl,
   createDeepgramSpeakUrl,
+  createDeepgramTranscriptBuffer,
   shouldFlushSpeechSegment,
   isCustomerHangupIntent,
   isAffirmativeAvailabilityResponse

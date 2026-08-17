@@ -1,5 +1,6 @@
 require('dotenv').config();
 const sqlite3 = require('sqlite3').verbose();
+const fs = require('fs');
 const path = require('path');
 
 let db;
@@ -25,6 +26,13 @@ function runMigrations() {
     db.run(sql, (err) => {
       if (err) reject(err);
       else resolve();
+    });
+  });
+
+  const runWithParams = (sql, params = []) => new Promise((resolve, reject) => {
+    db.run(sql, params, function onRun(err) {
+      if (err) reject(err);
+      else resolve({ lastID: this.lastID, changes: this.changes });
     });
   });
 
@@ -207,52 +215,54 @@ function runMigrations() {
       )
     `);
 
-    const adminUserCountRow = await new Promise((resolve, reject) => {
-      db.get('SELECT COUNT(*) as count FROM users', [], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
+    const isProduction = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+    const configuredAdminUsername = String(process.env.ADMIN_USERNAME || '').trim();
+    const configuredAdminPasswordHash = String(process.env.ADMIN_PASSWORD_HASH || '').trim();
+    const adminUsername = configuredAdminUsername || (isProduction ? '' : 'admin');
+    const developmentAdminPasswordHash = '$2b$10$Gl3xR8zUgWQfsseWE63q3e4JBUoU4pZCPpvjSn9ENt0ZHA7rYR4Zm';
+    const adminPasswordHash = configuredAdminPasswordHash || (isProduction ? '' : developmentAdminPasswordHash);
 
-    if (!adminUserCountRow || adminUserCountRow.count === 0) {
-      const defaultAdminUsername = process.env.ADMIN_USERNAME || 'admin';
-      const defaultAdminPasswordHash = process.env.ADMIN_PASSWORD_HASH || '$2b$10$Gl3xR8zUgWQfsseWE63q3e4JBUoU4pZCPpvjSn9ENt0ZHA7rYR4Zm';
-      
-      await new Promise((resolve, reject) => {
-        db.run(
-          `INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)`,
-          [defaultAdminUsername, defaultAdminPasswordHash, 'ADMIN'],
-          (err) => {
-            if (err) reject(err);
-            else resolve();
-          }
-        );
-      });
-      console.log('✓ Seeded default admin user');
+    if (!adminUsername || !adminPasswordHash) {
+      throw new Error('ADMIN_USERNAME and ADMIN_PASSWORD_HASH are required to bootstrap production authentication');
     }
 
-    const agentUserRow = await new Promise((resolve, reject) => {
-      db.get('SELECT COUNT(*) as count FROM users WHERE username = ?', ['agent1'], (err, row) => {
-        if (err) reject(err);
-        else resolve(row);
-      });
-    });
-
-    if (!agentUserRow || agentUserRow.count === 0) {
-      const bcrypt = require('bcrypt');
-      const hash = bcrypt.hashSync('1234', 10);
-      await new Promise((resolve, reject) => {
-        db.run(
-          `INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)`,
-          ['agent1', hash, 'AGENT'],
-          (err) => {
-            if (err) reject(err);
-            else resolve();
-          }
+    await run('BEGIN IMMEDIATE');
+    try {
+      if (configuredAdminPasswordHash) {
+        await runWithParams(
+          `INSERT INTO users (username, password_hash, role)
+           VALUES (?, ?, 'ADMIN')
+           ON CONFLICT(username) DO UPDATE SET password_hash = excluded.password_hash, role = 'ADMIN'`,
+          [adminUsername, adminPasswordHash]
         );
-      });
-      console.log('✓ Seeded agent1 test user');
+      } else {
+        await runWithParams(
+          `INSERT INTO users (username, password_hash, role)
+           VALUES (?, ?, 'ADMIN')
+           ON CONFLICT(username) DO UPDATE SET role = 'ADMIN'`,
+          [adminUsername, adminPasswordHash]
+        );
+      }
+
+      await runWithParams(
+        `UPDATE users
+            SET role = 'AGENT'
+          WHERE UPPER(COALESCE(role, '')) = 'ADMIN'
+            AND username <> ?`,
+        [adminUsername]
+      );
+      await run(
+        `UPDATE users
+            SET role = 'AGENT'
+          WHERE UPPER(COALESCE(role, '')) NOT IN ('ADMIN', 'AGENT')`
+      );
+      await run('COMMIT');
+    } catch (error) {
+      await run('ROLLBACK').catch(() => {});
+      throw error;
     }
+
+    console.log('✓ Ensured one configured admin; existing agent accounts preserved');
 
     await addColumnIfMissing('customers', 'customer_value', "VARCHAR(20) DEFAULT 'standard'");
     await addColumnIfMissing('customers', 'urgency_level', "VARCHAR(20) DEFAULT 'normal'");
@@ -382,6 +392,31 @@ function runMigrations() {
     await addColumnIfMissing('calls', 'agent_id', 'INTEGER');
     await addColumnIfMissing('feedback', 'source', "VARCHAR(20) DEFAULT 'manual'");
 
+    await run(`
+      UPDATE calls
+         SET status = outcome
+       WHERE COALESCE(status, 'pending') = 'pending'
+         AND COALESCE(outcome, '') != ''
+    `);
+    await run(`
+      CREATE TRIGGER IF NOT EXISTS calls_sync_status_after_insert
+      AFTER INSERT ON calls
+      WHEN COALESCE(NEW.status, 'pending') = 'pending'
+       AND COALESCE(NEW.outcome, '') != ''
+      BEGIN
+        UPDATE calls SET status = NEW.outcome WHERE id = NEW.id;
+      END
+    `);
+    await run(`
+      CREATE TRIGGER IF NOT EXISTS calls_sync_status_after_outcome_update
+      AFTER UPDATE OF outcome ON calls
+      WHEN COALESCE(NEW.outcome, '') != COALESCE(OLD.outcome, '')
+       AND COALESCE(NEW.outcome, '') != ''
+      BEGIN
+        UPDATE calls SET status = NEW.outcome WHERE id = NEW.id;
+      END
+    `);
+
     const defaultAgent = await new Promise((resolve, reject) => {
       db.get('SELECT id FROM agents WHERE slug = ?', ['default-feedback-agent'], (err, row) => {
         if (err) reject(err);
@@ -458,10 +493,75 @@ function dbAll(sql, params = []) {
   });
 }
 
+function getDatabasePath() {
+  return path.resolve(process.env.DATABASE_URL || './feedback.db');
+}
+
+function pruneDatabaseBackups(backupDir, retentionCount) {
+  const backups = fs.readdirSync(backupDir)
+    .filter((name) => /^feedback-\d{8}T\d{6}\.db$/.test(name))
+    .sort()
+    .reverse();
+  backups.slice(retentionCount).forEach((name) => fs.rmSync(path.join(backupDir, name)));
+}
+
+function backupDatabase() {
+  if (!db) {
+    return Promise.reject(new Error('Database is not initialized'));
+  }
+
+  const dbPath = getDatabasePath();
+  const backupDir = path.resolve(process.env.DATABASE_BACKUP_DIR || path.join(path.dirname(dbPath), 'backups'));
+  const retentionCount = Math.max(Number(process.env.DATABASE_BACKUP_RETENTION || 7) || 7, 1);
+  const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, '');
+  const destination = path.join(backupDir, `feedback-${timestamp}.db`);
+  fs.mkdirSync(backupDir, { recursive: true });
+
+  return new Promise((resolve, reject) => {
+    const backup = db.backup(destination);
+    backup.step(-1, (stepError) => {
+      backup.finish((finishError) => {
+        const error = stepError || finishError;
+        if (error) {
+          reject(error);
+          return;
+        }
+        try {
+          pruneDatabaseBackups(backupDir, retentionCount);
+          resolve(destination);
+        } catch (pruneError) {
+          reject(pruneError);
+        }
+      });
+    });
+  });
+}
+
+function startDatabaseBackupSchedule() {
+  const defaultEnabled = process.env.NODE_ENV === 'production' ? 'true' : 'false';
+  const enabled = /^(1|true|yes|on)$/i.test(String(process.env.DATABASE_BACKUP_ENABLED || defaultEnabled));
+  if (!enabled) return () => {};
+
+  const intervalMs = Math.max(Number(process.env.DATABASE_BACKUP_INTERVAL_MS || 24 * 60 * 60 * 1000) || 24 * 60 * 60 * 1000, 60 * 1000);
+  const runBackup = () => backupDatabase()
+    .then((destination) => console.log(`[DATABASE BACKUP] Created ${destination}`))
+    .catch((error) => console.error('[DATABASE BACKUP ERROR]', error.message));
+  const initialTimer = setTimeout(runBackup, 5000);
+  const interval = setInterval(runBackup, intervalMs);
+  initialTimer.unref?.();
+  interval.unref?.();
+  return () => {
+    clearTimeout(initialTimer);
+    clearInterval(interval);
+  };
+}
+
 module.exports = {
   initializeDatabase,
   getDb,
   dbRun,
   dbGet,
-  dbAll
+  dbAll,
+  backupDatabase,
+  startDatabaseBackupSchedule
 };

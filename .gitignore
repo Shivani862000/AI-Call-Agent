@@ -10,4 +10,8 @@ cookies.txt
 cookiejar
 server.log
 logs/
+recordings/
+backups/
+*.wav
+*.log
 cleanup-backup-*

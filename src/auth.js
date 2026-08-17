@@ -1,6 +1,6 @@
 /**
  * src/auth.js
- * Cookie-based authentication, session management, and admin middleware.
+ * Cookie-based authentication, session management, and role middleware.
  */
 
 'use strict';
@@ -20,16 +20,63 @@ const PROTECTED_HTML_PATHS = new Set([
   '/reports.html'
 ]);
 
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
-const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || '$2b$10$Gl3xR8zUgWQfsseWE63q3e4JBUoU4pZCPpvjSn9ENt0ZHA7rYR4Zm';
+const VALID_ROLES = new Set(['ADMIN', 'AGENT']);
+const ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || 'admin').trim();
 const AUTH_COOKIE_NAME = 'feedback_admin_session';
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const AUTH_SIGNING_SECRET = process.env.AUTH_SIGNING_SECRET || process.env.SESSION_SECRET || process.env.ICALLMATE_UKEY || 'feedback-admin-auth-secret';
+const AUTH_CLOCK_SKEW_MS = 60 * 1000;
+const CONFIGURED_AUTH_SIGNING_SECRET = String(process.env.AUTH_SIGNING_SECRET || '').trim();
+const AUTH_SIGNING_SECRET = CONFIGURED_AUTH_SIGNING_SECRET
+  ? Buffer.from(CONFIGURED_AUTH_SIGNING_SECRET, 'utf8')
+  : crypto.randomBytes(32);
 
-if (process.env.NODE_ENV === 'production') {
-  if (!AUTH_SIGNING_SECRET || AUTH_SIGNING_SECRET.length < 16) {
-    console.error('FATAL ERROR: AUTH_SIGNING_SECRET is missing or too short for production environment. Must be at least 16 characters.');
-    process.exit(1);
+function getAuthConfigurationIssues(env = process.env) {
+  const isProduction = String(env.NODE_ENV || '').toLowerCase() === 'production';
+  const username = String(env.ADMIN_USERNAME || '').trim();
+  const passwordHash = String(env.ADMIN_PASSWORD_HASH || '').trim();
+  const signingSecret = String(env.AUTH_SIGNING_SECRET || '').trim();
+  const issues = [];
+
+  if (isProduction && !username) {
+    issues.push('ADMIN_USERNAME is required in production');
+  }
+
+  if (isProduction && !/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(passwordHash)) {
+    issues.push('ADMIN_PASSWORD_HASH must be a valid bcrypt hash in production');
+  }
+
+  if (isProduction && !signingSecret) {
+    issues.push('AUTH_SIGNING_SECRET is required in production');
+  }
+
+  if (signingSecret && Buffer.byteLength(signingSecret, 'utf8') < 32) {
+    issues.push('AUTH_SIGNING_SECRET must contain at least 32 bytes');
+  }
+
+  const reusedSecrets = [
+    env.SESSION_SECRET,
+    env.ICALLMATE_UKEY,
+    env.GEMINI_API_KEY,
+    env.GOOGLE_API_KEY,
+    env.DEEPGRAM_API_KEY
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  if (signingSecret && reusedSecrets.includes(signingSecret)) {
+    issues.push('AUTH_SIGNING_SECRET must not reuse a provider or legacy session secret');
+  }
+
+  return issues;
+}
+
+function validateAuthConfig() {
+  const issues = getAuthConfigurationIssues();
+  if (issues.length > 0) {
+    throw new Error(`Invalid authentication configuration: ${issues.join('; ')}`);
+  }
+
+  if (!CONFIGURED_AUTH_SIGNING_SECRET) {
+    console.warn('[AUTH] AUTH_SIGNING_SECRET is not set; using an ephemeral development secret.');
   }
 }
 
@@ -50,25 +97,44 @@ function parseCookies(req) {
     const key = item.slice(0, separatorIndex).trim();
     const value = item.slice(separatorIndex + 1).trim();
     if (key) {
-      accumulator[key] = decodeURIComponent(value);
+      try {
+        accumulator[key] = decodeURIComponent(value);
+      } catch (error) {
+        accumulator[key] = value;
+      }
     }
     return accumulator;
   }, {});
 }
 
+function normalizeRole(role) {
+  const normalized = String(role || '').trim().toUpperCase();
+  return VALID_ROLES.has(normalized) ? normalized : null;
+}
+
 // ── Token signing & creation ───────────────────────────────────────────────────
 
 function signAuthValue(value) {
-  return crypto.createHmac('sha256', AUTH_SIGNING_SECRET).update(value).digest('base64url');
+  return crypto.createHmac('sha256', AUTH_SIGNING_SECRET).update(value).digest();
 }
 
-function createAuthToken(username, role = 'ADMIN') {
+function createAuthToken(username, role) {
+  const normalizedUsername = String(username || '').trim();
+  const normalizedRole = normalizeRole(role);
+  if (!normalizedUsername || normalizedUsername.length > 100 || !normalizedRole) {
+    throw new Error('Cannot create a session for an invalid user or role');
+  }
+
+  const issuedAt = Date.now();
   const payload = Buffer.from(JSON.stringify({
-    username,
-    role,
-    exp: Date.now() + AUTH_SESSION_TTL_MS
+    version: 1,
+    username: normalizedUsername,
+    role: normalizedRole,
+    issuedAt,
+    exp: issuedAt + AUTH_SESSION_TTL_MS,
+    nonce: crypto.randomBytes(16).toString('base64url')
   })).toString('base64url');
-  const signature = signAuthValue(payload);
+  const signature = signAuthValue(payload).toString('base64url');
   return `${payload}.${signature}`;
 }
 
@@ -81,30 +147,50 @@ function readAuthSession(req) {
     return null;
   }
 
-  const [payload, signature] = token.split('.');
-  if (!payload || !signature) {
+  const tokenParts = token.split('.');
+  if (tokenParts.length !== 2) {
     return null;
   }
 
+  const [payload, signature] = tokenParts;
+  if (!/^[A-Za-z0-9_-]+$/.test(payload) || !/^[A-Za-z0-9_-]+$/.test(signature)) {
+    return null;
+  }
+
+  const suppliedSignature = Buffer.from(signature, 'base64url');
   const expectedSignature = signAuthValue(payload);
-  const signatureBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expectedSignature);
   if (
-    signatureBuffer.length !== expectedBuffer.length
-    || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+    suppliedSignature.length !== expectedSignature.length
+    || !crypto.timingSafeEqual(suppliedSignature, expectedSignature)
   ) {
     return null;
   }
 
   try {
     const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (!session?.username || !session?.exp || session.exp < Date.now()) {
+    const now = Date.now();
+    const role = normalizeRole(session?.role);
+    const username = String(session?.username || '').trim();
+    const issuedAt = Number(session?.issuedAt);
+    const expiresAt = Number(session?.exp);
+    const validLifetime = expiresAt > issuedAt && expiresAt - issuedAt <= AUTH_SESSION_TTL_MS;
+
+    if (
+      session?.version !== 1
+      || !username
+      || username.length > 100
+      || !role
+      || !Number.isFinite(issuedAt)
+      || !Number.isFinite(expiresAt)
+      || issuedAt > now + AUTH_CLOCK_SKEW_MS
+      || expiresAt <= now
+      || !validLifetime
+      || !/^[A-Za-z0-9_-]{20,}$/.test(String(session?.nonce || ''))
+    ) {
       return null;
     }
-    if (!session.role) {
-      session.role = 'ADMIN';
-    }
-    return session;
+
+    return { username, role, issuedAt, exp: expiresAt };
   } catch (error) {
     return null;
   }
@@ -167,14 +253,40 @@ function clearAuthCookie(req, res) {
 
 const validMediaTokens = new Set();
 
-function createMediaToken() {
+function getSharedMediaToken() {
+  return String(process.env.ICALLMATE_MEDIA_SHARED_SECRET || '').trim();
+}
+
+function createMediaToken(options = {}) {
+  if (options.reusable) {
+    const sharedToken = getSharedMediaToken();
+    if (Buffer.byteLength(sharedToken, 'utf8') < 32) {
+      throw new Error('ICALLMATE_MEDIA_SHARED_SECRET must contain at least 32 bytes');
+    }
+    return sharedToken;
+  }
+
   const token = crypto.randomBytes(16).toString('hex');
   validMediaTokens.add(token);
-  setTimeout(() => validMediaTokens.delete(token), 3600000);
+  const expiryTimer = setTimeout(() => validMediaTokens.delete(token), 3600000);
+  expiryTimer.unref?.();
   return token;
 }
 
 function validateMediaToken(token) {
+  const suppliedToken = String(token || '');
+  const sharedToken = getSharedMediaToken();
+  if (sharedToken && suppliedToken) {
+    const suppliedBuffer = Buffer.from(suppliedToken, 'utf8');
+    const sharedBuffer = Buffer.from(sharedToken, 'utf8');
+    if (
+      suppliedBuffer.length === sharedBuffer.length
+      && crypto.timingSafeEqual(suppliedBuffer, sharedBuffer)
+    ) {
+      return true;
+    }
+  }
+
   if (validMediaTokens.has(token)) {
     validMediaTokens.delete(token);
     return true;
@@ -189,56 +301,91 @@ function requireAdminAuth(req, res, next) {
     return next();
   }
 
-  if (req.path.startsWith('/api/')) {
+  if (req.path.startsWith('/api/') || req.path === '/call/start') {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
   return res.redirect('/login.html');
 }
 
+function requireRole(...allowedRoles) {
+  const normalizedRoles = new Set(allowedRoles.map(normalizeRole).filter(Boolean));
+  return (req, res, next) => {
+    const role = normalizeRole(req.adminSession?.role);
+    if (role && normalizedRoles.has(role)) {
+      return next();
+    }
+
+    if (req.path.startsWith('/api/') || req.path === '/call/start') {
+      return res.status(403).json({ error: 'Forbidden: Insufficient role' });
+    }
+
+    return res.status(403).send('Forbidden: You do not have access to this page.');
+  };
+}
+
 async function verifyCredentials(username, password) {
+  const normalizedUsername = String(username || '').trim();
+  if (!normalizedUsername || !password) {
+    return { success: false };
+  }
+
   const { dbGet } = require('../db');
   try {
-    const user = await dbGet('SELECT * FROM users WHERE username = ?', [username]);
-    if (user && bcrypt.compareSync(password, user.password_hash)) {
-      return { success: true, role: user.role };
-    }
-    // Fallback to env for safety
-    if (username === ADMIN_USERNAME && bcrypt.compareSync(password, ADMIN_PASSWORD_HASH)) {
-      return { success: true, role: 'ADMIN' };
+    const user = await dbGet(
+      'SELECT username, password_hash, role FROM users WHERE username = ?',
+      [normalizedUsername]
+    );
+    const role = normalizeRole(user?.role);
+    if (user?.password_hash && role && await bcrypt.compare(String(password), user.password_hash)) {
+      return { success: true, username: user.username, role };
     }
     return { success: false };
-  } catch (err) {
-    if (username === ADMIN_USERNAME && bcrypt.compareSync(password, ADMIN_PASSWORD_HASH)) {
-      return { success: true, role: 'ADMIN' };
-    }
+  } catch (error) {
     return { success: false };
   }
 }
 
 async function basicAuth(req, res, next) {
-  const b64auth = (req.headers.authorization || '').split(' ')[1] || '';
-  const [login, password] = Buffer.from(b64auth, 'base64').toString().split(':');
+  const authorization = String(req.headers.authorization || '');
+  const match = authorization.match(/^Basic\s+(.+)$/i);
+  let login = '';
+  let password = '';
+
+  if (match) {
+    const decoded = Buffer.from(match[1], 'base64').toString('utf8');
+    const separatorIndex = decoded.indexOf(':');
+    if (separatorIndex !== -1) {
+      login = decoded.slice(0, separatorIndex);
+      password = decoded.slice(separatorIndex + 1);
+    }
+  }
 
   const authResult = await verifyCredentials(login, password);
   if (authResult.success) {
-    req.adminSession = { username: login, role: authResult.role };
+    req.adminSession = { username: authResult.username, role: authResult.role };
     return next();
   }
 
   res.setHeader('WWW-Authenticate', 'Basic realm="Restricted Area"');
-  res.status(401).send('Authentication required');
+  return res.status(401).send('Authentication required');
 }
 
 module.exports = {
   PROTECTED_HTML_PATHS,
+  VALID_ROLES,
   ADMIN_USERNAME,
+  AUTH_COOKIE_NAME,
+  AUTH_SESSION_TTL_MS,
+  getAuthConfigurationIssues,
+  validateAuthConfig,
   parseCookies,
   createAuthToken,
   readAuthSession,
   setAuthCookie,
   clearAuthCookie,
   requireAdminAuth,
+  requireRole,
   basicAuth,
   verifyCredentials,
   createMediaToken,

@@ -43,12 +43,42 @@ test('three-month follow-up prompt contains one unambiguous closing line', () =>
 
 test('review flow completes with the shared closing line', () => {
   const state = newConversationState();
-  buildReviewCallTurnInstruction('nahi', state);
-  const closingInstruction = buildReviewCallTurnInstruction('experience achha tha', state);
+  const closingInstruction = buildReviewCallTurnInstruction('experience bahut achha tha', state);
 
   assert.equal(state.conversationState, 'COMPLETED');
   assert.equal(state.endCallAfterNextReply, true);
   assert.equal(countClosingLines(closingInstruction), 1);
+});
+
+test('review flow asks for issue details before closing a negative experience', () => {
+  const state = newConversationState();
+  const issueInstruction = buildReviewCallTurnInstruction('experience kharab tha, dikkat hui', state);
+
+  assert.equal(state.step, 'issue_detail');
+  assert.match(issueInstruction, /pareshani hui/i);
+  assert.equal(state.endCallAfterNextReply, false);
+
+  const closingInstruction = buildReviewCallTurnInstruction('staff ka behaviour rude tha', state);
+  assert.equal(state.conversationState, 'COMPLETED');
+  assert.equal(state.endCallAfterNextReply, true);
+  assert.equal(countClosingLines(closingInstruction), 1);
+});
+
+test('review flow does not interpret a positive yes response as a problem', () => {
+  const state = newConversationState();
+  const instruction = buildReviewCallTurnInstruction('haan ji, bahut achha tha', state);
+
+  assert.equal(state.conversationState, 'COMPLETED');
+  assert.doesNotMatch(instruction, /kya problem|kya pareshani hui/i);
+});
+
+test('review flow recognizes badhiya as positive feedback', () => {
+  const state = newConversationState();
+  const instruction = buildReviewCallTurnInstruction('sab badhiya tha', state);
+
+  assert.equal(state.conversationState, 'COMPLETED');
+  assert.doesNotMatch(instruction, /pareshani hui/i);
+  assert.equal(countClosingLines(instruction), 1);
 });
 
 test('three-month follow-up flow completes with the shared closing line', () => {
@@ -59,6 +89,30 @@ test('three-month follow-up flow completes with the shared closing line', () => 
 
   assert.equal(state.conversationState, 'COMPLETED');
   assert.equal(state.endCallAfterNextReply, true);
+  assert.equal(countClosingLines(closingInstruction), 1);
+});
+
+test('three-month follow-up accepts the recorded identity confirmation', () => {
+  const state = newConversationState();
+  const instruction = buildThreeMonthFollowupTurnInstruction('haan, kar rahi hoon', state);
+
+  assert.equal(state.step, 'donated_again');
+  assert.match(instruction, /dobara blood donate kiya hai/i);
+  assert.equal(state.endCallAfterNextReply, false);
+});
+
+test('three-month follow-up no-donation flow waits for interest answer', () => {
+  const state = newConversationState();
+  buildThreeMonthFollowupTurnInstruction('haan ji', state);
+  const interestQuestion = buildThreeMonthFollowupTurnInstruction('nahi', state);
+
+  assert.equal(state.step, 'plan_to_donate');
+  assert.match(interestQuestion, /ruchi rakhte hain/i);
+  assert.equal(state.endCallAfterNextReply, false);
+
+  const closingInstruction = buildThreeMonthFollowupTurnInstruction('nahi, abhi interested nahi', state);
+  assert.equal(state.conversationState, 'COMPLETED');
+  assert.match(closingInstruction, /Theek hai Sir/i);
   assert.equal(countClosingLines(closingInstruction), 1);
 });
 

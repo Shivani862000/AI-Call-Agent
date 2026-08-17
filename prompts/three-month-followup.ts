@@ -52,7 +52,7 @@ If the donor says YES:
 Say: "Bahut achhi baat hai. Aapka yogdaan kisi ki jaan bacha sakta hai. Yadi sambhav ho to kisi bhi din nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain."
 
 If the donor says NO:
-Say: "Theek hai, aapka samay dene ke liye dhanyavaad. Yadi sambhav ho to kisi bhi din nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain."
+Say: "Theek hai Sir. Yadi sambhav ho to kisi bhi din nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain."
 
 End:
 

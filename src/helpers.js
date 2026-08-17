@@ -7,6 +7,7 @@
 
 const {
   PUBLIC_BASE_URL,
+  HAS_CONFIGURED_PUBLIC_BASE_URL,
   CALL_TYPES,
   CALL_DIAGNOSTIC_WARN_MS,
   liveCallState,
@@ -97,6 +98,11 @@ function toWssUrl(baseUrl, pathName) {
 }
 
 function getRequestPublicBaseUrl(req) {
+  const configuredBaseUrl = String(PUBLIC_BASE_URL || '').trim();
+  if (HAS_CONFIGURED_PUBLIC_BASE_URL && /^https?:\/\//i.test(configuredBaseUrl)) {
+    return configuredBaseUrl.replace(/\/+$/, '');
+  }
+
   const forwardedHost = String(req.headers['x-forwarded-host'] || '')
     .split(',')[0]
     .trim();

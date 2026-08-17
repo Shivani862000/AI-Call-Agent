@@ -1,5 +1,142 @@
+const { createMediaToken } = require('../src/auth');
+const {
+  buildIcallMateCallbackUrl,
+  redactIcallMateCallbackUrl
+} = require('../src/icallmate-webhook');
+const logger = require('./system-logger');
+
+const ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE = 'ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE';
+
 function getOutboundEndpoint() {
   return `${String(process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in').replace(/\/+$/, '')}/OBDAPI/webresources/CreateOBDCampaignPost`;
+}
+
+function getDefaultMediaUrl() {
+  const configuredUrl = String(process.env.ICALLMATE_MASTER_POST_WSURL || '').trim();
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  const publicBaseUrl = String(
+    process.env.APP_BASE_URL
+    || process.env.NGROK_URL
+    || process.env.WEBHOOK_URL
+    || ''
+  ).trim();
+  if (!publicBaseUrl) {
+    return '';
+  }
+
+  return `${publicBaseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:').replace(/\/+$/, '')}/icallmate/media`;
+}
+
+function getDefaultCallbackUrl() {
+  const publicBaseUrl = String(
+    process.env.APP_BASE_URL
+    || process.env.NGROK_URL
+    || process.env.WEBHOOK_URL
+    || ''
+  ).trim();
+  return publicBaseUrl ? buildIcallMateCallbackUrl(publicBaseUrl) : '';
+}
+
+function ensureAuthenticatedMediaUrl(value) {
+  const rawUrl = String(value || getDefaultMediaUrl()).trim();
+  if (!rawUrl) {
+    return '';
+  }
+
+  const url = new URL(rawUrl);
+  if (!['ws:', 'wss:'].includes(url.protocol)) {
+    throw new Error('iCallMate media URL must use ws:// or wss://');
+  }
+
+  if (!url.searchParams.get('token')) {
+    url.searchParams.set('token', createMediaToken());
+  }
+  return url.toString();
+}
+
+function getMediaHealthUrl(value) {
+  const mediaUrl = new URL(String(value || '').trim());
+  if (!['ws:', 'wss:'].includes(mediaUrl.protocol)) {
+    throw new Error('iCallMate media URL must use ws:// or wss://');
+  }
+
+  mediaUrl.protocol = mediaUrl.protocol === 'wss:' ? 'https:' : 'http:';
+  mediaUrl.pathname = '/health';
+  mediaUrl.search = '';
+  mediaUrl.hash = '';
+  return mediaUrl.toString();
+}
+
+async function assertPublicMediaEndpointReachable(mediaUrl, options = {}) {
+  const fetchImpl = options.fetchImpl || fetch;
+  const timeoutMs = Math.max(Number(options.timeoutMs || 5000) || 5000, 500);
+  const healthUrl = getMediaHealthUrl(mediaUrl);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetchImpl(healthUrl, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      redirect: 'follow',
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      throw new Error(`public URL returned HTTP ${response.status}`);
+    }
+  } catch (error) {
+    const reason = error?.name === 'AbortError'
+      ? `timed out after ${timeoutMs}ms`
+      : String(error?.message || 'unreachable');
+    const preflightError = new Error(
+      `iCallMate media endpoint preflight failed: ${reason}. Keep the public tunnel running before placing calls.`
+    );
+    preflightError.code = ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE;
+    throw preflightError;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function redactMediaUrlToken(value) {
+  const rawUrl = String(value || '').trim();
+  if (!rawUrl) {
+    return rawUrl;
+  }
+
+  try {
+    const url = new URL(rawUrl);
+    if (url.searchParams.has('token')) {
+      url.searchParams.set('token', '[redacted]');
+    }
+    return url.toString();
+  } catch (error) {
+    return '[invalid-media-url]';
+  }
+}
+
+function redactRequestPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return payload;
+  }
+
+  const copy = JSON.parse(JSON.stringify(payload));
+  if (Array.isArray(copy.msisdnlist)) {
+    copy.msisdnlist.forEach((entry) => {
+      if (entry?.wsurl) entry.wsurl = redactMediaUrlToken(entry.wsurl);
+      if (entry?.callbackapi) entry.callbackapi = redactIcallMateCallbackUrl(entry.callbackapi);
+    });
+  }
+  if (Array.isArray(copy.fieldpairs)) {
+    copy.fieldpairs.forEach((entry) => {
+      if (entry?.wsurl) entry.wsurl = redactMediaUrlToken(entry.wsurl);
+      if (entry?.callbackapi) entry.callbackapi = redactIcallMateCallbackUrl(entry.callbackapi);
+    });
+  }
+  return copy;
 }
 
 function getMasterPostEndpoint() {
@@ -11,8 +148,8 @@ function normalizePhone(value) {
 }
 
 function buildOutboundCampaignPayload(customerPhone, customerId, options = {}) {
-  const msisdn = normalizePhone(customerPhone);
-  if (!msisdn) {
+  const phoneNo = normalizePhone(customerPhone).replace(/^\+/, '');
+  if (!phoneNo) {
     throw new Error('Customer phone is required for iCallMate outbound call');
   }
 
@@ -32,8 +169,8 @@ function buildOutboundCampaignPayload(customerPhone, customerId, options = {}) {
     s_unique: options.s_unique || (customerId ? `customer-${customerId}-${Date.now()}` : `call-${Date.now()}`),
     msisdnlist: [
       {
-        msisdn,
-        name: options.customerName || '',
+        phoneno: phoneNo,
+        customer_name: options.customerName || '',
         wsurl: options.wsurl || '',
         agentid: String(options.agentId || process.env.ICALLMATE_AGENT_ID || '0'),
         botid: String(options.botId || process.env.ICALLMATE_BOT_ID || '0'),
@@ -134,7 +271,7 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
   }
 
   console.log(
-    `[ICALLMATE OUTBOUND] Initiating call to ${customerPhone} provider=masterpost endpoint=${endpoint} ` +
+    `[ICALLMATE OUTBOUND] Initiating call to ${logger.maskPhone(customerPhone)} provider=masterpost endpoint=${endpoint} ` +
     `campid=${payload.campid} leadid=${payload.leadid}`
   );
 
@@ -152,11 +289,11 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(`iCallMate master-post call failed (${response.status}): ${rawText || response.statusText}`);
+    throw new Error(`iCallMate master-post call failed with HTTP ${response.status}`);
   }
 
   if (isFailurePayload(parsed)) {
-    throw new Error(`iCallMate master-post call rejected: ${parsed.message || rawText || 'unknown failure'}`);
+    throw new Error('iCallMate master-post call was rejected by the provider');
   }
 
   const providerReturnedSid = hasProviderCallSid(parsed);
@@ -175,24 +312,33 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
 }
 
 async function initiateCall(customerPhone, customerId, options = {}) {
-  const provider = String(options.provider || process.env.ICALLMATE_OUTBOUND_PROVIDER || '').toLowerCase();
+  const authenticatedOptions = {
+    ...options,
+    wsurl: ensureAuthenticatedMediaUrl(options.wsurl),
+    callbackapi: options.callbackapi || getDefaultCallbackUrl()
+  };
+  await assertPublicMediaEndpointReachable(authenticatedOptions.wsurl);
+
+  const provider = String(authenticatedOptions.provider || process.env.ICALLMATE_OUTBOUND_PROVIDER || '').toLowerCase();
   if (provider === 'masterpost' || provider === 'master-post') {
-    return initiateMasterPostCall(customerPhone, customerId, options);
+    const result = await initiateMasterPostCall(customerPhone, customerId, authenticatedOptions);
+    return { ...result, requestPayload: redactRequestPayload(result.requestPayload) };
   }
 
   const endpoint = getOutboundEndpoint();
-  const payload = buildOutboundCampaignPayload(customerPhone, customerId, options);
+  const payload = buildOutboundCampaignPayload(customerPhone, customerId, authenticatedOptions);
 
   if (!payload.ukey || !payload.serviceno || !payload.ivrtemplateid) {
     if (process.env.ICALLMATE_MASTER_POST_API_ENDPOINT || process.env.ICALLMATE_MASTER_POST_WSURL) {
       console.log('[ICALLMATE OUTBOUND] Falling back to masterpost provider due to missing campaign credentials');
-      return initiateMasterPostCall(customerPhone, customerId, options);
+      const result = await initiateMasterPostCall(customerPhone, customerId, authenticatedOptions);
+      return { ...result, requestPayload: redactRequestPayload(result.requestPayload) };
     }
     throw new Error('Missing iCallMate outbound config: ICALLMATE_UKEY, ICALLMATE_SERVICE_NO, and ICALLMATE_IVR_TEMPLATE_ID are required.');
   }
 
   console.log(
-    `[ICALLMATE OUTBOUND] Initiating call to ${customerPhone} endpoint=${endpoint} ` +
+    `[ICALLMATE OUTBOUND] Initiating call to ${logger.maskPhone(customerPhone)} endpoint=${endpoint} ` +
     `serviceNo=${payload.serviceno} ivrTemplate=${payload.ivrtemplateid}`
   );
 
@@ -210,11 +356,11 @@ async function initiateCall(customerPhone, customerId, options = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(`iCallMate outbound call failed (${response.status}): ${rawText || response.statusText}`);
+    throw new Error(`iCallMate outbound call failed with HTTP ${response.status}`);
   }
 
   if (isFailurePayload(parsed)) {
-    throw new Error(`iCallMate outbound call rejected: ${parsed.message || rawText || 'unknown failure'}`);
+    throw new Error('iCallMate outbound call was rejected by the provider');
   }
 
   const sid = extractCallSid(parsed, payload.s_unique);
@@ -222,12 +368,18 @@ async function initiateCall(customerPhone, customerId, options = {}) {
   return {
     sid,
     status: 'queued',
-    raw: parsed
+    raw: parsed,
+    requestPayload: redactRequestPayload(payload)
   };
 }
 
 module.exports = {
   buildOutboundCampaignPayload,
   buildMasterPostPayload,
+  ensureAuthenticatedMediaUrl,
+  getMediaHealthUrl,
+  assertPublicMediaEndpointReachable,
+  ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE,
+  redactMediaUrlToken,
   initiateCall,
 };

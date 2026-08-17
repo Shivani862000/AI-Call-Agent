@@ -7,6 +7,12 @@ npm-debug.log
 feedback.db
 *.db
 tmp
+logs
+recordings
+backups
+*.log
+*.wav
+scratch
 .DS_Store
 DEPLOYMENT_AZURE.md
 DEPLOYMENT_DIGITALOCEAN.md

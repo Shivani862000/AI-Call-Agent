@@ -13,7 +13,8 @@ const rateLimit = require('express-rate-limit');
 
 // Import modular components
 const { PORT } = require('./src/config');
-const { PROTECTED_HTML_PATHS, requireAdminAuth, basicAuth } = require('./src/auth');
+const { PROTECTED_HTML_PATHS, requireAdminAuth, requireRole, basicAuth } = require('./src/auth');
+const { isAdminOnlyRequest } = require('./src/authorization');
 const mountApiRoutes = require('./src/api-routes');
 const setupWebSocketBridge = require('./src/websocket-bridge');
 const startServer = require('./src/server');
@@ -68,11 +69,14 @@ app.use((req, res, next) => {
   }
 
   if (
-    req.path === '/api/icallmate/callback'
-    || req.path === '/api/icallmate/config'
+    req.path === '/api/icallmate/config'
     || req.path === '/icallmate/health'
   ) {
     return basicAuth(req, res, next);
+  }
+
+  if (req.path === '/api/icallmate/callback') {
+    return next();
   }
 
   if (PROTECTED_HTML_PATHS.has(req.path) || req.path.startsWith('/api/') || req.path === '/call/start') {
@@ -82,21 +86,15 @@ app.use((req, res, next) => {
   return next();
 });
 
-// RBAC Middleware
+// Phase 1 RBAC: agents can work with patient records, schedules, and read-only
+// call history. Configuration, feedback, real calls, and destructive actions
+// remain admin-only.
+const requireAdminRole = requireRole('ADMIN');
 app.use((req, res, next) => {
-  if (req.adminSession && req.adminSession.role === 'AGENT') {
-    const forbiddenHtml = ['/feedback.html', '/feedback-analysis.html', '/reports.html'];
-    const isForbiddenApi = req.path.startsWith('/api/feedback') || req.path.startsWith('/api/reports');
-    
-    if (forbiddenHtml.includes(req.path) || isForbiddenApi) {
-      if (req.path.startsWith('/api/')) {
-        return res.status(403).json({ error: 'Forbidden: Insufficient role' });
-      } else {
-        return res.status(403).send('Forbidden: You do not have access to this page.');
-      }
-    }
+  if (isAdminOnlyRequest(req)) {
+    return requireAdminRole(req, res, next);
   }
-  next();
+  return next();
 });
 
 app.get('/incoming-calls.html', (req, res) => {

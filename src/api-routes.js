@@ -5,7 +5,6 @@
 
 'use strict';
 
-const fetch = require('node-fetch');
 const fs = require('fs');
 const customersRouter = require('../routes/customers');
 const clientsRouter = require('../routes/clients');
@@ -35,6 +34,7 @@ const {
   setAuthCookie,
   clearAuthCookie,
   createAuthToken,
+  createMediaToken,
   ADMIN_USERNAME,
   verifyCredentials
 } = require('./auth');
@@ -79,6 +79,10 @@ const { buildCallAnalysis, storeCallAnalysis } = require('../services/call-analy
 const { generateCallAnalysisPDF } = require('../services/pdf');
 const { initiateCall, buildMasterPostPayload } = require('../services/icallmate');
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
+const {
+  buildIcallMateCallbackUrl,
+  hasValidIcallMateWebhookSecret
+} = require('./icallmate-webhook');
 const logger = require('../services/system-logger');
 
 module.exports = function mountApiRoutes(app) {
@@ -215,7 +219,7 @@ module.exports = function mountApiRoutes(app) {
       }
 
       console.log(
-        `[CALL REQUEST] to=${customerPhone} serviceNo=${process.env.ICALLMATE_SERVICE_NO || ''} baseUrl=${PUBLIC_BASE_URL} ` +
+        `[CALL REQUEST] to=${logger.maskPhone(customerPhone)} serviceNo=${process.env.ICALLMATE_SERVICE_NO || ''} baseUrl=${PUBLIC_BASE_URL} ` +
         `mode=${CALL_MODE} pipeline=${VOICE_PIPELINE} model=${REALTIME_MODEL}`
       );
       console.log(
@@ -698,7 +702,7 @@ module.exports = function mountApiRoutes(app) {
       test_number: process.env.ICALLMATE_TEST_NUMBER || ICALLMATE_DEFAULT_TEST_NUMBER,
       incoming_api_endpoint: process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in',
       outbound_api_endpoint: process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in',
-      callback_url: `${requestBaseUrl}/api/icallmate/callback`,
+      callback_url: buildIcallMateCallbackUrl(requestBaseUrl),
       audio_format: {
         sampleRate: 8000,
         encoding: 'LINEAR16',
@@ -710,11 +714,8 @@ module.exports = function mountApiRoutes(app) {
 
   app.post('/api/icallmate/callback', async (req, res) => {
     try {
-      if (process.env.WEBHOOK_SECRET) {
-        const providedSecret = req.headers['x-webhook-secret'] || req.query.secret || req.body.secret;
-        if (providedSecret !== process.env.WEBHOOK_SECRET) {
-          return res.status(401).json({ error: 'Invalid webhook secret' });
-        }
+      if (!hasValidIcallMateWebhookSecret(req)) {
+        return res.status(401).json({ error: 'Invalid webhook secret' });
       }
 
       const payload = req.body || {};
@@ -725,10 +726,14 @@ module.exports = function mountApiRoutes(app) {
       const callerId = payload.callerId || payload.phoneno || payload.customer_number || '';
       const did = payload.did || payload.serviceno || payload.dnis || '';
 
-      console.log(
-        `[ICALLMATE CALLBACK] event=${eventName} key=${key} callerId=${callerId} did=${did} ` +
-        `callType=${callType || 'unknown'} status=${status} payload=${JSON.stringify(payload)}`
-      );
+      logger.info('ICALLMATE_CALLBACK', {
+        event: eventName,
+        key,
+        callerId,
+        did,
+        callType: callType || 'unknown',
+        status
+      });
 
       if (callType === 'inbound' || callType === 'inbou' || !callType) {
         incomingCallState.set(key, {
@@ -778,7 +783,8 @@ module.exports = function mountApiRoutes(app) {
           `, [cleanPhone]);
 
           if (callRecord) {
-            await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ?, recording_url = COALESCE(NULLIF(?, \'\'), recording_url) WHERE id = ?', [
+            await dbRun('UPDATE calls SET outcome = ?, status = ?, outcome_detail = ?, recording_url = COALESCE(NULLIF(?, \'\'), recording_url) WHERE id = ?', [
+              mappedOutcome,
               mappedOutcome,
               payload.call_status || 'callback',
               payload.recording_filename || '',
@@ -829,9 +835,9 @@ module.exports = function mountApiRoutes(app) {
       }
 
       const endpoint = `${String(process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in').replace(/\/+$/, '')}/Test_WSS/setMacroDnis`;
-      const token = createMediaToken();
+      const token = createMediaToken({ reusable: true });
       const websocketUrl = req.body.wsurl || req.body.websocket_url || `${toWssUrl(requestBaseUrl, `/icallmate/media?token=${token}`)}`;
-      const callbackUrl = req.body.callbackapi || req.body.callback_url || `${requestBaseUrl}/api/icallmate/callback`;
+      const callbackUrl = req.body.callbackapi || req.body.callback_url || buildIcallMateCallbackUrl(requestBaseUrl);
       const macros = [
         { dnisNo, macroName: 'llm_wssurl', macroValue: websocketUrl },
         { dnisNo, macroName: 'llm_botid', macroValue: String(req.body.botid || process.env.ICALLMATE_BOT_ID || '') },
@@ -941,6 +947,7 @@ module.exports = function mountApiRoutes(app) {
       const leadId = req.body.leadid || req.body.leadId || '1031';
       const campid = req.body.campid || '54';
       const wsurl = firstFieldPair.wsurl || req.body.wsurl || toWssUrl(getRequestPublicBaseUrl(req), '/icallmate/media');
+      const callbackapi = buildIcallMateCallbackUrl(getRequestPublicBaseUrl(req));
       const customerName = req.body.customerName || firstFieldPair.Name || 'Outgoing Customer';
       const requestedAgentId = Number(req.body.agentId || req.query.agentId || 0) || null;
       const callType = normalizeOutboundCallType(req.body.callType || req.body.call_type || firstFieldPair.callType || firstFieldPair.call_type);
@@ -949,7 +956,7 @@ module.exports = function mountApiRoutes(app) {
         return res.status(400).json({ error: 'Phone_No, phone, customerPhone, or fieldpairs[0].Phone_No is required' });
       }
 
-      const payload = buildMasterPostPayload(phone, leadId, { campid, wsurl });
+      const payload = buildMasterPostPayload(phone, leadId, { campid, wsurl, callbackapi });
       if (String(req.body.dryRun || '').toLowerCase() === 'true') {
         return res.json({
           success: true,
@@ -986,6 +993,7 @@ module.exports = function mountApiRoutes(app) {
         campid,
         leadid: leadId,
         wsurl,
+        callbackapi,
         customerName: customer.name || customerName,
         clientName: agentConfig?.client_name || CLIENT_NAME,
         agentId: agentConfig?.id || null,

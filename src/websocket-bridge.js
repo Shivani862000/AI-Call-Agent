@@ -22,7 +22,10 @@ const {
   GEMINI_LIVE_DIRECT_AUDIO,
   DEEPGRAM_TTS_MODEL,
   FINAL_AUDIO_GRACE_MS,
-  DEEPGRAM_ENDPOINTING_MS
+  DEEPGRAM_ENDPOINTING_MS,
+  DEEPGRAM_FINAL_FLUSH_MS,
+  ICALLMATE_REVERSE_MEDIA_CHUNK_BYTES,
+  ICALLMATE_REVERSE_MEDIA_INTERVAL_MS
 } = require('./config');
 
 const {
@@ -46,11 +49,18 @@ const { generateGeminiReply } = require('../services/gemini');
 const logger = require('../services/system-logger');
 const {
   resamplePcm16,
-  parsePcmRate
+  parsePcmRate,
+  createDeepgramListenUrl,
+  createDeepgramSpeakUrl,
+  createDeepgramTranscriptBuffer
 } = require('./speech-utils');
 
 const { AudioRecorder } = require('./audio-mixer');
 const { dequeueAudioFrame, calculateHangupDelayMs } = require('./audio-drain');
+const {
+  shouldStartAiBridgeForEvent,
+  buildReverseHangupEvent
+} = require('./icallmate-protocol');
 
 const {
   shouldAutoHangupAfterAgentTurn,
@@ -65,34 +75,11 @@ const {
 
 const { validateMediaToken } = require('./auth');
 
-const REQUIRE_MEDIA_TOKEN = /^(1|true|yes|on)$/i.test(String(process.env.ICALLMATE_REQUIRE_MEDIA_TOKEN || ''));
-const GEMINI_OPENING_INPUT_GRACE_MS = Math.max(Number(process.env.GEMINI_OPENING_INPUT_GRACE_MS || 3500) || 3500, 1000);
+const REQUIRE_MEDIA_TOKEN = !/^(0|false|no|off)$/i.test(String(process.env.ICALLMATE_REQUIRE_MEDIA_TOKEN || 'true'));
 const GEMINI_OPENING_FALLBACK_MS = Math.max(Number(process.env.GEMINI_OPENING_FALLBACK_MS || 2500) || 2500, 1000);
 
 function debugLog(message, details = {}) {
   logger.debug('MEDIA_DEBUG', { message, ...details });
-}
-
-function createDeepgramListenUrl() {
-  const url = new URL('wss://api.deepgram.com/v1/listen');
-  url.searchParams.set('model', 'nova-2');
-  url.searchParams.set('smart_format', 'true');
-  url.searchParams.set('encoding', 'linear16');
-  url.searchParams.set('sample_rate', '8000');
-  url.searchParams.set('channels', '1');
-  url.searchParams.set('language', 'hi');
-  url.searchParams.set('endpointing', '400');
-  url.searchParams.set('vad_events', 'true');
-  url.searchParams.set('interim_results', 'false');
-  return url.toString();
-}
-
-function createDeepgramSpeakUrl() {
-  const url = new URL('wss://api.deepgram.com/v1/speak');
-  url.searchParams.set('model', DEEPGRAM_TTS_MODEL);
-  url.searchParams.set('encoding', 'linear16');
-  url.searchParams.set('sample_rate', '8000');
-  return url.toString();
 }
 
 module.exports = function setupWebSocketBridge(server) {
@@ -220,7 +207,7 @@ module.exports = function setupWebSocketBridge(server) {
         }
 
         const audioFrame = dequeueAudioFrame(session.audioBuffer, {
-          chunkBytes: 640,
+          chunkBytes: ICALLMATE_REVERSE_MEDIA_CHUNK_BYTES,
           turnComplete: session.turnComplete
         });
 
@@ -230,12 +217,10 @@ module.exports = function setupWebSocketBridge(server) {
           session.turnComplete = audioFrame.turnComplete;
 
           session.outChunkCount++;
+          session.lastAgentAudioSentAt = Date.now();
           if (session.outChunkCount % 100 === 0) {
             console.log(`[STAGE 7: Audio Stream] Sending TTS audio chunk ${session.outChunkCount} back to Caller`);
           }
-
-          const remainingMs = (audioFrame.remaining.length / 2 / 8000) * 1000;
-          session.aiSpeakingUntil = Date.now() + remainingMs + 500;
 
           if (!session.firstChunkSentAt) {
             session.firstChunkSentAt = Date.now();
@@ -290,7 +275,7 @@ module.exports = function setupWebSocketBridge(server) {
           session.geminiLiveFirstAudioAt = null;
           session.sttProducedAt = null;
         }
-      }, 40); // Match ~8kHz chunk rate for 640 bytes (40ms)
+      }, ICALLMATE_REVERSE_MEDIA_INTERVAL_MS);
     }
   }
 
@@ -310,7 +295,7 @@ module.exports = function setupWebSocketBridge(server) {
     let deepgramReady = false;
     let deepgramTtsReady = false;
     let pendingTtsTexts = [];
-    let finalTranscriptBuffer = [];
+    let callerSpeechActive = false;
     let pendingHangup = false;
     let hangupFinalizeTimer = null;
     let openingFallbackTimer = null;
@@ -325,6 +310,13 @@ module.exports = function setupWebSocketBridge(server) {
       endCall: false,
       endCallAfterNextReply: false
     };
+    const deepgramTranscriptBuffer = createDeepgramTranscriptBuffer({
+      flushDelayMs: DEEPGRAM_FINAL_FLUSH_MS,
+      onTranscript: (merged) => {
+        callerSpeechActive = false;
+        dispatchCallerTranscript(merged);
+      }
+    });
 
     const getSessionLabel = () => session.streamId || session.callerId || 'unknown';
     const isOutboundSession = () => normalizeCallDirection(session.callDirection) === 'outbound';
@@ -476,7 +468,7 @@ module.exports = function setupWebSocketBridge(server) {
     }
 
     function stopListeningForCallerAudio() {
-      finalTranscriptBuffer = [];
+      deepgramTranscriptBuffer.close();
       deepgramReady = false;
       if (deepgramWs && deepgramWs.readyState < WebSocket.CLOSING) {
         deepgramWs.close();
@@ -626,7 +618,8 @@ module.exports = function setupWebSocketBridge(server) {
                     clearInterval(llmWatchdogInterval);
                     return;
                   }
-                  if (Date.now() - lastLlmResponseAt > 12000) {
+                  const latestActivityAt = Math.max(lastLlmResponseAt, session.lastAgentAudioSentAt || 0);
+                  if (Date.now() - latestActivityAt > 12000) {
                     console.warn(`[ICALLMATE] LLM watchdog timeout streamId=${getSessionLabel()}`);
                     requestCallHangup('llm_watchdog_timeout');
                     scheduleFinalizeCallHangup('llm_watchdog_timeout', transcript[transcript.length - 1]?.text || '');
@@ -745,7 +738,11 @@ module.exports = function setupWebSocketBridge(server) {
                 const fullAgentTurnText = transcript[transcript.length - 1]?.role === 'AGENT'
                   ? transcript[transcript.length - 1].text
                   : cleanTranscript;
-                console.log('Checking hangup condition for text:', fullAgentTurnText, 'shouldHangup:', shouldAutoHangupAfterAgentTurn(fullAgentTurnText));
+                debugLog('Checking hangup condition', {
+                  streamId: getSessionLabel(),
+                  text: fullAgentTurnText,
+                  shouldHangup: shouldAutoHangupAfterAgentTurn(fullAgentTurnText)
+                });
                 if (outboundDemoState.endCallAfterNextReply || shouldAutoHangupAfterAgentTurn(fullAgentTurnText)) {
                   finalResponseInProgress = true;
                   requestFinalHangup('gemini_live_state_completed', fullAgentTurnText);
@@ -944,6 +941,8 @@ module.exports = function setupWebSocketBridge(server) {
 
       await persistConversationCompletion(reason);
 
+      const pendingMediaPackets = session.pendingMediaPackets || 0;
+      session.pendingMediaPackets = 0;
       await upsertIcallMateCallFromMedia({
         streamId: session.streamId,
         callerId: session.callerId,
@@ -953,19 +952,17 @@ module.exports = function setupWebSocketBridge(server) {
       }, session, {
         status: 'completed',
         ended_at: new Date().toISOString(),
+        media_packets: pendingMediaPackets,
         notes: 'AI conversation completed; auto hangup'
       });
       sendReverseMediaStop(ws, session);
 
       console.log(`[ACTUAL_HANGUP_SENT] streamId=${getSessionLabel()} reason=${reason}`);
-      sendIcallMateJson(ws, {
-        event: 'reverse-hangup-call',
+      sendIcallMateJson(ws, buildReverseHangupEvent({
         callerId: session.callerId,
         streamId: session.streamId,
-        source: 'ai',
-        message: 'Call Dropped on BOT',
         reason
-      });
+      }));
       bridgeClosed = true;
       setTimeout(() => {
         if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CLOSING) {
@@ -974,60 +971,39 @@ module.exports = function setupWebSocketBridge(server) {
       }, 500);
     }
 
+    function dispatchCallerTranscript(merged) {
+      session.sttProducedAt = Date.now();
+      debugLog('STT produced caller text', { streamId: getSessionLabel(), text: merged });
+      pushTranscriptTurn(transcript, 'CUSTOMER', merged);
+      const turnText = isOutboundSession()
+        ? buildOutboundDemoTurnInstruction(
+          merged,
+          outboundDemoState,
+          getSessionClientName(),
+          getSessionCustomerName(),
+          getSessionCallType()
+        )
+        : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`;
+
+      if (useGeminiLive()) {
+        sendGeminiLiveText(turnText, { interrupt: true });
+      } else if (useGemini()) {
+        sendGeminiClientTurn(turnText, { interrupt: true });
+      } else {
+        sendOpenAIClientTurn(turnText, { interrupt: true });
+      }
+    }
+
     function handleDeepgramTranscript(event) {
       if (pendingHangup || outboundDemoState.conversationState === 'COMPLETED') {
         return;
       }
 
-      const transcriptText = String(event?.channel?.alternatives?.[0]?.transcript || '').trim();
-      const isFinal = Boolean(event?.is_final);
-      const isSpeechFinal = Boolean(event?.speech_final);
-
-      if (!transcriptText) {
-        if (isSpeechFinal && finalTranscriptBuffer.length) {
-          const merged = finalTranscriptBuffer.join(' ').replace(/\s+/g, ' ').trim();
-          finalTranscriptBuffer = [];
-          if (merged) {
-            session.sttProducedAt = Date.now();
-            debugLog('STT produced outbound text', { streamId: getSessionLabel(), text: merged });
-            pushTranscriptTurn(transcript, 'CUSTOMER', merged);
-            const turnText = isOutboundSession()
-              ? buildOutboundDemoTurnInstruction(merged, outboundDemoState, getSessionClientName(), getSessionCustomerName(), getSessionCallType())
-              : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`;
-            if (useGeminiLive()) {
-              sendGeminiLiveText(turnText, { interrupt: true });
-            } else if (useGemini()) {
-              sendGeminiClientTurn(turnText, { interrupt: true });
-            } else {
-              sendOpenAIClientTurn(turnText, { interrupt: true });
-            }
-          }
-        }
-        return;
-      }
-
-      if (isFinal) {
-        finalTranscriptBuffer.push(transcriptText);
-      }
-
-      if (isSpeechFinal) {
-        const merged = (finalTranscriptBuffer.length ? finalTranscriptBuffer.join(' ') : transcriptText)
-          .replace(/\s+/g, ' ')
-          .trim();
-        finalTranscriptBuffer = [];
-        if (merged) {
-          session.sttProducedAt = Date.now();
-          debugLog('STT produced inbound text', { streamId: getSessionLabel(), text: merged });
-          pushTranscriptTurn(transcript, 'CUSTOMER', merged);
-          const turnText = `Caller said: ${merged}\nRespond naturally in Hindi/Hinglish based on the system prompt instructions.`;
-          if (useGeminiLive()) {
-            sendGeminiLiveText(turnText, { interrupt: true });
-          } else if (useGemini()) {
-            sendGeminiClientTurn(turnText, { interrupt: true });
-          } else {
-            sendOpenAIClientTurn(turnText, { interrupt: true });
-          }
-        }
+      const result = deepgramTranscriptBuffer.handleResult(event);
+      if (result.hasSpeech && !callerSpeechActive) {
+        callerSpeechActive = true;
+        lastLlmResponseAt = Date.now();
+        sendReverseMediaStop(ws, session);
       }
     }
 
@@ -1073,6 +1049,8 @@ module.exports = function setupWebSocketBridge(server) {
 
         if (event.type === 'Results') {
           handleDeepgramTranscript(event);
+        } else if (event.type === 'UtteranceEnd') {
+          deepgramTranscriptBuffer.flush();
         }
       });
 
@@ -1188,43 +1166,6 @@ module.exports = function setupWebSocketBridge(server) {
         }
         session.audioChunkCount = (session.audioChunkCount || 0) + 1;
 
-        // In DIRECT_AUDIO mode, keep Gemini Live's native turn-taking fed continuously.
-        // Deepgram STT is still gated below while the agent is speaking to avoid echo transcripts.
-        if (useGeminiLive() && GEMINI_LIVE_DIRECT_AUDIO) {
-          const openingGraceActive = openingPromptSent
-            && !session.geminiLiveFirstAudioAt
-            && (session.outChunkCount || 0) < 1
-            && session.openingPromptSentAt
-            && Date.now() - session.openingPromptSentAt < GEMINI_OPENING_INPUT_GRACE_MS;
-
-          if (openingGraceActive) {
-            if (session.audioChunkCount % 100 === 0) {
-              debugLog('Holding caller audio from Gemini Live during opening grace', {
-                streamId: getSessionLabel(),
-                count: session.audioChunkCount
-              });
-            }
-          } else if (geminiLiveSession && geminiLiveReady) {
-            if (session.audioChunkCount % 100 === 0) {
-              debugLog('Sending audio chunk to Gemini Live Native Audio', { streamId: getSessionLabel(), count: session.audioChunkCount });
-            }
-            geminiLiveSession.sendRealtimeInput({
-              audio: {
-                data: payload,
-                mimeType: 'audio/pcm;rate=8000'
-              }
-            });
-          }
-        }
-
-        if (session.aiSpeakingUntil && Date.now() < session.aiSpeakingUntil) {
-          if (deepgramReady && deepgramWs?.readyState === WebSocket.OPEN) {
-            const audioBuffer = Buffer.from(payload, 'base64');
-            deepgramWs.send(Buffer.alloc(audioBuffer.length));
-          }
-          return;
-        }
-
         if (!deepgramReady || deepgramWs?.readyState !== WebSocket.OPEN) {
           return;
         }
@@ -1238,6 +1179,7 @@ module.exports = function setupWebSocketBridge(server) {
         if (session.audioInterval) clearInterval(session.audioInterval);
         if (session.hardLimitTimer) clearTimeout(session.hardLimitTimer);
         clearOpeningFallbackTimer();
+        deepgramTranscriptBuffer.close();
         bridgeClosed = true;
         if (hangupFinalizeTimer) {
           clearTimeout(hangupFinalizeTimer);
@@ -1296,9 +1238,18 @@ module.exports = function setupWebSocketBridge(server) {
       callId: null,
       providerCallId: '',
       mediaPacketsSeen: 0,
+      aiBridgeStarted: false,
       connectedAt: new Date().toISOString()
     };
     const aiBridge = createIcallMateAiBridge(ws, session);
+
+    function startAiBridgeOnce() {
+      if (session.aiBridgeStarted) {
+        return;
+      }
+      session.aiBridgeStarted = true;
+      aiBridge.start();
+    }
 
     function logRealCallStarted(status) {
       if (session.callStartedLogged || !session.callId) {
@@ -1315,12 +1266,11 @@ module.exports = function setupWebSocketBridge(server) {
 
           if (ws.readyState === WebSocket.OPEN) {
             // Tell iCallMate to hang up forcefully
-            sendIcallMateJson(ws, {
-              event: 'hangup-call',
+            sendIcallMateJson(ws, buildReverseHangupEvent({
               callerId: session.callerId,
               streamId: session.streamId,
               reason: 'Maximum call duration reached'
-            });
+            }));
 
             // Disconnect backend immediately
             setTimeout(() => {
@@ -1384,7 +1334,9 @@ module.exports = function setupWebSocketBridge(server) {
       if (extraParams.callType || extraParams.call_type) session.callType = normalizeOutboundCallType(extraParams.callType || extraParams.call_type);
       if (extraParams.customerName) session.customerName = extraParams.customerName;
       if (extraParams.clientName) session.clientName = extraParams.clientName;
-      await hydrateIcallMateSessionContext(session, message, extraParams);
+      if (!session.contextHydrated) {
+        await hydrateIcallMateSessionContext(session, message, extraParams);
+      }
 
       if (eventName === 'connected') {
         await upsertIcallMateCallFromMedia(message, session, { status: 'active', notes: 'Service provider connected' });
@@ -1409,16 +1361,6 @@ module.exports = function setupWebSocketBridge(server) {
         logRealCallStarted('media_started');
         sendIcallMateMark(ws, message, 'start-received');
 
-        if (!session.answered) {
-          session.answered = true;
-          await upsertIcallMateCallFromMedia(message, session, {
-            status: 'active',
-            answered_at: normalizeIcallTimestamp(message.timestamp),
-            notes: session.callDirection === 'outbound' ? 'Outbound call answered via start event' : 'Incoming call answered via start event'
-          });
-          aiBridge.start();
-          sendIcallMateMark(ws, message, 'answer-received');
-        }
         return;
       }
 
@@ -1430,39 +1372,54 @@ module.exports = function setupWebSocketBridge(server) {
           notes: session.callDirection === 'outbound' ? 'Outbound call answered' : 'Incoming call answered'
         });
         logRealCallStarted('answered');
-        aiBridge.start();
+        if (shouldStartAiBridgeForEvent(eventName, false)) {
+          startAiBridgeOnce();
+        }
         sendIcallMateMark(ws, message, 'answer-received');
         return;
       }
 
       if (eventName === 'media') {
-        if (!session.answered) {
+        const wasAnswered = session.answered;
+        if (message.payload) {
+          session.audioRecorder.addUserAudio(Buffer.from(message.payload, 'base64'));
+        }
+
+        if (!wasAnswered) {
           session.answered = true;
           await upsertIcallMateCallFromMedia(message, session, {
             status: 'active',
             answered_at: normalizeIcallTimestamp(message.timestamp || new Date().toISOString()),
+            media_packets: 1,
             notes: session.callDirection === 'outbound' ? 'Outbound call answered (inferred from media)' : 'Incoming call answered (inferred from media)'
           });
           logRealCallStarted('media_started_implicitly');
-          aiBridge.start();
+          if (shouldStartAiBridgeForEvent(eventName, wasAnswered)) {
+            startAiBridgeOnce();
+          }
+          aiBridge.sendCallerAudio(message.payload);
         } else {
-          await upsertIcallMateCallFromMedia(message, session, {
-            status: 'active',
-            media_packets: 1,
-            notes: 'Audio streaming'
-          });
+          aiBridge.sendCallerAudio(message.payload);
+          session.pendingMediaPackets = (session.pendingMediaPackets || 0) + 1;
+          if (session.pendingMediaPackets >= 25) {
+            const mediaPackets = session.pendingMediaPackets;
+            session.pendingMediaPackets = 0;
+            runInBackground('ICALLMATE MEDIA COUNTER ERROR', () => dbRun(
+              'UPDATE calls SET media_packets = COALESCE(media_packets, 0) + ? WHERE id = ?',
+              [mediaPackets, session.callId]
+            ));
+          }
         }
-        if (message.payload) {
-          session.audioRecorder.addUserAudio(Buffer.from(message.payload, 'base64'));
-        }
-        aiBridge.sendCallerAudio(message.payload);
         return;
       }
 
       if (eventName === 'hangup-call' || eventName === 'reverse-hangup-call') {
+        const pendingMediaPackets = session.pendingMediaPackets || 0;
+        session.pendingMediaPackets = 0;
         await upsertIcallMateCallFromMedia(message, session, {
           status: session.answered ? 'completed' : 'missed',
           ended_at: normalizeIcallTimestamp(message.timestamp),
+          media_packets: pendingMediaPackets,
           notes: session.answered ? 'Call disconnected' : 'Call missed'
         });
         // Persist transcript + update customer status before closing
@@ -1530,6 +1487,8 @@ module.exports = function setupWebSocketBridge(server) {
       aiBridge.close();
       if (session.streamId) {
         const closeTimestamp = new Date().toISOString();
+        const pendingMediaPackets = session.pendingMediaPackets || 0;
+        session.pendingMediaPackets = 0;
         upsertIcallMateCallFromMedia({
           streamId: session.streamId,
           callerId: session.callerId,
@@ -1539,6 +1498,7 @@ module.exports = function setupWebSocketBridge(server) {
         }, session, {
           status: session.answered ? 'completed' : 'missed',
           ended_at: closeTimestamp,
+          media_packets: pendingMediaPackets,
           notes: session.answered ? 'Call disconnected' : 'Call closed'
         }).then(async () => {
           // Safety net: save transcript if not already saved
@@ -1555,7 +1515,7 @@ module.exports = function setupWebSocketBridge(server) {
             const recordingPath = require('path').join(recordingsDir, recordingFilename);
             try {
                await session.audioRecorder.saveToFile(recordingPath);
-               console.log(`[AUDIO RECORDER] Saved call ${session.callId} to ${recordingPath}`);
+               console.log(`[AUDIO RECORDER] Saved recording for callId=${session.callId}`);
             } catch (err) {
                console.error('[AUDIO RECORDER ERROR]', err.message);
             }

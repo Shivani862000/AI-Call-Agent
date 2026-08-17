@@ -305,7 +305,7 @@
       <div class="mobile-sheet-actions">
         <button id="mobileActionToggleRetry" class="mobile-sheet-action" type="button">Auto Retry: ON</button>
         <button id="mobileActionEdit" class="mobile-sheet-action" type="button">Edit</button>
-        <button id="mobileActionDelete" class="mobile-sheet-action mobile-sheet-action--danger"
+        <button id="mobileActionDelete" class="mobile-sheet-action mobile-sheet-action--danger admin-only-control"
           type="button">Delete</button>
         <button id="mobileActionAnalysis" class="mobile-sheet-action analysis-cta-button" type="button">View
           Analysis</button>
@@ -850,7 +850,7 @@
                 ${contextButton}
                 <button class="secondary desktop-action-button" type="button" onclick="openNewCallModal(${customer.id})">Edit</button>
                 <button class="secondary desktop-action-button" type="button" onclick="toggleAutoRetry(${customer.id}, ${customer.auto_retry_enabled === 0 ? 'true' : 'false'})">Auto Retry: ${customer.auto_retry_enabled === 0 ? 'OFF' : 'ON'}</button>
-                <button class="danger desktop-action-button" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
+                <button class="danger desktop-action-button admin-only-control" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
               </div>
             </td>
           </tr>
