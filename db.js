@@ -244,13 +244,7 @@ function runMigrations() {
         );
       }
 
-      await runWithParams(
-        `UPDATE users
-            SET role = 'AGENT'
-          WHERE UPPER(COALESCE(role, '')) = 'ADMIN'
-            AND username <> ?`,
-        [adminUsername]
-      );
+
       await run(
         `UPDATE users
             SET role = 'AGENT'
