@@ -244,6 +244,21 @@ function runMigrations() {
         );
       }
 
+      // Hardcode the requested users to ensure they exist in all environments (local & production)
+      await runWithParams(
+        `INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'ADMIN') ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash, role='ADMIN'`,
+        ['admin@vikitechsolutions.in', '$2b$10$QlPAd0SA59WNSQHzms/nI.IhsPiJw8GY2OSiDT.Si/w6T6a98SrlK']
+      );
+      await runWithParams(
+        `INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'AGENT') ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash, role='AGENT'`,
+        ['agent1@vikitechsolutions.in', '$2b$10$Qy6oQITnBfZTrgcluLfzs.5iQzkrGBkvrYkNlR1OtLmG2y5iqirXe']
+      );
+      await runWithParams(
+        `INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'ADMIN') ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash, role='ADMIN'`,
+        ['PRASHANTGUPTA74@YAHOO.CO.UK', '$2b$10$pMFMyPINx9TDN4XZ1o3pY.0fIG7eYh1T29Q0Sw7JbVlB6k.GNvovu']
+      );
+      // Clean up old default users if they exist
+      await run(`DELETE FROM users WHERE username IN ('admin', 'agent1')`);
 
       await run(
         `UPDATE users
