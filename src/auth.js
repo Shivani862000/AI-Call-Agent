@@ -12,6 +12,7 @@ const bcrypt = require('bcrypt');
 
 const PROTECTED_HTML_PATHS = new Set([
   '/admin.html',
+  '/support-tickets.html',
   '/incoming-calls.html',
   '/customers.html',
   '/clients.html',

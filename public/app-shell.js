@@ -57,6 +57,7 @@
       document.body.classList.add('role-agent');
     }
     window.AppShell.session = session;
+    if (session.role === 'ADMIN' && !NAV_ITEMS.some((item) => item.href === '/support-tickets.html')) NAV_ITEMS.push({ href: '/support-tickets.html', label: 'Support Tickets', shortLabel: 'Support' });
     return session;
   }
 
@@ -859,6 +860,11 @@
   }
 
   document.addEventListener('DOMContentLoaded', loadTestCallWidgetScript);
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/support-widget.css'; document.head.appendChild(css);
+    const script = document.createElement('script'); script.src = '/support-widget.js'; script.onload = () => window.SupportWidget?.initialize(); document.head.appendChild(script);
+  });
 
   const Pagination = (() => {
     let globalItemsPerPage = window.innerWidth <= 640 ? 5 : 10;

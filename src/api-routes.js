@@ -10,6 +10,8 @@ const customersRouter = require('../routes/customers');
 const clientsRouter = require('../routes/clients');
 const campaignsRouter = require('../routes/campaigns');
 const feedbackRouter = require('../routes/feedback');
+const createSupportTicketsRouter = require('../routes/support-tickets');
+const { createSlackSupportNotifier } = require('../services/slack-support');
 const reportsRouter = require('../routes/reports');
 const agentsRouter = require('../routes/agents');
 const testCallRouter = require('../routes/test-call');
@@ -151,6 +153,7 @@ module.exports = function mountApiRoutes(app) {
   app.use('/api/clients', clientsRouter);
   app.use('/api/campaigns', campaignsRouter);
   app.use('/api/feedback', feedbackRouter);
+  app.use('/api/support-tickets', createSupportTicketsRouter({ dbRun, dbGet, dbAll, notifyNewTicket: createSlackSupportNotifier({ webhookUrl: process.env.SLACK_SUPPORT_WEBHOOK_URL }) }));
   app.use('/api/reports', reportsRouter);
   app.use('/api/agents', agentsRouter);
   app.use('/api/test-call', testCallRouter);
