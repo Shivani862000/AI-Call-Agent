@@ -81,7 +81,7 @@
           <div class="page-subtitle">Manage patient records and bulk import customers via CSV.</div>
         </div>
         <div class="header-actions">
-          <button id="importCsvButton" class="import-btn" type="button">Bulk Import CSV</button>
+          <button id="importCsvButton" class="primary" type="button">Bulk Import CSV</button>
           <button id="refreshDataButton" class="secondary desktop-only" type="button">Refresh List</button>
           <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
@@ -152,18 +152,18 @@
       </div>
 
       <div style="margin-bottom: 20px;">
-        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 10px;">
-          Your CSV file should have headers corresponding to customer fields:
-          <code>name, phone, preferred_slot, scheduled_date, call_type</code>
-        </p>
-        
+        <p>Upload a CSV file with patient records. Ensure it has <code>name</code>, <code>phone</code>, <code>scheduled_date</code>, and <code>preferred_slot</code> columns.</p>
+        <p><a href="/sample-customers.csv" download="sample-customers.csv" style="color: var(--color-primary); font-size: 14px; text-decoration: underline;">Download Sample CSV</a></p>
+            
         <form id="bulkImportForm">
-          <div class="file-input-wrapper">
-            <input type="file" id="csvFileInput" accept=".csv" required>
+          <div class="saas-field" style="margin-top: 16px;">
+            <div class="file-input-wrapper">
+              <input type="file" id="csvFileInput" accept=".csv" required>
+            </div>
           </div>
-          <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
-            <button type="button" class="secondary" id="cancelImportBtn">Cancel</button>
-            <button type="submit" class="primary" id="submitImportBtn">Upload & Import</button>
+          <div class="modal-actions" style="margin-top: 20px;">
+            <button type="button" class="btn secondary" id="cancelImportBtn">Cancel</button>
+            <button type="submit" class="btn primary" id="submitImportBtn">Upload & Import</button>
           </div>
         </form>
       </div>
