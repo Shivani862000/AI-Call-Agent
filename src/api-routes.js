@@ -12,6 +12,7 @@ const usersRouter = require('../routes/users');
 const clientsRouter = require('../routes/clients');
 const campaignsRouter = require('../routes/campaigns');
 const feedbackRouter = require('../routes/feedback');
+const Call = require('./models/Call');
 const createSupportTicketsRouter = require('../routes/support-tickets');
 const { createSlackSupportNotifier } = require('../services/slack-support');
 const reportsRouter = require('../routes/reports');
@@ -1105,69 +1106,29 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/recent', async (req, res) => {
     try {
-      const rows = await dbAll(
-        `SELECT
-         calls.id,
-         calls.customer_id,
-         calls.agent_id,
-         customers.name AS customer_name,
-         customers.phone AS customer_phone,
-         agents.name AS agent_name,
-         agents.slug AS agent_slug,
-         calls.called_at,
-         calls.outcome,
-         calls.outcome_detail,
-         calls.call_type,
-         calls.call_direction,
-         calls.call_source,
-         calls.did,
-         calls.media_packets,
-         calls.answered_at,
-         calls.ended_at,
-         calls.notes,
-         calls.provider_call_id,
-         calls.recording_sid,
-         calls.recording_url,
-         calls.recording_status,
-         calls.recording_local_path,
-         calls.transcript_text,
-         calls.transcript_status,
-         calls.transcript_source,
-         calls.analysis_status,
-         calls.summary,
-         calls.analysis_summary,
-         calls.analysis_json,
-         calls.key_points_json,
-         calls.report_excerpt,
-         calls.language,
-         calls.extracted_rating,
-         calls.extracted_review_text,
-         calls.sentiment_label,
-         calls.sentiment,
-         calls.sentiment_score,
-         calls.call_duration,
-         calls.ai_talk_time,
-         calls.patient_talk_time,
-         calls.quality_score,
-         calls.timeline_events,
-         calls.extracted_entities,
-         calls.hot_lead_score,
-         calls.next_action_at,
-         calls.follow_up_task,
-         calls.crm_sync_status,
-         calls.live_sentiment_score,
-         calls.live_sentiment_label,
-         calls.live_red_flag,
-         calls.supervisor_alert_level,
-         calls.human_escalation_requested,
-         calls.objections_json,
-         calls.competitor_mentions_json
-       FROM calls
-       JOIN customers ON customers.id = calls.customer_id
-       LEFT JOIN agents ON agents.id = calls.agent_id
-       ORDER BY calls.id DESC
-       LIMIT 25`
-      );
+      const calls = await Call.find({ tenantId: req.tenantId })
+        .populate('customerId')
+        .sort({ started_at: -1 })
+        .limit(25)
+        .lean();
+
+      const rows = calls.map(c => ({
+         id: c._id,
+         customer_id: c.customerId?._id,
+         customer_name: c.customerId?.name,
+         customer_phone: c.customerId?.phone,
+         called_at: c.started_at,
+         outcome: c.outcome,
+         call_type: c.call_type,
+         transcript_text: c.transcript,
+         transcript_status: c.transcript_status,
+         analysis_status: c.analysis_status,
+         analysis_summary: c.analysis_summary,
+         extracted_rating: c.extracted_rating,
+         extracted_review_text: c.extracted_review_text,
+         sentiment_label: c.sentiment_label,
+         sentiment: c.sentiment
+      }));
 
       res.json(rows);
     } catch (error) {

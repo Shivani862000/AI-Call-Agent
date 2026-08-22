@@ -3,7 +3,7 @@ const Tenant = require('../models/Tenant');
 const User = require('../models/User');
 const Call = require('../models/Call');
 const { sendDailyReportToAdmin } = require('../services/email-service');
-const logger = require('../services/system-logger');
+const logger = require('../../services/system-logger');
 
 async function sendReportsForTime(timeString) {
   try {

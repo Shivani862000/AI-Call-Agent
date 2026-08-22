@@ -90,7 +90,7 @@ app.use((req, res, next) => {
 // Phase 1 RBAC: agents can work with patient records, schedules, and read-only
 // call history. Configuration, feedback, real calls, and destructive actions
 // remain admin-only.
-const requireAdminRole = requireRole('ADMIN');
+const requireAdminRole = requireRole('WEBMASTER', 'CLIENT_ADMIN');
 app.use((req, res, next) => {
   if (isAdminOnlyRequest(req)) {
     return requireAdminRole(req, res, next);

@@ -158,23 +158,26 @@ function validateCustomerPayload(payload) {
   else if (payload.name.length > 100) errors.name = 'Customer name must be 100 characters or fewer';
   if (!payload.phone) errors.phone = 'Phone number is required';
   else if (!PHONE_PATTERN.test(payload.phone)) errors.phone = 'Phone must be in E.164 format, e.g. +919876543210';
-  if (!payload.preferred_slot) errors.preferred_slot = 'Scheduled time is required';
-  else if (!SLOT_PATTERN.test(payload.preferred_slot)) errors.preferred_slot = 'Scheduled time must be in HH:MM format';
-  if (!payload.scheduled_date) errors.scheduled_date = 'Scheduled date is required';
-  else if (!DATE_PATTERN.test(payload.scheduled_date)) errors.scheduled_date = 'Scheduled date must be in YYYY-MM-DD format';
-  
-  const scheduled = buildScheduledDateTime(payload.scheduled_date, payload.preferred_slot);
-  if (!errors.scheduled_date && !errors.preferred_slot && !scheduled) {
-    errors.scheduled_datetime = 'Scheduled date and time are invalid';
-  } else if (scheduled && scheduled.getTime() <= Date.now()) {
-    if (payload.scheduled_date === getLocalDateValue()) errors.preferred_slot = 'Choose a future time for today';
-    else errors.scheduled_date = 'Choose today or a future date';
-  }
-  if (scheduled) {
-    const hours = scheduled.getHours();
-    if (hours < 7 || hours >= 21) {
-      errors.preferred_slot = 'Calls can only be scheduled between 7:00 AM and 9:00 PM.';
-      logger.warn('CALL_SCHEDULE_BLOCKED_QUIET_HOURS', { phone: payload.phone, selectedTime: payload.preferred_slot, reason: 'Calls can only be scheduled between 7 AM and 9 PM' });
+  if (payload.preferred_slot || payload.scheduled_date) {
+    if (!payload.preferred_slot) errors.preferred_slot = 'Scheduled time is required when date is provided';
+    else if (!SLOT_PATTERN.test(payload.preferred_slot)) errors.preferred_slot = 'Scheduled time must be in HH:MM format';
+    
+    if (!payload.scheduled_date) errors.scheduled_date = 'Scheduled date is required when time is provided';
+    else if (!DATE_PATTERN.test(payload.scheduled_date)) errors.scheduled_date = 'Scheduled date must be in YYYY-MM-DD format';
+    
+    const scheduled = buildScheduledDateTime(payload.scheduled_date, payload.preferred_slot);
+    if (!errors.scheduled_date && !errors.preferred_slot && !scheduled) {
+      errors.scheduled_datetime = 'Scheduled date and time are invalid';
+    } else if (scheduled && scheduled.getTime() <= Date.now()) {
+      if (payload.scheduled_date === getLocalDateValue()) errors.preferred_slot = 'Choose a future time for today';
+      else errors.scheduled_date = 'Choose today or a future date';
+    }
+    if (scheduled) {
+      const hours = scheduled.getHours();
+      if (hours < 7 || hours >= 21) {
+        errors.preferred_slot = 'Calls can only be scheduled between 7:00 AM and 9:00 PM.';
+        logger.warn('CALL_SCHEDULE_BLOCKED_QUIET_HOURS', { phone: payload.phone, selectedTime: payload.preferred_slot, reason: 'Calls can only be scheduled between 7 AM and 9 PM' });
+      }
     }
   }
   if (!['vip', 'high', 'standard', 'low'].includes(payload.customer_value)) errors.customer_value = 'Customer value must be vip, high, standard, or low';
@@ -221,6 +224,25 @@ router.post('/', async (req, res) => {
       status: initialStatus,
       is_manual: 1
     });
+
+    // Temp dual-write to SQLite so the legacy scheduler can pick it up
+    const { dbRun } = require('../db');
+    await dbRun(
+      'INSERT INTO customers (name, phone, call_type, preferred_slot, status, is_manual, created_at, scheduled_datetime, customer_value, urgency_level, priority_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        payload.name || 'Customer',
+        payload.phone,
+        payload.call_type || 'REVIEW_CALL',
+        payload.preferred_slot || '10:00',
+        initialStatus,
+        1,
+        new Date().toISOString(),
+        payload.scheduled_datetime || null,
+        payload.customer_value || 'standard',
+        payload.urgency_level || 'normal',
+        50
+      ]
+    );
 
     logger.info('USER_CREATED_CALL', baseCustomerLogDetails(customer, { user: req.adminSession?.username || 'admin' }));
     logger.info('CALL_CREATED', baseCustomerLogDetails(customer));

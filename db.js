@@ -8,7 +8,9 @@ async function initializeDatabase() {
   if (isConnected) return;
   
   try {
-    await mongoose.connect(uri);
+    await mongoose.connect(uri, {
+      family: 4
+    });
     isConnected = true;
     console.log('Connected to MongoDB Atlas:', uri.split('@').pop());
   } catch (err) {

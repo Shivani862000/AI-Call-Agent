@@ -1,12 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const { dbRun, dbGet, dbAll } = require('../db');
+const Customer = require('../src/models/Customer');
+const Feedback = require('../src/models/Feedback');
+const Call = require('../src/models/Call');
 const { categorizeFeedback } = require('../services/gemini');
 
 // Manual feedback entry
 router.post('/manual', async (req, res) => {
   try {
-    const customer_id = Number(req.body.customer_id);
+    const customer_id = req.body.customer_id;
     const review_text = String(req.body.review_text || '').trim();
     const stars = Number(req.body.stars || 0);
     const fieldErrors = {};
@@ -31,7 +33,7 @@ router.post('/manual', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
-    const customer = await dbGet('SELECT id FROM customers WHERE id = ?', [customer_id]);
+    const customer = await Customer.findOne({ _id: customer_id, tenantId: req.tenantId });
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found', fieldErrors: { customer_id: 'Selected customer no longer exists' } });
     }
@@ -40,13 +42,17 @@ router.post('/manual', async (req, res) => {
     const categorization = await categorizeFeedback(review_text, stars);
 
     // Save to feedback table
-    const result = await dbRun(
-      'INSERT INTO feedback (customer_id, review_text, category, stars, submitted_at, source) VALUES (?, ?, ?, ?, ?, ?)',
-      [customer_id, review_text, categorization.category, stars, new Date().toISOString(), 'manual']
-    );
+    const feedback = await Feedback.create({
+      tenantId: req.tenantId,
+      customerId: customer_id,
+      review_text,
+      category: categorization.category,
+      rating: stars,
+      source: 'manual'
+    });
 
     res.json({
-      id: result.lastID,
+      id: feedback._id,
       category: categorization.category,
       reason: categorization.reason
     });
@@ -97,110 +103,71 @@ function getFollowUpAnswers(analysisJson) {
   };
 }
 
-async function listUnifiedFeedback() {
-  const feedbackRows = await dbAll(`
-    SELECT
-      f.id,
-      f.customer_id,
-      f.call_id,
-      c.name AS customer_name,
-      c.phone AS customer_phone,
-      f.review_text,
-      f.category,
-      f.stars,
-      f.source,
-      f.submitted_at,
-      calls.call_type,
-      calls.outcome,
-      calls.called_at,
-      calls.extracted_review_text,
-      calls.extracted_rating,
-      calls.sentiment_label,
-      calls.sentiment,
-      calls.analysis_summary,
-      calls.analysis_status,
-      calls.analysis_json,
-      calls.transcript_status,
-      CASE WHEN COALESCE(calls.transcript_text, '') != '' THEN 1 ELSE 0 END AS transcript_available
-    FROM feedback f
-    JOIN customers c ON c.id = f.customer_id
-    LEFT JOIN calls ON calls.id = f.call_id
-    ORDER BY f.submitted_at DESC
-    LIMIT 500
-  `);
+async function listUnifiedFeedback(tenantId) {
+  const manualFeedbacks = await Feedback.find({ tenantId })
+    .populate('customerId', 'name phone')
+    .populate('callId')
+    .sort({ created_at: -1 })
+    .limit(500)
+    .lean();
 
-  const linkedCallIds = new Set(feedbackRows.map((row) => Number(row.call_id || 0)).filter(Boolean));
-  const analyzedCalls = await dbAll(`
-      SELECT 
-        calls.id AS call_id,
-        calls.customer_id,
-        customers.name AS customer_name,
-        customers.phone AS customer_phone,
-        calls.extracted_review_text,
-        calls.analysis_summary,
-        calls.summary,
-        calls.report_excerpt,
-        calls.extracted_rating AS stars,
-        calls.sentiment_label,
-        calls.sentiment,
-        calls.analysis_status,
-        calls.analysis_completed_at,
-        calls.feedback_saved_at,
-        calls.called_at,
-        calls.call_type,
-        calls.outcome,
-        calls.analysis_json,
-        calls.transcript_status,
-        CASE WHEN COALESCE(calls.transcript_text, '') != '' THEN 1 ELSE 0 END AS transcript_available
-      FROM calls
-      JOIN customers ON customers.id = calls.customer_id
-      WHERE calls.extracted_rating IS NOT NULL 
-         OR calls.sentiment IS NOT NULL 
-         OR calls.analysis_summary IS NOT NULL
-      ORDER BY COALESCE(calls.analysis_completed_at, calls.feedback_saved_at, calls.called_at) DESC
-      LIMIT 500
-  `);
+  const linkedCallIds = new Set(manualFeedbacks.map(f => f.callId?._id?.toString()).filter(Boolean));
 
-  const storedFeedback = feedbackRows.map((row) => {
-    const stars = normalizeRating(row.stars || row.extracted_rating);
-    const sentiment = normalizeSentiment(row.sentiment_label || row.sentiment || row.category);
-    const followUpAnswers = getFollowUpAnswers(parseAnalysisJson(row.analysis_json));
+  const analyzedCalls = await Call.find({
+    tenantId,
+    $or: [
+      { extracted_rating: { $ne: null } },
+      { sentiment: { $ne: null } },
+      { analysis_summary: { $ne: null } }
+    ]
+  })
+    .populate('customerId', 'name phone')
+    .sort({ analysis_completed_at: -1, started_at: -1 })
+    .limit(500)
+    .lean();
+
+  const storedFeedback = manualFeedbacks.map((row) => {
+    const callData = row.callId || {};
+    const stars = normalizeRating(row.rating || callData.extracted_rating);
+    const sentiment = normalizeSentiment(callData.sentiment_label || callData.sentiment || row.category);
+    const followUpAnswers = getFollowUpAnswers(parseAnalysisJson(callData.analysis_json));
+    
     return {
-      id: row.id,
-      feedback_id: row.id,
-      customer_id: row.customer_id,
-      call_id: row.call_id,
-      customer_name: row.customer_name,
-      customer_phone: row.customer_phone,
-      review_text: row.review_text || row.extracted_review_text || row.analysis_summary || '',
+      id: row._id,
+      feedback_id: row._id,
+      customer_id: row.customerId?._id,
+      call_id: callData._id,
+      customer_name: row.customerId?.name,
+      customer_phone: row.customerId?.phone,
+      review_text: row.review_text || callData.extracted_review_text || callData.analysis_summary || '',
       category: categoryFromAnalysis({ stars, sentiment }),
       stars,
       sentiment,
-      call_type: row.call_type,
-      outcome: row.outcome,
-      analysis_status: row.analysis_status,
-      transcript_status: row.transcript_status,
-      transcript_available: Boolean(row.transcript_available),
-      source: row.source || (row.call_id ? 'call_analysis' : 'manual'),
-      submitted_at: row.submitted_at || row.called_at,
+      call_type: callData.call_type,
+      outcome: callData.outcome,
+      analysis_status: callData.analysis_status,
+      transcript_status: callData.transcript_status,
+      transcript_available: Boolean(callData.transcript),
+      source: row.source || (callData._id ? 'call_analysis' : 'manual'),
+      submitted_at: row.created_at || callData.started_at,
       ...followUpAnswers
     };
   });
 
   const analysisFeedback = analyzedCalls
-    .filter((row) => !linkedCallIds.has(Number(row.call_id)))
+    .filter((row) => !linkedCallIds.has(row._id.toString()))
     .map((row) => {
-      const stars = normalizeRating(row.stars);
+      const stars = normalizeRating(row.extracted_rating);
       const sentiment = normalizeSentiment(row.sentiment_label || row.sentiment);
       const followUpAnswers = getFollowUpAnswers(parseAnalysisJson(row.analysis_json));
       return {
-        id: `analysis-${row.call_id}`,
+        id: `analysis-${row._id}`,
         feedback_id: null,
-        customer_id: row.customer_id,
-        call_id: row.call_id,
-        customer_name: row.customer_name,
-        customer_phone: row.customer_phone,
-        review_text: row.extracted_review_text || row.analysis_summary || row.summary || row.report_excerpt || '',
+        customer_id: row.customerId?._id,
+        call_id: row._id,
+        customer_name: row.customerId?.name,
+        customer_phone: row.customerId?.phone,
+        review_text: row.extracted_review_text || row.analysis_summary || '',
         category: categoryFromAnalysis({ stars, sentiment }),
         stars,
         sentiment,
@@ -208,9 +175,9 @@ async function listUnifiedFeedback() {
         outcome: row.outcome,
         analysis_status: row.analysis_status,
         transcript_status: row.transcript_status,
-        transcript_available: Boolean(row.transcript_available),
+        transcript_available: Boolean(row.transcript),
         source: 'call_analysis',
-        submitted_at: row.analysis_completed_at || row.feedback_saved_at || row.called_at,
+        submitted_at: row.analysis_completed_at || row.started_at,
         ...followUpAnswers
       };
     })
@@ -254,7 +221,7 @@ function buildFeedbackOverview(feedback) {
 
 router.get('/overview', async (req, res) => {
   try {
-    const feedback = await listUnifiedFeedback();
+    const feedback = await listUnifiedFeedback(req.tenantId);
     res.json(buildFeedbackOverview(feedback));
   } catch (error) {
     console.error('Error fetching feedback overview:', error);
@@ -264,7 +231,7 @@ router.get('/overview', async (req, res) => {
 
 router.get('/items', async (req, res) => {
   try {
-    res.json(await listUnifiedFeedback());
+    res.json(await listUnifiedFeedback(req.tenantId));
   } catch (error) {
     console.error('Error fetching feedback items:', error);
     res.status(500).json({ error: error.message });
@@ -274,7 +241,7 @@ router.get('/items', async (req, res) => {
 // Backward-compatible list endpoint used by the overview dashboard.
 router.get('/', async (req, res) => {
   try {
-    const feedback = await listUnifiedFeedback();
+    const feedback = await listUnifiedFeedback(req.tenantId);
     console.log(`[FEEDBACK_ANALYSIS_RECORDS_FOUND] count=${feedback.length}`);
     res.json(feedback);
   } catch (error) {

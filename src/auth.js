@@ -8,6 +8,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const User = require('./models/User');
+const Tenant = require('./models/Tenant');
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -316,14 +317,36 @@ function requireRole(...allowedRoles) {
   };
 }
 
-function requireTenantAccess(req, res, next) {
+async function requireTenantAccess(req, res, next) {
   const session = req.adminSession;
   if (!session) {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
   if (session.role === 'WEBMASTER' || session.role === 'SUPPORT_TEAM') {
-    return next();
+    if (req.query.tenantId || req.body.tenantId) {
+      req.tenantId = req.query.tenantId || req.body.tenantId;
+      return next();
+    }
+    try {
+      // For Webmaster interacting with the legacy UI, fallback to the first tenant
+      let tenant = await Tenant.findOne();
+      if (!tenant) {
+        // Create a default tenant if none exists
+        tenant = await Tenant.create({
+          name: 'Default Tenant',
+          slug: 'default-tenant',
+          dbConnectionString: process.env.MONGODB_URI,
+          ownerEmail: 'admin@vikitechsolutions.in'
+        });
+      }
+      req.tenantId = tenant._id;
+      return next();
+    } catch (err) {
+      console.error('Error fetching/creating fallback tenant:', err);
+      // We must not proceed without a tenantId if we expect it downstream
+      return res.status(500).json({ error: 'Failed to assign a tenant context to the Webmaster.' });
+    }
   }
 
   if (session.tenantId) {
@@ -339,6 +362,16 @@ async function verifyCredentials(username, password) {
   const normalizedUsername = String(username || '').trim();
   if (!normalizedUsername || !password) {
     return { success: false };
+  }
+
+  // Fallback to .env admin for Webmaster access
+  const envAdmin = String(process.env.ADMIN_USERNAME || '').trim();
+  const envHash = String(process.env.ADMIN_PASSWORD_HASH || '').trim();
+  
+  if (envAdmin && normalizedUsername === envAdmin && envHash) {
+    if (await bcrypt.compare(String(password), envHash)) {
+      return { success: true, username: envAdmin, role: 'WEBMASTER', tenantId: null };
+    }
   }
 
   try {
