@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Customer Directory - Path Lab</title>
+  <link rel="stylesheet" href="/app-shell.css">
+  <style>
+    .import-btn {
+      background-color: var(--primary);
+      color: white;
+    }
+    .import-btn:hover {
+      background-color: var(--primary-hover);
+    }
+    .file-input-wrapper {
+      margin-top: 15px;
+      margin-bottom: 15px;
+    }
+    #csvFileInput {
+      width: 100%;
+      padding: 10px;
+      border: 1px dashed var(--border-light);
+      border-radius: var(--radius-md);
+      background: var(--bg-secondary);
+    }
+    .customer-table-wrap {
+      overflow-x: auto;
+    }
+    .status-badge {
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+    .status-badge.pending { background-color: #fff3cd; color: #856404; }
+    .status-badge.scheduled { background-color: #d1ecf1; color: #0c5460; }
+    .status-badge.completed { background-color: #d4edda; color: #155724; }
+    .status-badge.failed, .status-badge.busy, .status-badge.no_answer { background-color: #f8d7da; color: #721c24; }
+    .status-badge.retry_scheduled { background-color: #e2e3e5; color: #383d41; }
+  </style>
+</head>
+
+<body class="poc-page customers-page">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-mark">PL</div>
+          <div class="brand-copy">
+            <h1>Path Lab Console</h1>
+            <p>Patient follow-up operations</p>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <a href="/admin.html" class="nav-link">Overview</a>
+          <a href="/customer-list.html" class="nav-link active">Customer List</a>
+          <a href="/customers.html" class="nav-link">Outbound Calls</a>
+          <a href="/feedback.html" class="nav-link">Feedback</a>
+          <a href="/support-tickets.html" class="nav-link">Support Tickets</a>
+        </nav>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <section class="mobile-ops-header mobile-only">
+        <div class="mobile-ops-bar">
+          <div class="mobile-ops-title">Customer List</div>
+          <div class="mobile-ops-actions">
+            <button id="mobileHeaderMenuButton" class="mobile-icon-button" type="button" aria-label="Open menu">...</button>
+          </div>
+        </div>
+      </section>
+
+      <header class="page-header desktop-page-header">
+        <div class="page-title-wrap">
+          <h2>Customer Directory</h2>
+          <div class="page-subtitle">Manage patient records and bulk import customers via CSV.</div>
+        </div>
+        <div class="header-actions">
+          <button id="importCsvButton" class="import-btn" type="button">Bulk Import CSV</button>
+          <button id="refreshDataButton" class="secondary desktop-only" type="button">Refresh List</button>
+          <button id="logoutButton" class="secondary" type="button">Logout</button>
+        </div>
+      </header>
+
+      <div id="alertContainer" class="alert-stack"></div>
+
+      <section class="poc-metrics-grid">
+        <article class="metric-card">
+          <div class="metric-label">Total Customers</div>
+          <div class="metric-value" id="totalCustomersMetric">0</div>
+          <div class="metric-note">All patient records in the system.</div>
+        </article>
+      </section>
+
+      <section class="table-card">
+        <div class="poc-card-header">
+          <div>
+            <h3 class="poc-card-title">Patient Records</h3>
+            <div class="poc-card-subtitle" id="tableMeta">Loading customers...</div>
+          </div>
+        </div>
+
+        <div class="search-row">
+          <input id="customerSearch" class="search-input" type="search" placeholder="Search patient or phone..." style="width: 100%; max-width: 400px;">
+        </div>
+
+        <div class="table-wrap customer-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Patient Name</th>
+                <th>Phone Number</th>
+                <th>Preferred Slot</th>
+                <th>Call Type</th>
+                <th>Status</th>
+                <th>Added On</th>
+              </tr>
+            </thead>
+            <tbody id="customersTableBody">
+              <!-- Customer rows will be dynamically injected here -->
+            </tbody>
+          </table>
+        </div>
+        <div id="customerPagination"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Mobile Footer Navigation -->
+  <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
+    <a href="/admin.html" class="mobile-dock-link">Overview</a>
+    <a href="/customer-list.html" class="mobile-dock-link active">Customers</a>
+    <a href="/customers.html" class="mobile-dock-link">Calls</a>
+    <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
+  </nav>
+
+  <!-- Bulk Import Modal -->
+  <div id="bulkImportModal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="bulkImportModalTitle">
+      <div class="mobile-sheet-handle mobile-only"></div>
+      <div class="poc-card-header">
+        <div>
+          <h3 id="bulkImportModalTitle" class="poc-card-title">Bulk Import CSV</h3>
+          <div class="poc-card-subtitle">Upload a CSV file containing patient data.</div>
+        </div>
+        <button id="bulkImportModalClose" class="secondary modal-close modal-close-icon" type="button" aria-label="Close">&times;</button>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 10px;">
+          Your CSV file should have headers corresponding to customer fields:
+          <code>name, phone, preferred_slot, scheduled_date, call_type</code>
+        </p>
+        
+        <form id="bulkImportForm">
+          <div class="file-input-wrapper">
+            <input type="file" id="csvFileInput" accept=".csv" required>
+          </div>
+          <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
+            <button type="button" class="secondary" id="cancelImportBtn">Cancel</button>
+            <button type="submit" class="primary" id="submitImportBtn">Upload & Import</button>
+          </div>
+        </form>
+      </div>
+      
+      <div id="importResults" style="display: none; padding: 15px; border-radius: 8px; background: var(--bg-secondary); margin-top: 15px;">
+        <h4 style="margin: 0 0 10px; font-size: 15px;">Import Results</h4>
+        <div id="importStats" style="font-size: 14px; margin-bottom: 10px;"></div>
+        <div id="importErrors" style="font-size: 13px; color: var(--color-danger); max-height: 150px; overflow-y: auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="mobileMenuSheet" class="modal-backdrop mobile-sheet-backdrop" aria-hidden="true">
+    <div class="modal-panel mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="mobileMenuTitle">
+      <div class="mobile-sheet-handle"></div>
+      <div class="mobile-sheet-title-row">
+        <button id="mobileMenuLogoutAction" class="mobile-sheet-action" type="button">Logout</button>
+        <button id="closeMobileMenuSheet" class="secondary modal-close modal-close-icon" type="button" aria-label="Close">&times;</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app-shell.js"></script>
+  <script src="/customer-list.js"></script>
+</body>
+</html>
