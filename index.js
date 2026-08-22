@@ -18,6 +18,7 @@ const { isAdminOnlyRequest } = require('./src/authorization');
 const mountApiRoutes = require('./src/api-routes');
 const setupWebSocketBridge = require('./src/websocket-bridge');
 const startServer = require('./src/server');
+require('./src/cron/daily-reports');
 
 const app = express();
 app.set('trust proxy', 1);

@@ -217,6 +217,7 @@ router.post('/', async (req, res) => {
     const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
     const customer = await Customer.create({
       ...payload,
+      tenantId: req.tenantId,
       status: initialStatus,
       is_manual: 1
     });
@@ -252,7 +253,7 @@ router.post('/csv', upload.single('file'), async (req, res) => {
       }
       try {
         const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
-        await Customer.create({ ...payload, status: initialStatus, is_manual: 0 });
+        await Customer.create({ ...payload, tenantId: req.tenantId, status: initialStatus, is_manual: 0 });
         successCount += 1;
       } catch (err) {
         errorCount += 1;
@@ -272,6 +273,7 @@ router.get('/search', async (req, res) => {
     if (q.length < 2) return res.json([]);
     const regex = new RegExp(q, 'i');
     const customers = await Customer.find({
+      tenantId: req.tenantId,
       $or: [{ name: regex }, { phone: regex }]
     }).select('_id name phone call_type preferred_slot')
       .sort({ created_at: -1 })
@@ -287,7 +289,7 @@ router.get('/search', async (req, res) => {
 // List all customers
 router.get('/', async (req, res) => {
   try {
-    const customers = await Customer.find()
+    const customers = await Customer.find({ tenantId: req.tenantId })
       .sort({ priority_score: -1, created_at: -1 });
     res.json(customers.map(c => ({ ...c.toObject(), id: c._id })));
   } catch (error) {
@@ -298,7 +300,7 @@ router.get('/', async (req, res) => {
 // Get one customer
 router.get('/:id', async (req, res) => {
   try {
-    const customer = await Customer.findById(req.params.id);
+    const customer = await Customer.findOne({ _id: req.params.id, tenantId: req.tenantId });
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
     res.json({ ...customer.toObject(), id: customer._id });
   } catch (error) {
@@ -309,7 +311,7 @@ router.get('/:id', async (req, res) => {
 // Update customer
 router.put('/:id', async (req, res) => {
   try {
-    const existing = await Customer.findById(req.params.id);
+    const existing = await Customer.findOne({ _id: req.params.id, tenantId: req.tenantId });
     if (!existing) return res.status(404).json({ error: 'Customer not found' });
 
     const payload = normalizeCustomerPayload(req.body);
@@ -328,7 +330,7 @@ router.put('/:id', async (req, res) => {
     const nextStatus = shouldRescheduleStatus ? 'scheduled' : existing.status;
 
     await Customer.updateOne(
-      { _id: req.params.id },
+      { _id: req.params.id, tenantId: req.tenantId },
       { 
         ...payload, 
         status: nextStatus,
@@ -354,7 +356,7 @@ router.put('/:id', async (req, res) => {
 
 router.patch('/:id/workflow', async (req, res) => {
   try {
-    const existing = await Customer.findById(req.params.id);
+    const existing = await Customer.findOne({ _id: req.params.id, tenantId: req.tenantId });
     if (!existing) return res.status(404).json({ error: 'Customer not found' });
 
     const patch = {
@@ -366,7 +368,7 @@ router.patch('/:id/workflow', async (req, res) => {
       pending_follow_ups: req.body.pending_follow_ups === undefined ? existing.pending_follow_ups : String(req.body.pending_follow_ups || '').trim()
     };
 
-    await Customer.updateOne({ _id: req.params.id }, patch);
+    await Customer.updateOne({ _id: req.params.id, tenantId: req.tenantId }, patch);
     res.json({ message: 'Workflow updated successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -375,12 +377,12 @@ router.patch('/:id/workflow', async (req, res) => {
 
 router.post('/:id/retry', async (req, res) => {
   try {
-    const existing = await Customer.findById(req.params.id);
+    const existing = await Customer.findOne({ _id: req.params.id, tenantId: req.tenantId });
     if (!existing) return res.status(404).json({ error: 'Customer not found' });
 
     const retryAt = req.body.retry_at || new Date(Date.now() + (60 * 60 * 1000)).toISOString();
     await Customer.updateOne(
-      { _id: req.params.id },
+      { _id: req.params.id, tenantId: req.tenantId },
       { $set: { status: 'retry_scheduled', next_retry_at: retryAt }, $inc: { retry_count: 1 } }
     );
     res.json({ message: 'Retry scheduled successfully', retry_at: retryAt });
@@ -391,11 +393,11 @@ router.post('/:id/retry', async (req, res) => {
 
 router.put('/:id/auto-retry', async (req, res) => {
   try {
-    const existing = await Customer.findById(req.params.id);
+    const existing = await Customer.findOne({ _id: req.params.id, tenantId: req.tenantId });
     if (!existing) return res.status(404).json({ error: 'Customer not found' });
     
     const auto_retry_enabled = req.body.auto_retry_enabled ? 1 : 0;
-    await Customer.updateOne({ _id: req.params.id }, { auto_retry_enabled });
+    await Customer.updateOne({ _id: req.params.id, tenantId: req.tenantId }, { auto_retry_enabled });
     res.json({ message: 'Auto retry toggled successfully', auto_retry_enabled });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -405,7 +407,7 @@ router.put('/:id/auto-retry', async (req, res) => {
 // Delete all customers (Admin only - authorized in index.js)
 router.delete('/bulk', async (req, res) => {
   try {
-    await Customer.deleteMany({});
+    await Customer.deleteMany({ tenantId: req.tenantId });
     res.json({ message: 'All patients and call history deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -415,9 +417,9 @@ router.delete('/bulk', async (req, res) => {
 // Delete customer (Admin only - authorized in index.js)
 router.delete('/:id', async (req, res) => {
   try {
-    const existing = await Customer.findById(req.params.id);
+    const existing = await Customer.findOne({ _id: req.params.id, tenantId: req.tenantId });
     if (!existing) return res.status(404).json({ error: 'Customer not found' });
-    await Customer.deleteOne({ _id: req.params.id });
+    await Customer.deleteOne({ _id: req.params.id, tenantId: req.tenantId });
     res.json({ message: 'Customer deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });

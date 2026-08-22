@@ -7,6 +7,7 @@
 
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
+const User = require('./models/User');
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -21,8 +22,7 @@ const PROTECTED_HTML_PATHS = new Set([
   '/reports.html'
 ]);
 
-const VALID_ROLES = new Set(['ADMIN', 'AGENT']);
-const ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || 'admin').trim();
+const VALID_ROLES = new Set(['WEBMASTER', 'SUPPORT_TEAM', 'CLIENT_ADMIN', 'CLIENT_AGENT']);
 const AUTH_COOKIE_NAME = 'feedback_admin_session';
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const AUTH_CLOCK_SKEW_MS = 60 * 1000;
@@ -33,18 +33,8 @@ const AUTH_SIGNING_SECRET = CONFIGURED_AUTH_SIGNING_SECRET
 
 function getAuthConfigurationIssues(env = process.env) {
   const isProduction = String(env.NODE_ENV || '').toLowerCase() === 'production';
-  const username = String(env.ADMIN_USERNAME || '').trim();
-  const passwordHash = String(env.ADMIN_PASSWORD_HASH || '').trim();
   const signingSecret = String(env.AUTH_SIGNING_SECRET || '').trim();
   const issues = [];
-
-  if (isProduction && !username) {
-    issues.push('ADMIN_USERNAME is required in production');
-  }
-
-  if (isProduction && !/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(passwordHash)) {
-    issues.push('ADMIN_PASSWORD_HASH must be a valid bcrypt hash in production');
-  }
 
   if (isProduction && !signingSecret) {
     issues.push('AUTH_SIGNING_SECRET is required in production');
@@ -119,7 +109,7 @@ function signAuthValue(value) {
   return crypto.createHmac('sha256', AUTH_SIGNING_SECRET).update(value).digest();
 }
 
-function createAuthToken(username, role) {
+function createAuthToken(username, role, tenantId = null) {
   const normalizedUsername = String(username || '').trim();
   const normalizedRole = normalizeRole(role);
   if (!normalizedUsername || normalizedUsername.length > 100 || !normalizedRole) {
@@ -128,9 +118,10 @@ function createAuthToken(username, role) {
 
   const issuedAt = Date.now();
   const payload = Buffer.from(JSON.stringify({
-    version: 1,
+    version: 2,
     username: normalizedUsername,
     role: normalizedRole,
+    tenantId: tenantId ? tenantId.toString() : null,
     issuedAt,
     exp: issuedAt + AUTH_SESSION_TTL_MS,
     nonce: crypto.randomBytes(16).toString('base64url')
@@ -174,11 +165,11 @@ function readAuthSession(req) {
     const username = String(session?.username || '').trim();
     const issuedAt = Number(session?.issuedAt);
     const expiresAt = Number(session?.exp);
+    const tenantId = session?.tenantId || null;
     const validLifetime = expiresAt > issuedAt && expiresAt - issuedAt <= AUTH_SESSION_TTL_MS;
 
     if (
-      session?.version !== 1
-      || !username
+      !username
       || username.length > 100
       || !role
       || !Number.isFinite(issuedAt)
@@ -191,7 +182,7 @@ function readAuthSession(req) {
       return null;
     }
 
-    return { username, role, issuedAt, exp: expiresAt };
+    return { username, role, tenantId, issuedAt, exp: expiresAt };
   } catch (error) {
     return null;
   }
@@ -325,21 +316,36 @@ function requireRole(...allowedRoles) {
   };
 }
 
+function requireTenantAccess(req, res, next) {
+  const session = req.adminSession;
+  if (!session) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  if (session.role === 'WEBMASTER' || session.role === 'SUPPORT_TEAM') {
+    return next();
+  }
+
+  if (session.tenantId) {
+    // Inject tenantId into req for easy filtering in downstream controllers
+    req.tenantId = session.tenantId;
+    return next();
+  }
+
+  return res.status(403).json({ error: 'Forbidden: No tenant context' });
+}
+
 async function verifyCredentials(username, password) {
   const normalizedUsername = String(username || '').trim();
   if (!normalizedUsername || !password) {
     return { success: false };
   }
 
-  const { dbGet } = require('../db');
   try {
-    const user = await dbGet(
-      'SELECT username, password_hash, role FROM users WHERE username = ?',
-      [normalizedUsername]
-    );
+    const user = await User.findOne({ username: normalizedUsername });
     const role = normalizeRole(user?.role);
     if (user?.password_hash && role && await bcrypt.compare(String(password), user.password_hash)) {
-      return { success: true, username: user.username, role };
+      return { success: true, username: user.username, role, tenantId: user.tenantId };
     }
     return { success: false };
   } catch (error) {
@@ -364,7 +370,7 @@ async function basicAuth(req, res, next) {
 
   const authResult = await verifyCredentials(login, password);
   if (authResult.success) {
-    req.adminSession = { username: authResult.username, role: authResult.role };
+    req.adminSession = { username: authResult.username, role: authResult.role, tenantId: authResult.tenantId };
     return next();
   }
 
@@ -375,7 +381,6 @@ async function basicAuth(req, res, next) {
 module.exports = {
   PROTECTED_HTML_PATHS,
   VALID_ROLES,
-  ADMIN_USERNAME,
   AUTH_COOKIE_NAME,
   AUTH_SESSION_TTL_MS,
   getAuthConfigurationIssues,
@@ -387,6 +392,7 @@ module.exports = {
   clearAuthCookie,
   requireAdminAuth,
   requireRole,
+  requireTenantAccess,
   basicAuth,
   verifyCredentials,
   createMediaToken,

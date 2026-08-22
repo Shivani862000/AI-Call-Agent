@@ -7,6 +7,8 @@
 
 const fs = require('fs');
 const customersRouter = require('../routes/customers');
+const tenantsRouter = require('../routes/tenants');
+const usersRouter = require('../routes/users');
 const clientsRouter = require('../routes/clients');
 const campaignsRouter = require('../routes/campaigns');
 const feedbackRouter = require('../routes/feedback');
@@ -34,6 +36,9 @@ const {
 const {
   readAuthSession,
   setAuthCookie,
+  requireAdminAuth,
+  requireRole,
+  requireTenantAccess,
   clearAuthCookie,
   createAuthToken,
   createMediaToken,
@@ -132,25 +137,29 @@ module.exports = function mountApiRoutes(app) {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const token = createAuthToken(username, authResult.role);
+    const token = createAuthToken(username, authResult.role, authResult.tenantId);
     setAuthCookie(req, res, token);
-    logger.info('USER_LOGIN', { user: username, role: authResult.role });
+    logger.info('USER_LOGIN', { user: username, role: authResult.role, tenantId: authResult.tenantId });
     return res.json({
       success: true,
       username,
-      role: authResult.role
+      role: authResult.role,
+      tenantId: authResult.tenantId
     });
   });
 
   app.post('/api/auth/logout', (req, res) => {
     const session = readAuthSession(req);
     clearAuthCookie(req, res);
-    logger.info('USER_LOGOUT', { user: session?.username || req.adminSession?.username || 'admin' });
+    logger.info('USER_LOGOUT', { user: session?.username || req.adminSession?.username || 'unknown' });
     return res.json({ success: true });
   });
 
-  app.use('/api/customers', customersRouter);
-  app.use('/api/clients', clientsRouter);
+  app.use('/api/tenants', requireRole('WEBMASTER'), tenantsRouter);
+  app.use('/api/users', requireTenantAccess, usersRouter);
+  
+  app.use('/api/customers', requireTenantAccess, customersRouter);
+  app.use('/api/clients', requireTenantAccess, clientsRouter);
   app.use('/api/campaigns', campaignsRouter);
   app.use('/api/feedback', feedbackRouter);
   app.use('/api/support-tickets', createSupportTicketsRouter({ dbRun, dbGet, dbAll, notifyNewTicket: createSlackSupportNotifier({ webhookUrl: process.env.SLACK_SUPPORT_WEBHOOK_URL }) }));

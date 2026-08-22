@@ -22,6 +22,11 @@ async function loadCustomerData() {
   }
 }
 
+function formatLanguage(langCode) {
+  const map = { hi: 'Hindi', en: 'English', mixed: 'Mixed', hinglish: 'Hinglish' };
+  return map[langCode?.toLowerCase()] || 'Hindi';
+}
+
 let currentCustomerPage = 1;
 
 function renderCustomerTable(customers) {
@@ -46,7 +51,7 @@ function renderCustomerTable(customers) {
       <td><strong>${AppShell.escapeHtml(customer.name)}</strong></td>
       <td>${AppShell.escapeHtml(customer.phone)}</td>
       <td>${AppShell.escapeHtml(customer.preferred_slot || '--')}</td>
-      <td><span class="status-badge active">${AppShell.escapeHtml(customer.preferred_language || 'hindi')}</span></td>
+      <td><span class="status-badge active">${AppShell.escapeHtml(formatLanguage(customer.preferred_language))}</span></td>
     `;
     tbody.appendChild(tr);
   });
