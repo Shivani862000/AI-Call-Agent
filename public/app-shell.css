@@ -6153,13 +6153,9 @@ a[href="/incoming-calls.html"] {
     overflow-wrap: anywhere;
   }
 
-  .customers-page .mobile-call-actions .mobile-more-button {
-    grid-column: 1 / -1;
-  }
-
   .customers-page #mobileFloatingNewCallButton.mobile-floating-cta {
-    left: auto;
-    right: max(14px, env(safe-area-inset-right));
+    left: max(14px, env(safe-area-inset-left));
+    right: auto;
     bottom: calc(68px + env(safe-area-inset-bottom));
     transform: none;
     width: 150px;

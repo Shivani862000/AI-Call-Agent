@@ -1,1 +1,49 @@
-.support-launcher{position:fixed;right:20px;bottom:24px;z-index:1000;border:0;border-radius:999px;padding:12px 16px;background:#172b4d;color:#fff;font:600 14px system-ui;box-shadow:0 6px 20px #172b4d44;cursor:pointer}.support-dialog{width:min(440px,calc(100vw - 28px));border:0;border-radius:16px;padding:0;box-shadow:0 20px 70px #0005}.support-dialog form{padding:24px;display:grid;gap:14px}.support-dialog h2{margin:0;color:#172b4d}.support-help,.support-context small{margin:0;color:#52606d;font-size:13px}.support-close{position:absolute;right:12px;top:10px;border:0;background:transparent;font-size:24px}.support-types{display:flex;gap:8px}.support-types button{flex:1;padding:10px;border:1px solid #cbd5df;background:#fff;border-radius:8px}.support-types button[aria-pressed=true]{border-color:#2657d8;background:#eaf0ff;color:#1746be;font-weight:700}.support-dialog label{display:grid;gap:6px;font-weight:600}.support-dialog textarea{min-height:90px;padding:10px;border:1px solid #cbd5df;border-radius:8px;font:inherit;resize:vertical}.support-context{display:grid;gap:5px;padding:12px;border-radius:8px;background:#f3f6fa;font-size:13px}.support-context-value{color:#52606d}.support-submit{padding:12px;border:0;border-radius:8px;background:#2657d8;color:#fff;font-weight:700}.support-message{min-height:18px;margin:0;color:#2657d8;font-size:13px}@media(max-width:640px){.support-launcher{bottom:76px;right:14px;padding:14px}.support-launcher span{display:none}}
+.support-launcher {
+  position: fixed;
+  right: 20px;
+  bottom: 24px;
+  z-index: 1000;
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 16px;
+  background: #172b4d;
+  color: #fff;
+  font: 600 14px system-ui;
+  box-shadow: 0 6px 20px #172b4d44;
+  cursor: pointer;
+}
+.support-icon { width: 18px; height: 18px; vertical-align: middle; }
+.support-dialog { width: min(440px, calc(100vw - 28px)); border: 0; border-radius: 16px; padding: 0; box-shadow: 0 20px 70px #0005; }
+.support-dialog form { padding: 24px; display: grid; gap: 14px; }
+.support-dialog h2 { margin: 0; padding-right: 42px; color: #172b4d; }
+.support-help, .support-context small { margin: 0; color: #52606d; font-size: 13px; }
+.support-close { position: absolute; right: 12px; top: 10px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; display: grid; place-items: center; color: #172b4d; font-size: 24px; line-height: 1; cursor: pointer; }
+.support-close:hover, .support-close:focus-visible { background: #edf4ff; outline: 2px solid #2657d8; outline-offset: 1px; }
+.support-types { display: flex; gap: 8px; }
+.support-types button { flex: 1; padding: 10px; border: 1px solid #cbd5df; background: #fff; border-radius: 8px; }
+.support-types button[aria-pressed=true] { border-color: #2657d8; background: #eaf0ff; color: #1746be; font-weight: 700; }
+.support-dialog label { display: grid; gap: 6px; font-weight: 600; }
+.support-dialog textarea { min-height: 90px; padding: 10px; border: 1px solid #cbd5df; border-radius: 8px; font: inherit; resize: vertical; }
+.support-context { display: grid; gap: 5px; padding: 12px; border-radius: 8px; background: #f3f6fa; font-size: 13px; }
+.support-context-value { color: #52606d; }
+.support-submit { min-height: 48px; padding: 12px; border: 0; border-radius: 8px; background: #2657d8; color: #fff; font-weight: 700; }
+.support-message { min-height: 18px; margin: 0; color: #2657d8; font-size: 13px; }
+
+@media(max-width:1024px) {
+  .support-launcher { bottom: 76px; right: 14px; width: 45px; height: 45px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+  .support-launcher .support-icon { width: 22px; height: 22px; }
+  .support-launcher span { display: none; }
+  .support-dialog { width: min(520px, calc(100vw - 20px)); max-height: calc(100dvh - 20px); margin: 10px; border-radius: 20px; }
+  .support-dialog form { max-height: calc(100dvh - 20px); padding: 20px; gap: 12px; overflow-y: auto; box-sizing: border-box; }
+  .support-dialog h2 { font-size: 22px; line-height: 1.15; }
+  .support-help { line-height: 1.4; }
+  .support-types button { min-height: 42px; padding: 8px 5px; font-size: 13px; }
+  .support-dialog textarea { min-height: 84px; }
+  .support-context { padding: 10px; }
+}
+
+@media(max-width:480px) {
+  .support-dialog form { padding: 18px; }
+  .support-types { gap: 6px; }
+  .support-types button { font-size: 12px; }
+}

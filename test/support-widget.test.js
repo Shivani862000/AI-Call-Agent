@@ -10,6 +10,37 @@ test('support popup close control never submits the required description form', 
   assert.match(widget, /class="support-close" type="button"/);
 });
 
+test('mobile and iPad support launcher is a compact circular headphones button without the legacy chart glyph', () => {
+  const widget = fs.readFileSync(path.join(__dirname, '..', 'public', 'support-widget.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'support-widget.css'), 'utf8');
+  assert.doesNotMatch(widget, /◔/);
+  assert.match(widget, /class="support-icon"/);
+  assert.match(widget, /aria-label', 'Open support'/);
+  assert.match(css, /@media\(max-width:1024px\)\s*\{\s*\.support-launcher\s*\{[^}]*width:\s*45px;[^}]*height:\s*45px;[^}]*border-radius:\s*50%/);
+});
+
+test('mobile Customers New Call control stays left of the right-side support launcher', () => {
+  const shellCss = fs.readFileSync(path.join(__dirname, '..', 'public', 'app-shell.css'), 'utf8');
+  assert.match(shellCss, /\.customers-page #mobileFloatingNewCallButton\.mobile-floating-cta\s*\{[^}]*left:\s*max\(14px, env\(safe-area-inset-left\)\);[^}]*right:\s*auto;/);
+});
+
+test('mobile Customers call-card actions keep Analysis and More in the same row', () => {
+  const shellCss = fs.readFileSync(path.join(__dirname, '..', 'public', 'app-shell.css'), 'utf8');
+  const actionsRule = shellCss.match(/\.customers-page \.mobile-call-actions \{[^}]*\}/)?.[0] || '';
+  const moreRules = Array.from(shellCss.matchAll(/\.customers-page \.mobile-call-actions \.mobile-more-button \{[^}]*\}/g), (match) => match[0]).join('\n');
+
+  assert.match(actionsRule, /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.doesNotMatch(moreRules, /grid-column/);
+});
+
+test('mobile support dialog protects the title, fits the viewport, and scrolls its form safely', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'support-widget.css'), 'utf8');
+  assert.match(css, /\.support-dialog\s+h2\s*\{[^}]*padding-right:\s*42px/);
+  assert.match(css, /@media\(max-width:1024px\)\s*\{[\s\S]*?\.support-dialog\s*\{[^}]*max-height:\s*calc\(100dvh - 20px\)/);
+  assert.match(css, /\.support-dialog\s+form\s*\{[^}]*overflow-y:\s*auto/);
+  assert.match(css, /\.support-close\s*\{[^}]*width:\s*36px;[^}]*height:\s*36px/);
+});
+
 test('admin session refreshes navigation after adding the Support Tickets link', () => {
   const shell = fs.readFileSync(path.join(__dirname, '..', 'public', 'app-shell.js'), 'utf8');
   assert.match(shell, /NAV_ITEMS\.push\(\{ href: '\/support-tickets\.html'/);
