@@ -3,7 +3,18 @@ let allCustomers = [];
 async function loadCustomerData() {
   try {
     const response = await AppShell.fetchJson(`${AppShell.API_BASE}/customers`);
-    allCustomers = response;
+    
+    // Deduplicate by phone number (keep only the first occurrence, which is the most recent due to backend ordering)
+    const seenPhones = new Set();
+    allCustomers = response.filter(customer => {
+      const normalizedPhone = (customer.phone || '').trim().replace(/\D/g, '').slice(-10);
+      if (seenPhones.has(normalizedPhone)) {
+        return false;
+      }
+      seenPhones.add(normalizedPhone);
+      return true;
+    });
+
     renderCustomerTable(allCustomers);
   } catch (error) {
     console.error('Error loading customers:', error);
