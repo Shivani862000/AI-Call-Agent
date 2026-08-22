@@ -51,13 +51,44 @@
     return payload;
   }
 
+  function addAdminSupportNavigation() {
+    const currentPath = window.location.pathname || '/admin.html';
+    const navigationTargets = [
+      { selector: '.nav-list', className: 'nav-link', label: 'Support Tickets' },
+      { selector: '.mobile-dock', className: 'mobile-dock-link', label: 'Support' }
+    ];
+
+    navigationTargets.forEach(({ selector, className, label }) => {
+      const navigation = document.querySelector(selector);
+      if (!navigation || navigation.querySelector('a[href="/support-tickets.html"]')) return;
+
+      const link = document.createElement('a');
+      link.href = '/support-tickets.html';
+      link.className = className;
+      link.textContent = label;
+      if (currentPath === '/support-tickets.html') {
+        link.classList.add('active');
+        link.setAttribute('aria-current', 'page');
+      }
+      navigation.appendChild(link);
+    });
+
+    document.body.classList.add('admin-support-navigation');
+  }
+
   async function ensureAuthenticatedSession() {
     const session = await fetchJson('/api/auth/session');
     if (session.role === 'AGENT') {
       document.body.classList.add('role-agent');
     }
     window.AppShell.session = session;
-    if (session.role === 'ADMIN' && !NAV_ITEMS.some((item) => item.href === '/support-tickets.html')) NAV_ITEMS.push({ href: '/support-tickets.html', label: 'Support Tickets', shortLabel: 'Support' });
+    if (session.role === 'ADMIN') {
+      if (!NAV_ITEMS.some((item) => item.href === '/support-tickets.html')) {
+        NAV_ITEMS.push({ href: '/support-tickets.html', label: 'Support Tickets', shortLabel: 'Support' });
+        buildMobileTabbar();
+      }
+      addAdminSupportNavigation();
+    }
     return session;
   }
 

@@ -2103,6 +2103,10 @@ body.poc-page .search-row .table-filter.desktop-only {
     border-radius: 16px;
   }
 
+  body.admin-support-navigation .mobile-dock {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .mobile-dock-link {
     display: inline-flex;
     align-items: center;
