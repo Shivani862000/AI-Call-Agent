@@ -110,15 +110,13 @@
         </div>
 
         <div class="table-wrap customer-table-wrap">
-          <table>
+          <table class="saas-table">
             <thead>
               <tr>
                 <th>Patient Name</th>
                 <th>Phone Number</th>
                 <th>Preferred Slot</th>
-                <th>Call Type</th>
-                <th>Status</th>
-                <th>Added On</th>
+                <th>Language</th>
               </tr>
             </thead>
             <tbody id="customersTableBody">
@@ -141,37 +139,46 @@
 
   <!-- Bulk Import Modal -->
   <div id="bulkImportModal" class="modal-backdrop" aria-hidden="true">
-    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="bulkImportModalTitle">
-      <div class="mobile-sheet-handle mobile-only"></div>
-      <div class="poc-card-header">
+    <div class="saas-modal-panel schedule-modal" role="dialog" aria-modal="true" aria-labelledby="bulkImportModalTitle">
+      <div class="saas-modal-header">
         <div>
-          <h3 id="bulkImportModalTitle" class="poc-card-title">Bulk Import CSV</h3>
-          <div class="poc-card-subtitle">Upload a CSV file containing patient data.</div>
+          <h3 id="bulkImportModalTitle" class="saas-modal-title">Bulk Import CSV</h3>
+          <div class="saas-modal-subtitle">Upload multiple patients at once.</div>
         </div>
-        <button id="bulkImportModalClose" class="secondary modal-close modal-close-icon" type="button" aria-label="Close">&times;</button>
+        <button id="bulkImportModalClose" class="saas-modal-close" type="button" aria-label="Close">
+          <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
       </div>
 
-      <div style="margin-bottom: 20px;">
-        <p>Upload a CSV file with patient records. Ensure it has <code>name</code>, <code>phone</code>, <code>scheduled_date</code>, and <code>preferred_slot</code> columns.</p>
-        <p><a href="/sample-customers.csv" download="sample-customers.csv" style="color: var(--color-primary); font-size: 14px; text-decoration: underline;">Download Sample CSV</a></p>
+      <div class="saas-modal-body">
+        
+        <div style="margin-bottom: 24px; text-align: center;">
+          <p style="margin: 0 0 12px 0; font-size: 15px; color: var(--text-main);">
+            Upload a CSV file to add multiple patient records at once. Ensure your file contains headers for <code>name</code>, <code>phone</code>, <code>preferred_slot</code>, and <code>preferred_language</code>.
+          </p>
+          <a href="/sample-customers.csv" download="sample-customers.csv" style="color: var(--color-primary); font-weight: 500; font-size: 14px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            Download Sample CSV
+          </a>
+        </div>
             
         <form id="bulkImportForm">
-          <div class="saas-field" style="margin-top: 16px;">
-            <div class="file-input-wrapper">
-              <input type="file" id="csvFileInput" accept=".csv" required>
+          <div class="saas-field">
+            <div style="border: 1px dashed var(--border-strong); border-radius: 8px; padding: 24px; text-align: center; background: #fafafa;">
+              <input type="file" id="csvFileInput" accept=".csv" required style="font-size: 14px; max-width: 100%;">
             </div>
           </div>
-          <div class="modal-actions" style="margin-top: 20px;">
-            <button type="button" class="btn secondary" id="cancelImportBtn">Cancel</button>
-            <button type="submit" class="btn primary" id="submitImportBtn">Upload & Import</button>
+          
+          <div id="importResults" style="display: none; margin-top: 16px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;">
+            <div id="importStats" style="font-size: 14px; margin-bottom: 8px; font-weight: 500;"></div>
+            <div id="importErrors" style="font-size: 13px; color: var(--color-danger); max-height: 120px; overflow-y: auto;"></div>
+          </div>
+
+          <div class="saas-modal-footer" style="padding: 24px 0 0 0; border-top: none;">
+            <button type="button" class="btn-ghost-saas" id="cancelImportBtn">Cancel</button>
+            <button type="submit" class="btn-primary-saas" id="submitImportBtn">Upload & Import</button>
           </div>
         </form>
-      </div>
-      
-      <div id="importResults" style="display: none; padding: 15px; border-radius: 8px; background: var(--bg-secondary); margin-top: 15px;">
-        <h4 style="margin: 0 0 10px; font-size: 15px;">Import Results</h4>
-        <div id="importStats" style="font-size: 14px; margin-bottom: 10px;"></div>
-        <div id="importErrors" style="font-size: 13px; color: var(--color-danger); max-height: 150px; overflow-y: auto;"></div>
       </div>
     </div>
   </div>

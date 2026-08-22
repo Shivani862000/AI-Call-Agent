@@ -42,15 +42,11 @@ function renderCustomerTable(customers) {
 
   paged.items.forEach(customer => {
     const tr = document.createElement('tr');
-    const createdDate = new Date(customer.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    
     tr.innerHTML = `
       <td><strong>${AppShell.escapeHtml(customer.name)}</strong></td>
       <td>${AppShell.escapeHtml(customer.phone)}</td>
       <td>${AppShell.escapeHtml(customer.preferred_slot || '--')}</td>
-      <td>${AppShell.escapeHtml(customer.call_type || 'REVIEW_CALL')}</td>
-      <td><span class="status-badge ${AppShell.escapeHtml(customer.status)}">${AppShell.escapeHtml(customer.status || 'pending')}</span></td>
-      <td>${createdDate}</td>
+      <td><span class="status-badge active">${AppShell.escapeHtml(customer.preferred_language || 'hindi')}</span></td>
     `;
     tbody.appendChild(tr);
   });
