@@ -6,6 +6,7 @@
 'use strict';
 
 const ADMIN_ONLY_PREFIXES = [
+  '/api/support-tickets',
   '/api/agents',
   '/api/feedback',
   '/api/reports',
@@ -16,6 +17,7 @@ const ADMIN_ONLY_PREFIXES = [
 ];
 
 const ADMIN_ONLY_HTML = new Set([
+  '/support-tickets.html',
   '/feedback.html',
   '/feedback-analysis.html',
   '/reports.html'
@@ -24,6 +26,7 @@ const ADMIN_ONLY_HTML = new Set([
 function isAdminOnlyRequest(req) {
   const method = String(req.method || 'GET').toUpperCase();
   const requestPath = String(req.path || '');
+  if (method === 'POST' && requestPath === '/api/support-tickets') return false;
 
   if (requestPath === '/api/icallmate/callback') {
     return false;

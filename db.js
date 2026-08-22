@@ -402,6 +402,27 @@ function runMigrations() {
     await addColumnIfMissing('feedback', 'source', "VARCHAR(20) DEFAULT 'manual'");
 
     await run(`
+      CREATE TABLE IF NOT EXISTS support_tickets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_id TEXT NOT NULL UNIQUE,
+        type TEXT NOT NULL CHECK (type IN ('BUG','IDEA','QUESTION')),
+        description TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'NEW' CHECK (status IN ('NEW','IN_PROGRESS','RESOLVED')),
+        reporter_username TEXT NOT NULL,
+        reporter_role TEXT NOT NULL CHECK (reporter_role IN ('ADMIN','AGENT')),
+        page_url TEXT NOT NULL,
+        page_title TEXT NOT NULL,
+        context_json TEXT NOT NULL,
+        assignee_username TEXT,
+        internal_update TEXT,
+        resolution_note TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    await run('CREATE INDEX IF NOT EXISTS support_tickets_status_updated_idx ON support_tickets(status, updated_at DESC)');
+
+    await run(`
       UPDATE calls
          SET status = outcome
        WHERE COALESCE(status, 'pending') = 'pending'

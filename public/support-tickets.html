@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Support Tickets</title>
+  <link rel="stylesheet" href="/app-shell.css">
+  <style>
+    .tickets { padding: 24px; max-width: 1100px; margin: 0 auto; }
+    .ticket { padding: 16px; border: 1px solid #d9e1e8; border-radius: 10px; margin: 10px 0; }
+    .ticket h3 { margin: 0 0 6px; }
+    .ticket small { color: #52606d; }
+    .ticket select, .ticket textarea, .ticket input { width: 100%; margin-top: 8px; padding: 9px; }
+    .ticket button { margin-top: 8px; padding: 9px 14px; }
+    .ticket { scroll-margin-top: 118px; }
+    .ticket-jump-menu { position: sticky; top: 16px; z-index: 4; display: flex; align-items: center; gap: 12px; margin: 0 0 16px; padding: 12px; border: 1px solid #d9e1e8; border-radius: 12px; background: rgba(255, 255, 255, 0.96); box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); }
+    .ticket-jump-label { flex: 0 0 auto; color: #52606d; font-size: 13px; font-weight: 700; }
+    .ticket-jump-list { display: flex; flex: 1; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+    .ticket-jump-link { flex: 0 0 auto; padding: 8px 10px; border-radius: 8px; background: #edf4ff; color: #1d4ed8; font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+    .ticket-jump-link:hover, .ticket-jump-link:focus-visible { background: #dbeafe; outline: 2px solid #2563eb; outline-offset: 2px; }
+    @media (max-width: 640px) { .ticket-jump-menu { position: static; align-items: flex-start; flex-direction: column; gap: 8px; } .ticket-jump-list { width: 100%; } }
+  </style>
+</head>
+<body class="poc-page support-tickets-page">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-mark">PL</div>
+          <div class="brand-copy">
+            <h1>Path Lab Console</h1>
+            <p>Patient follow-up operations</p>
+          </div>
+        </div>
+        <nav class="nav-list">
+          <a href="/admin.html" class="nav-link">Overview</a>
+          <a href="/customers.html" class="nav-link">Outbound Calls</a>
+          <a href="/feedback.html" class="nav-link">Feedback</a>
+        </nav>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <section class="tickets">
+        <header class="page-header desktop-page-header">
+          <div class="page-title-wrap">
+            <h2>Support Tickets</h2>
+            <div class="page-subtitle">Review submitted issues and manage ticket updates.</div>
+          </div>
+        </header>
+        <nav id="ticketJumpMenu" class="ticket-jump-menu" aria-label="Jump to ticket" hidden></nav>
+        <div id="tickets">Loading…</div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
+    <a href="/admin.html" class="mobile-dock-link">Overview</a>
+    <a href="/customers.html" class="mobile-dock-link">Outbound</a>
+    <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
+  </nav>
+
+  <script src="/app-shell.js"></script>
+  <script>
+    function renderTicketJumpMenu(tickets) {
+      const menu = document.getElementById('ticketJumpMenu');
+      menu.replaceChildren();
+      menu.hidden = tickets.length === 0;
+      if (!tickets.length) return;
+
+      const label = document.createElement('span');
+      label.className = 'ticket-jump-label';
+      label.textContent = 'Jump to ticket';
+      const list = document.createElement('div');
+      list.className = 'ticket-jump-list';
+
+      tickets.forEach((ticket) => {
+        const link = document.createElement('a');
+        link.className = 'ticket-jump-link';
+        link.href = `#ticket-${ticket.ticket_id}`;
+        link.textContent = ticket.ticket_id;
+        link.title = ticket.description;
+        list.appendChild(link);
+      });
+
+      menu.append(label, list);
+    }
+
+    async function load() {
+      const root = document.getElementById('tickets');
+      try {
+        const data = await AppShell.fetchJson('/api/support-tickets');
+        renderTicketJumpMenu(data.tickets);
+        root.innerHTML = data.tickets.map((ticket) => `
+          <article id="ticket-${AppShell.escapeHtml(ticket.ticket_id)}" class="ticket" tabindex="-1">
+            <h3>${AppShell.escapeHtml(ticket.ticket_id)} · ${AppShell.escapeHtml(ticket.description)}</h3>
+            <small>${AppShell.escapeHtml(ticket.status)} · ${AppShell.escapeHtml(ticket.reporter_username)} · ${AppShell.escapeHtml(ticket.page_url)}</small>
+            <select data-id="${ticket.ticket_id}">
+              <option ${ticket.status === 'NEW' ? 'selected' : ''}>NEW</option>
+              <option ${ticket.status === 'IN_PROGRESS' ? 'selected' : ''}>IN_PROGRESS</option>
+              <option ${ticket.status === 'RESOLVED' ? 'selected' : ''}>RESOLVED</option>
+            </select>
+            <input placeholder="Assignee" value="${AppShell.escapeHtml(ticket.assignee_username || '')}">
+            <textarea placeholder="Internal update">${AppShell.escapeHtml(ticket.internal_update || '')}</textarea>
+            <textarea placeholder="Resolution note">${AppShell.escapeHtml(ticket.resolution_note || '')}</textarea>
+            <button type="button" onclick="save(this)">Save update</button>
+          </article>
+        `).join('') || 'No tickets yet.';
+      } catch (error) {
+        document.getElementById('ticketJumpMenu').hidden = true;
+        root.textContent = error.message;
+      }
+    }
+
+    async function save(button) {
+      const card = button.closest('.ticket');
+      const [status, assigneeUsername, internalUpdate, resolutionNote] = [...card.querySelectorAll('select,input,textarea')].map((element) => element.value);
+      await AppShell.fetchJson(`/api/support-tickets/${card.querySelector('select').dataset.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, assigneeUsername, internalUpdate, resolutionNote })
+      });
+      load();
+    }
+
+    async function initialize() {
+      await AppShell.ensureAuthenticatedSession();
+      await load();
+    }
+
+    initialize();
+  </script>
+</body>
+</html>
