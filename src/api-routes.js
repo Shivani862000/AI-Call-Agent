@@ -100,7 +100,7 @@ const logger = require('../services/system-logger');
 const webmasterAuthorization = createWebmasterAuthorization({ UserModel: User, TenantModel: Tenant });
 const { recordFilterFromRequest } = require('./webmaster/lifecycle');
 const { createLegacyCallScope, tenantVisibleRows } = require('./legacy-call-scope');
-const { outboundCallContextRepository } = require('./outbound-call-context');
+const { outboundCallContextCoordinator } = require('./outbound-call-context');
 
 module.exports = function mountApiRoutes(app) {
   app.get('/health', (req, res) => {
@@ -280,26 +280,25 @@ module.exports = function mountApiRoutes(app) {
         `ICALLMATE_IVR_TEMPLATE_ID=${process.env.ICALLMATE_IVR_TEMPLATE_ID || ''} ` +
         `TZ=${process.env.TZ || ''}`
       );
-      const call = await placeRealtimeCall({
-        customerPhone,
-        customerName: customer.name || customerName,
-        customerId: customer.id,
-        clientName,
-        agentId: agentConfig?.id || null,
-        tenantId: req.tenantId,
-        callType
-      });
-
-      const result = await outboundCallContextRepository.persistInitiatedCall({
+      const placement = await outboundCallContextCoordinator.initiate({
         tenantId: req.tenantId,
         customerId: customer.id,
+        customerPhone: customer.phone || customerPhone,
         agentId: agentConfig?.id || null,
-        providerCallId: call.sid,
         callType,
-        clientName,
         source: 'icallmate',
-        providerPayload: { request: call.requestPayload || null, response: call.raw || null }
+        placeProviderCall: () => placeRealtimeCall({
+          customerPhone: customer.phone || customerPhone,
+          customerName: customer.name || customerName,
+          customerId: customer.id,
+          clientName,
+          agentId: agentConfig?.id || null,
+          tenantId: req.tenantId,
+          callType
+        })
       });
+      const call = placement.providerCall;
+      const result = placement.context;
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
       
       const callsTodayRow = await dbGet(
@@ -326,7 +325,15 @@ module.exports = function mountApiRoutes(app) {
         agentId: agentConfig?.id || null,
         trigger: '/call/start'
       });
-      res.json({ success: true, sid: call.sid, callId: result.id, customerId: customer.id, agentId: agentConfig?.id || null });
+      res.status(placement.persistence.retryable ? 202 : 200).json({
+        success: true,
+        sid: call.sid,
+        callId: result.id,
+        customerId: customer.id,
+        agentId: agentConfig?.id || null,
+        contextPersistence: placement.persistence.state,
+        contextRetryable: placement.persistence.retryable
+      });
     } catch (error) {
       if (customer?.id) {
         try {
@@ -556,26 +563,25 @@ module.exports = function mountApiRoutes(app) {
         return res.status(409).json({ error: 'A call for this customer is already in progress' });
       }
 
-      const call = await placeRealtimeCall({
+      const placement = await outboundCallContextCoordinator.initiate({
+        tenantId: req.tenantId,
+        customerId: customer.id,
         customerPhone: customer.phone,
-        customerName: customer.name,
-        customerId: customer.id,
-        clientName: agentConfig?.client_name || CLIENT_NAME,
         agentId: agentConfig?.id || null,
-        tenantId: req.tenantId,
-        callType
-      });
-
-      const result = await outboundCallContextRepository.persistInitiatedCall({
-        tenantId: req.tenantId,
-        customerId: customer.id,
-        agentId: agentConfig?.id || null,
-        providerCallId: call.sid,
         callType,
-        clientName: agentConfig?.client_name || CLIENT_NAME,
         source: 'icallmate',
-        providerPayload: { request: call.requestPayload || null, response: call.raw || null }
+        placeProviderCall: () => placeRealtimeCall({
+          customerPhone: customer.phone,
+          customerName: customer.name,
+          customerId: customer.id,
+          clientName: agentConfig?.client_name || CLIENT_NAME,
+          agentId: agentConfig?.id || null,
+          tenantId: req.tenantId,
+          callType
+        })
       });
+      const call = placement.providerCall;
+      const result = placement.context;
 
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
       
@@ -602,7 +608,15 @@ module.exports = function mountApiRoutes(app) {
         agentId: agentConfig?.id || null,
         trigger: '/api/calls/initiate/:customerId'
       });
-      res.json({ message: 'Call initiated', callId: result.id, sid: call.sid, agentId: agentConfig?.id || null, agentName: agentConfig?.name || null });
+      res.status(placement.persistence.retryable ? 202 : 200).json({
+        message: 'Call initiated',
+        callId: result.id,
+        sid: call.sid,
+        agentId: agentConfig?.id || null,
+        agentName: agentConfig?.name || null,
+        contextPersistence: placement.persistence.state,
+        contextRetryable: placement.persistence.retryable
+      });
     } catch (error) {
       if (customer?.id) {
         try {
@@ -1033,29 +1047,28 @@ module.exports = function mountApiRoutes(app) {
         return res.status(409).json({ error: 'A call for this customer is already in progress' });
       }
 
-      const call = await initiateCall(phone, customer.id, {
-        provider: 'masterpost',
-        campid,
-        leadid: leadId,
-        wsurl,
-        callbackapi,
-        customerName: customer.name || customerName,
-        clientName: agentConfig?.client_name || CLIENT_NAME,
-        agentId: agentConfig?.id || null,
-        tenantId: req.tenantId,
-        callType
-      });
-
-      const result = await outboundCallContextRepository.persistInitiatedCall({
+      const placement = await outboundCallContextCoordinator.initiate({
         tenantId: req.tenantId,
         customerId: customer.id,
+        customerPhone: customer.phone || phone,
         agentId: agentConfig?.id || null,
-        providerCallId: call.sid,
         callType,
-        clientName: agentConfig?.client_name || CLIENT_NAME,
         source: 'icallmate-masterpost',
-        providerPayload: { request: call.requestPayload || payload, response: call.raw || null }
+        placeProviderCall: () => initiateCall(customer.phone || phone, customer.id, {
+          provider: 'masterpost',
+          campid,
+          leadid: leadId,
+          wsurl,
+          callbackapi,
+          customerName: customer.name || customerName,
+          clientName: agentConfig?.client_name || CLIENT_NAME,
+          agentId: agentConfig?.id || null,
+          tenantId: req.tenantId,
+          callType
+        })
       });
+      const call = placement.providerCall;
+      const result = placement.context;
 
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
       logger.info('CALL_STARTED', {
@@ -1075,7 +1088,7 @@ module.exports = function mountApiRoutes(app) {
         trigger: '/api/icallmate/outgoing-call'
       });
 
-      res.json({
+      res.status(placement.persistence.retryable ? 202 : 200).json({
         success: true,
         message: 'Outgoing call initiated',
         sid: call.sid,
@@ -1083,6 +1096,8 @@ module.exports = function mountApiRoutes(app) {
         customerId: customer.id,
         agentId: agentConfig?.id || null,
         provider: 'icallmate-masterpost',
+        contextPersistence: placement.persistence.state,
+        contextRetryable: placement.persistence.retryable,
         payload
       });
     } catch (error) {

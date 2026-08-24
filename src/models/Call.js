@@ -2,7 +2,25 @@ const mongoose = require('mongoose');
 
 const callSchema = new mongoose.Schema({
   tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
-  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
+  customerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Customer',
+    default: null,
+    required() { return !this.legacy_customer_ref_hash; }
+  },
+  legacy_customer_ref_hash: {
+    type: String,
+    default: null,
+    select: false,
+    match: /^[a-f0-9]{64}$/,
+    required() { return !this.customerId; }
+  },
+  customer_phone_ref_hash: {
+    type: String,
+    default: null,
+    select: false,
+    match: /^[a-f0-9]{64}$/
+  },
   agentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Agent', default: null },
   call_type: { type: String, required: true },
   status: { type: String, required: true },
@@ -12,6 +30,7 @@ const callSchema = new mongoose.Schema({
   pre_archive_status: { type: String, default: null },
   outcome: { type: String }, // e.g., initiated, scheduled_initiated, answered, no_answer
   provider_call_id: { type: String, default: null },
+  context_state: { type: String, default: null },
   call_direction: { type: String, default: 'outbound' },
   call_source: { type: String, default: null },
   client_name: { type: String, default: null },
@@ -33,5 +52,7 @@ const callSchema = new mongoose.Schema({
   analysis_json: { type: mongoose.Schema.Types.Mixed }, // Store JSON directly instead of string
   analysis_completed_at: { type: Date }
 });
+
+callSchema.index({ tenantId: 1, customer_phone_ref_hash: 1, started_at: -1 });
 
 module.exports = mongoose.model('Call', callSchema);

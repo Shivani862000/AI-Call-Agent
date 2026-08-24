@@ -213,9 +213,9 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
 
 // ── Call Context & Intelligence ───────────────────────────────────────────────
 
-async function findRecentOutboundCallContextByPhone(phoneValue, tenantId) {
-  if (!tenantId) return null;
-  return outboundCallContextRepository.findRecentByPhone({ phone: phoneValue, tenantId });
+async function findRecentOutboundCallContextByPhone(phoneValue, tenantId, customerId) {
+  if (!tenantId || customerId === null || customerId === undefined) return null;
+  return outboundCallContextRepository.findRecentByPhone({ phone: phoneValue, tenantId, customerId });
 }
 
 function createIcallMateSessionHydrator({ contextRepository = outboundCallContextRepository } = {}) {
@@ -237,21 +237,20 @@ function createIcallMateSessionHydrator({ contextRepository = outboundCallContex
       try {
         const context = await contextRepository.findRecentByPhone({
           phone: message.callerId || session.callerId,
-          tenantId
+          tenantId,
+          customerId: extraParams.customerId || session.customerId
         });
         if (!context) return;
 
         session.contextHydrated = true;
         session.tenantId = String(tenantId);
         session.callDirection = 'outbound';
-        session.customerName = context.customer.name || session.customerName || process.env.CUSTOMER_NAME || 'Customer';
-        session.clientName = context.call.client_name || session.clientName || CLIENT_NAME;
-        session.customerId = context.customer.id;
+        session.customerName = extraParams.customerName || session.customerName || process.env.CUSTOMER_NAME || 'Customer';
+        session.clientName = extraParams.clientName || session.clientName || CLIENT_NAME;
+        session.customerId = extraParams.customerId || session.customerId || null;
         session.callId = context.call.id;
-        session.providerCallId = context.call.provider_call_id || '';
-        session.callType = normalizeOutboundCallType(extraParams.callType || extraParams.call_type || context.call.call_type || context.customer.call_type);
-        session.videoSent = context.customer.video_sent === 1;
-        session.lastVisitDate = context.customer.last_visit_date || 'kal';
+        session.providerCallId = context.call.providerCallId || '';
+        session.callType = normalizeOutboundCallType(extraParams.callType || extraParams.call_type || context.call.callType);
       } finally {
         session.contextHydrating = false;
         session._hydrationPromise = null;
