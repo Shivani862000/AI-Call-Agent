@@ -74,15 +74,24 @@ const {
 } = require('./call-management');
 
 const { validateMediaToken } = require('./auth');
+const { getIntegrationRuntimeConfig: defaultRuntimeConfigResolver } = require('./webmaster/settings-service');
 
 const REQUIRE_MEDIA_TOKEN = !/^(0|false|no|off)$/i.test(String(process.env.ICALLMATE_REQUIRE_MEDIA_TOKEN || 'true'));
 const GEMINI_OPENING_FALLBACK_MS = Math.max(Number(process.env.GEMINI_OPENING_FALLBACK_MS || 2500) || 2500, 1000);
+
+async function resolveLiveProviderConfig({ tenantId = null, getIntegrationRuntimeConfig = defaultRuntimeConfigResolver } = {}) {
+  const [gemini, deepgram] = await Promise.all([
+    getIntegrationRuntimeConfig('gemini', tenantId),
+    getIntegrationRuntimeConfig('deepgram', tenantId)
+  ]);
+  return { gemini, deepgram };
+}
 
 function debugLog(message, details = {}) {
   logger.debug('MEDIA_DEBUG', { message, ...details });
 }
 
-module.exports = function setupWebSocketBridge(server) {
+function setupWebSocketBridge(server, { getIntegrationRuntimeConfig = defaultRuntimeConfigResolver } = {}) {
   const icallMateWss = new WebSocket.Server({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {
@@ -302,6 +311,22 @@ module.exports = function setupWebSocketBridge(server) {
     let completionPersisted = false;
     let finalResponseInProgress = false;
     let activeResponseId = null;
+    let runtimeAiProvider = AI_PROVIDER;
+    let runtimeDirectAudio = GEMINI_LIVE_DIRECT_AUDIO;
+    let liveProviderConfigPromise = null;
+    const getLiveProviderConfig = async () => {
+      if (!liveProviderConfigPromise) {
+        liveProviderConfigPromise = resolveLiveProviderConfig({
+          tenantId: session.tenantId || null,
+          getIntegrationRuntimeConfig
+        }).then((config) => {
+          runtimeAiProvider = config.gemini.settings?.provider || runtimeAiProvider;
+          runtimeDirectAudio = config.gemini.settings?.liveDirectAudio ?? runtimeDirectAudio;
+          return config;
+        });
+      }
+      return liveProviderConfigPromise;
+    };
     const transcript = [];
     const outboundDemoState = {
       step: 'intro',
@@ -326,8 +351,8 @@ module.exports = function setupWebSocketBridge(server) {
     const getSystemPrompt = () => buildAgentSystemPrompt(getSessionClientName(), getSessionCustomerName(), null, getSessionCallType());
     const getOpeningPrompt = () => buildOpeningPrompt(getSessionClientName(), getSessionCustomerName(), null, getSessionCallType());
     const openingInstruction = `System Instruction: This is an active voice call over WebSockets. Please start the conversation immediately by speaking this opening text naturally:\n"${getOpeningPrompt()}"`;
-    const useGemini = () => AI_PROVIDER === 'gemini';
-    const useGeminiLive = () => AI_PROVIDER === 'gemini-live';
+    const useGemini = () => runtimeAiProvider === 'gemini';
+    const useGeminiLive = () => runtimeAiProvider === 'gemini-live';
     const useGeminiFamily = () => useGemini() || useGeminiLive();
 
     function sendDeepgramTtsText(text) {
@@ -346,7 +371,9 @@ module.exports = function setupWebSocketBridge(server) {
       }
 
       pendingTtsTexts.push(safeText);
-      connectDeepgramTts();
+      connectDeepgramTts().catch((error) => {
+        if (!bridgeClosed) console.error('[ICALLMATE][DEEPGRAM TTS CONNECT ERROR]', error.message);
+      });
     }
 
     function clearOpeningFallbackTimer() {
@@ -495,7 +522,8 @@ module.exports = function setupWebSocketBridge(server) {
           systemPrompt: getSystemPrompt(),
           transcript,
           userText: safeText,
-          model: GEMINI_MODEL
+          tenantId: session.tenantId || null,
+          getIntegrationRuntimeConfig
         });
 
         if (bridgeClosed) {
@@ -564,31 +592,38 @@ module.exports = function setupWebSocketBridge(server) {
           await session._hydrationPromise;
         }
 
+        const liveConfig = await getLiveProviderConfig();
+        const geminiSettings = liveConfig.gemini.settings || {};
+        const geminiApiKey = liveConfig.gemini.secrets?.apiKey;
+        if (!geminiApiKey) throw new Error('Gemini API key is not configured');
+        const liveModel = geminiSettings.model || GEMINI_MODEL;
+        const liveVoice = geminiSettings.voice || GEMINI_VOICE;
+        const directAudio = geminiSettings.liveDirectAudio ?? GEMINI_LIVE_DIRECT_AUDIO;
         const { GoogleGenAI, Modality } = await import('@google/genai');
         const ai = new GoogleGenAI({
-          apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+          apiKey: geminiApiKey
         });
 
         const config = {
-          responseModalities: [GEMINI_LIVE_DIRECT_AUDIO ? Modality.AUDIO : Modality.TEXT],
+          responseModalities: [directAudio ? Modality.AUDIO : Modality.TEXT],
           systemInstruction: getSystemPrompt(),
-          speechConfig: GEMINI_LIVE_DIRECT_AUDIO ? {
+          speechConfig: directAudio ? {
             voiceConfig: {
               prebuiltVoiceConfig: {
-                voiceName: GEMINI_VOICE
+                voiceName: liveVoice
               }
             }
           } : undefined,
-          temperature: LIVE_TEMPERATURE,
-          maxOutputTokens: GEMINI_LIVE_MAX_OUTPUT_TOKENS,
+          temperature: geminiSettings.temperature ?? LIVE_TEMPERATURE,
+          maxOutputTokens: geminiSettings.maxOutputTokens || GEMINI_LIVE_MAX_OUTPUT_TOKENS,
           thinkingConfig: {
-            thinkingLevel: GEMINI_LIVE_THINKING_LEVEL
+            thinkingLevel: geminiSettings.liveThinkingLevel || GEMINI_LIVE_THINKING_LEVEL
           },
           realtimeInputConfig: {
             automaticActivityDetection: {
               disabled: false,
-              prefixPaddingMs: GEMINI_LIVE_PREFIX_PADDING_MS,
-              silenceDurationMs: GEMINI_LIVE_SILENCE_DURATION_MS
+              prefixPaddingMs: geminiSettings.livePrefixPaddingMs || GEMINI_LIVE_PREFIX_PADDING_MS,
+              silenceDurationMs: geminiSettings.liveSilenceDurationMs || GEMINI_LIVE_SILENCE_DURATION_MS
             }
           },
           outputAudioTranscription: {}
@@ -596,15 +631,15 @@ module.exports = function setupWebSocketBridge(server) {
 
         debugLog('Gemini Live connecting', {
           streamId: getSessionLabel(),
-          model: GEMINI_MODEL,
-          voice: GEMINI_VOICE,
-          thinking: GEMINI_LIVE_THINKING_LEVEL,
-          silenceMs: GEMINI_LIVE_SILENCE_DURATION_MS,
-          directAudio: GEMINI_LIVE_DIRECT_AUDIO
+          model: liveModel,
+          voice: liveVoice,
+          thinking: geminiSettings.liveThinkingLevel || GEMINI_LIVE_THINKING_LEVEL,
+          silenceMs: geminiSettings.liveSilenceDurationMs || GEMINI_LIVE_SILENCE_DURATION_MS,
+          directAudio
         });
 
         geminiLiveSession = await ai.live.connect({
-          model: GEMINI_MODEL,
+          model: liveModel,
           config,
           callbacks: {
             onopen: () => {
@@ -678,7 +713,7 @@ module.exports = function setupWebSocketBridge(server) {
                   debugLog('Gemini Live text-only diagnostic warning', {
                     streamId: getSessionLabel(),
                     messages: session._geminiDiag.msgCount,
-                    directAudio: GEMINI_LIVE_DIRECT_AUDIO
+                    directAudio: runtimeDirectAudio
                   });
                 }
               }
@@ -727,7 +762,7 @@ module.exports = function setupWebSocketBridge(server) {
                 if (cleanTranscript) {
                   debugLog('Gemini Live generated text', { streamId: getSessionLabel(), text: cleanTranscript });
                   pushTranscriptTurn(transcript, 'AGENT', cleanTranscript);
-                  if (!GEMINI_LIVE_DIRECT_AUDIO) {
+                  if (!runtimeDirectAudio) {
                     sendDeepgramTtsText(cleanTranscript);
                   }
                 }
@@ -886,7 +921,7 @@ module.exports = function setupWebSocketBridge(server) {
         session.pendingHangupSpokenText = spokenText;
       }
 
-      if (useGeminiLive() && GEMINI_LIVE_DIRECT_AUDIO) {
+      if (useGeminiLive() && runtimeDirectAudio) {
         if (hangupFinalizeTimer) {
           clearTimeout(hangupFinalizeTimer);
           hangupFinalizeTimer = null;
@@ -1007,12 +1042,15 @@ module.exports = function setupWebSocketBridge(server) {
       }
     }
 
-    function connectDeepgram() {
+    async function connectDeepgram() {
       if (bridgeClosed) {
         return;
       }
 
-      if (!process.env.DEEPGRAM_API_KEY) {
+      const liveConfig = await getLiveProviderConfig();
+      const deepgramSettings = liveConfig.deepgram.settings || {};
+      const deepgramApiKey = liveConfig.deepgram.secrets?.apiKey;
+      if (!deepgramApiKey) {
         console.warn('[ICALLMATE][DEEPGRAM] Missing DEEPGRAM_API_KEY; bot can speak opening but caller speech will not be transcribed.');
         return;
       }
@@ -1021,9 +1059,14 @@ module.exports = function setupWebSocketBridge(server) {
         return;
       }
 
-      deepgramWs = new WebSocket(createDeepgramListenUrl(), {
+      const listenUrl = new URL(createDeepgramListenUrl());
+      listenUrl.searchParams.set('model', deepgramSettings.listenModel || 'nova-2');
+      listenUrl.searchParams.set('language', deepgramSettings.language || 'hi');
+      listenUrl.searchParams.set('endpointing', String(deepgramSettings.endpointingMs || DEEPGRAM_ENDPOINTING_MS));
+      listenUrl.searchParams.set('utterance_end_ms', String(Math.max((deepgramSettings.endpointingMs || DEEPGRAM_ENDPOINTING_MS) + 820, 1000)));
+      deepgramWs = new WebSocket(listenUrl, {
         headers: {
-          Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`
+          Authorization: `Token ${deepgramApiKey}`
         }
       });
 
@@ -1069,13 +1112,16 @@ module.exports = function setupWebSocketBridge(server) {
       });
     }
 
-    function connectDeepgramTts() {
-      const usesTextToSpeech = useGemini() || (useGeminiLive() && !GEMINI_LIVE_DIRECT_AUDIO);
+    async function connectDeepgramTts() {
+      const usesTextToSpeech = useGemini() || (useGeminiLive() && !runtimeDirectAudio);
       if (bridgeClosed || !usesTextToSpeech) {
         return;
       }
 
-      if (!process.env.DEEPGRAM_API_KEY) {
+      const liveConfig = await getLiveProviderConfig();
+      const deepgramSettings = liveConfig.deepgram.settings || {};
+      const deepgramApiKey = liveConfig.deepgram.secrets?.apiKey;
+      if (!deepgramApiKey) {
         console.warn('[ICALLMATE][DEEPGRAM TTS] Missing DEEPGRAM_API_KEY; Gemini replies cannot be spoken.');
         return;
       }
@@ -1085,9 +1131,11 @@ module.exports = function setupWebSocketBridge(server) {
       }
 
       deepgramTtsReady = false;
-      ttsWs = new WebSocket(createDeepgramSpeakUrl(), {
+      const speakUrl = new URL(createDeepgramSpeakUrl());
+      speakUrl.searchParams.set('model', deepgramSettings.ttsModel || DEEPGRAM_TTS_MODEL);
+      ttsWs = new WebSocket(speakUrl, {
         headers: {
-          Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`
+          Authorization: `Token ${deepgramApiKey}`
         }
       });
 
@@ -1098,7 +1146,7 @@ module.exports = function setupWebSocketBridge(server) {
         }
 
         deepgramTtsReady = true;
-        console.log(`[ICALLMATE][DEEPGRAM TTS] Connected streamId=${getSessionLabel()} model=${DEEPGRAM_TTS_MODEL}`);
+        console.log(`[ICALLMATE][DEEPGRAM TTS] Connected streamId=${getSessionLabel()} model=${deepgramSettings.ttsModel || DEEPGRAM_TTS_MODEL}`);
         const queued = pendingTtsTexts;
         pendingTtsTexts = [];
         queued.forEach((text) => sendDeepgramTtsText(text));
@@ -1145,20 +1193,32 @@ module.exports = function setupWebSocketBridge(server) {
     }
 
     return {
-      start() {
+      async start() {
         if (bridgeClosed) {
+          return;
+        }
+
+        try {
+          await getLiveProviderConfig();
+        } catch (error) {
+          console.error('[ICALLMATE][PROVIDER CONFIG ERROR]', error.message);
+          requestCallHangup('provider_config_error');
           return;
         }
 
         if (useGeminiLive()) {
           connectGeminiLive();
         } else if (useGemini()) {
-          connectDeepgramTts();
+          connectDeepgramTts().catch((error) => {
+            if (!bridgeClosed) console.error('[ICALLMATE][DEEPGRAM TTS CONNECT ERROR]', error.message);
+          });
           sendOpeningPrompt();
         } else {
           connectOpenAI();
         }
-        connectDeepgram();
+        connectDeepgram().catch((error) => {
+          if (!bridgeClosed) console.error('[ICALLMATE][DEEPGRAM CONNECT ERROR]', error.message);
+        });
       },
       sendCallerAudio(payload) {
         if (bridgeClosed || pendingHangup || !payload) {
@@ -1574,4 +1634,8 @@ module.exports = function setupWebSocketBridge(server) {
   });
 
   return icallMateWss;
-};
+}
+
+setupWebSocketBridge.resolveLiveProviderConfig = resolveLiveProviderConfig;
+
+module.exports = setupWebSocketBridge;

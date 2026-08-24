@@ -1,5 +1,6 @@
 const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+const { getIntegrationRuntimeConfig: defaultRuntimeConfigResolver } = require('../src/webmaster/settings-service');
 
 function normalizeTurnText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -61,21 +62,26 @@ function extractGeminiText(payload) {
     .trim();
 }
 
-async function generateGeminiReply({
-  systemPrompt,
-  transcript = [],
-  userText = '',
-  model = DEFAULT_GEMINI_MODEL,
-  apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
-  responseMimeType = null,
-  maxTokens = null
-} = {}) {
+async function generateGeminiReply(options = {}) {
+  const {
+    systemPrompt,
+    transcript = [],
+    userText = '',
+    responseMimeType = null,
+    maxTokens = null,
+    tenantId = null,
+    getIntegrationRuntimeConfig = defaultRuntimeConfigResolver,
+    fetchImpl = global.fetch
+  } = options;
+  const runtime = await getIntegrationRuntimeConfig('gemini', tenantId);
+  const model = options.model || runtime.settings.model || DEFAULT_GEMINI_MODEL;
+  const apiKey = options.apiKey || runtime.secrets.apiKey;
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is not configured');
   }
 
   const url = `${GEMINI_API_BASE_URL}/models/${encodeURIComponent(model)}:generateContent`;
-  const response = await fetch(url, {
+  const response = await fetchImpl(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -87,10 +93,10 @@ async function generateGeminiReply({
       },
       contents: buildGeminiConversationContents(transcript, userText),
       generationConfig: {
-        temperature: Number(process.env.GEMINI_TEMPERATURE || process.env.LIVE_TEMPERATURE || 0.3),
-        maxOutputTokens: maxTokens || Number(process.env.GEMINI_MAX_OUTPUT_TOKENS || process.env.LIVE_MAX_RESPONSE_TOKENS || 60),
+        temperature: Number(options.temperature ?? runtime.settings.temperature ?? 0.3),
+        maxOutputTokens: maxTokens || Number(runtime.settings.maxOutputTokens || 60),
         thinkingConfig: {
-          thinkingBudget: Number(process.env.GEMINI_THINKING_BUDGET || 0)
+          thinkingBudget: Number(options.thinkingBudget ?? runtime.settings.thinkingBudget ?? 0)
         },
         ...(responseMimeType ? { responseMimeType } : {})
       }
@@ -200,7 +206,8 @@ RATING SCALE GUIDELINES:
       userText: transcriptText || '(No transcript provided)',
       responseMimeType: 'application/json',
       model: 'gemini-2.5-flash',
-      maxTokens: 800
+      maxTokens: 800,
+      tenantId: context.tenantId || null
     });
 
     const analysis = JSON.parse(rawAiResponse);
@@ -250,12 +257,20 @@ async function transcribeAudioFile(filePath, options = {}) {
     }
     const audioData = fs.readFileSync(filePath);
     
-    if (process.env.DEEPGRAM_API_KEY) {
-      const url = `https://api.deepgram.com/v1/listen?smart_format=true&language=${options.language || 'hi'}&model=nova-2&diarize=true`;
-      const response = await fetch(url, {
+    const getIntegrationRuntimeConfig = options.getIntegrationRuntimeConfig || defaultRuntimeConfigResolver;
+    const runtime = await getIntegrationRuntimeConfig('deepgram', options.tenantId || null);
+    const apiKey = options.apiKey || runtime.secrets.apiKey;
+    if (apiKey) {
+      const url = new URL('https://api.deepgram.com/v1/listen');
+      url.searchParams.set('smart_format', 'true');
+      url.searchParams.set('language', options.language || runtime.settings.language || 'hi');
+      url.searchParams.set('model', runtime.settings.listenModel || 'nova-2');
+      url.searchParams.set('diarize', 'true');
+      const fetchImpl = options.fetchImpl || global.fetch;
+      const response = await fetchImpl(url, {
         method: 'POST',
         headers: {
-          'Authorization': `Token ${process.env.DEEPGRAM_API_KEY}`,
+          'Authorization': `Token ${apiKey}`,
           'Content-Type': 'audio/mpeg' // fallback content type
         },
         body: audioData

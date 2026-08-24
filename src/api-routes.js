@@ -90,12 +90,19 @@ const { computePriorityScore, applyCallOutcomeWorkflow, createSupervisorEvent } 
 const { getAgentConfigById, getDefaultAgentConfig, normalizeRequestedAgentId } = require('./prompt-builder');
 const { buildCallAnalysis, storeCallAnalysis } = require('../services/call-analysis');
 const { generateCallAnalysisPDF } = require('../services/pdf');
-const { initiateCall, buildMasterPostPayload } = require('../services/icallmate');
+const {
+  initiateCall,
+  buildMasterPostPayload,
+  redactMediaUrlToken,
+  redactRequestPayload
+} = require('../services/icallmate');
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
 const {
   buildIcallMateCallbackUrl,
-  hasValidIcallMateWebhookSecret
+  hasValidIcallMateWebhookSecret,
+  redactIcallMateCallbackUrl
 } = require('./icallmate-webhook');
+const { getIntegrationRuntimeConfig: defaultRuntimeConfigResolver } = require('./webmaster/settings-service');
 const logger = require('../services/system-logger');
 const webmasterAuthorization = createWebmasterAuthorization({ UserModel: User, TenantModel: Tenant });
 const { recordFilterFromRequest } = require('./webmaster/lifecycle');
@@ -148,8 +155,39 @@ async function runOutboundAncillaryWork(work, { callId, trigger, skip = false })
   }
 }
 
-module.exports = function mountApiRoutes(app, {
-  outboundCoordinator = outboundCallContextCoordinator
+function createIcallMateConfigDto({ requestBaseUrl, token, runtime }) {
+  const settings = runtime?.settings || {};
+  return {
+    websocket_url: toWssUrl(requestBaseUrl, `/icallmate/media?token=${token}`),
+    did: settings.did || ICALLMATE_DEFAULT_DID,
+    test_number: settings.testNumber || ICALLMATE_DEFAULT_TEST_NUMBER,
+    incoming_api_endpoint: settings.incomingApiEndpoint || 'https://crm.icallmate.in',
+    outbound_api_endpoint: settings.outboundApiEndpoint || 'https://ecp1.icallmate.in',
+    callback_url: buildIcallMateCallbackUrl(requestBaseUrl, {}),
+    audio_format: {
+      sampleRate: 8000,
+      encoding: 'LINEAR16',
+      channels: 1,
+      bitsPerSample: 16
+    }
+  };
+}
+
+function sanitizeIcallMateMacros(macros) {
+  return macros.map((macro) => {
+    if (macro.macroName === 'llm_callbackapi') {
+      return { ...macro, macroValue: redactIcallMateCallbackUrl(macro.macroValue) };
+    }
+    if (macro.macroName === 'llm_wssurl') {
+      return { ...macro, macroValue: redactMediaUrlToken(macro.macroValue) };
+    }
+    return { ...macro };
+  });
+}
+
+function mountApiRoutes(app, {
+  outboundCoordinator = outboundCallContextCoordinator,
+  getIntegrationRuntimeConfig = defaultRuntimeConfigResolver
 } = {}) {
   app.get('/health', (req, res) => {
     res.json({
@@ -285,7 +323,12 @@ module.exports = function mountApiRoutes(app, {
     agentsRouter,
     callArchiveRouter
   });
-  app.use('/api/support-tickets', createSupportTicketsRouter({ dbRun, dbGet, dbAll, notifyNewTicket: createSlackSupportNotifier({ webhookUrl: process.env.SLACK_SUPPORT_WEBHOOK_URL }) }));
+  app.use('/api/support-tickets', createSupportTicketsRouter({
+    dbRun,
+    dbGet,
+    dbAll,
+    notifyNewTicket: createSlackSupportNotifier({ getIntegrationRuntimeConfig })
+  }));
   app.use('/api/reports', reportsRouter);
   app.use('/api/test-call', testCallRouter);
   app.use('/api/test-ai-call', testAiCallRouter);
@@ -850,25 +893,14 @@ module.exports = function mountApiRoutes(app, {
   app.get('/api/icallmate/config', async (req, res) => {
     const requestBaseUrl = getRequestPublicBaseUrl(req);
     const token = createMediaToken();
-    res.json({
-      websocket_url: `${toWssUrl(requestBaseUrl, `/icallmate/media?token=${token}`)}`,
-      did: process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID,
-      test_number: process.env.ICALLMATE_TEST_NUMBER || ICALLMATE_DEFAULT_TEST_NUMBER,
-      incoming_api_endpoint: process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in',
-      outbound_api_endpoint: process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in',
-      callback_url: buildIcallMateCallbackUrl(requestBaseUrl),
-      audio_format: {
-        sampleRate: 8000,
-        encoding: 'LINEAR16',
-        channels: 1,
-        bitsPerSample: 16
-      }
-    });
+    const runtime = await getIntegrationRuntimeConfig('icallmate', req.tenantId || null);
+    res.json(createIcallMateConfigDto({ requestBaseUrl, token, runtime }));
   });
 
   app.post('/api/icallmate/callback', async (req, res) => {
     try {
-      if (!hasValidIcallMateWebhookSecret(req)) {
+      const runtime = await getIntegrationRuntimeConfig('icallmate', req.tenantId || null);
+      if (!hasValidIcallMateWebhookSecret(req, { ICALLMATE_WEBHOOK_SECRET: runtime.secrets?.webhookSecret || '' })) {
         return res.status(401).json({ error: 'Invalid webhook secret' });
       }
 
@@ -983,26 +1015,31 @@ module.exports = function mountApiRoutes(app, {
   app.post('/api/icallmate/incoming-config', async (req, res) => {
     try {
       const requestBaseUrl = getRequestPublicBaseUrl(req);
-      const dnisNo = String(req.body.dnisNo || req.body.virtualNumber || process.env.ICALLMATE_DID || ICALLMATE_DEFAULT_DID).trim();
+      const runtime = await getIntegrationRuntimeConfig('icallmate', req.tenantId || null);
+      const settings = runtime.settings || {};
+      const dnisNo = String(req.body.dnisNo || req.body.virtualNumber || settings.did || ICALLMATE_DEFAULT_DID).trim();
       if (!dnisNo) {
         return res.status(400).json({ error: 'dnisNo or virtualNumber is required' });
       }
 
-      const endpoint = `${String(process.env.ICALLMATE_IBD_API_ENDPOINT || 'https://crm.icallmate.in').replace(/\/+$/, '')}/Test_WSS/setMacroDnis`;
+      const endpoint = `${String(settings.incomingApiEndpoint || 'https://crm.icallmate.in').replace(/\/+$/, '')}/Test_WSS/setMacroDnis`;
       const token = createMediaToken({ reusable: true });
       const websocketUrl = req.body.wsurl || req.body.websocket_url || `${toWssUrl(requestBaseUrl, `/icallmate/media?token=${token}`)}`;
-      const callbackUrl = req.body.callbackapi || req.body.callback_url || buildIcallMateCallbackUrl(requestBaseUrl);
+      const callbackUrl = req.body.callbackapi || req.body.callback_url || buildIcallMateCallbackUrl(requestBaseUrl, {
+        ICALLMATE_WEBHOOK_SECRET: runtime.secrets?.webhookSecret || ''
+      });
       const macros = [
         { dnisNo, macroName: 'llm_wssurl', macroValue: websocketUrl },
-        { dnisNo, macroName: 'llm_botid', macroValue: String(req.body.botid || process.env.ICALLMATE_BOT_ID || '') },
-        { dnisNo, macroName: 'llm_agentid', macroValue: String(req.body.agentid || process.env.ICALLMATE_AGENT_ID || '') },
+        { dnisNo, macroName: 'llm_botid', macroValue: String(req.body.botid || settings.botId || '') },
+        { dnisNo, macroName: 'llm_agentid', macroValue: String(req.body.agentid || settings.agentId || '') },
         { dnisNo, macroName: 'llm_extraparam', macroValue: String(req.body.extraParams || req.body.extra_param || 'path-lab') },
         { dnisNo, macroName: 'llm_iscallbackapi', macroValue: String(req.body.iscallbackapi ?? '0') },
         { dnisNo, macroName: 'llm_callbackapi', macroValue: callbackUrl }
       ];
+      const safeMacros = sanitizeIcallMateMacros(macros);
 
       if (String(req.body.dryRun || '').toLowerCase() === 'true') {
-        return res.json({ endpoint, macros, dryRun: true });
+        return res.json({ endpoint, macros: safeMacros, dryRun: true });
       }
 
       const response = await fetch(endpoint, {
@@ -1022,7 +1059,7 @@ module.exports = function mountApiRoutes(app, {
       res.status(providerSuccess ? 200 : (response.ok ? 502 : response.status)).json({
         success: providerSuccess,
         endpoint,
-        macros,
+        macros: safeMacros,
         response: text
       });
     } catch (error) {
@@ -1097,11 +1134,15 @@ module.exports = function mountApiRoutes(app, {
     try {
       const fieldpairs = Array.isArray(req.body.fieldpairs) ? req.body.fieldpairs : [];
       const firstFieldPair = fieldpairs[0] || {};
+      const runtime = await getIntegrationRuntimeConfig('icallmate', req.tenantId || null);
+      const settings = runtime.settings || {};
       const phone = req.body.Phone_No || req.body.phone || req.body.customerPhone || firstFieldPair.Phone_No;
-      const leadId = req.body.leadid || req.body.leadId || '1031';
-      const campid = req.body.campid || '54';
+      const leadId = req.body.leadid || req.body.leadId || settings.leadId || '1031';
+      const campid = req.body.campid || settings.campaignId || '54';
       const wsurl = firstFieldPair.wsurl || req.body.wsurl || toWssUrl(getRequestPublicBaseUrl(req), '/icallmate/media');
-      const callbackapi = buildIcallMateCallbackUrl(getRequestPublicBaseUrl(req));
+      const callbackapi = buildIcallMateCallbackUrl(getRequestPublicBaseUrl(req), {
+        ICALLMATE_WEBHOOK_SECRET: runtime.secrets?.webhookSecret || ''
+      });
       const customerName = req.body.customerName || firstFieldPair.Name || 'Outgoing Customer';
       const requestedAgentId = normalizeRequestedAgentId(req.body.agentId || req.query.agentId);
       const callType = normalizeOutboundCallType(req.body.callType || req.body.call_type || firstFieldPair.callType || firstFieldPair.call_type);
@@ -1115,8 +1156,8 @@ module.exports = function mountApiRoutes(app, {
         return res.json({
           success: true,
           dryRun: true,
-          endpoint: process.env.ICALLMATE_MASTER_POST_API_ENDPOINT || 'https://crm.icallmate.in/WebSVC111/setMasterPostAPI',
-          payload
+          endpoint: settings.masterPostApiEndpoint || 'https://crm.icallmate.in/WebSVC111/setMasterPostAPI',
+          payload: redactRequestPayload(payload)
         });
       }
 
@@ -1204,7 +1245,7 @@ module.exports = function mountApiRoutes(app, {
         agentId: agentConfig?.id || null,
         provider: 'icallmate-masterpost',
         ...safeOutboundPlacementFields(placement, ancillary),
-        payload
+        payload: redactRequestPayload(payload)
       });
     } catch (error) {
       if (customer?.id) {
@@ -1823,4 +1864,9 @@ module.exports = function mountApiRoutes(app, {
     }
   });
 
-};
+}
+
+mountApiRoutes.createIcallMateConfigDto = createIcallMateConfigDto;
+mountApiRoutes.sanitizeIcallMateMacros = sanitizeIcallMateMacros;
+
+module.exports = mountApiRoutes;
