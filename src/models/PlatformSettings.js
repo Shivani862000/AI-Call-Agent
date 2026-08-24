@@ -11,7 +11,13 @@ const platformSettingsSchema = new mongoose.Schema({
     unique: true,
     immutable: true
   },
-  schemaVersion: { type: Number, min: 1, default: 1, required: true },
+  schemaVersion: {
+    type: Number,
+    min: 1,
+    default: 1,
+    required: true,
+    validate: { validator: Number.isInteger, message: 'Schema version must be an integer' }
+  },
   application: { type: mongoose.Schema.Types.Mixed, default: {} },
   defaults: { type: mongoose.Schema.Types.Mixed, default: {} },
   featureFlags: { type: mongoose.Schema.Types.Mixed, default: {} },

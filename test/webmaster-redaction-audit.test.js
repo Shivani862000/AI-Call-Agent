@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const mongoose = require('mongoose');
 
 const { sanitizeForAudit } = require('../src/webmaster/redaction');
 const { createAuditService } = require('../src/webmaster/audit-service');
@@ -159,4 +160,142 @@ test('environment audit actors use a stable synthetic id without copying the con
 
   assert.equal(payload.actor, 'environment-owner');
   assert.equal(JSON.stringify(payload).includes('private-login@example.com'), false);
+});
+
+test('redaction fails closed for semantic credential, identity, and free-text variants', () => {
+  // Mutation caught: normalized compound variants bypass an exact-key denylist.
+  const sanitized = sanitizeForAudit({
+    auth: { user: 'database-user', pass: 'database-pass' },
+    databaseUrl: 'mongodb://database-user:database-pass@db/private',
+    db_uri: 'mongodb://database-user:database-pass@db/private',
+    mongoUri: 'mongodb://database-user:database-pass@db/private',
+    primaryConnectionString: 'postgres://database-user:database-pass@db/private',
+    errorMessage: 'Patient Jane has jane@example.com',
+    stackTrace: 'private response body',
+    responseHeaders: { setCookie: 'session-secret' },
+    responseBody: { jwt: 'signed-token', status: 'rejected' },
+    requestPayload: { sessionCookie: 'session-secret' },
+    socialSecurityNumber: '123-45-6789',
+    birthDate: '1980-01-01',
+    DOB: '1980-01-01',
+    aadhaarNumber: '1111-2222-3333',
+    nested: [{ cookieValue: 'private-cookie', statusCode: 503 }],
+    providerStatus: 'degraded',
+    patientCount: 4
+  });
+
+  assert.deepEqual(sanitized, {
+    auth: '[redacted]',
+    databaseUrl: '[redacted]',
+    db_uri: '[redacted]',
+    mongoUri: '[redacted]',
+    primaryConnectionString: '[redacted]',
+    errorMessage: '[redacted]',
+    stackTrace: '[redacted]',
+    responseHeaders: '[redacted]',
+    responseBody: '[redacted]',
+    requestPayload: '[redacted]',
+    socialSecurityNumber: '[redacted]',
+    birthDate: '[redacted]',
+    DOB: '[redacted]',
+    aadhaarNumber: '[redacted]',
+    nested: [{ cookieValue: '[redacted]', statusCode: 503 }],
+    providerStatus: 'degraded',
+    patientCount: 4
+  });
+});
+
+test('redaction deeply serializes maps and BSON values without leaking binary internals', () => {
+  // Mutation caught: Map values collapse or ObjectId/Buffer implementation fields enter retained metadata.
+  const objectId = new mongoose.Types.ObjectId('507f1f77bcf86cd799439011');
+  const date = new Date('2026-08-24T00:00:00.000Z');
+  const binary = Buffer.from('secret-bytes');
+  const source = {
+    metadata: new Map([
+      ['status', 'failed'],
+      ['retryCount', 2],
+      ['details', new Map([
+        ['password', 'map-secret'],
+        ['provider', 'smtp']
+      ])]
+    ]),
+    objectId,
+    date,
+    binary
+  };
+
+  const sanitized = sanitizeForAudit(source);
+
+  assert.deepEqual(sanitized, {
+    metadata: {
+      status: 'failed',
+      retryCount: 2,
+      details: { password: '[redacted]', provider: 'smtp' }
+    },
+    objectId: '507f1f77bcf86cd799439011',
+    date: '2026-08-24T00:00:00.000Z',
+    binary: '[binary:12 bytes]'
+  });
+  assert.equal(source.metadata.get('details').get('password'), 'map-secret');
+  assert.equal(binary.toString('utf8'), 'secret-bytes');
+  assert.equal(JSON.stringify(sanitized).includes('"data":['), false);
+  assert.equal(JSON.stringify(sanitized).includes('secret-bytes'), false);
+});
+
+test('audit service rejects invalid outcomes instead of recording a false success', async () => {
+  // Mutation caught: `failed` or an unknown outcome is silently converted to success.
+  let createCount = 0;
+  const service = createAuditService({
+    AuditEventModel: { async create() { createCount += 1; } }
+  });
+
+  for (const outcome of ['failed', 'SUCCESS', 'unknown']) {
+    await assert.rejects(
+      service.record({
+        actor: { id: 'actor-1', platformAccessLevel: 'OWNER' },
+        action: 'settings.update',
+        target: { type: 'settings', id: 'platform' },
+        outcome
+      }),
+      (error) => error.code === 'INVALID_AUDIT_OUTCOME'
+    );
+  }
+  assert.equal(createCount, 0);
+});
+
+test('audit failure codes accept machine vocabulary and reject unsafe content without echoing it', async () => {
+  // Mutation caught: whitespace, emails, or secret-like values are retained as failure metadata.
+  const created = [];
+  const service = createAuditService({
+    AuditEventModel: { async create(payload) { created.push(payload); return payload; } }
+  });
+  const base = {
+    actor: { id: 'actor-1', platformAccessLevel: 'OWNER' },
+    action: 'integration.test',
+    target: { type: 'integration', id: 'smtp' },
+    outcome: 'failure'
+  };
+
+  await service.record({ ...base, failureCode: 'PROVIDER_TIMEOUT' });
+  assert.equal(created[0].failureCode, 'PROVIDER_TIMEOUT');
+
+  for (const unsafeCode of [
+    'SMTP unavailable',
+    'OWNER@EXAMPLE.COM',
+    'SECRET_TOKEN',
+    'JWT_INVALID',
+    'BAD__CODE',
+    'BAD_',
+    'A'.repeat(81)
+  ]) {
+    await assert.rejects(
+      service.record({ ...base, failureCode: unsafeCode }),
+      (error) => {
+        assert.equal(error.code, 'INVALID_AUDIT_FAILURE_CODE');
+        assert.equal(error.message.includes(unsafeCode), false);
+        return true;
+      }
+    );
+  }
+  assert.equal(created.length, 1);
 });

@@ -1,7 +1,7 @@
 'use strict';
 
 const mongoose = require('mongoose');
-const { sanitizeForAudit } = require('../webmaster/redaction');
+const { isSafeMachineCode, sanitizeForAudit } = require('../webmaster/redaction');
 
 const immutableString = (options = {}) => ({ type: String, immutable: true, ...options });
 
@@ -16,11 +16,25 @@ const auditEventSchema = new mongoose.Schema({
   after: { type: mongoose.Schema.Types.Mixed, default: null, immutable: true, set: sanitizeForAudit },
   requestId: immutableString({ default: null, maxlength: 128 }),
   outcome: immutableString({ enum: ['success', 'failure'], required: true }),
-  failureCode: immutableString({ default: null, maxlength: 80 })
+  failureCode: immutableString({
+    default: null,
+    validate: {
+      validator: (value) => value == null || isSafeMachineCode(value),
+      message: 'Failure code must use safe machine-code vocabulary'
+    }
+  })
 }, {
   strict: true,
   minimize: false,
   timestamps: { createdAt: 'created_at', updatedAt: false }
 });
+
+auditEventSchema.pre('validate', function sanitizeRetainedAuditMetadata() {
+  this.before = sanitizeForAudit(this.before);
+  this.after = sanitizeForAudit(this.after);
+});
+
+auditEventSchema.index({ created_at: -1 });
+auditEventSchema.index({ tenantId: 1, created_at: -1 });
 
 module.exports = mongoose.model('AuditEvent', auditEventSchema);

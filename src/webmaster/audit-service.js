@@ -1,6 +1,6 @@
 'use strict';
 
-const { sanitizeForAudit } = require('./redaction');
+const { isSafeMachineCode, sanitizeForAudit } = require('./redaction');
 
 function safeIdentifier(value, fallback = null, maxLength = 128) {
   const normalized = value == null ? '' : String(value).trim();
@@ -24,7 +24,21 @@ function actorAccessLevel(actor) {
 
 function safeFailureCode(value) {
   if (value == null || value === '') return null;
-  return safeIdentifier(value, 'UNSPECIFIED_FAILURE', 80);
+  if (!isSafeMachineCode(value)) {
+    const error = new Error('Audit failure code must use safe machine-code vocabulary');
+    error.code = 'INVALID_AUDIT_FAILURE_CODE';
+    throw error;
+  }
+  return value;
+}
+
+function safeOutcome(value) {
+  if (value !== 'success' && value !== 'failure') {
+    const error = new Error('Audit outcome must be success or failure');
+    error.code = 'INVALID_AUDIT_OUTCOME';
+    throw error;
+  }
+  return value;
 }
 
 function createdValue(document) {
@@ -59,7 +73,7 @@ function createAuditService({ AuditEventModel }) {
       before: sanitizeForAudit(before),
       after: sanitizeForAudit(after),
       requestId: safeIdentifier(requestId),
-      outcome: outcome === 'failure' ? 'failure' : 'success',
+      outcome: safeOutcome(outcome),
       failureCode: safeFailureCode(failureCode)
     };
 

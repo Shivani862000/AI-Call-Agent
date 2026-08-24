@@ -205,3 +205,39 @@ test('tampered encrypted records fail closed without putting secret material in 
     }
   );
 });
+
+test('a different valid encryption key cannot decrypt a database envelope', async () => {
+  // Mutation caught: decryption omits GCM key authentication and accepts a wrong valid key.
+  const store = fakeSecretStore();
+  const writer = createService(store);
+  await writer.replaceSecret({
+    integration: 'gemini', key: 'apiKey', value: 'database-secret', actor: OWNER
+  });
+  const reader = createService(store, {
+    env: {
+      WEBMASTER_SECRETS_KEY: Buffer.alloc(32, 8).toString('base64'),
+      GEMINI_API_KEY: 'environment-secret'
+    }
+  });
+
+  await assert.rejects(
+    reader.resolveSecret('gemini', 'apiKey'),
+    (error) => error.code === 'SECRET_DECRYPTION_FAILED'
+  );
+});
+
+test('missing database secret returns an explicit unconfigured result without fallback', async () => {
+  // Mutation caught: a missing record is reported configured or returns an unrelated environment value.
+  const store = fakeSecretStore();
+  const service = createService(store, {
+    env: { WEBMASTER_SECRETS_KEY: Buffer.alloc(32, 7).toString('base64') }
+  });
+
+  assert.equal(await service.resolveSecret('gemini', 'apiKey'), null);
+  assert.deepEqual(await service.getMetadata('gemini', 'apiKey'), {
+    configured: false,
+    source: null,
+    updatedAt: null,
+    updatedBy: null
+  });
+});
