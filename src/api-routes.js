@@ -102,7 +102,19 @@ const { recordFilterFromRequest } = require('./webmaster/lifecycle');
 const { createLegacyCallScope, tenantVisibleRows } = require('./legacy-call-scope');
 const { outboundCallContextCoordinator } = require('./outbound-call-context');
 
-module.exports = function mountApiRoutes(app) {
+function safeOutboundContextFields(error) {
+  const reconciliation = error?.outboundCallContext;
+  if (!reconciliation?.context?.id || !reconciliation?.persistence?.state) return {};
+  return {
+    callId: reconciliation.context.id,
+    contextPersistence: reconciliation.persistence.state,
+    contextRetryable: Boolean(reconciliation.persistence.retryable)
+  };
+}
+
+module.exports = function mountApiRoutes(app, {
+  outboundCoordinator = outboundCallContextCoordinator
+} = {}) {
   app.get('/health', (req, res) => {
     res.json({
       ok: true,
@@ -182,6 +194,37 @@ module.exports = function mountApiRoutes(app) {
     logger.info('USER_LOGOUT', { user: session?.username || req.adminSession?.username || 'unknown' });
     return res.json({ success: true });
   });
+
+  app.post(
+    '/api/calls/outbound-context/:contextId/reconcile',
+    requireTenantAccess,
+    requireRole('WEBMASTER', 'CLIENT_ADMIN'),
+    async (req, res) => {
+      try {
+        const reconciliation = await outboundCoordinator.reconcile({
+          tenantId: req.tenantId,
+          contextId: req.params.contextId,
+          disposition: req.body?.disposition,
+          providerCallId: req.body?.providerCallId
+        });
+        return res.status(reconciliation.persistence.retryable ? 202 : 200).json({
+          callId: reconciliation.context.id,
+          contextPersistence: reconciliation.persistence.state,
+          contextRetryable: reconciliation.persistence.retryable
+        });
+      } catch (error) {
+        const status = error instanceof TypeError ? 400 : Number(error.status || 503);
+        const safeStatus = [400, 404, 409].includes(status) ? status : 503;
+        const messages = {
+          400: 'Invalid outbound call context reconciliation request',
+          404: 'Outbound call context not found',
+          409: 'Outbound call context conflicts with the requested disposition',
+          503: 'Outbound call context reconciliation is temporarily unavailable'
+        };
+        return res.status(safeStatus).json({ error: messages[safeStatus] });
+      }
+    }
+  );
 
   app.use('/api/tenants', webmasterAuthorization.requireWebmaster, tenantsRouter);
   mountTenantScopedRoutes(app, {
@@ -280,7 +323,7 @@ module.exports = function mountApiRoutes(app) {
         `ICALLMATE_IVR_TEMPLATE_ID=${process.env.ICALLMATE_IVR_TEMPLATE_ID || ''} ` +
         `TZ=${process.env.TZ || ''}`
       );
-      const placement = await outboundCallContextCoordinator.initiate({
+      const placement = await outboundCoordinator.initiate({
         tenantId: req.tenantId,
         customerId: customer.id,
         customerPhone: customer.phone || customerPhone,
@@ -348,7 +391,11 @@ module.exports = function mountApiRoutes(app) {
         phone: customer?.phone || req.body.customerPhone,
         reason: error.message
       });
-      res.status(500).json({ success: false, error: error.message });
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        ...safeOutboundContextFields(error)
+      });
     }
   });
 
@@ -563,7 +610,7 @@ module.exports = function mountApiRoutes(app) {
         return res.status(409).json({ error: 'A call for this customer is already in progress' });
       }
 
-      const placement = await outboundCallContextCoordinator.initiate({
+      const placement = await outboundCoordinator.initiate({
         tenantId: req.tenantId,
         customerId: customer.id,
         customerPhone: customer.phone,
@@ -631,7 +678,10 @@ module.exports = function mountApiRoutes(app) {
         phone: customer?.phone,
         reason: error.message
       });
-      res.status(500).json({ error: error.message });
+      res.status(500).json({
+        error: error.message,
+        ...safeOutboundContextFields(error)
+      });
     }
   });
 
@@ -1047,7 +1097,7 @@ module.exports = function mountApiRoutes(app) {
         return res.status(409).json({ error: 'A call for this customer is already in progress' });
       }
 
-      const placement = await outboundCallContextCoordinator.initiate({
+      const placement = await outboundCoordinator.initiate({
         tenantId: req.tenantId,
         customerId: customer.id,
         customerPhone: customer.phone || phone,
@@ -1114,7 +1164,10 @@ module.exports = function mountApiRoutes(app) {
         phone: customer?.phone || req.body.Phone_No || req.body.phone || req.body.customerPhone,
         reason: error.message
       });
-      res.status(500).json({ error: error.message });
+      res.status(500).json({
+        error: error.message,
+        ...safeOutboundContextFields(error)
+      });
     }
   });
 

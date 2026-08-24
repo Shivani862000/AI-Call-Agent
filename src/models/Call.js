@@ -30,7 +30,17 @@ const callSchema = new mongoose.Schema({
   pre_archive_status: { type: String, default: null },
   outcome: { type: String }, // e.g., initiated, scheduled_initiated, answered, no_answer
   provider_call_id: { type: String, default: null },
-  context_state: { type: String, default: null },
+  context_state: {
+    type: String,
+    enum: [
+      'prepared',
+      'provider_acceptance_pending',
+      'provider_failure_pending',
+      'provider_accepted',
+      'provider_failed'
+    ],
+    default: null
+  },
   call_direction: { type: String, default: 'outbound' },
   call_source: { type: String, default: null },
   client_name: { type: String, default: null },

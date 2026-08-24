@@ -20,12 +20,14 @@ function matches(record, filter) {
   });
 }
 
-function createMemoryCallModel({ onCreate, failCreate = false, failNextUpdate = false } = {}) {
+function createMemoryCallModel({ onCreate, failCreate = false, failUpdateAttempts = [] } = {}) {
   const records = [];
-  let rejectNextUpdate = failNextUpdate;
+  const rejectedUpdateAttempts = new Set(failUpdateAttempts);
+  let updateAttempts = 0;
 
   return {
     records,
+    get updateAttempts() { return updateAttempts; },
     async create(record) {
       onCreate?.(record);
       if (failCreate) throw new Error('Call context persistence unavailable');
@@ -45,13 +47,16 @@ function createMemoryCallModel({ onCreate, failCreate = false, failNextUpdate = 
       };
     },
     async updateOne(filter, update) {
-      if (rejectNextUpdate) {
-        rejectNextUpdate = false;
+      updateAttempts += 1;
+      if (rejectedUpdateAttempts.has(updateAttempts)) {
         throw new Error('Call context finalization unavailable');
       }
       const record = records.find((candidate) => matches(candidate, filter));
       if (!record) return { matchedCount: 0, modifiedCount: 0 };
-      Object.assign(record, update.$set || {});
+      const updated = { ...record, ...(update.$set || {}) };
+      const document = new Call(updated);
+      await document.validate();
+      Object.assign(record, document.toObject());
       return { matchedCount: 1, modifiedCount: 1 };
     }
   };
@@ -151,8 +156,8 @@ test('Mongoose ObjectId customer keeps the native reference and uses the same op
   );
 });
 
-test('unpersistable context prevents provider side effects and accepted finalization is retry-safe', async () => {
-  // Mutation caught: calling the provider before validating/persisting local context creates a provider-call orphan and a 500.
+test('unpersistable context prevents provider side effects and transient accepted finalization is retried without another provider call', async () => {
+  // Mutation caught: retrying the whole entrypoint after one persistence failure places a duplicate provider call.
   const tenantId = '64b64c8f0f1e2d3c4b5a6911';
   let providerCalls = 0;
   const failedModel = createMemoryCallModel({ failCreate: true });
@@ -174,7 +179,7 @@ test('unpersistable context prevents provider side effects and accepted finaliza
   );
   assert.equal(providerCalls, 0);
 
-  const retryModel = createMemoryCallModel({ failNextUpdate: true });
+  const retryModel = createMemoryCallModel({ failUpdateAttempts: [1] });
   const retryBoundary = createContextBoundary(retryModel);
   const placement = await retryBoundary.coordinator.initiate({
     tenantId,
@@ -189,19 +194,126 @@ test('unpersistable context prevents provider side effects and accepted finaliza
   });
 
   assert.equal(providerCalls, 1);
-  assert.deepEqual(placement.persistence, { state: 'prepared', retryable: true });
-  const finalized = await retryBoundary.repository.markProviderAccepted({
-    tenantId,
-    contextId: placement.context.id,
-    providerCallId: 'provider-retry-safe'
-  });
+  assert.deepEqual(placement.persistence, { state: 'provider_accepted', retryable: false });
+  assert.equal(retryModel.updateAttempts, 3);
   const repeated = await retryBoundary.repository.markProviderAccepted({
     tenantId,
     contextId: placement.context.id,
     providerCallId: 'provider-retry-safe'
   });
-  assert.equal(finalized.state, 'provider_accepted');
+  assert.equal(repeated.state, 'provider_accepted');
+  assert.equal(providerCalls, 1);
+});
+
+test('exhausted accepted finalization stays non-hydratable and reconciles idempotently without another provider call', async () => {
+  // Mutation caught: treating prepared as accepted hydrates an unverified call, while rerunning initiation duplicates the provider request.
+  const tenantA = '64b64c8f0f1e2d3c4b5a6911';
+  const tenantB = '64b64c8f0f1e2d3c4b5a6912';
+  let providerCalls = 0;
+  const CallModel = createMemoryCallModel({ failUpdateAttempts: [1, 2, 3] });
+  const { repository, coordinator } = createContextBoundary(CallModel);
+
+  const placement = await coordinator.initiate({
+    tenantId: tenantA,
+    customerId: 42,
+    customerPhone: '+919876543210',
+    callType: 'REVIEW_CALL',
+    source: 'call-start',
+    placeProviderCall: async () => {
+      providerCalls += 1;
+      return { sid: 'provider-needs-reconciliation' };
+    }
+  });
+
+  assert.equal(providerCalls, 1);
+  assert.equal(CallModel.updateAttempts, 3);
+  assert.deepEqual(placement.persistence, { state: 'prepared', retryable: true });
+  assert.equal(await repository.findRecentByPhone({
+    phone: '+919876543210', tenantId: tenantA, customerId: 42
+  }), null);
+
+  const finalized = await coordinator.reconcile({
+    tenantId: tenantA,
+    contextId: placement.context.id,
+    disposition: 'accepted',
+    providerCallId: 'provider-needs-reconciliation'
+  });
+  const repeated = await coordinator.reconcile({
+    tenantId: tenantA,
+    contextId: placement.context.id,
+    disposition: 'accepted',
+    providerCallId: 'provider-needs-reconciliation'
+  });
+
+  assert.deepEqual(finalized.persistence, { state: 'provider_accepted', retryable: false });
   assert.deepEqual(repeated, finalized);
+  assert.equal(providerCalls, 1);
+  assert.equal((await repository.findRecentByPhone({
+    phone: '+919876543210', tenantId: tenantA, customerId: 42
+  })).call.providerCallId, 'provider-needs-reconciliation');
+  await assert.rejects(
+    coordinator.reconcile({
+      tenantId: tenantB,
+      contextId: placement.context.id,
+      disposition: 'accepted',
+      providerCallId: 'provider-needs-reconciliation'
+    }),
+    (error) => error.code === 'OUTBOUND_CONTEXT_NOT_FOUND'
+  );
+});
+
+test('provider rejection remains excluded when provider_failed persistence is interrupted and later reconciles', async () => {
+  // Mutation caught: swallowing a provider_failed write leaves prepared hydratable in the rejected tenant context.
+  const tenantId = '64b64c8f0f1e2d3c4b5a6911';
+  let providerCalls = 0;
+  const CallModel = createMemoryCallModel({ failUpdateAttempts: [2, 3, 4] });
+  const { repository, coordinator } = createContextBoundary(CallModel);
+  let rejection;
+
+  try {
+    await coordinator.initiate({
+      tenantId,
+      customerId: 42,
+      customerPhone: '+919876543210',
+      callType: 'REVIEW_CALL',
+      source: 'icallmate-masterpost',
+      placeProviderCall: async () => {
+        providerCalls += 1;
+        throw new Error('Provider rejected call');
+      }
+    });
+  } catch (error) {
+    rejection = error;
+  }
+
+  assert.equal(rejection.message, 'Provider rejected call');
+  assert.equal(providerCalls, 1);
+  assert.equal(CallModel.updateAttempts, 4);
+  assert.deepEqual(rejection.outboundCallContext.persistence, {
+    state: 'provider_failure_pending',
+    retryable: true
+  });
+  assert.equal(await repository.findRecentByPhone({
+    phone: '+919876543210', tenantId, customerId: 42
+  }), null);
+
+  const reconciled = await coordinator.reconcile({
+    tenantId,
+    contextId: rejection.outboundCallContext.context.id,
+    disposition: 'failed'
+  });
+  const repeated = await coordinator.reconcile({
+    tenantId,
+    contextId: rejection.outboundCallContext.context.id,
+    disposition: 'failed'
+  });
+
+  assert.deepEqual(reconciled.persistence, { state: 'provider_failed', retryable: false });
+  assert.deepEqual(repeated, reconciled);
+  assert.equal(providerCalls, 1);
+  assert.equal(await repository.findRecentByPhone({
+    phone: '+919876543210', tenantId, customerId: 42
+  }), null);
 });
 
 test('provider media hydrates safe persisted context without a separate Mongoose Customer document', async () => {

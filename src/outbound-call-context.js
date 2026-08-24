@@ -7,10 +7,52 @@ const { activeRecordFilter } = require('./webmaster/lifecycle');
 const { normalizePhoneLookupValue, normalizeOutboundCallType } = require('./helpers');
 
 const PREPARED = 'prepared';
+const PROVIDER_ACCEPTANCE_PENDING = 'provider_acceptance_pending';
+const PROVIDER_FAILURE_PENDING = 'provider_failure_pending';
 const PROVIDER_ACCEPTED = 'provider_accepted';
 const PROVIDER_FAILED = 'provider_failed';
-const ACTIVE_CONTEXT_STATES = [PREPARED, PROVIDER_ACCEPTED];
+const ACTIVE_CONTEXT_STATES = [PROVIDER_ACCEPTANCE_PENDING, PROVIDER_ACCEPTED];
+const MAX_RECONCILIATION_ATTEMPTS = 3;
 const configuredReferenceSecret = String(process.env.AUTH_SIGNING_SECRET || '').trim();
+
+class OutboundCallContextError extends Error {
+  constructor(code, message, status = 409) {
+    super(message);
+    this.name = 'OutboundCallContextError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+function normalizeDisposition(value) {
+  const disposition = String(value || '').trim().toLowerCase();
+  if (!['accepted', 'failed'].includes(disposition)) {
+    throw new OutboundCallContextError(
+      'OUTBOUND_CONTEXT_DISPOSITION_INVALID',
+      'Outbound call disposition must be accepted or failed',
+      400
+    );
+  }
+  return disposition;
+}
+
+function statesForDisposition(disposition) {
+  return disposition === 'accepted'
+    ? { pending: PROVIDER_ACCEPTANCE_PENDING, terminal: PROVIDER_ACCEPTED }
+    : { pending: PROVIDER_FAILURE_PENDING, terminal: PROVIDER_FAILED };
+}
+
+function requireProviderCallId(disposition, providerCallId) {
+  const providerId = String(providerCallId || '').trim();
+  if (disposition === 'accepted' && !providerId) {
+    throw new OutboundCallContextError(
+      'OUTBOUND_CONTEXT_PROVIDER_ID_REQUIRED',
+      'Provider call identifier is required for accepted reconciliation',
+      400
+    );
+  }
+  return providerId;
+}
 
 function requireObjectId(value, label) {
   if (!mongoose.isObjectIdOrHexString(value)) {
@@ -135,63 +177,130 @@ function createOutboundCallContextRepository({ CallModel = Call, now = () => new
     })));
   }
 
-  async function markProviderAccepted({ tenantId, contextId, providerCallId }) {
-    const providerId = String(providerCallId || '').trim();
-    if (!providerId) throw new TypeError('Provider call identifier is required');
+  function assertCompatibleProviderId(record, disposition, providerId) {
+    if (
+      disposition === 'accepted'
+      && record.provider_call_id
+      && record.provider_call_id !== providerId
+    ) {
+      throw new OutboundCallContextError(
+        'OUTBOUND_CONTEXT_PROVIDER_CONFLICT',
+        'Outbound call context is already bound to another provider call'
+      );
+    }
+  }
+
+  async function reconcileProviderOutcome({ tenantId, contextId, disposition, providerCallId = null }) {
+    const normalizedDisposition = normalizeDisposition(disposition);
+    const providerId = requireProviderCallId(normalizedDisposition, providerCallId);
+    const states = statesForDisposition(normalizedDisposition);
     const existing = await readScopedContext({ tenantId, contextId });
-    if (!existing) throw new Error('Prepared outbound call context was not found');
-    if (existing.context_state === PROVIDER_ACCEPTED) {
-      if (existing.provider_call_id !== providerId) {
-        throw new Error('Outbound call context is already bound to another provider call');
-      }
+    if (!existing) {
+      throw new OutboundCallContextError(
+        'OUTBOUND_CONTEXT_NOT_FOUND',
+        'Outbound call context was not found for the authorized tenant',
+        404
+      );
+    }
+    assertCompatibleProviderId(existing, normalizedDisposition, providerId);
+
+    if (existing.context_state === states.terminal) {
       return safeState(existing);
     }
-    if (existing.context_state !== PREPARED) {
-      throw new Error('Outbound call context is not available for provider acceptance');
+    if (![PREPARED, states.pending].includes(existing.context_state)) {
+      throw new OutboundCallContextError(
+        'OUTBOUND_CONTEXT_STATE_CONFLICT',
+        'Outbound call context has a conflicting provider disposition'
+      );
+    }
+
+    let staged = existing;
+    if (existing.context_state === PREPARED) {
+      await CallModel.updateOne(
+        activeRecordFilter({
+          _id: existing._id,
+          tenantId: existing.tenantId,
+          context_state: PREPARED
+        }),
+        {
+          $set: {
+            provider_call_id: normalizedDisposition === 'accepted' ? providerId : null,
+            context_state: states.pending,
+            outcome: states.pending,
+            status: normalizedDisposition === 'accepted' ? 'queued' : 'failed'
+          }
+        },
+        { runValidators: true }
+      );
+      staged = await readScopedContext({ tenantId, contextId });
+      if (!staged) {
+        throw new OutboundCallContextError(
+          'OUTBOUND_CONTEXT_NOT_FOUND',
+          'Outbound call context was not found for the authorized tenant',
+          404
+        );
+      }
+      assertCompatibleProviderId(staged, normalizedDisposition, providerId);
+      if (staged.context_state === states.terminal) return safeState(staged);
+      if (staged.context_state !== states.pending) {
+        throw new OutboundCallContextError(
+          'OUTBOUND_CONTEXT_PERSISTENCE_UNAVAILABLE',
+          'Outbound call context outcome staging did not persist',
+          503
+        );
+      }
     }
 
     await CallModel.updateOne(
       activeRecordFilter({
-        _id: existing._id,
-        tenantId: existing.tenantId,
-        context_state: PREPARED
+        _id: staged._id,
+        tenantId: staged.tenantId,
+        context_state: states.pending,
+        ...(normalizedDisposition === 'accepted' ? { provider_call_id: providerId } : {})
       }),
       {
         $set: {
-          provider_call_id: providerId,
-          context_state: PROVIDER_ACCEPTED,
-          outcome: 'initiated',
-          status: 'queued'
+          context_state: states.terminal,
+          outcome: normalizedDisposition === 'accepted' ? 'initiated' : 'provider_failed',
+          status: normalizedDisposition === 'accepted' ? 'queued' : 'failed'
         }
       },
       { runValidators: true }
     );
-    const updated = await readScopedContext({ tenantId, contextId });
-    if (!updated || updated.context_state !== PROVIDER_ACCEPTED || updated.provider_call_id !== providerId) {
-      throw new Error('Outbound call context finalization did not persist');
+    const finalized = await readScopedContext({ tenantId, contextId });
+    if (!finalized) {
+      throw new OutboundCallContextError(
+        'OUTBOUND_CONTEXT_NOT_FOUND',
+        'Outbound call context was not found for the authorized tenant',
+        404
+      );
     }
-    return safeState(updated);
+    assertCompatibleProviderId(finalized, normalizedDisposition, providerId);
+    if (finalized.context_state !== states.terminal) {
+      throw new OutboundCallContextError(
+        'OUTBOUND_CONTEXT_PERSISTENCE_UNAVAILABLE',
+        'Outbound call context finalization did not persist',
+        503
+      );
+    }
+    return safeState(finalized);
+  }
+
+  async function markProviderAccepted({ tenantId, contextId, providerCallId }) {
+    return reconcileProviderOutcome({
+      tenantId,
+      contextId,
+      disposition: 'accepted',
+      providerCallId
+    });
   }
 
   async function markProviderFailed({ tenantId, contextId }) {
-    const existing = await readScopedContext({ tenantId, contextId });
-    if (!existing || existing.context_state !== PREPARED) return safeState(existing);
-    await CallModel.updateOne(
-      activeRecordFilter({
-        _id: existing._id,
-        tenantId: existing.tenantId,
-        context_state: PREPARED
-      }),
-      {
-        $set: {
-          context_state: PROVIDER_FAILED,
-          outcome: 'provider_failed',
-          status: 'failed'
-        }
-      },
-      { runValidators: true }
-    );
-    return safeState(await readScopedContext({ tenantId, contextId }));
+    return reconcileProviderOutcome({
+      tenantId,
+      contextId,
+      disposition: 'failed'
+    });
   }
 
   async function findRecentByPhone({ phone, tenantId, customerId }) {
@@ -219,6 +328,8 @@ function createOutboundCallContextRepository({ CallModel = Call, now = () => new
 
   return {
     prepareInitiatedCall,
+    readState: async ({ tenantId, contextId }) => safeState(await readScopedContext({ tenantId, contextId })),
+    reconcileProviderOutcome,
     markProviderAccepted,
     markProviderFailed,
     findRecentByPhone
@@ -228,6 +339,55 @@ function createOutboundCallContextRepository({ CallModel = Call, now = () => new
 function createOutboundCallContextCoordinator({ repository } = {}) {
   if (!repository) throw new TypeError('Outbound call context repository is required');
 
+  async function currentState({ tenantId, contextId }, fallback) {
+    try {
+      return await repository.readState({ tenantId, contextId }) || fallback;
+    } catch (_error) {
+      return fallback;
+    }
+  }
+
+  async function reconcile({ tenantId, contextId, disposition, providerCallId = null }) {
+    const normalizedDisposition = normalizeDisposition(disposition);
+    let lastError;
+
+    for (let attempt = 0; attempt < MAX_RECONCILIATION_ATTEMPTS; attempt += 1) {
+      try {
+        const context = await repository.reconcileProviderOutcome({
+          tenantId,
+          contextId,
+          disposition: normalizedDisposition,
+          providerCallId
+        });
+        return {
+          context,
+          persistence: { state: context.state, retryable: false }
+        };
+      } catch (error) {
+        lastError = error;
+        if (error.code && error.code !== 'OUTBOUND_CONTEXT_PERSISTENCE_UNAVAILABLE') {
+          throw error;
+        }
+      }
+    }
+
+    const context = await currentState(
+      { tenantId, contextId },
+      { id: String(contextId), state: PREPARED }
+    );
+    if ([PROVIDER_ACCEPTED, PROVIDER_FAILED].includes(context.state)) {
+      return {
+        context,
+        persistence: { state: context.state, retryable: false }
+      };
+    }
+    return {
+      context,
+      persistence: { state: context.state, retryable: true },
+      errorCode: lastError?.code || 'OUTBOUND_CONTEXT_PERSISTENCE_UNAVAILABLE'
+    };
+  }
+
   async function initiate({ placeProviderCall, ...context }) {
     if (typeof placeProviderCall !== 'function') throw new TypeError('Provider call function is required');
     const prepared = await repository.prepareInitiatedCall(context);
@@ -236,37 +396,33 @@ function createOutboundCallContextCoordinator({ repository } = {}) {
       providerCall = await placeProviderCall();
     } catch (error) {
       try {
-        await repository.markProviderFailed({
+        error.outboundCallContext = await reconcile({
           tenantId: context.tenantId,
-          contextId: prepared.id
+          contextId: prepared.id,
+          disposition: 'failed'
         });
-      } catch (_persistenceError) {
-        // The durable prepared row is retained for operational diagnosis.
+      } catch (_reconciliationError) {
+        error.outboundCallContext = {
+          context: await currentState(
+            { tenantId: context.tenantId, contextId: prepared.id },
+            prepared
+          ),
+          persistence: { state: PREPARED, retryable: true }
+        };
       }
       throw error;
     }
 
-    try {
-      const accepted = await repository.markProviderAccepted({
-        tenantId: context.tenantId,
-        contextId: prepared.id,
-        providerCallId: providerCall?.sid
-      });
-      return {
-        providerCall,
-        context: accepted,
-        persistence: { state: PROVIDER_ACCEPTED, retryable: false }
-      };
-    } catch (_error) {
-      return {
-        providerCall,
-        context: prepared,
-        persistence: { state: PREPARED, retryable: true }
-      };
-    }
+    const reconciled = await reconcile({
+      tenantId: context.tenantId,
+      contextId: prepared.id,
+      disposition: 'accepted',
+      providerCallId: providerCall?.sid
+    });
+    return { providerCall, ...reconciled };
   }
 
-  return { initiate };
+  return { initiate, reconcile };
 }
 
 const outboundCallContextRepository = createOutboundCallContextRepository();

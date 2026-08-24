@@ -6,8 +6,8 @@ const express = require('express');
 const http = require('node:http');
 const { Duplex } = require('node:stream');
 
-async function request(app, path, tenantId) {
-  const payload = JSON.stringify({
+async function request(app, path, tenantId, body = null) {
+  const payload = JSON.stringify(body || {
     phone: '+919876543210',
     customerPhone: '+919876543210',
     customerName: 'Legacy Customer'
@@ -140,4 +140,66 @@ test('all mounted non-dry-run outbound entrypoints prepare numeric legacy contex
   assert.ok(preparedContexts.every((context) => context.customerId === 42));
   assert.ok(preparedContexts.every((context) => context.customerPhone === '+919876543210'));
   assert.ok(preparedContexts.every((context) => context.tenantId === tenantId));
+});
+
+test('mounted tenant reconciliation endpoint retries persistence without invoking a provider', async () => {
+  // Mutation caught: returning retryable without a mounted later caller leaves accepted context permanently prepared.
+  const tenantId = '64b64c8f0f1e2d3c4b5a6911';
+  const otherTenantId = '64b64c8f0f1e2d3c4b5a6912';
+  const contextId = '64b64c8f0f1e2d3c4b5a6999';
+  let state = 'prepared';
+  const { createOutboundCallContextCoordinator } = require('../src/outbound-call-context');
+  const outboundCoordinator = createOutboundCallContextCoordinator({
+    repository: {
+      async readState() { return { id: contextId, state }; },
+      async reconcileProviderOutcome(input) {
+        if (input.tenantId !== tenantId || input.contextId !== contextId) {
+          const error = new Error('Not found');
+          error.code = 'OUTBOUND_CONTEXT_NOT_FOUND';
+          error.status = 404;
+          throw error;
+        }
+        state = 'provider_accepted';
+        return { id: contextId, state };
+      }
+    }
+  });
+
+  const Tenant = require('../src/models/Tenant');
+  Tenant.findById = (requestedTenantId) => ({
+    lean: async () => ({ _id: requestedTenantId, status: 'active' })
+  });
+
+  delete require.cache[require.resolve('../src/api-routes')];
+  const mountApiRoutes = require('../src/api-routes');
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.adminSession = {
+      username: 'client-admin',
+      role: 'CLIENT_ADMIN',
+      tenantId: req.headers['x-test-tenant']
+    };
+    next();
+  });
+  mountApiRoutes(app, { outboundCoordinator });
+  app.use((_req, res) => res.status(404).json({ error: 'Endpoint not found' }));
+
+  const body = {
+    disposition: 'accepted',
+    providerCallId: 'provider-needs-reconciliation'
+  };
+  const first = await request(app, `/api/calls/outbound-context/${contextId}/reconcile`, tenantId, body);
+  const repeated = await request(app, `/api/calls/outbound-context/${contextId}/reconcile`, tenantId, body);
+  const wrongTenant = await request(app, `/api/calls/outbound-context/${contextId}/reconcile`, otherTenantId, body);
+
+  assert.equal(first.status, 200);
+  assert.equal(repeated.status, 200);
+  assert.equal(wrongTenant.status, 404);
+  assert.deepEqual(JSON.parse(first.body), {
+    callId: contextId,
+    contextPersistence: 'provider_accepted',
+    contextRetryable: false
+  });
+  assert.equal(state, 'provider_accepted');
 });
