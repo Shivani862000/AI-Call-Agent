@@ -1,6 +1,21 @@
 'use strict';
 
+const mongoose = require('mongoose');
+const { types: utilTypes } = require('node:util');
+
 const REDACTED = '[redacted]';
+const ACCESSOR_VALUE = Symbol('accessor-value');
+const NOT_A_DATE = Symbol('not-a-date');
+const MAP_BRAND_PROBE = Symbol('map-brand-probe');
+const ARRAY_BUFFER_BYTE_LENGTH = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, 'byteLength').get;
+const SHARED_ARRAY_BUFFER_BYTE_LENGTH = typeof SharedArrayBuffer === 'undefined'
+  ? null
+  : Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype, 'byteLength').get;
+const DATA_VIEW_BYTE_LENGTH = Object.getOwnPropertyDescriptor(DataView.prototype, 'byteLength').get;
+const TYPED_ARRAY_BYTE_LENGTH = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  'byteLength'
+).get;
 
 const OPERATIONAL_FAILURE_CODES = Object.freeze([
   'ACCOUNT_INACTIVE',
@@ -14,14 +29,33 @@ const OPERATIONAL_FAILURE_CODES = Object.freeze([
   'INTEGRATION_NOT_CONFIGURED',
   'INTEGRATION_UNAVAILABLE',
   'INTERNAL_ERROR',
+  'IMMUTABLE_AUDIT_EVENT',
+  'INVALID_AUDIT_ACTION',
+  'INVALID_AUDIT_ACTOR',
+  'INVALID_AUDIT_ACTOR_ACCESS_LEVEL',
   'INVALID_AUDIT_FAILURE_CODE',
+  'INVALID_AUDIT_INPUT',
   'INVALID_AUDIT_OUTCOME',
+  'INVALID_AUDIT_REQUEST_ID',
+  'INVALID_AUDIT_TARGET_ID',
+  'INVALID_AUDIT_TARGET_TYPE',
+  'INVALID_AUDIT_TENANT_ID',
   'INVALID_INPUT',
+  'INVALID_NOTIFICATION_ACCOUNT_ID',
+  'INVALID_NOTIFICATION_EVENT',
+  'INVALID_NOTIFICATION_FILTER',
+  'INVALID_NOTIFICATION_FILTER_ID',
   'INVALID_NOTIFICATION_FAILURE_CODE',
+  'INVALID_NOTIFICATION_INPUT',
+  'INVALID_NOTIFICATION_LAST_ATTEMPT_AT',
+  'INVALID_NOTIFICATION_RECIPIENT_CATEGORY',
   'INVALID_NOTIFICATION_RETRY_COUNT',
   'INVALID_NOTIFICATION_RETRY_INCREMENT',
+  'INVALID_NOTIFICATION_SENT_AT',
   'INVALID_NOTIFICATION_STATUS',
   'INVALID_NOTIFICATION_STATE_MUTATION',
+  'INVALID_NOTIFICATION_TEMPLATE',
+  'INVALID_NOTIFICATION_TENANT_ID',
   'INVALID_OVERRIDE_KEY',
   'INVALID_SECRET_IDENTIFIER',
   'INVALID_SECRET_VALUE',
@@ -51,6 +85,10 @@ const OPERATIONAL_FAILURE_CODES = Object.freeze([
   'UNSUPPORTED_NOTIFICATION_OPERATOR_OPERAND',
   'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE',
   'UNSUPPORTED_NOTIFICATION_UPDATE_PIPELINE',
+  'UNSUPPORTED_AUDIT_LEAN_INSERT_MANY',
+  'UNSAFE_AUDIT_INSERT_MANY_OPTIONS',
+  'UNSAFE_NOTIFICATION_INSERT_MANY_OPTIONS',
+  'UNSAFE_NOTIFICATION_UPDATE',
   'VALIDATION_FAILED',
   'VERSION_CONFLICT',
   'WEBMASTER_ACCESS_UNASSIGNED',
@@ -61,12 +99,14 @@ const OPERATIONAL_FAILURE_CODES = Object.freeze([
 const OPERATIONAL_FAILURE_CODE_SET = new Set(OPERATIONAL_FAILURE_CODES);
 
 const SAFE_MACHINE_STRING_KEYS = new Set([
+  'accountid',
   'action',
   'actor',
   'actoraccesslevel',
   'event',
   'integration',
   'integrationstatus',
+  'id',
   'deliverystatus',
   'notificationstatus',
   'outcome',
@@ -100,10 +140,30 @@ const SAFE_INTEGER_KEYS = new Set([
   'suspended',
   'total',
   'usage',
+  'usagetotal',
   'used',
-  'version'
+  'version',
+  'queuedepth',
+  'ratelimit',
+  'retentiondays'
 ]);
-const SAFE_DATE_KEYS = new Set(['createdat', 'created_at', 'updatedat', 'updated_at']);
+const SAFE_RATE_KEYS = new Set([
+  'callcompletionrate',
+  'callfailurerate',
+  'completionrate',
+  'failurerate',
+  'quotausagerate',
+  'successrate',
+  'usagerate'
+]);
+const SAFE_DATE_KEYS = new Set([
+  'createdat',
+  'created_at',
+  'lastattemptat',
+  'sentat',
+  'updatedat',
+  'updated_at'
+]);
 const SAFE_SLUG_KEYS = new Set([
   'integrationid',
   'model',
@@ -112,17 +172,39 @@ const SAFE_SLUG_KEYS = new Set([
   'providerid',
   'section'
 ]);
-const OPERATIONAL_INTEGER_SUFFIXES = new Set([
-  'count',
-  'days',
-  'depth',
-  'limit',
-  'minutes',
-  'total',
+const SAFE_RECURSIVE_KEYS = new Set([
+  'after',
+  'application',
+  'attentionitems',
+  'attempts',
+  'before',
+  'calls',
+  'defaults',
+  'details',
+  'maintenance',
+  'metadata',
+  'nested',
+  'notificationtemplates',
+  'notifications',
+  'policies',
+  'recentaudit',
+  'retention',
+  'tenants',
   'usage',
-  'version'
+  'users'
 ]);
-const OPERATIONAL_RATE_SUFFIXES = new Set(['percent', 'percentage', 'rate', 'ratio']);
+const NULLABLE_SAFE_KEYS = new Set([
+  'accountid',
+  'failurecode',
+  'lastattemptat',
+  'requestid',
+  'sentat',
+  'targetid',
+  'tenantid',
+  'updatedat',
+  'updated_at',
+  'updatedby'
+]);
 
 const PROVIDER_VALUES = new Set(['deepgram', 'gemini', 'icallmate', 'slack', 'smtp', 'webhook']);
 const STATUS_VALUES = new Set([
@@ -155,6 +237,7 @@ const SAFE_ENUM_FIELDS = new Map([
   ['outcome', new Set(['delivered', 'failed', 'failure', 'success'])],
   ['provider', PROVIDER_VALUES],
   ['providerstatus', STATUS_VALUES],
+  ['recipientcategory', new Set(['account', 'owner', 'support', 'tenant_admin'])],
   ['source', new Set(['database', 'default', 'environment', 'global', 'inherited', 'runtime', 'tenant'])],
   ['status', STATUS_VALUES]
 ]);
@@ -164,6 +247,8 @@ const PRE_SENSITIVE_EXACT_FIELDS = new Map([
   ['health', sanitizeHealthValue],
   ['healthstatus', sanitizeHealthValue],
   ['integrationhealth', sanitizeHealthValue],
+  ['integrations', sanitizeIntegrationMap],
+  ['providers', sanitizeIntegrationMap],
   ['providerhealth', sanitizeHealthValue],
   ['requestid', (value) => isSafeCorrelationId(value) ? value : REDACTED],
   ['servicehealth', sanitizeHealthValue],
@@ -359,6 +444,23 @@ function isSafeTimezone(value) {
   }
 }
 
+function dateTimestamp(value) {
+  try {
+    return Date.prototype.getTime.call(value);
+  } catch (_error) {
+    return NOT_A_DATE;
+  }
+}
+
+function isMapObject(value) {
+  try {
+    Map.prototype.has.call(value, MAP_BRAND_PROBE);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
 function isSensitiveSemantic(parts) {
   if (!parts.normalized) return false;
   if (parts.normalized === 'iv' || parts.normalized === 'dsn') return true;
@@ -374,7 +476,7 @@ function isSensitiveSemantic(parts) {
 }
 
 function isExplicitlySafeOperational(value, parts) {
-  const { normalized, tokens } = parts;
+  const { normalized } = parts;
   const enumValues = SAFE_ENUM_FIELDS.get(normalized);
   if (enumValues) return typeof value === 'string' && enumValues.has(value);
   if (SAFE_MACHINE_STRING_KEYS.has(normalized)) return isMachineString(value);
@@ -385,22 +487,36 @@ function isExplicitlySafeOperational(value, parts) {
     return typeof value === 'boolean';
   }
   if (SAFE_INTEGER_KEYS.has(normalized)) return isNonNegativeInteger(value);
+  if (SAFE_RATE_KEYS.has(normalized)) return isNonNegativeNumber(value);
   if (SAFE_SLUG_KEYS.has(normalized)) return isSafeSlug(value);
   if (normalized === 'timezone') return isSafeTimezone(value);
-  const suffix = tokens.at(-1);
-  if (OPERATIONAL_INTEGER_SUFFIXES.has(suffix)) return isNonNegativeInteger(value);
-  if (OPERATIONAL_RATE_SUFFIXES.has(suffix)) return isNonNegativeNumber(value);
   if (SAFE_DATE_KEYS.has(normalized)) {
-    return value instanceof Date
+    return dateTimestamp(value) !== NOT_A_DATE
       || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
   }
   if (normalized === 'failurecode') return isSafeMachineCode(value);
   return false;
 }
 
+function hasExplicitSafePolicy(normalized) {
+  return SAFE_ENUM_FIELDS.has(normalized)
+    || SAFE_MACHINE_STRING_KEYS.has(normalized)
+    || SAFE_BOOLEAN_KEYS.has(normalized)
+    || SAFE_INTEGER_KEYS.has(normalized)
+    || SAFE_RATE_KEYS.has(normalized)
+    || SAFE_SLUG_KEYS.has(normalized)
+    || SAFE_DATE_KEYS.has(normalized)
+    || normalized === 'enabled'
+    || normalized === 'failurecode'
+    || normalized === 'inherited'
+    || normalized === 'maintenancemode'
+    || normalized === 'timezone';
+}
+
 function sanitizeFeatureFlags(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return REDACTED;
-  const entries = value instanceof Map ? value.entries() : Object.entries(value);
+  if (!value || typeof value !== 'object' || Array.isArray(value) || utilTypes.isProxy(value)) return REDACTED;
+  const entries = isMapObject(value) ? Map.prototype.entries.call(value) : dataObjectEntries(value);
+  if (!entries) return REDACTED;
   const clone = {};
   for (const [rawKey, flagValue] of entries) {
     const key = typeof rawKey === 'string' ? rawKey : REDACTED;
@@ -415,21 +531,48 @@ function sanitizeFeatureFlags(value) {
 
 function sanitizeHealthValue(value, seen) {
   if (typeof value === 'string') return STATUS_VALUES.has(value) ? value : REDACTED;
-  if (!value || typeof value !== 'object') return REDACTED;
+  if (!value || typeof value !== 'object' || utilTypes.isProxy(value)) return REDACTED;
   return cloneSanitized(value, seen || new WeakSet());
 }
 
+function sanitizeIntegrationMap(value, seen) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || utilTypes.isProxy(value)) return REDACTED;
+  const entries = isMapObject(value) ? Map.prototype.entries.call(value) : dataObjectEntries(value);
+  if (!entries) return REDACTED;
+  const clone = {};
+  for (const [rawKey, integrationValue] of entries) {
+    const key = typeof rawKey === 'string' ? rawKey : REDACTED;
+    const safe = PROVIDER_VALUES.has(key)
+      && integrationValue
+      && typeof integrationValue === 'object';
+    setOwn(clone, key, safe ? cloneSanitized(integrationValue, seen || new WeakSet()) : REDACTED);
+  }
+  return clone;
+}
+
 function isObjectId(value) {
-  return Boolean(value
-    && typeof value === 'object'
-    && (value._bsontype === 'ObjectId' || value.constructor?.name === 'ObjectId')
-    && typeof value.toHexString === 'function');
+  if (!value || typeof value !== 'object' || utilTypes.isProxy(value)) return false;
+  try {
+    return Object.getPrototypeOf(value) === mongoose.Types.ObjectId.prototype;
+  } catch (_error) {
+    return false;
+  }
 }
 
 function binaryByteLength(value) {
-  if (typeof ArrayBuffer !== 'undefined' && value instanceof ArrayBuffer) return value.byteLength;
-  if (typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer) return value.byteLength;
-  if (ArrayBuffer.isView(value)) return value.byteLength;
+  for (const getter of [
+    ARRAY_BUFFER_BYTE_LENGTH,
+    SHARED_ARRAY_BUFFER_BYTE_LENGTH,
+    DATA_VIEW_BYTE_LENGTH,
+    TYPED_ARRAY_BYTE_LENGTH
+  ]) {
+    if (!getter) continue;
+    try {
+      return getter.call(value);
+    } catch (_error) {
+      // Try the next built-in binary brand without reading user properties.
+    }
+  }
   return null;
 }
 
@@ -442,7 +585,26 @@ function setOwn(target, key, value) {
   });
 }
 
+function dataObjectEntries(value) {
+  if (!value || typeof value !== 'object' || utilTypes.isProxy(value)) return null;
+  let descriptors;
+  try {
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch (_error) {
+    return null;
+  }
+  const entries = [];
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== 'string') continue;
+    const descriptor = descriptors[key];
+    if (!descriptor.enumerable) continue;
+    entries.push([key, Object.hasOwn(descriptor, 'value') ? descriptor.value : ACCESSOR_VALUE]);
+  }
+  return entries;
+}
+
 function cloneEntry(key, entry, seen) {
+  if (entry === ACCESSOR_VALUE) return REDACTED;
   const parts = keyParts(key);
   const exactSanitizer = PRE_SENSITIVE_EXACT_FIELDS.get(parts.normalized);
   if (exactSanitizer) return exactSanitizer(entry, seen);
@@ -450,11 +612,23 @@ function cloneEntry(key, entry, seen) {
   const sensitive = isSensitiveSemantic(parts);
   if (sensitive) return REDACTED;
 
-  if (entry === null) return null;
-  if (typeof entry !== 'object') {
-    return isExplicitlySafeOperational(entry, parts) ? entry : REDACTED;
+  if (SAFE_RECURSIVE_KEYS.has(parts.normalized)) {
+    if (entry === null) return null;
+    return entry && typeof entry === 'object' ? cloneSanitized(entry, seen) : REDACTED;
   }
-  return cloneSanitized(entry, seen);
+
+  if (!hasExplicitSafePolicy(parts.normalized)) return REDACTED;
+  if (entry === null) return NULLABLE_SAFE_KEYS.has(parts.normalized) ? null : REDACTED;
+  if (typeof entry === 'object') {
+    if (SAFE_DATE_KEYS.has(parts.normalized) && dateTimestamp(entry) !== NOT_A_DATE) {
+      return cloneSanitized(entry, seen);
+    }
+    if (SAFE_MACHINE_STRING_KEYS.has(parts.normalized) && isObjectId(entry)) {
+      return cloneSanitized(entry, seen);
+    }
+    return REDACTED;
+  }
+  return isExplicitlySafeOperational(entry, parts) ? entry : REDACTED;
 }
 
 function cloneEntries(entries, seen) {
@@ -469,8 +643,10 @@ function cloneEntries(entries, seen) {
 function cloneSanitized(value, seen) {
   if (value === null) return null;
   if (typeof value !== 'object') return REDACTED;
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? '[invalid-date]' : value.toISOString();
+  if (utilTypes.isProxy(value)) return REDACTED;
+  const timestamp = dateTimestamp(value);
+  if (timestamp !== NOT_A_DATE) {
+    return Number.isNaN(timestamp) ? '[invalid-date]' : Date.prototype.toISOString.call(value);
   }
 
   const byteLength = binaryByteLength(value);
@@ -478,7 +654,7 @@ function cloneSanitized(value, seen) {
 
   if (isObjectId(value)) {
     try {
-      const hex = value.toHexString();
+      const hex = mongoose.Types.ObjectId.prototype.toHexString.call(value);
       return /^[a-f0-9]{24}$/i.test(hex) ? hex.toLowerCase() : '[object-id]';
     } catch (_error) {
       return '[object-id]';
@@ -489,11 +665,17 @@ function cloneSanitized(value, seen) {
   seen.add(value);
   let clone;
   if (Array.isArray(value)) {
-    clone = value.map((entry) => cloneSanitized(entry, seen));
-  } else if (value instanceof Map) {
-    clone = cloneEntries(value.entries(), seen);
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    clone = Array.from({ length: value.length }, (_unused, index) => {
+      const descriptor = descriptors[index];
+      if (!descriptor || !Object.hasOwn(descriptor, 'value')) return REDACTED;
+      return cloneSanitized(descriptor.value, seen);
+    });
+  } else if (isMapObject(value)) {
+    clone = cloneEntries(Map.prototype.entries.call(value), seen);
   } else {
-    clone = cloneEntries(Object.entries(value), seen);
+    const entries = dataObjectEntries(value);
+    clone = entries ? cloneEntries(entries, seen) : REDACTED;
   }
   seen.delete(value);
   return clone;

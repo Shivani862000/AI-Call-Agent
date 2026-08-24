@@ -2,11 +2,42 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const mongoose = require('mongoose');
 
 const PlatformSettings = require('../src/models/PlatformSettings');
 const IntegrationSecret = require('../src/models/IntegrationSecret');
 const AuditEvent = require('../src/models/AuditEvent');
 const NotificationDelivery = require('../src/models/NotificationDelivery');
+
+function enumerableSnapshot(value, seen = new WeakSet()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) return '[circular]';
+  seen.add(value);
+  const snapshot = {};
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string') continue;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor?.enumerable || !Object.hasOwn(descriptor, 'value')) continue;
+    snapshot[key] = enumerableSnapshot(descriptor.value, seen);
+  }
+  seen.delete(value);
+  return snapshot;
+}
+
+function assertPrivateValidationError(error, marker, expectedCode) {
+  assert.equal(error.code, expectedCode);
+  const serialized = JSON.stringify(error);
+  const enumerable = JSON.stringify(enumerableSnapshot(error));
+  const nestedErrors = error.errors || {};
+  for (const representation of [error.message, serialized, enumerable, JSON.stringify(nestedErrors)]) {
+    assert.equal(representation.includes(marker), false, representation);
+  }
+  for (const nestedError of Object.values(nestedErrors)) {
+    assert.notEqual(nestedError?.value, marker);
+    assert.equal(JSON.stringify(enumerableSnapshot(nestedError)).includes(marker), false);
+  }
+  return true;
+}
 
 test('webmaster persistence schemas are strict and timestamp every retained record', () => {
   // Mutation caught: allowing undeclared fields or silently omitting creation/update evidence.
@@ -114,8 +145,11 @@ test('audit request ids reject non-string originals without coercion or value di
     await assert.rejects(
       new AuditEvent({ ...base, requestId }).validate(),
       (error) => {
-        assert.equal(error.errors?.requestId?.message, 'Request ID must be a bounded correlation identifier');
+        assert.equal(error.code, 'INVALID_AUDIT_REQUEST_ID');
+        assert.equal(error.message, 'Request ID must be a bounded correlation identifier');
         assert.equal(error.message.includes(privateMarker), false);
+        assert.equal(JSON.stringify(error).includes(privateMarker), false);
+        assert.equal(JSON.stringify(enumerableSnapshot(error)).includes(privateMarker), false);
         return true;
       }
     );
@@ -472,6 +506,119 @@ test('notification insertMany rejects every truthy lean option without coercion 
   for (const batch of persistedBatches) {
     assert.deepEqual(batch[0].metadata, { responseBody: '[redacted]', provider: 'smtp' });
   }
+});
+
+test('notification insertMany rejects accessor-bearing options without invoking lean getters', async () => {
+  // Mutation caught: reading `options.lean` lets an accessor return false in the hook and true to Mongoose.
+  const originalInsertMany = NotificationDelivery.collection.insertMany;
+  let collectionCallCount = 0;
+  let getterCallCount = 0;
+  NotificationDelivery.collection.insertMany = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true, insertedCount: 1, insertedIds: { 0: 'unsafe' } };
+  };
+
+  const options = { ordered: true };
+  Object.defineProperty(options, 'lean', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      getterCallCount += 1;
+      return getterCallCount > 1;
+    }
+  });
+
+  try {
+    await assert.rejects(
+      NotificationDelivery.insertMany([{
+        recipientCategory: 'owner',
+        template: 'tenant-restored',
+        event: 'tenant.restored',
+        metadata: { responseBody: 'private-accessor-marker-9137' },
+        status: 'failed',
+        retryCount: 0,
+        failureCode: 'PATIENT_JANE'
+      }], options),
+      (error) => error.code === 'UNSAFE_NOTIFICATION_INSERT_MANY_OPTIONS'
+        && error.message === 'Notification insert options must be plain data'
+    );
+  } finally {
+    NotificationDelivery.collection.insertMany = originalInsertMany;
+  }
+
+  assert.equal(getterCallCount, 0);
+  assert.equal(collectionCallCount, 0);
+});
+
+test('notification insertMany rejects inherited accessors and proxies without observing option values', async () => {
+  // Mutation caught: inherited or proxied option values bypass own-descriptor validation.
+  const originalInsertMany = NotificationDelivery.collection.insertMany;
+  let collectionCallCount = 0;
+  let observationCount = 0;
+  NotificationDelivery.collection.insertMany = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true, insertedCount: 1, insertedIds: { 0: 'unsafe' } };
+  };
+
+  const inheritedOptions = Object.create(Object.defineProperty({}, 'lean', {
+    get() {
+      observationCount += 1;
+      return true;
+    }
+  }));
+  const proxyOptions = new Proxy({}, {
+    get() {
+      observationCount += 1;
+      return true;
+    },
+    getOwnPropertyDescriptor() {
+      observationCount += 1;
+      return undefined;
+    },
+    getPrototypeOf() {
+      observationCount += 1;
+      return Object.prototype;
+    },
+    ownKeys() {
+      observationCount += 1;
+      return [];
+    }
+  });
+  const nonExtensibleOptions = Object.preventExtensions({});
+
+  try {
+    for (const options of [inheritedOptions, proxyOptions]) {
+      await assert.rejects(
+        NotificationDelivery.insertMany([{
+          recipientCategory: 'owner',
+          template: 'tenant-restored',
+          event: 'tenant.restored',
+          metadata: { responseBody: 'private-option-marker-9137' },
+          status: 'failed',
+          retryCount: 0,
+          failureCode: 'PATIENT_JANE'
+        }], options),
+        (error) => error.code === 'UNSAFE_NOTIFICATION_INSERT_MANY_OPTIONS'
+          && error.message === 'Notification insert options must be plain data'
+      );
+    }
+    await assert.rejects(
+      NotificationDelivery.insertMany([{
+        recipientCategory: 'owner',
+        template: 'tenant-restored',
+        event: 'tenant.restored',
+        metadata: {},
+        status: 'pending',
+        retryCount: 0
+      }], nonExtensibleOptions),
+      (error) => error.code === 'UNSAFE_NOTIFICATION_INSERT_MANY_OPTIONS'
+    );
+  } finally {
+    NotificationDelivery.collection.insertMany = originalInsertMany;
+  }
+
+  assert.equal(observationCount, 0);
+  assert.equal(collectionCallCount, 0);
 });
 
 test('notification assignment, replacement, and update paths sanitize before collection persistence', async () => {
@@ -904,4 +1051,431 @@ test('notification status retry and failure values reject hostile types with fix
 
   assert.equal(collectionCallCount, 0);
   assert.equal(coercionCount, 0);
+});
+
+test('notification direct validation keeps every rejected adjacent field out of the complete error', async () => {
+  // Mutation caught: Mongoose CastError/ValidatorError retains a raw ID, enum, count, code, or date value.
+  const marker = 'private-adjacent-marker-7193';
+  let coercionCount = 0;
+  const coerciveValue = {
+    marker,
+    toString() {
+      coercionCount += 1;
+      return marker;
+    },
+    valueOf() {
+      coercionCount += 1;
+      return marker;
+    }
+  };
+  const base = {
+    recipientCategory: 'owner',
+    template: 'tenant-restored',
+    event: 'tenant.restored',
+    metadata: {},
+    status: 'pending',
+    retryCount: 0
+  };
+  const cases = [
+    ['tenantId', marker, 'INVALID_NOTIFICATION_TENANT_ID'],
+    ['accountId', coerciveValue, 'INVALID_NOTIFICATION_ACCOUNT_ID'],
+    ['recipientCategory', marker, 'INVALID_NOTIFICATION_RECIPIENT_CATEGORY'],
+    ['template', `${marker}${'x'.repeat(128)}`, 'INVALID_NOTIFICATION_TEMPLATE'],
+    ['event', [marker], 'INVALID_NOTIFICATION_EVENT'],
+    ['status', marker, 'INVALID_NOTIFICATION_STATUS'],
+    ['retryCount', coerciveValue, 'INVALID_NOTIFICATION_RETRY_COUNT'],
+    ['failureCode', [marker], 'INVALID_NOTIFICATION_FAILURE_CODE'],
+    ['lastAttemptAt', coerciveValue, 'INVALID_NOTIFICATION_LAST_ATTEMPT_AT'],
+    ['sentAt', [marker], 'INVALID_NOTIFICATION_SENT_AT']
+  ];
+
+  for (const [field, value, code] of cases) {
+    await assert.rejects(
+      new NotificationDelivery({ ...base, [field]: value }).validate(),
+      (error) => assertPrivateValidationError(error, marker, code),
+      field
+    );
+  }
+
+  const valid = new NotificationDelivery({
+    ...base,
+    tenantId: '507f1f77bcf86cd799439011',
+    accountId: '507f1f77bcf86cd799439012',
+    lastAttemptAt: '2026-08-24T12:00:00.000Z',
+    sentAt: new Date('2026-08-24T12:01:00.000Z')
+  });
+  await valid.validate();
+  assert.ok(valid.tenantId instanceof mongoose.Types.ObjectId);
+  assert.ok(valid.accountId instanceof mongoose.Types.ObjectId);
+  assert.ok(valid.lastAttemptAt instanceof Date);
+  assert.ok(valid.sentAt instanceof Date);
+  assert.equal(coercionCount, 0);
+});
+
+test('notification insert update and replacement reject raw adjacent values before collection access', async () => {
+  // Mutation caught: non-document write APIs defer adjacent fields to value-bearing Mongoose casts/validators.
+  const originalInsertMany = NotificationDelivery.collection.insertMany;
+  const originalUpdateOne = NotificationDelivery.collection.updateOne;
+  const originalReplaceOne = NotificationDelivery.collection.replaceOne;
+  const marker = 'private-write-marker-7193';
+  let collectionCallCount = 0;
+  let coercionCount = 0;
+  const coerciveDate = {
+    marker,
+    toString() {
+      coercionCount += 1;
+      return '2026-08-24T12:00:00.000Z';
+    },
+    valueOf() {
+      coercionCount += 1;
+      return Date.now();
+    }
+  };
+  const spy = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true };
+  };
+  NotificationDelivery.collection.insertMany = spy;
+  NotificationDelivery.collection.updateOne = spy;
+  NotificationDelivery.collection.replaceOne = spy;
+
+  const base = {
+    recipientCategory: 'owner',
+    template: 'tenant-restored',
+    event: 'tenant.restored',
+    metadata: {},
+    status: 'pending',
+    retryCount: 0
+  };
+
+  try {
+    await assert.rejects(
+      NotificationDelivery.insertMany([{ ...base, tenantId: [marker] }]),
+      (error) => assertPrivateValidationError(error, marker, 'INVALID_NOTIFICATION_TENANT_ID')
+    );
+    await assert.rejects(
+      NotificationDelivery.updateOne(
+        { _id: '507f1f77bcf86cd799439011' },
+        { $set: { lastAttemptAt: coerciveDate } },
+        { runValidators: false }
+      ),
+      (error) => assertPrivateValidationError(error, marker, 'INVALID_NOTIFICATION_LAST_ATTEMPT_AT')
+    );
+    await assert.rejects(
+      NotificationDelivery.replaceOne(
+        { _id: '507f1f77bcf86cd799439011' },
+        { ...base, accountId: { marker } },
+        { runValidators: false }
+      ),
+      (error) => assertPrivateValidationError(error, marker, 'INVALID_NOTIFICATION_ACCOUNT_ID')
+    );
+  } finally {
+    NotificationDelivery.collection.insertMany = originalInsertMany;
+    NotificationDelivery.collection.updateOne = originalUpdateOne;
+    NotificationDelivery.collection.replaceOne = originalReplaceOne;
+  }
+
+  assert.equal(collectionCallCount, 0);
+  assert.equal(coercionCount, 0);
+});
+
+test('notification raw inserts and query filters reject accessors and hostile IDs before observation', async () => {
+  // Mutation caught: Mongoose reads raw document accessors or manufactures a filter CastError before privacy guards.
+  const originalInsertMany = NotificationDelivery.collection.insertMany;
+  const originalUpdateOne = NotificationDelivery.collection.updateOne;
+  const marker = 'private-query-marker-7193';
+  let observationCount = 0;
+  let collectionCallCount = 0;
+  const rawDocument = {
+    recipientCategory: 'owner',
+    template: 'tenant-restored',
+    event: 'tenant.restored',
+    metadata: {},
+    retryCount: 0
+  };
+  Object.defineProperty(rawDocument, 'status', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      return 'pending';
+    }
+  });
+  const coerciveFilterId = {
+    marker,
+    toString() {
+      observationCount += 1;
+      return '507f1f77bcf86cd799439011';
+    },
+    valueOf() {
+      observationCount += 1;
+      return '507f1f77bcf86cd799439011';
+    }
+  };
+  const persistedUpdates = [];
+  NotificationDelivery.collection.insertMany = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true };
+  };
+  NotificationDelivery.collection.updateOne = async (_filter, update) => {
+    collectionCallCount += 1;
+    persistedUpdates.push(update);
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+
+  try {
+    await assert.rejects(
+      NotificationDelivery.insertMany([rawDocument]),
+      (error) => assertPrivateValidationError(error, marker, 'INVALID_NOTIFICATION_INPUT')
+    );
+    await assert.rejects(
+      NotificationDelivery.updateOne(
+        { _id: coerciveFilterId },
+        { $set: { status: 'delivered' } }
+      ),
+      (error) => assertPrivateValidationError(error, marker, 'INVALID_NOTIFICATION_FILTER_ID')
+    );
+    await assert.rejects(
+      NotificationDelivery.updateOne(
+        { $or: [{ _id: coerciveFilterId }] },
+        { $set: { status: 'delivered' } }
+      ),
+      (error) => assertPrivateValidationError(error, marker, 'INVALID_NOTIFICATION_FILTER_ID')
+    );
+    await assert.rejects(
+      NotificationDelivery.updateOne(
+        { $or: [{ status: [marker] }] },
+        { $set: { status: 'delivered' } }
+      ),
+      (error) => assertPrivateValidationError(error, marker, 'INVALID_NOTIFICATION_STATUS')
+    );
+    await NotificationDelivery.updateOne(
+      { _id: '507f1f77bcf86cd799439011' },
+      {
+        $set: {
+          tenantId: '507f1f77bcf86cd799439012',
+          lastAttemptAt: '2026-08-24T12:00:00.000Z'
+        }
+      }
+    );
+  } finally {
+    NotificationDelivery.collection.insertMany = originalInsertMany;
+    NotificationDelivery.collection.updateOne = originalUpdateOne;
+  }
+
+  assert.equal(observationCount, 0);
+  assert.equal(collectionCallCount, 1);
+  assert.ok(persistedUpdates[0].$set.tenantId instanceof mongoose.Types.ObjectId);
+  assert.ok(persistedUpdates[0].$set.lastAttemptAt instanceof Date);
+});
+
+test('audit direct validation rejects unsafe identity and outcome fields with value-free errors', async () => {
+  // Mutation caught: String casts and validators retain rejected audit IDs/outcome/failure values.
+  const marker = 'private-audit-marker-7193';
+  let coercionCount = 0;
+  const coerciveValue = {
+    marker,
+    toString() {
+      coercionCount += 1;
+      return marker;
+    },
+    valueOf() {
+      coercionCount += 1;
+      return marker;
+    }
+  };
+  const base = {
+    actor: 'actor-1',
+    actorAccessLevel: 'SYSTEM',
+    action: 'settings.update',
+    targetType: 'platform-settings',
+    targetId: 'platform',
+    tenantId: null,
+    requestId: 'request-7193',
+    outcome: 'success',
+    failureCode: null
+  };
+  const cases = [
+    ['actor', coerciveValue, 'INVALID_AUDIT_ACTOR'],
+    ['actorAccessLevel', marker, 'INVALID_AUDIT_ACTOR_ACCESS_LEVEL'],
+    ['action', [marker], 'INVALID_AUDIT_ACTION'],
+    ['targetType', coerciveValue, 'INVALID_AUDIT_TARGET_TYPE'],
+    ['targetId', [marker], 'INVALID_AUDIT_TARGET_ID'],
+    ['tenantId', coerciveValue, 'INVALID_AUDIT_TENANT_ID'],
+    ['requestId', `${marker}@invalid`, 'INVALID_AUDIT_REQUEST_ID'],
+    ['outcome', marker, 'INVALID_AUDIT_OUTCOME'],
+    ['failureCode', marker, 'INVALID_AUDIT_FAILURE_CODE']
+  ];
+
+  for (const [field, value, code] of cases) {
+    await assert.rejects(
+      new AuditEvent({ ...base, [field]: value }).validate(),
+      (error) => assertPrivateValidationError(error, marker, code),
+      field
+    );
+  }
+  assert.equal(coercionCount, 0);
+});
+
+test('audit insert and immutable mutation APIs fail privately before collection access', async () => {
+  // Mutation caught: insert validation leaks raw values or an update/replacement reaches immutable storage.
+  const originalInsertMany = AuditEvent.collection.insertMany;
+  const originalUpdateOne = AuditEvent.collection.updateOne;
+  const originalReplaceOne = AuditEvent.collection.replaceOne;
+  const marker = 'private-audit-write-marker-7193';
+  let collectionCallCount = 0;
+  const spy = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true };
+  };
+  AuditEvent.collection.insertMany = spy;
+  AuditEvent.collection.updateOne = spy;
+  AuditEvent.collection.replaceOne = spy;
+  const base = {
+    actor: 'actor-1',
+    actorAccessLevel: 'SYSTEM',
+    action: 'settings.update',
+    targetType: 'platform-settings',
+    outcome: 'success'
+  };
+
+  try {
+    await assert.rejects(
+      AuditEvent.insertMany([{ ...base, outcome: marker }]),
+      (error) => assertPrivateValidationError(error, marker, 'INVALID_AUDIT_OUTCOME')
+    );
+    await assert.rejects(
+      AuditEvent.updateOne(
+        { _id: '507f1f77bcf86cd799439011' },
+        { $set: { outcome: marker } }
+      ),
+      (error) => assertPrivateValidationError(error, marker, 'IMMUTABLE_AUDIT_EVENT')
+    );
+    await assert.rejects(
+      AuditEvent.replaceOne(
+        { _id: '507f1f77bcf86cd799439011' },
+        { ...base, tenantId: marker }
+      ),
+      (error) => assertPrivateValidationError(error, marker, 'IMMUTABLE_AUDIT_EVENT')
+    );
+  } finally {
+    AuditEvent.collection.insertMany = originalInsertMany;
+    AuditEvent.collection.updateOne = originalUpdateOne;
+    AuditEvent.collection.replaceOne = originalReplaceOne;
+  }
+
+  assert.equal(collectionCallCount, 0);
+});
+
+test('audit insertMany rejects lean accessors without observation and keeps hydrated sanitization', async () => {
+  // Mutation caught: lean audit inserts bypass setters, validation, and before/after redaction.
+  const originalInsertMany = AuditEvent.collection.insertMany;
+  const marker = 'private-audit-lean-marker-7193';
+  let getterCallCount = 0;
+  const persisted = [];
+  AuditEvent.collection.insertMany = async (documents) => {
+    persisted.push(documents);
+    return {
+      acknowledged: true,
+      insertedCount: documents.length,
+      insertedIds: Object.fromEntries(documents.map((document, index) => [index, document._id]))
+    };
+  };
+  const options = {};
+  Object.defineProperty(options, 'lean', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      getterCallCount += 1;
+      return getterCallCount > 1;
+    }
+  });
+  const base = {
+    actor: 'actor-1',
+    actorAccessLevel: 'SYSTEM',
+    action: 'settings.update',
+    targetType: 'platform-settings',
+    outcome: 'success'
+  };
+
+  try {
+    await assert.rejects(
+      AuditEvent.insertMany([{ ...base, before: { message: marker } }], options),
+      (error) => assertPrivateValidationError(error, marker, 'UNSAFE_AUDIT_INSERT_MANY_OPTIONS')
+    );
+    await assert.rejects(
+      AuditEvent.insertMany([{ ...base, before: { message: marker } }], { lean: true }),
+      (error) => assertPrivateValidationError(error, marker, 'UNSUPPORTED_AUDIT_LEAN_INSERT_MANY')
+    );
+    await AuditEvent.insertMany([{
+      ...base,
+      before: { status: 'active', message: marker },
+      after: { status: 'suspended' }
+    }]);
+  } finally {
+    AuditEvent.collection.insertMany = originalInsertMany;
+  }
+
+  assert.equal(getterCallCount, 0);
+  assert.equal(persisted.length, 1);
+  assert.deepEqual(persisted[0][0].before, { status: 'active', message: '[redacted]' });
+  assert.equal(JSON.stringify(persisted).includes(marker), false);
+});
+
+test('audit save validates fixed fields even when document validation is explicitly skipped', async () => {
+  // Mutation caught: validateBeforeSave=false persists an invalid retained audit without a fixed private error.
+  const originalInsertOne = AuditEvent.collection.insertOne;
+  const marker = 'private-audit-save-marker-7193';
+  let collectionCallCount = 0;
+  AuditEvent.collection.insertOne = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true };
+  };
+
+  try {
+    await assert.rejects(
+      new AuditEvent({
+        actor: 'actor-1',
+        actorAccessLevel: 'SYSTEM',
+        action: 'settings.update',
+        targetType: 'platform-settings',
+        outcome: marker,
+        before: { message: marker }
+      }).save({ validateBeforeSave: false }),
+      (error) => assertPrivateValidationError(error, marker, 'INVALID_AUDIT_OUTCOME')
+    );
+  } finally {
+    AuditEvent.collection.insertOne = originalInsertOne;
+  }
+
+  assert.equal(collectionCallCount, 0);
+});
+
+test('hydrated audit documents cannot bypass immutability with document deletion', async () => {
+  // Mutation caught: query delete hooks do not automatically protect Document#deleteOne().
+  const originalDeleteOne = AuditEvent.collection.deleteOne;
+  let collectionCallCount = 0;
+  AuditEvent.collection.deleteOne = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true, deletedCount: 1 };
+  };
+  const event = new AuditEvent({
+    actor: 'actor-1',
+    actorAccessLevel: 'SYSTEM',
+    action: 'settings.update',
+    targetType: 'platform-settings',
+    outcome: 'success'
+  });
+  event.$isNew = false;
+
+  try {
+    await assert.rejects(
+      event.deleteOne(),
+      (error) => error.code === 'IMMUTABLE_AUDIT_EVENT'
+        && error.message === 'Audit events are immutable'
+    );
+  } finally {
+    AuditEvent.collection.deleteOne = originalDeleteOne;
+  }
+
+  assert.equal(collectionCallCount, 0);
 });

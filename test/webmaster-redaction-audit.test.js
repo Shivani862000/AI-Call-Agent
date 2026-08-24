@@ -12,6 +12,21 @@ const {
 } = require('../src/webmaster/redaction');
 const { createAuditService } = require('../src/webmaster/audit-service');
 
+function enumerableSnapshot(value, seen = new WeakSet()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) return '[circular]';
+  seen.add(value);
+  const snapshot = {};
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string') continue;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor?.enumerable || !Object.hasOwn(descriptor, 'value')) continue;
+    snapshot[key] = enumerableSnapshot(descriptor.value, seen);
+  }
+  seen.delete(value);
+  return snapshot;
+}
+
 test('deep audit redaction removes credential, identity, patient, and clinical variants', () => {
   // Mutation caught: a renamed or nested sensitive field survives an audit clone.
   const source = {
@@ -210,8 +225,8 @@ test('redaction fails closed for semantic credential, identity, and free-text va
   });
 });
 
-test('redaction deeply serializes maps and BSON values without leaking binary internals', () => {
-  // Mutation caught: Map values collapse or ObjectId/Buffer implementation fields enter retained metadata.
+test('redaction deeply serializes registered maps while unknown typed fields remain closed', () => {
+  // Mutation caught: Map values collapse or unregistered ObjectId/Buffer/date fields enter retained metadata.
   const objectId = new mongoose.Types.ObjectId('507f1f77bcf86cd799439011');
   const date = new Date('2026-08-24T00:00:00.000Z');
   const binary = Buffer.from('secret-bytes');
@@ -237,9 +252,9 @@ test('redaction deeply serializes maps and BSON values without leaking binary in
       retryCount: 2,
       details: { password: '[redacted]', provider: 'smtp' }
     },
-    objectId: '507f1f77bcf86cd799439011',
-    date: '2026-08-24T00:00:00.000Z',
-    binary: '[binary:12 bytes]'
+    objectId: '[redacted]',
+    date: '[redacted]',
+    binary: '[redacted]'
   });
   assert.equal(source.metadata.get('details').get('password'), 'map-secret');
   assert.equal(binary.toString('utf8'), 'secret-bytes');
@@ -368,16 +383,129 @@ test('compact compound PII and PHI keys win over numeric suffix policies without
     passwordresetCount: '[redacted]',
     credentialHealthRate: '[redacted]',
     requestId: 'request-9137',
-    recordCount: 12,
-    insuranceRate: 0.6,
-    careQueueDepth: 9,
-    serviceLatencyRate: 0.03,
+    recordCount: '[redacted]',
+    insuranceRate: '[redacted]',
+    careQueueDepth: '[redacted]',
+    serviceLatencyRate: '[redacted]',
     retentionDays: 90
   });
 });
 
-test('all binary views redact without exposing bytes while dates and object ids stay useful', () => {
-  // Mutation caught: Uint8Array and ArrayBuffer are enumerated into retained byte values.
+test('unknown compact keys redact regardless of operational-looking suffix or value shape', () => {
+  // Mutation caught: an unregistered field becomes retained merely by ending in Count/Rate/Days/Total/etc.
+  const cases = [
+    ['mobileCount', 1],
+    ['secondaryPhoneRate', 0.5],
+    ['contactEmailDays', 30],
+    ['homeAddressTotal', 2],
+    ['passportTotal', 1],
+    ['patientQueueDepth', 2],
+    ['userIdentifierCount', 3],
+    ['clinicalAlertRate', 0.1],
+    ['healthMetricDays', 7],
+    ['accountIdentifierUsage', 4],
+    ['memberTotal', 5],
+    ['careQueueDepth', 9],
+    ['serviceLatencyRate', 0.03],
+    ['recordCount', 12],
+    ['insuranceRate', 0.6],
+    ['arbitraryVersion', 2],
+    ['unknownConfigured', true],
+    ['unknownStatus', 'active']
+  ];
+
+  for (const [key, value] of cases) {
+    assert.deepEqual(sanitizeForAudit({ [key]: value }), { [key]: '[redacted]' }, key);
+  }
+});
+
+test('unknown compound containers redact as a unit instead of laundering known child fields', () => {
+  // Mutation caught: unknown objects survive because their child `total`, `active`, or `status` keys are allowed.
+  for (const [key, value] of [
+    ['passportMetrics', { total: 1 }],
+    ['patientSummary', { active: 2 }],
+    ['userIdentifierStats', { status: 'active' }],
+    ['clinicalDashboard', { failed: 3 }],
+    ['healthBreakdown', { usageRate: 0.5 }],
+    ['unregisteredMetrics', { total: 4, status: 'healthy' }]
+  ]) {
+    assert.deepEqual(sanitizeForAudit({ [key]: value }), { [key]: '[redacted]' }, key);
+  }
+});
+
+test('audit redaction never invokes object accessors or proxy traps', () => {
+  // Mutation caught: Object.entries() executes attacker getters while cloning retained metadata.
+  const marker = 'private-redaction-accessor-marker-7193';
+  let observationCount = 0;
+  const source = { status: 'active', retryCount: 1 };
+  Object.defineProperty(source, 'details', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      return { message: marker };
+    }
+  });
+  const proxy = new Proxy({ status: 'active' }, {
+    get() {
+      observationCount += 1;
+      return marker;
+    },
+    getOwnPropertyDescriptor() {
+      observationCount += 1;
+      return undefined;
+    },
+    getPrototypeOf() {
+      observationCount += 1;
+      return Object.prototype;
+    },
+    ownKeys() {
+      observationCount += 1;
+      return [];
+    }
+  });
+  class HostileMap extends Map {
+    entries() {
+      observationCount += 1;
+      return super.entries();
+    }
+  }
+  class HostileDate extends Date {
+    getTime() {
+      observationCount += 1;
+      return super.getTime();
+    }
+
+    toISOString() {
+      observationCount += 1;
+      return super.toISOString();
+    }
+  }
+  class HostileBytes extends Uint8Array {
+    get byteLength() {
+      observationCount += 1;
+      return super.byteLength;
+    }
+  }
+
+  assert.deepEqual(sanitizeForAudit(source), {
+    status: 'active',
+    retryCount: 1,
+    details: '[redacted]'
+  });
+  assert.equal(sanitizeForAudit(proxy), '[redacted]');
+  assert.deepEqual(sanitizeForAudit({
+    metadata: new HostileMap([['status', 'active']]),
+    createdAt: new HostileDate('2026-08-24T12:00:00.000Z')
+  }), {
+    metadata: { status: 'active' },
+    createdAt: '2026-08-24T12:00:00.000Z'
+  });
+  assert.deepEqual(sanitizeForAudit([new HostileBytes([1, 2, 3])]), ['[binary:3 bytes]']);
+  assert.equal(observationCount, 0);
+});
+
+test('unregistered binary and identifier fields redact while registered timestamps stay useful', () => {
+  // Mutation caught: unknown typed values bypass exact field registration based on their runtime shape.
   const objectId = new mongoose.Types.ObjectId('507f1f77bcf86cd799439011');
   const bytes = new Uint8Array([112, 97, 116, 105, 101, 110, 116]);
   const view = new DataView(bytes.buffer, 1, 4);
@@ -390,10 +518,10 @@ test('all binary views redact without exposing bytes while dates and object ids 
   });
 
   assert.deepEqual(sanitized, {
-    bytes: '[binary:7 bytes]',
-    view: '[binary:4 bytes]',
-    raw: '[binary:7 bytes]',
-    objectId: '507f1f77bcf86cd799439011',
+    bytes: '[redacted]',
+    view: '[redacted]',
+    raw: '[redacted]',
+    objectId: '[redacted]',
     createdAt: '2026-08-24T12:00:00.000Z'
   });
   assert.equal(JSON.stringify(sanitized).includes('112'), false);
@@ -547,6 +675,10 @@ test('Task 4 settings audits retain registered operational values and redact arb
     maintenanceMode: false,
     retentionDays: 90,
     rateLimit: 120,
+    defaults: { timezone: 'Asia/Kolkata', plan: 'enterprise' },
+    policies: { retentionDays: 90, rateLimit: 120 },
+    maintenance: { maintenanceMode: false, maintenanceMessage: 'Patient Jane is unavailable' },
+    providers: { gemini: { provider: 'gemini', configured: true } },
     featureFlags: {
       smartRetry: true,
       beta_dashboard: false,
@@ -569,6 +701,10 @@ test('Task 4 settings audits retain registered operational values and redact arb
     maintenanceMode: false,
     retentionDays: 90,
     rateLimit: 120,
+    defaults: { timezone: 'Asia/Kolkata', plan: 'enterprise' },
+    policies: { retentionDays: 90, rateLimit: 120 },
+    maintenance: { maintenanceMode: false, maintenanceMessage: '[redacted]' },
+    providers: { gemini: { provider: 'gemini', configured: true } },
     featureFlags: {
       smartRetry: true,
       beta_dashboard: false,
@@ -596,6 +732,8 @@ test('Task 8 dashboard audits retain aggregate operations and system actor metad
       gemini: { provider: 'gemini', configured: true, health: 'healthy' }
     },
     notifications: { pending: 4, failed: 2 },
+    recentAudit: [{ action: 'settings.update', outcome: 'success' }],
+    attentionItems: [{ failureCode: 'PROVIDER_TIMEOUT', provider: 'gemini', status: 'degraded' }],
     summary: 'Patient Jane is waiting',
     patientQueueDepth: 2
   }), {
@@ -609,6 +747,8 @@ test('Task 8 dashboard audits retain aggregate operations and system actor metad
       gemini: { provider: 'gemini', configured: true, health: 'healthy' }
     },
     notifications: { pending: 4, failed: 2 },
+    recentAudit: [{ action: 'settings.update', outcome: 'success' }],
+    attentionItems: [{ failureCode: 'PROVIDER_TIMEOUT', provider: 'gemini', status: 'degraded' }],
     summary: '[redacted]',
     patientQueueDepth: '[redacted]'
   });
@@ -670,4 +810,62 @@ test('audit failure codes accept machine vocabulary and reject unsafe content wi
     );
   }
   assert.equal(created.length, 1);
+});
+
+test('audit service rejects accessor-bearing and coercive input without observing private values', async () => {
+  // Mutation caught: service normalization reads actor/target accessors or calls attacker string coercion.
+  const marker = 'private-service-marker-7193';
+  let observationCount = 0;
+  let createCount = 0;
+  const actor = { platformAccessLevel: 'OWNER' };
+  Object.defineProperty(actor, 'id', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      return marker;
+    }
+  });
+  const coerciveOutcome = {
+    marker,
+    toString() {
+      observationCount += 1;
+      return 'failure';
+    },
+    valueOf() {
+      observationCount += 1;
+      return 'failure';
+    }
+  };
+  const service = createAuditService({
+    AuditEventModel: {
+      async create() {
+        createCount += 1;
+      }
+    }
+  });
+
+  await assert.rejects(
+    service.record({
+      actor,
+      action: 'settings.update',
+      target: { type: 'settings', id: ['platform', marker] },
+      outcome: coerciveOutcome,
+      failureCode: { marker }
+    }),
+    (error) => {
+      assert.equal(error.code, 'INVALID_AUDIT_INPUT');
+      for (const representation of [
+        error.message,
+        JSON.stringify(error),
+        JSON.stringify(enumerableSnapshot(error)),
+        JSON.stringify(error.errors || {})
+      ]) {
+        assert.equal(representation.includes(marker), false, representation);
+      }
+      return true;
+    }
+  );
+
+  assert.equal(observationCount, 0);
+  assert.equal(createCount, 0);
 });
