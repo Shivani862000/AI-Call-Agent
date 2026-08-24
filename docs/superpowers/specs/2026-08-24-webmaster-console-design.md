@@ -8,7 +8,7 @@
 
 Build a dedicated, responsive control plane where authorized Webmasters manage tenants, tenant users, platform administrators, global settings, tenant overrides, integrations, policies, operational health, notifications, and immutable audit history.
 
-The console is separate from tenant-facing operations. It must never expose patient or customer personally identifiable information (PII) or protected health information (PHI), and the application must not provide permanent-delete behavior anywhere in the webmaster feature set.
+The console is separate from tenant-facing operations. It must never expose patient or customer personally identifiable information (PII) or protected health information (PHI), and the application must not provide permanent-delete behavior for application records. Existing destructive routes outside the new console are included in the preservation work and become archive transitions.
 
 ## Product Decisions
 
@@ -19,7 +19,7 @@ The console is separate from tenant-facing operations. It must never expose pati
 - Webmaster Admins can manage tenants, tenant users, non-secret global settings, tenant overrides, policies, notifications, and audit views. They cannot replace secrets or manage Owner accounts.
 - Tenant admins continue to manage agents within their own tenant. Webmasters can manage tenant admins and agents across all tenants.
 - Tenant operational views contain aggregate statistics and service health only. They exclude names, phone numbers, email addresses, addresses, transcripts, recordings, free-text feedback, external identifiers, and any other PII/PHI.
-- Tenant, user, and operational records are never permanently deleted. Lifecycle actions use suspension, archiving, and restoration.
+- Tenant, user, customer, call, client, campaign, agent, feedback, audit, notification, and other application records are never permanently deleted. Lifecycle actions use suspension, archiving, and restoration.
 - Passwords are entered manually by an authorized administrator. Passwords and password hashes are never returned by an API or displayed after submission.
 - Sensitive actions use a confirmation popup. Password re-entry is not required.
 - Tenant administrators receive email notifications when their tenant or account is suspended, restored, or archived.
@@ -111,6 +111,10 @@ Lifecycle actions:
 - **Restore:** return a suspended or archived tenant to active status after validation.
 
 There is no tenant-delete button, route, service operation, or cascading deletion.
+
+### Application-wide preservation
+
+Existing tenant-facing routes that permanently delete customers, calls, client records, campaigns, agent configurations, or users are converted to archive transitions. Existing UI labels that say “delete” are replaced with “archive,” confirmation copy explains that the record remains retained, and normal active queries exclude archived records unless an archived view is explicitly requested. Filesystem rotation for ephemeral logs and cleanup of test-only temporary files are infrastructure housekeeping rather than application-record deletion and are not affected by this rule.
 
 ### Users
 
@@ -310,7 +314,7 @@ The console uses a neutral VikiTech identity and administration-oriented informa
 ### Lifecycle and preservation
 
 - Verify tenant and user suspend/archive/restore transitions.
-- Verify there are no webmaster hard-delete routes.
+- Verify there are no application-record hard-delete routes, including the pre-existing customer, call, client, campaign, agent, and user routes.
 - Verify archived records remain queryable in archived views and remain referenced by audits.
 - Verify tenant-admin invariants and Owner invariants.
 
@@ -352,7 +356,7 @@ All milestones are part of the same requested release. A milestone is complete o
 
 ## Explicit Non-Goals
 
-- Permanent deletion of tenants, users, audit records, notification records, or operational data.
+- Permanent deletion of tenants, users, customers, calls, clients, campaigns, agents, feedback, audit records, notification records, or other application data.
 - Support Team access to the webmaster console.
 - PII/PHI access or user impersonation from the webmaster console.
 - Reusing tenant customer screens as webmaster operational views.
@@ -363,4 +367,4 @@ All milestones are part of the same requested release. A milestone is complete o
 
 ## Acceptance Criteria
 
-The feature is accepted when an Owner can manage the complete platform configuration and tenant estate; a Webmaster Admin can perform all delegated non-secret operations; unauthorized roles cannot access the console; tenant administrators retain tenant-scoped agent management; tenant and user records can be suspended, archived, and restored but never deleted; all existing integrations can be configured without secret disclosure; global defaults and tenant overrides resolve predictably; sensitive activity is immutably audited; lifecycle notifications are visible and retryable; the tenant operational snapshot contains no PII/PHI; and all console sections function across desktop, tablet, and mobile without regressing tenant operations.
+The feature is accepted when an Owner can manage the complete platform configuration and tenant estate; a Webmaster Admin can perform all delegated non-secret operations; unauthorized roles cannot access the console; tenant administrators retain tenant-scoped agent management; application records can be suspended or archived and restored as appropriate but never permanently deleted; all existing integrations can be configured without secret disclosure; global defaults and tenant overrides resolve predictably; sensitive activity is immutably audited; lifecycle notifications are visible and retryable; the tenant operational snapshot contains no PII/PHI; and all console sections function across desktop, tablet, and mobile without regressing tenant operations.
