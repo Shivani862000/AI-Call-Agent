@@ -179,6 +179,7 @@ function buildOutboundCampaignPayload(customerPhone, customerId, options = {}) {
           customerId: customerId || null,
           customerName: options.customerName || '',
           clientName: options.clientName || '',
+          tenantId: options.tenantId || null,
           callType: options.callType || 'REVIEW_CALL'
         }),
         iscallbackapi: String(options.iscallbackapi ?? process.env.ICALLMATE_IS_CALLBACK_API ?? '1'),
@@ -211,6 +212,7 @@ function buildMasterPostPayload(customerPhone, leadId, options = {}) {
           customerId: options.customerId || null,
           customerName: options.customerName || '',
           clientName: options.clientName || '',
+          tenantId: options.tenantId || null,
           callType: options.callType || 'REVIEW_CALL',
           leadId: resolvedLeadId
         })

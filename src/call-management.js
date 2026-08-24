@@ -24,6 +24,7 @@ const {
   normalizeOutboundCallType,
   normalizePhoneLookupValue,
   normalizeCallDirection,
+  parseIcallMateExtraParams,
   getIncomingCallKey,
   normalizeIcallTimestamp
 } = require('./helpers');
@@ -31,12 +32,13 @@ const { buildIcallMateCallbackUrl } = require('./icallmate-webhook');
 
 // ── Call Initiation ────────────────────────────────────────────────────────────
 
-async function placeRealtimeCall({ customerPhone, customerName, customerId, clientName, agentId, callType }) {
+async function placeRealtimeCall({ customerPhone, customerName, customerId, clientName, agentId, callType, tenantId }) {
   return initiateCall(customerPhone, customerId, {
     baseUrl: PUBLIC_BASE_URL,
     customerName,
     clientName,
     agentId,
+    tenantId,
     callType: normalizeOutboundCallType(callType),
     wsurl: toWssUrl(PUBLIC_BASE_URL, '/icallmate/media'),
     callbackapi: buildIcallMateCallbackUrl(PUBLIC_BASE_URL)
@@ -208,8 +210,14 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
 
 // ── Call Context & Intelligence ───────────────────────────────────────────────
 
-async function findRecentOutboundCallContextByPhone(phoneValue) {
-  const customer = await findCustomerByPhone(phoneValue);
+async function findRecentOutboundCallContextByPhone(phoneValue, tenantId) {
+  if (!tenantId) return null;
+  const normalized = normalizePhoneLookupValue(phoneValue);
+  const candidates = await dbAll(
+    "SELECT * FROM customers WHERE tenant_id = ? AND status <> 'archived' ORDER BY id DESC LIMIT 200",
+    [String(tenantId)]
+  );
+  const customer = candidates.find((candidate) => normalizePhoneLookupValue(candidate.phone) === normalized) || null;
   if (!customer) {
     return null;
   }
@@ -219,11 +227,13 @@ async function findRecentOutboundCallContextByPhone(phoneValue) {
        FROM calls
        LEFT JOIN agents ON agents.id = calls.agent_id
       WHERE calls.customer_id = ?
+        AND calls.tenant_id = ?
+        AND calls.status <> 'archived'
         AND COALESCE(calls.call_direction, 'outbound') = 'outbound'
         AND DATETIME(calls.called_at) >= DATETIME('now', '-30 minutes')
       ORDER BY calls.id DESC
       LIMIT 1`,
-    [customer.id]
+    [customer.id, String(tenantId)]
   );
 
   if (!call) {
@@ -255,7 +265,8 @@ async function hydrateIcallMateSessionContext(session, message = {}, extraParams
   session.contextHydrating = true;
   session._hydrationPromise = (async () => {
     try {
-      const context = await findRecentOutboundCallContextByPhone(message.callerId || session.callerId);
+      const tenantId = extraParams.tenantId || extraParams.tenant_id || session.tenantId;
+      const context = await findRecentOutboundCallContextByPhone(message.callerId || session.callerId, tenantId);
       if (!context) {
         return;
       }
@@ -424,6 +435,7 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
     eventName === 'hangup-call' ? 'missed' : 'active'
   );
 
+  const extraParams = parseIcallMateExtraParams(message.extraParams || message.extraparam || message.extra_param);
   const row = {
     id: key,
     stream_id: message.streamId || existing.stream_id || key,
@@ -443,6 +455,7 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
     botid: message.botid || existing.botid || '',
     userrefno: message.userrefno || existing.userrefno || '',
     sysrefno: message.sysrefno || existing.sysrefno || '',
+    tenantId: patch.tenantId || message.tenantId || extraParams.tenantId || existing.tenantId || null,
     extra_params: message.extraParams || existing.extra_params || ''
   };
 

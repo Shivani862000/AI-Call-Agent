@@ -254,30 +254,19 @@ router.get('/', async (req, res) => {
 // Analytics endpoint for unified feedback stats
 router.get('/analytics', async (req, res) => {
   try {
-    const feedback = await dbAll(`
-      SELECT f.*, c.name as customer_name, c.phone as customer_phone
-      FROM feedback f
-      LEFT JOIN customers c ON f.customer_id = c.id
-    `);
-    const recentCalls = await dbAll(`
-      SELECT calls.*, c.name as customer_name, c.phone as customer_phone
-      FROM calls
-      LEFT JOIN customers c ON calls.customer_id = c.id
-      ORDER BY calls.created_at DESC LIMIT 500
-    `);
+    const feedback = await listUnifiedFeedback(req.tenantId);
+    const recentCalls = feedback.filter((item) => item.call_id);
 
     // Positive Feedback
-    const fbPositive = feedback.filter((item) => normalizeRating(item.stars) >= 4);
+    const fbPositive = feedback.filter((item) => !item.call_id && normalizeRating(item.stars) >= 4);
     const callsPositive = recentCalls
-      .filter((c) => normalizeRating(c.extracted_rating) >= 4 && !feedback.find(f => f.call_id === c.id))
-      .map((c) => ({ ...c, stars: normalizeRating(c.extracted_rating), review_text: c.extracted_review_text }));
+      .filter((c) => normalizeRating(c.stars) >= 4);
     const positiveFeedback = [...fbPositive, ...callsPositive];
 
     // Negative Feedback
-    const fbNegative = feedback.filter((item) => normalizeRating(item.stars) > 0 && normalizeRating(item.stars) <= 2);
+    const fbNegative = feedback.filter((item) => !item.call_id && normalizeRating(item.stars) > 0 && normalizeRating(item.stars) <= 2);
     const callsNegative = recentCalls
-      .filter((c) => normalizeRating(c.extracted_rating) > 0 && normalizeRating(c.extracted_rating) <= 2 && !feedback.find(f => f.call_id === c.id))
-      .map((c) => ({ ...c, stars: normalizeRating(c.extracted_rating), review_text: c.extracted_review_text }));
+      .filter((c) => normalizeRating(c.stars) > 0 && normalizeRating(c.stars) <= 2);
     const negativeFeedback = [...fbNegative, ...callsNegative];
 
     // Pending Analysis
@@ -288,7 +277,7 @@ router.get('/analytics', async (req, res) => {
       const isCompleted = String(call.outcome || '').toLowerCase() === 'completed';
       const needsTranscript = String(call.transcript_status || '').toLowerCase() !== 'completed';
       const needsAnalysis = String(call.analysis_status || '').toLowerCase() !== 'completed';
-      const missingRating = !Number(call.extracted_rating || 0);
+      const missingRating = !Number(call.stars || 0);
       return isCompleted && (needsTranscript || needsAnalysis || missingRating);
     });
 

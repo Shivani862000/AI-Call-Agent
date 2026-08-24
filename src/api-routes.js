@@ -12,11 +12,13 @@ const usersRouter = require('../routes/users');
 const clientsRouter = require('../routes/clients');
 const campaignsRouter = require('../routes/campaigns');
 const feedbackRouter = require('../routes/feedback');
+const callArchiveRouter = require('../routes/call-archival');
 const Call = require('./models/Call');
 const createSupportTicketsRouter = require('../routes/support-tickets');
 const { createSlackSupportNotifier } = require('../services/slack-support');
 const reportsRouter = require('../routes/reports');
 const agentsRouter = require('../routes/agents');
+const { mountTenantScopedRoutes } = require('./tenant-route-mounts');
 const testCallRouter = require('../routes/test-call');
 const testAiCallRouter = require('../routes/test-ai-call');
 const User = require('./models/User');
@@ -96,15 +98,8 @@ const {
 } = require('./icallmate-webhook');
 const logger = require('../services/system-logger');
 const webmasterAuthorization = createWebmasterAuthorization({ UserModel: User, TenantModel: Tenant });
-const {
-  recordFilterFromRequest,
-  restoreFields,
-  createMongooseArchiveHandlers
-} = require('./webmaster/lifecycle');
-const callArchiveHandlers = createMongooseArchiveHandlers({
-  Model: Call,
-  resourceName: 'Call'
-});
+const { recordFilterFromRequest } = require('./webmaster/lifecycle');
+const { createLegacyCallScope, tenantVisibleRows } = require('./legacy-call-scope');
 
 module.exports = function mountApiRoutes(app) {
   app.get('/health', (req, res) => {
@@ -188,15 +183,18 @@ module.exports = function mountApiRoutes(app) {
   });
 
   app.use('/api/tenants', webmasterAuthorization.requireWebmaster, tenantsRouter);
-  app.use('/api/users', requireTenantAccess, usersRouter);
-  
-  app.use('/api/customers', requireTenantAccess, customersRouter);
-  app.use('/api/clients', requireTenantAccess, clientsRouter);
-  app.use('/api/campaigns', requireTenantAccess, campaignsRouter);
-  app.use('/api/feedback', feedbackRouter);
+  mountTenantScopedRoutes(app, {
+    requireTenantAccess,
+    usersRouter,
+    customersRouter,
+    clientsRouter,
+    campaignsRouter,
+    feedbackRouter,
+    agentsRouter,
+    callArchiveRouter
+  });
   app.use('/api/support-tickets', createSupportTicketsRouter({ dbRun, dbGet, dbAll, notifyNewTicket: createSlackSupportNotifier({ webhookUrl: process.env.SLACK_SUPPORT_WEBHOOK_URL }) }));
   app.use('/api/reports', reportsRouter);
-  app.use('/api/agents', requireTenantAccess, agentsRouter);
   app.use('/api/test-call', testCallRouter);
   app.use('/api/test-ai-call', testAiCallRouter);
 
@@ -283,6 +281,7 @@ module.exports = function mountApiRoutes(app) {
         customerId: customer.id,
         clientName,
         agentId: agentConfig?.id || null,
+        tenantId: req.tenantId,
         callType
       });
 
@@ -567,6 +566,7 @@ module.exports = function mountApiRoutes(app) {
         customerId: customer.id,
         clientName: agentConfig?.client_name || CLIENT_NAME,
         agentId: agentConfig?.id || null,
+        tenantId: req.tenantId,
         callType
       });
 
@@ -639,6 +639,7 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/incoming', async (req, res) => {
     pruneIncomingCallState();
+    const callScope = createLegacyCallScope(req.tenantId);
     const dbRows = await dbAll(
       `SELECT
        calls.id,
@@ -659,12 +660,15 @@ module.exports = function mountApiRoutes(app) {
      FROM calls
      JOIN customers ON customers.id = calls.customer_id
      WHERE calls.call_direction = 'incoming'
+       AND ${callScope.clause}
      ORDER BY COALESCE(calls.ended_at, calls.answered_at, calls.called_at, calls.created_at) DESC
-     LIMIT 100`
+     LIMIT 100`,
+      callScope.params
     );
 
     const seen = new Set(dbRows.map((row) => row.stream_id).filter(Boolean));
-    const liveOnlyRows = [...incomingCallState.values()].filter((row) => row.stream_id && !seen.has(row.stream_id));
+    const liveOnlyRows = tenantVisibleRows([...incomingCallState.values()], req.tenantId)
+      .filter((row) => row.stream_id && !seen.has(row.stream_id));
     const calls = [
       ...dbRows.map((row) => ({
         ...row,
@@ -686,6 +690,7 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/metrics', async (req, res) => {
     try {
+      const callScope = createLegacyCallScope(req.tenantId);
       const rows = await dbAll(
         `SELECT
          COALESCE(call_direction, 'outbound') AS direction,
@@ -694,8 +699,9 @@ module.exports = function mountApiRoutes(app) {
          SUM(CASE WHEN DATE(called_at) = DATE('now') THEN 1 ELSE 0 END) AS today_count,
          SUM(COALESCE(media_packets, 0)) AS media_packets
        FROM calls
-       WHERE status <> 'archived'
-       GROUP BY COALESCE(call_direction, 'outbound'), COALESCE(outcome, 'unknown')`
+       WHERE ${callScope.clause}
+       GROUP BY COALESCE(call_direction, 'outbound'), COALESCE(outcome, 'unknown')`,
+        callScope.params
       );
 
       const summary = {
@@ -1177,6 +1183,9 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId(\\d+)', async (req, res) => {
     try {
+      const callScope = createLegacyCallScope(req.tenantId, {
+        archived: String(req.query.status || '').toLowerCase() === 'archived'
+      });
       const row = await dbGet(
         `SELECT
          calls.id,
@@ -1236,8 +1245,8 @@ module.exports = function mountApiRoutes(app) {
        FROM calls
        JOIN customers ON customers.id = calls.customer_id
        LEFT JOIN agents ON agents.id = calls.agent_id
-      WHERE calls.id = ?`,
-        [req.params.callId]
+      WHERE calls.id = ? AND ${callScope.clause}`,
+        [req.params.callId, ...callScope.params]
       );
 
       if (!row) {
@@ -1282,13 +1291,14 @@ module.exports = function mountApiRoutes(app) {
 
   app.post('/api/calls/:callId(\\d+)/analyze', async (req, res) => {
     try {
+      const callScope = createLegacyCallScope(req.tenantId);
       const call = await dbGet(
         `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone, agents.name AS agent_name, agents.slug AS agent_slug
          FROM calls
          JOIN customers ON customers.id = calls.customer_id
          LEFT JOIN agents ON agents.id = calls.agent_id
-        WHERE calls.id = ?`,
-        [req.params.callId]
+        WHERE calls.id = ? AND ${callScope.clause}`,
+        [req.params.callId, ...callScope.params]
       );
 
       if (!call) {
@@ -1310,7 +1320,10 @@ module.exports = function mountApiRoutes(app) {
         product_analysis: productAnalysis
       };
       await storeCallAnalysis({ dbRun, callId: call.id, analysis });
-      const updatedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [call.id]);
+      const updatedCall = await dbGet(
+        `SELECT * FROM calls WHERE id = ? AND ${callScope.clause}`,
+        [call.id, ...callScope.params]
+      );
       const sentiment = updatedCall.sentiment || updatedCall.sentiment_label || analysis.sentiment || 'neutral';
       const rating = Number(updatedCall.extracted_rating || 0);
       logger.info('FEEDBACK_ANALYSIS_COMPLETED', {
@@ -1334,13 +1347,16 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId(\\d+)/analysis-pdf', async (req, res) => {
     try {
+      const callScope = createLegacyCallScope(req.tenantId, {
+        archived: String(req.query.status || '').toLowerCase() === 'archived'
+      });
       const call = await dbGet(
         `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone, agents.name AS agent_name, agents.slug AS agent_slug
          FROM calls
          JOIN customers ON customers.id = calls.customer_id
          LEFT JOIN agents ON agents.id = calls.agent_id
-        WHERE calls.id = ?`,
-        [req.params.callId]
+        WHERE calls.id = ? AND ${callScope.clause}`,
+        [req.params.callId, ...callScope.params]
       );
 
       if (!call) {
@@ -1369,8 +1385,9 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/live', async (req, res) => {
     try {
+      const callScope = createLegacyCallScope(req.tenantId);
       pruneLiveCallState();
-      const inMemoryRows = [...liveCallState.values()];
+      const inMemoryRows = tenantVisibleRows([...liveCallState.values()], req.tenantId);
       const seenCallSids = new Set(inMemoryRows.map((row) => row.call_sid).filter(Boolean));
       const now = Date.now();
       const recentDbRows = await dbAll(
@@ -1393,8 +1410,10 @@ module.exports = function mountApiRoutes(app) {
        JOIN customers ON customers.id = calls.customer_id
        LEFT JOIN agents ON agents.id = calls.agent_id
        WHERE DATETIME(calls.called_at) >= DATETIME('now', '-60 minutes')
+         AND ${callScope.clause}
        ORDER BY calls.called_at DESC
-       LIMIT 12`
+       LIMIT 12`,
+        callScope.params
       );
 
       const mergedRows = [
@@ -1438,9 +1457,12 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId/supervisor-events', async (req, res) => {
     try {
+      const callScope = createLegacyCallScope(req.tenantId);
       const rows = await dbAll(
-        'SELECT * FROM call_supervisor_events WHERE call_id = ? ORDER BY created_at DESC LIMIT 50',
-        [req.params.callId]
+        `SELECT * FROM call_supervisor_events
+          WHERE call_id IN (SELECT calls.id FROM calls WHERE calls.id = ? AND ${callScope.clause})
+          ORDER BY created_at DESC LIMIT 50`,
+        [req.params.callId, ...callScope.params]
       );
       res.json(rows);
     } catch (error) {
@@ -1451,10 +1473,13 @@ module.exports = function mountApiRoutes(app) {
 
   app.post('/api/calls/:callId/escalate', async (req, res) => {
     try {
-      await dbRun(
-        'UPDATE calls SET human_escalation_requested = ?, supervisor_alert_level = ?, supervisor_notes = ? WHERE id = ?',
-        [1, 'critical', String(req.body.note || 'Manual escalation requested').trim(), req.params.callId]
+      const callScope = createLegacyCallScope(req.tenantId);
+      const result = await dbRun(
+        `UPDATE calls SET human_escalation_requested = ?, supervisor_alert_level = ?, supervisor_notes = ?
+          WHERE id = ? AND ${callScope.clause}`,
+        [1, 'critical', String(req.body.note || 'Manual escalation requested').trim(), req.params.callId, ...callScope.params]
       );
+      if (!result?.changes) return res.status(404).json({ error: 'Call not found' });
       await createSupervisorEvent({
         dbRun,
         callId: Number(req.params.callId),
@@ -1471,7 +1496,14 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId/recording', async (req, res) => {
     try {
-      const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status, recording_local_path FROM calls WHERE id = ?', [req.params.callId]);
+      const callScope = createLegacyCallScope(req.tenantId, {
+        archived: String(req.query.status || '').toLowerCase() === 'archived'
+      });
+      const call = await dbGet(
+        `SELECT id, provider_call_id, recording_url, recording_status, recording_local_path
+           FROM calls WHERE id = ? AND ${callScope.clause}`,
+        [req.params.callId, ...callScope.params]
+      );
 
       if (call?.recording_local_path) {
         const fs = require('fs');
@@ -1506,26 +1538,11 @@ module.exports = function mountApiRoutes(app) {
     }
   });
 
-  app.post('/api/calls/bulk/archive', callArchiveHandlers.archiveBulk);
-  app.delete('/api/calls/bulk', callArchiveHandlers.archiveBulk);
-  app.post('/api/calls/bulk/restore', async (req, res) => {
-    try {
-      const result = await Call.updateMany(
-        { tenantId: req.tenantId, status: 'archived' },
-        { $set: restoreFields('active') }
-      );
-      res.status(200).json({
-        message: 'Call records restored successfully',
-        restoredCount: Number(result?.modifiedCount || 0),
-        resource: { status: 'active' }
-      });
-    } catch (error) {
-      res.status(500).json({ error: 'Unable to restore call records' });
-    }
-  });
-
   app.get('/api/calls/:callId/transcript', async (req, res) => {
     try {
+      const callScope = createLegacyCallScope(req.tenantId, {
+        archived: String(req.query.status || '').toLowerCase() === 'archived'
+      });
       const call = await dbGet(
         `SELECT
          calls.id,
@@ -1538,8 +1555,8 @@ module.exports = function mountApiRoutes(app) {
          customers.name AS customer_name
        FROM calls
        LEFT JOIN customers ON customers.id = calls.customer_id
-       WHERE calls.id = ?`,
-        [req.params.callId]
+       WHERE calls.id = ? AND ${callScope.clause}`,
+        [req.params.callId, ...callScope.params]
       );
 
       if (!call) {

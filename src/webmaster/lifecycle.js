@@ -37,9 +37,29 @@ function lifecycleResource(record) {
     id: record?._id || record?.id,
     status: record?.status,
     archived_at: record?.archived_at || null,
-    archived_by: record?.archived_by || null,
     archive_reason: record?.archive_reason || null
   };
+}
+
+function archiveUpdate(fields) {
+  return [{
+    $set: {
+      pre_archive_status: { $ifNull: ['$pre_archive_status', '$status'] },
+      ...fields
+    }
+  }];
+}
+
+function restoreUpdate(status) {
+  return [{
+    $set: {
+      status: { $ifNull: ['$pre_archive_status', status] },
+      pre_archive_status: null,
+      archived_at: null,
+      archived_by: null,
+      archive_reason: null
+    }
+  }];
 }
 
 function actorFromRequest(req) {
@@ -47,6 +67,11 @@ function actorFromRequest(req) {
 }
 
 function tenantScope(req, extra = {}) {
+  if (!req.tenantId) {
+    const error = new Error('A concrete authorized tenant is required');
+    error.statusCode = 403;
+    throw error;
+  }
   return { ...extra, tenantId: req.tenantId };
 }
 
@@ -58,7 +83,7 @@ function createMongooseArchiveHandlers({ Model, resourceName, restoreStatus = 'a
       const fields = archiveFields(actorFromRequest(req), req.body?.reason);
       const record = await Model.findOneAndUpdate(
         scopeFromRequest(req, { _id: req.params.id }),
-        { $set: fields },
+        archiveUpdate(fields),
         { new: true }
       );
       if (!record) return res.status(404).json({ error: `${resourceName} not found` });
@@ -67,7 +92,7 @@ function createMongooseArchiveHandlers({ Model, resourceName, restoreStatus = 'a
         resource: lifecycleResource(record)
       });
     } catch (error) {
-      return res.status(500).json({ error: `Unable to archive ${resourceName}` });
+      return res.status(error.statusCode || 500).json({ error: `Unable to archive ${resourceName}` });
     }
   }
 
@@ -75,7 +100,7 @@ function createMongooseArchiveHandlers({ Model, resourceName, restoreStatus = 'a
     try {
       const record = await Model.findOneAndUpdate(
         scopeFromRequest(req, { _id: req.params.id, status: 'archived' }),
-        { $set: restoreFields(restoreStatus) },
+        restoreUpdate(restoreStatus),
         { new: true }
       );
       if (!record) return res.status(404).json({ error: `${resourceName} not found` });
@@ -84,7 +109,7 @@ function createMongooseArchiveHandlers({ Model, resourceName, restoreStatus = 'a
         resource: lifecycleResource(record)
       });
     } catch (error) {
-      return res.status(500).json({ error: `Unable to restore ${resourceName}` });
+      return res.status(error.statusCode || 500).json({ error: `Unable to restore ${resourceName}` });
     }
   }
 
@@ -93,7 +118,7 @@ function createMongooseArchiveHandlers({ Model, resourceName, restoreStatus = 'a
       const fields = archiveFields(actorFromRequest(req), req.body?.reason);
       const result = await Model.updateMany(
         activeRecordFilter(scopeFromRequest(req)),
-        { $set: fields }
+        archiveUpdate(fields)
       );
       return res.status(200).json({
         message: `${resourceName} records archived successfully`,
@@ -101,16 +126,31 @@ function createMongooseArchiveHandlers({ Model, resourceName, restoreStatus = 'a
         resource: {
           status: fields.status,
           archived_at: fields.archived_at,
-          archived_by: fields.archived_by,
           archive_reason: fields.archive_reason
         }
       });
     } catch (error) {
-      return res.status(500).json({ error: `Unable to archive ${resourceName} records` });
+      return res.status(error.statusCode || 500).json({ error: `Unable to archive ${resourceName} records` });
     }
   }
 
-  return { archive, restore, archiveBulk };
+  async function restoreBulk(req, res) {
+    try {
+      const result = await Model.updateMany(
+        scopeFromRequest(req, { status: 'archived' }),
+        restoreUpdate(restoreStatus)
+      );
+      return res.status(200).json({
+        message: `${resourceName} records restored successfully`,
+        restoredCount: Number(result?.modifiedCount || 0),
+        resource: { status: 'restored' }
+      });
+    } catch (error) {
+      return res.status(error.statusCode || 500).json({ error: `Unable to restore ${resourceName} records` });
+    }
+  }
+
+  return { archive, restore, archiveBulk, restoreBulk };
 }
 
 function assertSqlIdentifier(value) {
@@ -183,6 +223,8 @@ module.exports = {
   activeOperationalFilter,
   restoreFields,
   lifecycleResource,
+  archiveUpdate,
+  restoreUpdate,
   createMongooseArchiveHandlers,
   createSqlArchiveHandlers
 };

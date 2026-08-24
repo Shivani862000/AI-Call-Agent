@@ -12,6 +12,7 @@ const feedbackSchema = new mongoose.Schema({
   archived_at: { type: Date, default: null },
   archived_by: { type: String, default: null },
   archive_reason: { type: String, default: null },
+  pre_archive_status: { type: String, default: null },
   created_at: { type: Date, default: Date.now } // equivalent to submitted_at
 });
 

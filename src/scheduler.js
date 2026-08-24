@@ -19,9 +19,12 @@ async function dispatchClientReminders() {}
 
 async function dispatchScheduledCalls() {
   const currentSlot = getCurrentSlotLabel(new Date());
-  
-  // Quick Mongoose port of the logic
+  const activeTenants = await Tenant.find({ status: 'active' }).select('_id').lean();
+  const activeTenantIds = activeTenants.map((tenant) => tenant._id);
+  if (!activeTenantIds.length) return;
+
   const dueCustomers = await Customer.find(activeOperationalFilter({
+    tenantId: { $in: activeTenantIds },
     do_not_call: { $ne: true },
     wrong_number_flag: { $ne: true },
     admin_review_required: { $ne: true },
@@ -63,6 +66,7 @@ async function dispatchScheduledCalls() {
         customerId: customer.id,
         clientName: agentConfig?.client_name || 'AI Call Agent',
         agentId: agentConfig?.id || null,
+        tenantId: customer.tenantId,
         callType: customer.call_type
       });
 

@@ -8,6 +8,7 @@ const callSchema = new mongoose.Schema({
   archived_at: { type: Date, default: null },
   archived_by: { type: String, default: null },
   archive_reason: { type: String, default: null },
+  pre_archive_status: { type: String, default: null },
   outcome: { type: String }, // e.g., initiated, scheduled_initiated, answered, no_answer
   recording_url: { type: String, default: null },
   transcript: { type: String, default: null }, // previously transcript_text

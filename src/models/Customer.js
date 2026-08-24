@@ -13,6 +13,7 @@ const customerSchema = new mongoose.Schema({
   archived_at: { type: Date, default: null },
   archived_by: { type: String, default: null },
   archive_reason: { type: String, default: null },
+  pre_archive_status: { type: String, default: null },
   customer_value: { type: String, default: 'standard' },
   urgency_level: { type: String, default: 'normal' },
   priority_score: { type: Number, default: 50 },

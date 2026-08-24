@@ -17,6 +17,8 @@ const Agent = require('../src/models/Agent');
 const Feedback = require('../src/models/Feedback');
 const User = require('../src/models/User');
 const Tenant = require('../src/models/Tenant');
+const Client = require('../src/models/Client');
+const Campaign = require('../src/models/Campaign');
 const { isAdminOnlyRequest } = require('../src/authorization');
 
 function createResponse() {
@@ -46,19 +48,43 @@ function matchesFilter(record, filter) {
 
 function createMemoryModel(initialRecords) {
   const records = initialRecords.map((record) => ({ ...record }));
+  function applyUpdate(record, update) {
+    const stages = Array.isArray(update) ? update : [update];
+    for (const stage of stages) {
+      const snapshot = { ...record };
+      const values = {};
+      for (const [key, expression] of Object.entries(stage.$set || {})) {
+        if (typeof expression === 'string' && expression.startsWith('$')) {
+          values[key] = snapshot[expression.slice(1)];
+        } else if (expression && typeof expression === 'object' && '$ifNull' in expression) {
+          const [reference, fallback] = expression.$ifNull;
+          const resolved = typeof reference === 'string' && reference.startsWith('$')
+            ? snapshot[reference.slice(1)]
+            : reference;
+          const resolvedFallback = typeof fallback === 'string' && fallback.startsWith('$')
+            ? snapshot[fallback.slice(1)]
+            : fallback;
+          values[key] = resolved ?? resolvedFallback;
+        } else {
+          values[key] = expression;
+        }
+      }
+      Object.assign(record, values);
+    }
+  }
   return {
     records,
     async findOneAndUpdate(filter, update) {
       const record = records.find((candidate) => matchesFilter(candidate, filter));
       if (!record) return null;
-      Object.assign(record, update.$set);
+      applyUpdate(record, update);
       return { ...record };
     },
     async updateMany(filter, update) {
       let modifiedCount = 0;
       for (const record of records) {
         if (!matchesFilter(record, filter)) continue;
-        Object.assign(record, update.$set);
+        applyUpdate(record, update);
         modifiedCount += 1;
       }
       return { modifiedCount };
@@ -96,7 +122,7 @@ test('Mongoose archive handlers retain, scope, and restore records without expos
   const request = {
     params: { id: 'customer-1' },
     tenantId: 'tenant-a',
-    adminSession: { username: 'admin-a' },
+    adminSession: { username: 'admin-a@example.com' },
     body: { reason: 'duplicate import' }
   };
   const archiveResponse = createResponse();
@@ -106,12 +132,14 @@ test('Mongoose archive handlers retain, scope, and restore records without expos
   assert.equal(archiveResponse.statusCode, 200);
   assert.equal(Model.records.length, 2);
   assert.equal(Model.records[0].status, 'archived');
-  assert.equal(Model.records[0].archived_by, 'admin-a');
+  assert.equal(Model.records[0].archived_by, 'admin-a@example.com');
+  assert.equal(Model.records[0].pre_archive_status, 'pending');
   assert.equal(Model.records[1].status, 'pending');
   assert.deepEqual(Object.keys(archiveResponse.body.resource).sort(), [
-    'archive_reason', 'archived_at', 'archived_by', 'id', 'status'
+    'archive_reason', 'archived_at', 'id', 'status'
   ]);
   assert.equal('phone' in archiveResponse.body.resource, false);
+  assert.equal('archived_by' in archiveResponse.body.resource, false);
 
   const restoreResponse = createResponse();
   await handlers.restore({ ...request, body: {} }, restoreResponse);
@@ -119,7 +147,46 @@ test('Mongoose archive handlers retain, scope, and restore records without expos
   assert.equal(restoreResponse.statusCode, 200);
   assert.equal(Model.records[0].status, 'pending');
   assert.equal(Model.records[0].archived_at, null);
+  assert.equal(Model.records[0].pre_archive_status, null);
   assert.equal(Model.records[1].status, 'pending');
+});
+
+test('call archival restores the exact pre-archive workflow status', async () => {
+  // Mutation caught: restore normalizes a completed call to generic active and loses workflow semantics.
+  const Model = createMemoryModel([
+    { _id: 'call-1', tenantId: 'tenant-a', status: 'completed', outcome: 'completed' }
+  ]);
+  const handlers = createMongooseArchiveHandlers({ Model, resourceName: 'call' });
+  const request = {
+    params: { id: 'call-1' },
+    tenantId: 'tenant-a',
+    adminSession: { username: 'admin-a@example.com' },
+    body: {}
+  };
+
+  await handlers.archive(request, createResponse());
+  await handlers.restore(request, createResponse());
+
+  assert.equal(Model.records[0].status, 'completed');
+  assert.equal(Model.records[0].pre_archive_status, null);
+});
+
+test('repeated compatibility archival is idempotent and keeps the original workflow status', async () => {
+  // Mutation caught: a second DELETE overwrites pre_archive_status with archived and makes restore ineffective.
+  const Model = createMemoryModel([{ _id: 'call-1', tenantId: 'tenant-a', status: 'completed' }]);
+  const handlers = createMongooseArchiveHandlers({ Model, resourceName: 'call' });
+  const request = {
+    params: { id: 'call-1' },
+    tenantId: 'tenant-a',
+    adminSession: { username: 'admin-a@example.com' },
+    body: {}
+  };
+
+  await handlers.archive(request, createResponse());
+  await handlers.archive(request, createResponse());
+  await handlers.restore(request, createResponse());
+
+  assert.equal(Model.records[0].status, 'completed');
 });
 
 test('SQL archive handlers retain, tenant-scope, and restore legacy records', async () => {
@@ -186,11 +253,12 @@ test('SQL archive handlers retain, tenant-scope, and restore legacy records', as
 
 test('application record schemas retain archive metadata for recovery', () => {
   // Mutation caught: strict Mongoose schemas discard archive metadata and make recovery unauditable.
-  for (const Model of [Customer, Call, Agent, Feedback, User, Tenant]) {
+  for (const Model of [Customer, Call, Agent, Feedback, User, Tenant, Client, Campaign]) {
     assert.ok(Model.schema.path('status'), `${Model.modelName} status`);
     assert.ok(Model.schema.path('archived_at'), `${Model.modelName} archived_at`);
     assert.ok(Model.schema.path('archived_by'), `${Model.modelName} archived_by`);
     assert.ok(Model.schema.path('archive_reason'), `${Model.modelName} archive_reason`);
+    assert.ok(Model.schema.path('pre_archive_status'), `${Model.modelName} pre_archive_status`);
   }
 });
 
@@ -206,16 +274,17 @@ test('bulk archive transitions only active records in the current tenant', async
 
   await handlers.archiveBulk({
     tenantId: 'tenant-a',
-    adminSession: { username: 'bulk-admin' },
+    adminSession: { username: 'bulk-admin@example.com' },
     body: { reason: 'account closure' }
   }, response);
 
   assert.equal(response.statusCode, 200);
   assert.equal(response.body.archivedCount, 1);
   assert.equal(Model.records[0].status, 'archived');
-  assert.equal(Model.records[0].archived_by, 'bulk-admin');
+  assert.equal(Model.records[0].archived_by, 'bulk-admin@example.com');
   assert.equal(Model.records[1].archived_by, 'first-admin');
   assert.equal(Model.records[2].status, 'pending');
+  assert.equal('archived_by' in response.body.resource, false);
 });
 
 test('archive, restore, and archived-record retrieval require administrator authorization', () => {

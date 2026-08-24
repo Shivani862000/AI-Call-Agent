@@ -61,6 +61,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  pre_archive_status: {
+    type: String,
+    default: null
+  },
   password_changed_at: {
     type: Date,
     default: null
