@@ -5398,8 +5398,8 @@ a[href="/incoming-calls.html"] {
   }
 
   .overview-page .mobile-floating-cta {
-    left: auto;
-    right: max(14px, env(safe-area-inset-right));
+    left: max(14px, env(safe-area-inset-left));
+    right: auto;
     bottom: calc(var(--overview-mobile-dock-height) + 18px + env(safe-area-inset-bottom));
     transform: none;
     width: 100px;
