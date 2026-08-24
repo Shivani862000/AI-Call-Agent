@@ -193,12 +193,97 @@ test('audit and notification indexes support created, tenant, and delivery-statu
   }
 });
 
-test('notification query updates sanitize dotted metadata paths before collection persistence', async () => {
+test('notification save sanitizes metadata and failure details before the collection boundary', async () => {
+  // Mutation caught: a root primitive array bypasses the Mixed setter and reaches insertOne.
+  const originalInsertOne = NotificationDelivery.collection.insertOne;
+  const persisted = [];
+  NotificationDelivery.collection.insertOne = async (document) => {
+    persisted.push(document);
+    return { acknowledged: true, insertedId: document._id };
+  };
+
+  try {
+    await new NotificationDelivery({
+      recipientCategory: 'owner',
+      template: 'tenant-suspended',
+      event: 'tenant.suspended',
+      metadata: ['patient@example.com', { status: 'failed', errorMessage: 'Jane Smith' }],
+      status: 'failed',
+      retryCount: 1,
+      failureCode: 'DELIVERY_FAILED',
+      failureReason: 'SMTP rejected patient@example.com'
+    }).save();
+  } finally {
+    NotificationDelivery.collection.insertOne = originalInsertOne;
+  }
+
+  assert.equal(persisted.length, 1);
+  assert.deepEqual(persisted[0].metadata, [
+    '[redacted]',
+    { status: 'failed', errorMessage: '[redacted]' }
+  ]);
+  assert.equal(persisted[0].failureReason, '[redacted]');
+  assert.equal(JSON.stringify(persisted[0]).includes('patient@example.com'), false);
+  assert.equal(JSON.stringify(persisted[0]).includes('Jane Smith'), false);
+});
+
+test('notification save remains fail-closed when document validation is explicitly skipped', async () => {
+  // Mutation caught: in-place Mixed mutation leaks when save skips the pre-validation hook.
+  const originalInsertOne = NotificationDelivery.collection.insertOne;
+  const persisted = [];
+  NotificationDelivery.collection.insertOne = async (document) => {
+    persisted.push(document);
+    return { acknowledged: true, insertedId: document._id };
+  };
+
+  try {
+    const delivery = new NotificationDelivery({
+      recipientCategory: 'owner',
+      template: 'tenant-suspended',
+      event: 'tenant.suspended',
+      metadata: { provider: 'smtp', status: 'pending' },
+      status: 'pending',
+      failureCode: null
+    });
+    delivery.metadata.responseBody = 'late patient@example.com';
+    delivery.failureReason = 'Jane Smith';
+    await delivery.save({ validateBeforeSave: false });
+
+    const unsafeCodeDelivery = new NotificationDelivery({
+      recipientCategory: 'owner',
+      template: 'tenant-suspended',
+      event: 'tenant.suspended',
+      metadata: {},
+      status: 'failed',
+      failureCode: 'PATIENT_JANE_SMITH'
+    });
+    await assert.rejects(
+      unsafeCodeDelivery.save({ validateBeforeSave: false }),
+      (error) => error.code === 'INVALID_NOTIFICATION_FAILURE_CODE'
+        && !error.message.includes('PATIENT_JANE_SMITH')
+    );
+  } finally {
+    NotificationDelivery.collection.insertOne = originalInsertOne;
+  }
+
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0].metadata.responseBody, '[redacted]');
+  assert.equal(persisted[0].failureReason, '[redacted]');
+  assert.equal(JSON.stringify(persisted[0]).includes('patient@example.com'), false);
+});
+
+test('notification assignment, replacement, and update paths sanitize before collection persistence', async () => {
   // Mutation caught: a retry path bypasses the metadata setter with `$set: { "metadata.errorMessage": ... }`.
   const originalUpdateOne = NotificationDelivery.collection.updateOne;
+  const originalReplaceOne = NotificationDelivery.collection.replaceOne;
   const persistedUpdates = [];
+  const persistedReplacements = [];
   NotificationDelivery.collection.updateOne = async (_filter, update) => {
     persistedUpdates.push(update);
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+  NotificationDelivery.collection.replaceOne = async (_filter, replacement) => {
+    persistedReplacements.push(replacement);
     return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
   };
 
@@ -209,30 +294,180 @@ test('notification query updates sanitize dotted metadata paths before collectio
         $set: {
           'metadata.errorMessage': 'late secret@example.com',
           'metadata.statusCode': 503,
-          status: 'failed'
+          status: 'failed',
+          retryCount: 2,
+          failureCode: 'DELIVERY_FAILED',
+          failureReason: 'Jane Smith delivery failure'
         }
       },
       { runValidators: true }
     );
-    await NotificationDelivery.updateOne(
+    await NotificationDelivery.replaceOne(
       { _id: '507f1f77bcf86cd799439011' },
-      [{
-        $set: {
-          'metadata.responseBody': 'pipeline secret@example.com',
-          'metadata.retryCount': 2
-        }
-      }],
-      { updatePipeline: true }
+      {
+        recipientCategory: 'owner',
+        template: 'tenant-restored',
+        event: 'tenant.restored',
+        metadata: 'replacement patient@example.com',
+        status: 'failed',
+        retryCount: 2,
+        failureCode: 'DELIVERY_FAILED',
+        failureReason: 'Jane Smith replacement failure'
+      },
+      { runValidators: true }
     );
   } finally {
     NotificationDelivery.collection.updateOne = originalUpdateOne;
+    NotificationDelivery.collection.replaceOne = originalReplaceOne;
   }
 
   const persistedUpdate = persistedUpdates[0];
   assert.equal(persistedUpdate.$set['metadata.errorMessage'], '[redacted]');
   assert.equal(persistedUpdate.$set['metadata.statusCode'], 503);
   assert.equal(persistedUpdate.$set.status, 'failed');
+  assert.equal(persistedUpdate.$set.retryCount, 2);
+  assert.equal(persistedUpdate.$set.failureCode, 'DELIVERY_FAILED');
+  assert.equal(persistedUpdate.$set.failureReason, '[redacted]');
   assert.ok(persistedUpdate.$set.updated_at instanceof Date);
-  assert.equal(persistedUpdates[1][0].$set['metadata.responseBody'], '[redacted]');
-  assert.equal(persistedUpdates[1][0].$set['metadata.retryCount'], 2);
+  assert.equal(JSON.stringify(persistedUpdate).includes('secret@example.com'), false);
+
+  assert.equal(persistedReplacements.length, 1);
+  assert.equal(persistedReplacements[0].metadata, '[redacted]');
+  assert.equal(persistedReplacements[0].failureReason, '[redacted]');
+  assert.equal(JSON.stringify(persistedReplacements[0]).includes('patient@example.com'), false);
+  assert.equal(JSON.stringify(persistedReplacements[0]).includes('Jane Smith'), false);
+});
+
+test('findOneAndReplace sanitizes retained notification data before collection persistence', async () => {
+  // Mutation caught: findOneAndReplace is omitted from replaceOne query middleware.
+  const originalFindOneAndReplace = NotificationDelivery.collection.findOneAndReplace;
+  const persisted = [];
+  NotificationDelivery.collection.findOneAndReplace = async (_filter, replacement) => {
+    persisted.push(replacement);
+    return null;
+  };
+
+  try {
+    await NotificationDelivery.findOneAndReplace(
+      { _id: '507f1f77bcf86cd799439011' },
+      {
+        recipientCategory: 'owner',
+        template: 'tenant-restored',
+        event: 'tenant.restored',
+        metadata: ['patient@example.com'],
+        status: 'failed',
+        retryCount: 3,
+        failureCode: 'DELIVERY_FAILED',
+        failureReason: 'Jane Smith'
+      },
+      { runValidators: true }
+    );
+  } finally {
+    NotificationDelivery.collection.findOneAndReplace = originalFindOneAndReplace;
+  }
+
+  assert.equal(persisted.length, 1);
+  assert.deepEqual(persisted[0].metadata, ['[redacted]']);
+  assert.equal(persisted[0].failureReason, '[redacted]');
+  assert.equal(JSON.stringify(persisted[0]).includes('patient@example.com'), false);
+});
+
+test('notification structural removals remain intact and unsupported mutation paths fail before collection', async () => {
+  // Mutation caught: sanitizer corrupts `$unset`/`$rename`/`$project`, or pipelines and bulk writes bypass it.
+  const originalUpdateOne = NotificationDelivery.collection.updateOne;
+  const originalBulkWrite = NotificationDelivery.collection.bulkWrite;
+  const persistedUpdates = [];
+  let bulkWriteCount = 0;
+  NotificationDelivery.collection.updateOne = async (_filter, update) => {
+    persistedUpdates.push(update);
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+  NotificationDelivery.collection.bulkWrite = async () => {
+    bulkWriteCount += 1;
+    return { acknowledged: true };
+  };
+
+  try {
+    await NotificationDelivery.updateOne(
+      { _id: '507f1f77bcf86cd799439011' },
+      { $unset: { 'metadata.errorMessage': 1 }, $inc: { retryCount: 1 } }
+    );
+
+    await assert.rejects(
+      NotificationDelivery.updateOne(
+        { _id: '507f1f77bcf86cd799439011' },
+        { $unset: { 'metadata.errorMessage': 'patient@example.com' } }
+      ),
+      (error) => error.code === 'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE'
+        && !error.message.includes('patient@example.com')
+    );
+
+    await assert.rejects(
+      NotificationDelivery.updateOne(
+        { _id: '507f1f77bcf86cd799439011' },
+        { $rename: { 'metadata.errorMessage': 'metadata.archivedMessage' } }
+      ),
+      (error) => error.code === 'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE'
+        && !error.message.includes('errorMessage')
+    );
+
+    await assert.rejects(
+      NotificationDelivery.updateOne(
+        { _id: '507f1f77bcf86cd799439011' },
+        [{ $project: { 'metadata.errorMessage': 0 } }],
+        { updatePipeline: true }
+      ),
+      (error) => error.code === 'UNSUPPORTED_NOTIFICATION_UPDATE_PIPELINE'
+        && !error.message.includes('errorMessage')
+    );
+
+    await assert.rejects(
+      NotificationDelivery.bulkWrite([{
+        updateOne: {
+          filter: { _id: '507f1f77bcf86cd799439011' },
+          update: {
+            $set: {
+              'metadata.responseBody': 'bulk patient@example.com',
+              failureReason: 'Jane Smith bulk failure'
+            }
+          }
+        }
+      }]),
+      (error) => error.code === 'UNSUPPORTED_NOTIFICATION_BULK_WRITE'
+        && !error.message.includes('patient@example.com')
+    );
+  } finally {
+    NotificationDelivery.collection.updateOne = originalUpdateOne;
+    NotificationDelivery.collection.bulkWrite = originalBulkWrite;
+  }
+
+  assert.equal(persistedUpdates.length, 1);
+  assert.equal(persistedUpdates[0].$unset['metadata.errorMessage'], 1);
+  assert.equal(persistedUpdates[0].$inc.retryCount, 1);
+  assert.equal(bulkWriteCount, 0);
+});
+
+test('unknown notification failure codes are rejected before collection persistence', async () => {
+  // Mutation caught: identifier-looking PII reaches a stored failureCode through an update.
+  const originalUpdateOne = NotificationDelivery.collection.updateOne;
+  let collectionCallCount = 0;
+  NotificationDelivery.collection.updateOne = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true };
+  };
+
+  try {
+    await assert.rejects(
+      NotificationDelivery.updateOne(
+        { _id: '507f1f77bcf86cd799439011' },
+        { $set: { failureCode: 'PATIENT_JANE_SMITH' } },
+        { runValidators: true }
+      ),
+      (error) => !error.message.includes('PATIENT_JANE_SMITH')
+    );
+  } finally {
+    NotificationDelivery.collection.updateOne = originalUpdateOne;
+  }
+
+  assert.equal(collectionCallCount, 0);
 });

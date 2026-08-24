@@ -4,7 +4,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 
-const { sanitizeForAudit } = require('../src/webmaster/redaction');
+const {
+  OPERATIONAL_FAILURE_CODES,
+  isSafeMachineCode,
+  sanitizeForAudit
+} = require('../src/webmaster/redaction');
 const { createAuditService } = require('../src/webmaster/audit-service');
 
 test('deep audit redaction removes credential, identity, patient, and clinical variants', () => {
@@ -240,6 +244,156 @@ test('redaction deeply serializes maps and BSON values without leaking binary in
   assert.equal(binary.toString('utf8'), 'secret-bytes');
   assert.equal(JSON.stringify(sanitized).includes('"data":['), false);
   assert.equal(JSON.stringify(sanitized).includes('secret-bytes'), false);
+});
+
+test('retained data redaction fails closed for root primitives and propagates parent context', () => {
+  // Mutation caught: context-free array and Map traversal retains raw free text.
+  assert.equal(sanitizeForAudit('patient@example.com'), '[redacted]');
+  assert.equal(sanitizeForAudit(42), '[redacted]');
+  assert.deepEqual(sanitizeForAudit([
+    'patient@example.com',
+    42,
+    { status: 'failed', message: 'Jane Smith could not be reached' }
+  ]), [
+    '[redacted]',
+    '[redacted]',
+    { status: 'failed', message: '[redacted]' }
+  ]);
+
+  const nested = sanitizeForAudit({
+    responseBody: [new Map([['status', 'private-patient-state']])],
+    attempts: [new Map([
+      ['provider', 'smtp'],
+      ['errorMessage', 'patient@example.com']
+    ])]
+  });
+  assert.deepEqual(nested, {
+    responseBody: '[redacted]',
+    attempts: [{ provider: 'smtp', errorMessage: '[redacted]' }]
+  });
+});
+
+test('sensitive semantics win over operational suffixes and current PHI variants', () => {
+  // Mutation caught: suffix inference marks passwordStatus or patientStatus as operationally safe.
+  const sanitized = sanitizeForAudit({
+    status: 'active',
+    provider: 'smtp',
+    source: 'database',
+    passwordStatus: 'reset-by-owner',
+    tokenProvider: 'jwt',
+    patientStatus: 'critical',
+    apiKeySource: 'database',
+    outstanding_issues: 'Jane requires a callback',
+    outstandingIssueCount: 2,
+    pending_follow_ups: ['Call Jane'],
+    followUpPending: true,
+    service_interest: 'oncology',
+    interestedServices: ['radiology'],
+    last_visit_date: '2026-08-01',
+    previousVisitAt: '2026-07-01'
+  });
+
+  assert.deepEqual(sanitized, {
+    status: 'active',
+    provider: 'smtp',
+    source: 'database',
+    passwordStatus: '[redacted]',
+    tokenProvider: '[redacted]',
+    patientStatus: '[redacted]',
+    apiKeySource: '[redacted]',
+    outstanding_issues: '[redacted]',
+    outstandingIssueCount: '[redacted]',
+    pending_follow_ups: '[redacted]',
+    followUpPending: '[redacted]',
+    service_interest: '[redacted]',
+    interestedServices: '[redacted]',
+    last_visit_date: '[redacted]',
+    previousVisitAt: '[redacted]'
+  });
+});
+
+test('all binary views redact without exposing bytes while dates and object ids stay useful', () => {
+  // Mutation caught: Uint8Array and ArrayBuffer are enumerated into retained byte values.
+  const objectId = new mongoose.Types.ObjectId('507f1f77bcf86cd799439011');
+  const bytes = new Uint8Array([112, 97, 116, 105, 101, 110, 116]);
+  const view = new DataView(bytes.buffer, 1, 4);
+  const sanitized = sanitizeForAudit({
+    bytes,
+    view,
+    raw: bytes.buffer,
+    objectId,
+    createdAt: new Date('2026-08-24T12:00:00.000Z')
+  });
+
+  assert.deepEqual(sanitized, {
+    bytes: '[binary:7 bytes]',
+    view: '[binary:4 bytes]',
+    raw: '[binary:7 bytes]',
+    objectId: '507f1f77bcf86cd799439011',
+    createdAt: '2026-08-24T12:00:00.000Z'
+  });
+  assert.equal(JSON.stringify(sanitized).includes('112'), false);
+});
+
+test('failure codes come only from an exported operational allowlist', () => {
+  // Mutation caught: syntactically machine-like PII and credential labels pass a heuristic validator.
+  for (const requiredCode of [
+    'DELIVERY_FAILED',
+    'NOT_FOUND',
+    'VERSION_CONFLICT',
+    'VALIDATION_FAILED',
+    'INTERNAL_ERROR',
+    'SMTP_UNAVAILABLE',
+    'PROVIDER_TIMEOUT'
+  ]) {
+    assert.ok(OPERATIONAL_FAILURE_CODES.includes(requiredCode), requiredCode);
+    assert.equal(isSafeMachineCode(requiredCode), true, requiredCode);
+  }
+
+  for (const unsafeCode of [
+    'UNKNOWN_FAILURE',
+    'PATIENT_JANE',
+    'SSN_123456789',
+    'AADHAAR_111122223333',
+    'EMAIL_OWNER_EXAMPLE_COM',
+    'PHONE_919999999999',
+    'MRN_12345',
+    'PASSWORDRESET',
+    'SECRETTOKEN'
+  ]) {
+    assert.equal(isSafeMachineCode(unsafeCode), false, unsafeCode);
+  }
+});
+
+test('operational string fields retain only controlled value shapes and vocabularies', () => {
+  // Mutation caught: identifier-looking free text survives merely because it has no whitespace.
+  assert.deepEqual(sanitizeForAudit({
+    status: 'active',
+    provider: 'smtp',
+    source: 'database',
+    outcome: 'failure',
+    providerStatus: 'degraded',
+    unsafeStatus: 'JaneSmith',
+    statusCandidate: 'patient42',
+    nested: {
+      status: 'JaneSmith',
+      provider: 'patient-provider',
+      source: 'private-record'
+    }
+  }), {
+    status: 'active',
+    provider: 'smtp',
+    source: 'database',
+    outcome: 'failure',
+    providerStatus: 'degraded',
+    unsafeStatus: '[redacted]',
+    statusCandidate: '[redacted]',
+    nested: {
+      status: '[redacted]',
+      provider: '[redacted]',
+      source: '[redacted]'
+    }
+  });
 });
 
 test('audit service rejects invalid outcomes instead of recording a false success', async () => {
