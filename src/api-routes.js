@@ -100,6 +100,7 @@ const logger = require('../services/system-logger');
 const webmasterAuthorization = createWebmasterAuthorization({ UserModel: User, TenantModel: Tenant });
 const { recordFilterFromRequest } = require('./webmaster/lifecycle');
 const { createLegacyCallScope, tenantVisibleRows } = require('./legacy-call-scope');
+const { outboundCallContextRepository } = require('./outbound-call-context');
 
 module.exports = function mountApiRoutes(app) {
   app.get('/health', (req, res) => {
@@ -289,28 +290,16 @@ module.exports = function mountApiRoutes(app) {
         callType
       });
 
-      const result = await dbRun(
-        `INSERT INTO calls (
-        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
-        provider_payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          customer.id,
-          agentConfig?.id || null,
-          'initiated',
-          call.sid,
-          new Date().toISOString(),
-          customer.priority_score || computePriorityScore(customer),
-          1,
-          agentConfig?.slug || 'hindi-feedback-v1',
-          'normal',
-          'outbound',
-          'icallmate',
-          callType,
-          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
-        ]
-      );
+      const result = await outboundCallContextRepository.persistInitiatedCall({
+        tenantId: req.tenantId,
+        customerId: customer.id,
+        agentId: agentConfig?.id || null,
+        providerCallId: call.sid,
+        callType,
+        clientName,
+        source: 'icallmate',
+        providerPayload: { request: call.requestPayload || null, response: call.raw || null }
+      });
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
       
       const callsTodayRow = await dbGet(
@@ -321,7 +310,7 @@ module.exports = function mountApiRoutes(app) {
       logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone || customerPhone, attempt });
       
       logger.info('CALL_STARTED', {
-        callId: result.lastID,
+        callId: result.id,
         customerId: customer.id,
         patient: customer.name || customerName,
         phone: customer.phone || customerPhone,
@@ -337,7 +326,7 @@ module.exports = function mountApiRoutes(app) {
         agentId: agentConfig?.id || null,
         trigger: '/call/start'
       });
-      res.json({ success: true, sid: call.sid, callId: result.lastID, customerId: customer.id, agentId: agentConfig?.id || null });
+      res.json({ success: true, sid: call.sid, callId: result.id, customerId: customer.id, agentId: agentConfig?.id || null });
     } catch (error) {
       if (customer?.id) {
         try {
@@ -577,28 +566,16 @@ module.exports = function mountApiRoutes(app) {
         callType
       });
 
-      const result = await dbRun(
-        `INSERT INTO calls (
-        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
-        provider_payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          customer.id,
-          agentConfig?.id || null,
-          'initiated',
-          call.sid,
-          new Date().toISOString(),
-          customer.priority_score || computePriorityScore(customer),
-          1,
-          agentConfig?.slug || 'hindi-feedback-v1',
-          'normal',
-          'outbound',
-          'icallmate',
-          callType,
-          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
-        ]
-      );
+      const result = await outboundCallContextRepository.persistInitiatedCall({
+        tenantId: req.tenantId,
+        customerId: customer.id,
+        agentId: agentConfig?.id || null,
+        providerCallId: call.sid,
+        callType,
+        clientName: agentConfig?.client_name || CLIENT_NAME,
+        source: 'icallmate',
+        providerPayload: { request: call.requestPayload || null, response: call.raw || null }
+      });
 
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
       
@@ -610,7 +587,7 @@ module.exports = function mountApiRoutes(app) {
       logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone, attempt });
 
       logger.info('CALL_STARTED', {
-        callId: result.lastID,
+        callId: result.id,
         customerId: customer.id,
         patient: customer.name,
         phone: customer.phone,
@@ -625,7 +602,7 @@ module.exports = function mountApiRoutes(app) {
         agentId: agentConfig?.id || null,
         trigger: '/api/calls/initiate/:customerId'
       });
-      res.json({ message: 'Call initiated', callId: result.lastID, sid: call.sid, agentId: agentConfig?.id || null, agentName: agentConfig?.name || null });
+      res.json({ message: 'Call initiated', callId: result.id, sid: call.sid, agentId: agentConfig?.id || null, agentName: agentConfig?.name || null });
     } catch (error) {
       if (customer?.id) {
         try {
@@ -1069,32 +1046,20 @@ module.exports = function mountApiRoutes(app) {
         callType
       });
 
-      const result = await dbRun(
-        `INSERT INTO calls (
-        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source,
-        provider_payload_json, call_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          customer.id,
-          agentConfig?.id || null,
-          'initiated',
-          call.sid,
-          new Date().toISOString(),
-          customer.priority_score || computePriorityScore(customer),
-          1,
-          agentConfig?.slug || 'gemini-deepgram-outgoing-v1',
-          'normal',
-          'outbound',
-          'icallmate-masterpost',
-          JSON.stringify({ request: call.requestPayload || payload, response: call.raw || null }),
-          callType
-        ]
-      );
+      const result = await outboundCallContextRepository.persistInitiatedCall({
+        tenantId: req.tenantId,
+        customerId: customer.id,
+        agentId: agentConfig?.id || null,
+        providerCallId: call.sid,
+        callType,
+        clientName: agentConfig?.client_name || CLIENT_NAME,
+        source: 'icallmate-masterpost',
+        providerPayload: { request: call.requestPayload || payload, response: call.raw || null }
+      });
 
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
       logger.info('CALL_STARTED', {
-        callId: result.lastID,
+        callId: result.id,
         customerId: customer.id,
         patient: customer.name || customerName,
         phone: customer.phone || phone,
@@ -1114,7 +1079,7 @@ module.exports = function mountApiRoutes(app) {
         success: true,
         message: 'Outgoing call initiated',
         sid: call.sid,
-        callId: result.lastID,
+        callId: result.id,
         customerId: customer.id,
         agentId: agentConfig?.id || null,
         provider: 'icallmate-masterpost',

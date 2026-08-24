@@ -71,13 +71,17 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { name, dailyReportTime, status } = req.body;
-    if (String(status || '').toLowerCase() === 'archived') {
+    const normalizedStatus = status === undefined ? undefined : String(status).trim().toLowerCase();
+    if (normalizedStatus === 'archived') {
       return res.status(400).json({ error: 'Use the explicit archive endpoint to archive a tenant' });
+    }
+    if (normalizedStatus !== undefined && !['active', 'suspended'].includes(normalizedStatus)) {
+      return res.status(400).json({ error: 'Tenant status must be active or suspended' });
     }
     const patch = {};
     if (name !== undefined) patch.name = name;
     if (dailyReportTime !== undefined) patch.dailyReportTime = dailyReportTime;
-    if (status !== undefined) patch.status = status;
+    if (normalizedStatus !== undefined) patch.status = normalizedStatus;
 
     const tenant = await Tenant.findOneAndUpdate(
       activeRecordFilter({ _id: req.params.id }),

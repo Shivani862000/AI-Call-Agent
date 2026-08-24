@@ -74,9 +74,11 @@ test('mounted outgoing entrypoints reject missing authorized tenant context befo
     body: { phone: '+919876543210', dryRun: true }
   });
   const callStart = await request(app, { path: '/call/start', body: {} });
+  const initiate = await request(app, { path: '/api/calls/initiate/customer-a', body: {} });
 
   assert.equal(outgoing.status, 401);
   assert.equal(callStart.status, 401);
+  assert.equal(initiate.status, 401);
 });
 
 test('client and Webmaster tenant context reaches the actual outgoing provider payload', async () => {

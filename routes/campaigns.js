@@ -47,10 +47,17 @@ function createCampaignsRouter({ Model = Campaign } = {}) {
 
   router.put('/:id', async (req, res) => {
     try {
-      if (String(req.body?.status || '').toLowerCase() === 'archived') {
+      const normalizedStatus = req.body?.status === undefined
+        ? undefined
+        : String(req.body.status).trim().toLowerCase();
+      if (normalizedStatus === 'archived') {
         return res.status(400).json({ error: 'Use the explicit archive endpoint to archive a campaign' });
       }
+      if (normalizedStatus !== undefined && !['active', 'paused'].includes(normalizedStatus)) {
+        return res.status(400).json({ error: 'Campaign status must be active or paused' });
+      }
       const payload = normalizePayload(req.body);
+      if (normalizedStatus !== undefined) payload.status = normalizedStatus;
       if (!payload.name) return res.status(400).json({ error: 'Campaign name is required' });
       const record = await Model.findOneAndUpdate(
         activeRecordFilter({ _id: req.params.id, tenantId: req.tenantId }),

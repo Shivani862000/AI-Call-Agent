@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const callSchema = new mongoose.Schema({
   tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
   customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
+  agentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Agent', default: null },
   call_type: { type: String, required: true },
   status: { type: String, required: true },
   archived_at: { type: Date, default: null },
@@ -10,6 +11,11 @@ const callSchema = new mongoose.Schema({
   archive_reason: { type: String, default: null },
   pre_archive_status: { type: String, default: null },
   outcome: { type: String }, // e.g., initiated, scheduled_initiated, answered, no_answer
+  provider_call_id: { type: String, default: null },
+  call_direction: { type: String, default: 'outbound' },
+  call_source: { type: String, default: null },
+  client_name: { type: String, default: null },
+  provider_payload_json: { type: mongoose.Schema.Types.Mixed, default: null },
   recording_url: { type: String, default: null },
   transcript: { type: String, default: null }, // previously transcript_text
   transcript_status: { type: String },

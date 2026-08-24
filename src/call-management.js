@@ -29,6 +29,7 @@ const {
   normalizeIcallTimestamp
 } = require('./helpers');
 const { buildIcallMateCallbackUrl } = require('./icallmate-webhook');
+const { outboundCallContextRepository } = require('./outbound-call-context');
 
 // ── Call Initiation ────────────────────────────────────────────────────────────
 
@@ -214,88 +215,54 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
 
 async function findRecentOutboundCallContextByPhone(phoneValue, tenantId) {
   if (!tenantId) return null;
-  const normalized = normalizePhoneLookupValue(phoneValue);
-  const candidates = await dbAll(
-    "SELECT * FROM customers WHERE tenant_id = ? AND status <> 'archived' ORDER BY id DESC LIMIT 200",
-    [String(tenantId)]
-  );
-  const customer = candidates.find((candidate) => normalizePhoneLookupValue(candidate.phone) === normalized) || null;
-  if (!customer) {
-    return null;
-  }
-
-  const call = await dbGet(
-    `SELECT calls.*, agents.client_name AS agent_client_name
-       FROM calls
-       LEFT JOIN agents ON agents.id = calls.agent_id
-      WHERE calls.customer_id = ?
-        AND calls.tenant_id = ?
-        AND calls.status <> 'archived'
-        AND COALESCE(calls.call_direction, 'outbound') = 'outbound'
-        AND DATETIME(calls.called_at) >= DATETIME('now', '-30 minutes')
-      ORDER BY calls.id DESC
-      LIMIT 1`,
-    [customer.id, String(tenantId)]
-  );
-
-  if (!call) {
-    return null;
-  }
-
-  return { customer, call };
+  return outboundCallContextRepository.findRecentByPhone({ phone: phoneValue, tenantId });
 }
 
-async function hydrateIcallMateSessionContext(session, message = {}, extraParams = {}) {
-  if (session.contextHydrated) {
-    return;
-  }
+function createIcallMateSessionHydrator({ contextRepository = outboundCallContextRepository } = {}) {
+  return async function hydrateIcallMateSessionContext(session, message = {}, extraParams = {}) {
+    if (session.contextHydrated) return;
+    if (session._hydrationPromise) return session._hydrationPromise;
 
-  // If hydration is already in progress, return the existing promise so callers can await it
-  if (session._hydrationPromise) {
-    return session._hydrationPromise;
-  }
-
-  if (extraParams.callDirection) {
-    session.callDirection = normalizeCallDirection(extraParams.callDirection, session.callDirection);
+    const tenantId = extraParams.tenantId || extraParams.tenant_id || session.tenantId;
+    if (!tenantId) return;
+    if (extraParams.callDirection) {
+      session.callDirection = normalizeCallDirection(extraParams.callDirection, session.callDirection);
+    }
     if (extraParams.callType || extraParams.call_type) {
       session.callType = normalizeOutboundCallType(extraParams.callType || extraParams.call_type);
     }
-    session.contextHydrated = true;
-    return;
-  }
 
-  session.contextHydrating = true;
-  session._hydrationPromise = (async () => {
-    try {
-      const tenantId = extraParams.tenantId || extraParams.tenant_id || session.tenantId;
-      const context = await findRecentOutboundCallContextByPhone(message.callerId || session.callerId, tenantId);
-      if (!context) {
-        return;
+    session.contextHydrating = true;
+    session._hydrationPromise = (async () => {
+      try {
+        const context = await contextRepository.findRecentByPhone({
+          phone: message.callerId || session.callerId,
+          tenantId
+        });
+        if (!context) return;
+
+        session.contextHydrated = true;
+        session.tenantId = String(tenantId);
+        session.callDirection = 'outbound';
+        session.customerName = context.customer.name || session.customerName || process.env.CUSTOMER_NAME || 'Customer';
+        session.clientName = context.call.client_name || session.clientName || CLIENT_NAME;
+        session.customerId = context.customer.id;
+        session.callId = context.call.id;
+        session.providerCallId = context.call.provider_call_id || '';
+        session.callType = normalizeOutboundCallType(extraParams.callType || extraParams.call_type || context.call.call_type || context.customer.call_type);
+        session.videoSent = context.customer.video_sent === 1;
+        session.lastVisitDate = context.customer.last_visit_date || 'kal';
+      } finally {
+        session.contextHydrating = false;
+        session._hydrationPromise = null;
       }
+    })();
 
-      session.contextHydrated = true;
-      session.callDirection = 'outbound';
-      session.customerName = context.customer.name || session.customerName || process.env.CUSTOMER_NAME || 'Customer';
-      session.clientName = context.call.agent_client_name || session.clientName || CLIENT_NAME;
-      session.customerId = context.customer.id;
-      session.callId = context.call.id;
-      session.providerCallId = context.call.provider_call_id || '';
-      session.callType = normalizeOutboundCallType(context.call.call_type || context.customer.call_type);
-      session.videoSent = context.customer.video_sent === 1;
-      session.lastVisitDate = context.customer.last_visit_date || 'kal';
-
-      console.log(
-        `[ICALLMATE] Hydrated outbound context streamId=${message.streamId || session.streamId || ''} ` +
-        `phone=${message.callerId || session.callerId || ''} customerId=${session.customerId} ` +
-        `callId=${session.callId} callType=${session.callType}`
-      );
-    } finally {
-      session.contextHydrating = false;
-    }
-  })();
-
-  return session._hydrationPromise;
+    return session._hydrationPromise;
+  };
 }
+
+const hydrateIcallMateSessionContext = createIcallMateSessionHydrator();
 
 async function getCustomerCallHistory(customerId, limit = 20) {
   if (!customerId) return [];
@@ -634,6 +601,7 @@ module.exports = {
   ensureIncomingCustomerForCall,
   findRecentOutboundCallContextByPhone,
   hydrateIcallMateSessionContext,
+  createIcallMateSessionHydrator,
   getCustomerCallHistory,
   hydratePreCallIntelligence,
   shouldBlockCustomerCall,

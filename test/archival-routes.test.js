@@ -225,8 +225,8 @@ test('mounted call bulk archive and restore retain cross-tenant call records and
   assert.equal(CallModel.records[1].status, 'queued');
 });
 
-test('Tenant and Campaign PUT reject direct archived status so lifecycle metadata cannot be bypassed', async () => {
-  // Mutation caught: plain PUT writes status=archived without preserving the suspended/paused status.
+test('Tenant and Campaign PUT normalize lifecycle status and reject archived or malformed values before update', async () => {
+  // Mutation caught: comparing the raw status lets whitespace-padded archived or malformed values bypass lifecycle validation.
   const originalTenantUpdate = Tenant.findOneAndUpdate;
   let tenantUpdates = 0;
   Tenant.findOneAndUpdate = async () => {
@@ -248,14 +248,22 @@ test('Tenant and Campaign PUT reject direct archived status so lifecycle metadat
 
   try {
     const tenant = await request(app, {
-      method: 'PUT', path: '/api/tenants/tenant-a', body: { status: 'archived' }
+      method: 'PUT', path: '/api/tenants/tenant-a', body: { status: ' archived ' }
     });
     const campaign = await request(app, {
-      method: 'PUT', path: '/api/campaigns/campaign-a', body: { name: 'Paused campaign', status: 'archived' }
+      method: 'PUT', path: '/api/campaigns/campaign-a', body: { name: 'Paused campaign', status: ' archived ' }
+    });
+    const malformedTenant = await request(app, {
+      method: 'PUT', path: '/api/tenants/tenant-a', body: { status: 'not-a-status' }
+    });
+    const malformedCampaign = await request(app, {
+      method: 'PUT', path: '/api/campaigns/campaign-a', body: { name: 'Paused campaign', status: 'not-a-status' }
     });
 
     assert.equal(tenant.status, 400);
     assert.equal(campaign.status, 400);
+    assert.equal(malformedTenant.status, 400);
+    assert.equal(malformedCampaign.status, 400);
     assert.equal(tenantUpdates, 0);
     assert.equal(CampaignModel.records[0].status, 'paused');
   } finally {
