@@ -47,6 +47,9 @@ function createCampaignsRouter({ Model = Campaign } = {}) {
 
   router.put('/:id', async (req, res) => {
     try {
+      if (String(req.body?.status || '').toLowerCase() === 'archived') {
+        return res.status(400).json({ error: 'Use the explicit archive endpoint to archive a campaign' });
+      }
       const payload = normalizePayload(req.body);
       if (!payload.name) return res.status(400).json({ error: 'Campaign name is required' });
       const record = await Model.findOneAndUpdate(

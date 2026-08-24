@@ -87,7 +87,7 @@ const {
 
 const { dbGet, dbRun, dbAll } = require('../db');
 const { computePriorityScore, applyCallOutcomeWorkflow, createSupervisorEvent } = require('../services/call-orchestration');
-const { getAgentConfigById, getDefaultAgentConfig } = require('./prompt-builder');
+const { getAgentConfigById, getDefaultAgentConfig, normalizeRequestedAgentId } = require('./prompt-builder');
 const { buildCallAnalysis, storeCallAnalysis } = require('../services/call-analysis');
 const { generateCallAnalysisPDF } = require('../services/pdf');
 const { initiateCall, buildMasterPostPayload } = require('../services/icallmate');
@@ -228,21 +228,25 @@ module.exports = function mountApiRoutes(app) {
     }
   });
 
-  app.post('/call/start', async (req, res) => {
+  app.post('/call/start', requireTenantAccess, async (req, res) => {
     let customer = null;
     try {
       const customerPhone = req.body.customerPhone || process.env.CUSTOMER_PHONE;
       const customerName = req.body.customerName || process.env.CUSTOMER_NAME;
       const requestedCustomerId = req.body.customerId;
-      const requestedAgentId = Number(req.body.agentId || req.query.agentId || 0) || null;
+      const requestedAgentId = normalizeRequestedAgentId(req.body.agentId || req.query.agentId);
       const callType = normalizeOutboundCallType(req.body.callType || req.body.call_type);
       customer = await ensureCustomerForCall({
         customerId: requestedCustomerId,
         customerName,
-        customerPhone
+        customerPhone,
+        tenantId: req.tenantId
       });
       customer = await hydratePreCallIntelligence(customer);
-      const agentConfig = requestedAgentId ? await getAgentConfigById(requestedAgentId) : await getDefaultAgentConfig();
+      const agentConfig = requestedAgentId
+        ? await getAgentConfigById(requestedAgentId, req.tenantId)
+        : await getDefaultAgentConfig(req.tenantId);
+      if (requestedAgentId && !agentConfig) return res.status(404).json({ error: 'Agent not found' });
       const clientName = req.body.clientName || agentConfig?.client_name || CLIENT_NAME;
 
       const blockedReason = await shouldBlockCustomerCall(customer);
@@ -542,9 +546,12 @@ module.exports = function mountApiRoutes(app) {
       }
 
       customer = await hydratePreCallIntelligence(customer);
-      const requestedAgentId = Number(req.body?.agentId || req.query.agentId || customer.default_agent_id || 0) || null;
+      const requestedAgentId = normalizeRequestedAgentId(req.body?.agentId || req.query.agentId || customer.default_agent_id);
       const callType = normalizeOutboundCallType(req.body?.callType || req.body?.call_type || customer.call_type);
-      const agentConfig = requestedAgentId ? await getAgentConfigById(requestedAgentId) : await getDefaultAgentConfig();
+      const agentConfig = requestedAgentId
+        ? await getAgentConfigById(requestedAgentId, req.tenantId)
+        : await getDefaultAgentConfig(req.tenantId);
+      if (requestedAgentId && !agentConfig) return res.status(404).json({ error: 'Agent not found' });
       const blockedReason = await shouldBlockCustomerCall(customer);
       if (blockedReason) {
         if (blockedReason.code === 'CALL_SKIPPED_QUIET_HOURS') {
@@ -992,7 +999,7 @@ module.exports = function mountApiRoutes(app) {
   //   }
   // });
 
-  app.post('/api/icallmate/outgoing-call', async (req, res) => {
+  app.post('/api/icallmate/outgoing-call', requireTenantAccess, async (req, res) => {
     let customer = null;
     try {
       const fieldpairs = Array.isArray(req.body.fieldpairs) ? req.body.fieldpairs : [];
@@ -1003,14 +1010,14 @@ module.exports = function mountApiRoutes(app) {
       const wsurl = firstFieldPair.wsurl || req.body.wsurl || toWssUrl(getRequestPublicBaseUrl(req), '/icallmate/media');
       const callbackapi = buildIcallMateCallbackUrl(getRequestPublicBaseUrl(req));
       const customerName = req.body.customerName || firstFieldPair.Name || 'Outgoing Customer';
-      const requestedAgentId = Number(req.body.agentId || req.query.agentId || 0) || null;
+      const requestedAgentId = normalizeRequestedAgentId(req.body.agentId || req.query.agentId);
       const callType = normalizeOutboundCallType(req.body.callType || req.body.call_type || firstFieldPair.callType || firstFieldPair.call_type);
 
       if (!phone) {
         return res.status(400).json({ error: 'Phone_No, phone, customerPhone, or fieldpairs[0].Phone_No is required' });
       }
 
-      const payload = buildMasterPostPayload(phone, leadId, { campid, wsurl, callbackapi });
+      const payload = buildMasterPostPayload(phone, leadId, { campid, wsurl, callbackapi, tenantId: req.tenantId });
       if (String(req.body.dryRun || '').toLowerCase() === 'true') {
         return res.json({
           success: true,
@@ -1023,13 +1030,17 @@ module.exports = function mountApiRoutes(app) {
       customer = await ensureCustomerForCall({
         customerId: req.body.customerId,
         customerName,
-        customerPhone: phone
+        customerPhone: phone,
+        tenantId: req.tenantId
       });
       if (String(customer?.status || '').toLowerCase() === 'archived') {
         return res.status(404).json({ error: 'Customer not found' });
       }
       customer = await hydratePreCallIntelligence(customer);
-      const agentConfig = requestedAgentId ? await getAgentConfigById(requestedAgentId) : await getDefaultAgentConfig();
+      const agentConfig = requestedAgentId
+        ? await getAgentConfigById(requestedAgentId, req.tenantId)
+        : await getDefaultAgentConfig(req.tenantId);
+      if (requestedAgentId && !agentConfig) return res.status(404).json({ error: 'Agent not found' });
       const blockedReason = await shouldBlockCustomerCall(customer);
       if (blockedReason) {
         if (blockedReason.code === 'CALL_SKIPPED_QUIET_HOURS') {
@@ -1054,6 +1065,7 @@ module.exports = function mountApiRoutes(app) {
         customerName: customer.name || customerName,
         clientName: agentConfig?.client_name || CLIENT_NAME,
         agentId: agentConfig?.id || null,
+        tenantId: req.tenantId,
         callType
       });
 

@@ -59,7 +59,9 @@ async function dispatchScheduledCalls() {
     await customer.save();
 
     try {
-      const agentConfig = customer.default_agent_id ? await getAgentConfigById(customer.default_agent_id) : await getDefaultAgentConfig();
+      const agentConfig = customer.default_agent_id
+        ? await getAgentConfigById(customer.default_agent_id, customer.tenantId)
+        : await getDefaultAgentConfig(customer.tenantId);
       const call = await placeRealtimeCall({
         customerPhone: customer.phone,
         customerName: customer.name,

@@ -109,9 +109,12 @@ function createAgentsRouter({ Model = Agent } = {}) {
       const payload = normalizePayload(req.body);
       const fieldErrors = validate(payload);
       if (Object.keys(fieldErrors).length) return res.status(400).json({ error: 'Please fix the highlighted agent fields', fieldErrors });
-      if (payload.is_default) await clearDefault(Model, req.tenantId, req.params.id);
-      const record = await Model.findOneAndUpdate(activeRecordFilter({ _id: req.params.id, tenantId: req.tenantId }), { $set: payload }, { new: true, runValidators: true });
+      const targetFilter = activeRecordFilter({ _id: req.params.id, tenantId: req.tenantId });
+      const existing = await Model.findOne(targetFilter).lean();
+      if (!existing) return res.status(404).json({ error: 'Agent not found' });
+      const record = await Model.findOneAndUpdate(targetFilter, { $set: payload }, { new: true, runValidators: true });
       if (!record) return res.status(404).json({ error: 'Agent not found' });
+      if (payload.is_default) await clearDefault(Model, req.tenantId, req.params.id);
       res.json({ message: 'Agent updated successfully' });
     } catch (error) { errorResponse(error, res); }
   });

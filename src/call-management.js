@@ -71,31 +71,33 @@ function computeNextAnnualReminderDate(lastVisitDate, referenceDate = new Date()
   return candidate;
 }
 
-async function ensureCustomerForCall({ customerId, customerName, customerPhone }) {
+async function ensureCustomerForCall({ customerId, customerName, customerPhone, tenantId }) {
+  if (!tenantId) throw new TypeError('A concrete authorized tenant is required for outgoing calls');
   if (customerId) {
-    const existingById = await dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [customerId]);
+    const existingById = await dbGet("SELECT * FROM customers WHERE id = ? AND tenant_id = ? AND status <> 'archived'", [customerId, String(tenantId)]);
     if (existingById) {
       return existingById;
     }
   }
 
-  const existingByPhone = await dbGet("SELECT * FROM customers WHERE phone = ? AND status <> 'archived'", [customerPhone]);
+  const existingByPhone = await dbGet("SELECT * FROM customers WHERE phone = ? AND tenant_id = ? AND status <> 'archived'", [customerPhone, String(tenantId)]);
   if (existingByPhone) {
     return existingByPhone;
   }
 
   const result = await dbRun(
-    'INSERT INTO customers (name, phone, preferred_slot, status, created_at) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO customers (name, phone, preferred_slot, status, created_at, tenant_id) VALUES (?, ?, ?, ?, ?, ?)',
     [
       customerName || 'Customer',
       customerPhone,
       '10:00',
       'pending',
-      new Date().toISOString()
+      new Date().toISOString(),
+      String(tenantId)
     ]
   );
 
-  return dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [result.lastID]);
+  return dbGet("SELECT * FROM customers WHERE id = ? AND tenant_id = ? AND status <> 'archived'", [result.lastID, String(tenantId)]);
 }
 
 async function claimCustomerForOutboundCall(customerId) {

@@ -6,6 +6,7 @@
 'use strict';
 
 const Agent = require('./models/Agent');
+const mongoose = require('mongoose');
 
 const { getGreeting } = require('../utils/greeting');
 const { buildReviewCallingPrompt, buildReviewCallingOpeningPrompt } = require('../prompts/review-calling.ts');
@@ -62,20 +63,55 @@ function buildOpeningPrompt(clientName, customerName, agentConfig = null, callTy
   return buildCallTypeOpeningPrompt(normalizedCallType, clientName, customerName, extraOptions);
 }
 
-async function getAgentConfigById(agentId) {
-  if (!agentId) return null;
-  return Agent.findOne(activeRecordFilter({ _id: agentId, is_active: true }));
+function requireTenantId(tenantId) {
+  if (!tenantId) throw new TypeError('A concrete authorized tenant is required for agent selection');
+  return tenantId;
 }
 
-async function getDefaultAgentConfig() {
-  return Agent.findOne(activeRecordFilter({ is_default: true, is_active: true })).sort({ _id: 1 });
+function normalizeRequestedAgentId(value) {
+  return String(value || '').trim() || null;
 }
+
+function normalizeAgentRecord(record) {
+  if (!record) return null;
+  return { ...record, id: String(record._id) };
+}
+
+function createAgentConfigLookup({ AgentModel = Agent } = {}) {
+  async function getAgentConfigById(agentId, tenantId) {
+    requireTenantId(tenantId);
+    const normalizedId = normalizeRequestedAgentId(agentId);
+    if (!normalizedId || !mongoose.isValidObjectId(normalizedId)) return null;
+    const record = await AgentModel.findOne(activeRecordFilter({
+      _id: normalizedId,
+      tenantId,
+      is_active: true
+    })).lean();
+    return normalizeAgentRecord(record);
+  }
+
+  async function getDefaultAgentConfig(tenantId) {
+    requireTenantId(tenantId);
+    const record = await AgentModel.findOne(activeRecordFilter({
+      tenantId,
+      is_default: true,
+      is_active: true
+    })).sort({ _id: 1 }).lean();
+    return normalizeAgentRecord(record);
+  }
+
+  return { getAgentConfigById, getDefaultAgentConfig };
+}
+
+const agentConfigLookup = createAgentConfigLookup();
 
 module.exports = {
   buildCallTypeSystemPrompt,
   buildCallTypeOpeningPrompt,
   buildAgentSystemPrompt,
   buildOpeningPrompt,
-  getAgentConfigById,
-  getDefaultAgentConfig
+  getAgentConfigById: agentConfigLookup.getAgentConfigById,
+  getDefaultAgentConfig: agentConfigLookup.getDefaultAgentConfig,
+  createAgentConfigLookup,
+  normalizeRequestedAgentId
 };

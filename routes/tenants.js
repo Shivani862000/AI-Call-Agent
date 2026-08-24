@@ -5,7 +5,6 @@ const User = require('../src/models/User');
 const bcrypt = require('bcrypt');
 const {
   activeRecordFilter,
-  archiveFields,
   recordFilterFromRequest,
   createMongooseArchiveHandlers
 } = require('../src/webmaster/lifecycle');
@@ -72,11 +71,13 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { name, dailyReportTime, status } = req.body;
+    if (String(status || '').toLowerCase() === 'archived') {
+      return res.status(400).json({ error: 'Use the explicit archive endpoint to archive a tenant' });
+    }
     const patch = {};
     if (name !== undefined) patch.name = name;
     if (dailyReportTime !== undefined) patch.dailyReportTime = dailyReportTime;
-    if (status !== undefined && status !== 'archived') patch.status = status;
-    if (status === 'archived') Object.assign(patch, archiveFields(req.adminSession, req.body.reason));
+    if (status !== undefined) patch.status = status;
 
     const tenant = await Tenant.findOneAndUpdate(
       activeRecordFilter({ _id: req.params.id }),

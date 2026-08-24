@@ -13,6 +13,7 @@ const { createAgentsRouter } = require('../routes/agents');
 const { createCallArchiveRouter } = require('../routes/call-archival');
 const { requireTenantAccess } = require('../src/auth');
 const Tenant = require('../src/models/Tenant');
+const tenantsRouter = require('../routes/tenants');
 
 function matches(record, filter) {
   return Object.entries(filter).every(([key, expected]) => {
@@ -222,4 +223,78 @@ test('mounted call bulk archive and restore retain cross-tenant call records and
   assert.equal(restored.status, 200);
   assert.equal(CallModel.records[0].status, 'completed');
   assert.equal(CallModel.records[1].status, 'queued');
+});
+
+test('Tenant and Campaign PUT reject direct archived status so lifecycle metadata cannot be bypassed', async () => {
+  // Mutation caught: plain PUT writes status=archived without preserving the suspended/paused status.
+  const originalTenantUpdate = Tenant.findOneAndUpdate;
+  let tenantUpdates = 0;
+  Tenant.findOneAndUpdate = async () => {
+    tenantUpdates += 1;
+    return { _id: 'tenant-a', status: 'archived' };
+  };
+  const CampaignModel = createMemoryModel([
+    { _id: 'campaign-a', tenantId: 'tenant-a', name: 'Paused campaign', status: 'paused' }
+  ]);
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.adminSession = { username: 'webmaster', role: 'WEBMASTER' };
+    req.tenantId = 'tenant-a';
+    next();
+  });
+  app.use('/api/tenants', tenantsRouter);
+  app.use('/api/campaigns', createCampaignsRouter({ Model: CampaignModel }));
+
+  try {
+    const tenant = await request(app, {
+      method: 'PUT', path: '/api/tenants/tenant-a', body: { status: 'archived' }
+    });
+    const campaign = await request(app, {
+      method: 'PUT', path: '/api/campaigns/campaign-a', body: { name: 'Paused campaign', status: 'archived' }
+    });
+
+    assert.equal(tenant.status, 400);
+    assert.equal(campaign.status, 400);
+    assert.equal(tenantUpdates, 0);
+    assert.equal(CampaignModel.records[0].status, 'paused');
+  } finally {
+    Tenant.findOneAndUpdate = originalTenantUpdate;
+  }
+});
+
+test('Agent PUT proves the tenant-scoped target exists before changing existing defaults', async () => {
+  // Mutation caught: clearing defaults before a stale/wrong-tenant target lookup leaves the tenant with no default.
+  let clearedDefaults = 0;
+  const Model = {
+    findOne() {
+      return { async lean() { return null; } };
+    },
+    async updateMany() {
+      clearedDefaults += 1;
+      return { modifiedCount: 1 };
+    },
+    async findOneAndUpdate() {
+      return null;
+    }
+  };
+  const app = express();
+  app.use(express.json());
+  app.use(tenantMiddleware);
+  app.use('/api/agents', createAgentsRouter({ Model }));
+
+  const response = await request(app, {
+    method: 'PUT',
+    path: '/api/agents/stale-agent',
+    headers: { 'x-tenant-id': 'tenant-a' },
+    body: {
+      name: 'Default Agent',
+      language: 'en',
+      opening_prompt: 'Hello',
+      is_default: true
+    }
+  });
+
+  assert.equal(response.status, 404);
+  assert.equal(clearedDefaults, 0);
 });
