@@ -404,6 +404,52 @@ test('invalid environment settings fall back to registry-safe values', async () 
   assert.equal(global.providers.smtp.port, 587);
 });
 
+test('resolved global reads reject cross-field-invalid environment combinations with a fixed private error', async () => {
+  const stores = fakeSettingsStores({
+    global: { singletonKey: 'platform', __v: 1 },
+    tenant: { _id: 'tenant-1', settingsOverrides: {}, __v: 1 }
+  });
+  const service = createSettingsService({
+    ...stores,
+    env: { PASSWORD_MIN_LENGTH: '128', PASSWORD_MAX_LENGTH: '32' }
+  });
+
+  await assert.rejects(
+    service.getGlobal(),
+    (error) => error.code === 'SETTINGS_INVALID'
+      && error.status === 500
+      && error.message === 'Resolved settings are invalid'
+      && !JSON.stringify(error).includes('128')
+      && !JSON.stringify(error).includes('32')
+  );
+});
+
+test('effective reads reject cross-field-invalid allowed legacy Map overrides', async () => {
+  const stores = fakeSettingsStores({
+    global: {
+      singletonKey: 'platform',
+      defaults: { limits: { maxConcurrentCalls: 5, maxCallsPerDay: 100 } },
+      __v: 1
+    },
+    tenant: {
+      _id: 'tenant-1',
+      settingsOverrides: new Map([
+        ['defaults.limits.maxConcurrentCalls', 101],
+        ['defaults.limits.maxCallsPerDay', 100]
+      ]),
+      __v: 2
+    }
+  });
+  const service = createSettingsService({ ...stores, env: {} });
+
+  await assert.rejects(
+    service.getEffectiveForTenant('tenant-1'),
+    (error) => error.code === 'SETTINGS_INVALID'
+      && error.message === 'Resolved settings are invalid'
+      && !JSON.stringify(error).includes('101')
+  );
+});
+
 test('settings updates validate section-wide cross-field invariants before writing', async () => {
   const stores = fakeSettingsStores({
     global: {

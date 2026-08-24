@@ -27,7 +27,11 @@ async function postJson(url, payload, { fetchImpl = global.fetch, timeoutMs = 50
   }
 
   if (!response.ok) {
-    await response.text();
+    try {
+      await response.text();
+    } catch (_error) {
+      // Provider response bodies are never allowed to change or enrich the public error.
+    }
     const error = new Error(`CRM webhook delivery failed with HTTP ${response.status}`);
     error.code = 'WEBHOOK_DELIVERY_FAILED';
     throw error;

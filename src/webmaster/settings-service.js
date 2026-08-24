@@ -198,6 +198,16 @@ function validateSectionInvariants(settings, section, code = 'INVALID_SETTING_VA
   }
 }
 
+function validateResolvedSettings(settings) {
+  try {
+    validateSectionInvariants(settings, 'policies');
+    validateSectionInvariants(settings, 'defaults');
+  } catch (_error) {
+    throw settingsError(500, 'SETTINGS_INVALID', 'Resolved settings are invalid');
+  }
+  return settings;
+}
+
 function safeResolvedGlobal(record, env) {
   const global = {};
   for (const [path, definition] of Object.entries(ALL_SAFE_DEFINITIONS)) {
@@ -207,7 +217,7 @@ function safeResolvedGlobal(record, env) {
       : environmentFallback(definition, env);
     setPath(global, path, cloneValue(value));
   }
-  return global;
+  return validateResolvedSettings(global);
 }
 
 function validateExpectedVersion(value) {
@@ -315,6 +325,7 @@ function createSettingsService({
       setPath(effective, path, cloneValue(value));
       setPath(inherited, path, false);
     }
+    validateResolvedSettings(effective);
     return {
       global: globalResult.global,
       overrides,

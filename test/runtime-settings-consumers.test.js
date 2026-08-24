@@ -45,6 +45,41 @@ test('CRM sync resolves the tenant webhook at delivery time without exposing pro
   assert.equal(writes.at(-1)[1][0], 'failed');
 });
 
+test('CRM sync wraps rejected provider-body reads without returning or logging the marker', async (t) => {
+  const marker = 'provider-body-read-secret-marker';
+  const logs = [];
+  const originalError = console.error;
+  console.error = (...values) => logs.push(values);
+  t.after(() => { console.error = originalError; });
+  const rows = {
+    calls: { id: 8, customer_id: 9, tenant_id: 'tenant-1' },
+    customers: { id: 9 },
+    feedback: null
+  };
+
+  await assert.rejects(
+    syncCallToCrm({
+      dbGet: async (sql) => rows[sql.match(/FROM (calls|customers|feedback)/)?.[1]] || null,
+      dbRun: async () => ({ changes: 1 }),
+      callId: 8,
+      getIntegrationRuntimeConfig: async () => ({
+        settings: { enabled: true, endpoint: 'https://crm.database.example/hook', timeoutMs: 250 },
+        secrets: { signingSecret: null }
+      }),
+      fetchImpl: async () => ({
+        ok: false,
+        status: 502,
+        async text() { throw new Error(marker); }
+      })
+    }),
+    (error) => error.code === 'WEBHOOK_DELIVERY_FAILED'
+      && error.message === 'CRM webhook delivery failed with HTTP 502'
+      && !JSON.stringify(error).includes(marker)
+  );
+
+  assert.equal(JSON.stringify(logs).includes(marker), false);
+});
+
 test('support ticket creation forwards the authorized tenant to Slack delivery', async () => {
   let notified = null;
   const ticket = {
