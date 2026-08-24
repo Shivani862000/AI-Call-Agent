@@ -25,6 +25,7 @@ const PROTECTED_HTML_PATHS = new Set([
 ]);
 
 const VALID_ROLES = new Set(['WEBMASTER', 'SUPPORT_TEAM', 'CLIENT_ADMIN', 'CLIENT_AGENT']);
+const AUTH_SOURCES = new Set(['database', 'environment']);
 const AUTH_COOKIE_NAME = 'feedback_admin_session';
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const AUTH_CLOCK_SKEW_MS = 60 * 1000;
@@ -111,19 +112,25 @@ function signAuthValue(value) {
   return crypto.createHmac('sha256', AUTH_SIGNING_SECRET).update(value).digest();
 }
 
-function createAuthToken(username, role, tenantId = null) {
+function createAuthToken(username, role, tenantId = null, authSource = 'database') {
   const normalizedUsername = String(username || '').trim();
   const normalizedRole = normalizeRole(role);
-  if (!normalizedUsername || normalizedUsername.length > 100 || !normalizedRole) {
+  if (
+    !normalizedUsername
+    || normalizedUsername.length > 100
+    || !normalizedRole
+    || !AUTH_SOURCES.has(authSource)
+  ) {
     throw new Error('Cannot create a session for an invalid user or role');
   }
 
   const issuedAt = Date.now();
   const payload = Buffer.from(JSON.stringify({
-    version: 2,
+    version: 3,
     username: normalizedUsername,
     role: normalizedRole,
     tenantId: tenantId ? tenantId.toString() : null,
+    authSource,
     issuedAt,
     exp: issuedAt + AUTH_SESSION_TTL_MS,
     nonce: crypto.randomBytes(16).toString('base64url')
@@ -168,12 +175,15 @@ function readAuthSession(req) {
     const issuedAt = Number(session?.issuedAt);
     const expiresAt = Number(session?.exp);
     const tenantId = session?.tenantId || null;
+    const authSource = String(session?.authSource || '');
     const validLifetime = expiresAt > issuedAt && expiresAt - issuedAt <= AUTH_SESSION_TTL_MS;
 
     if (
       !username
       || username.length > 100
+      || session?.version !== 3
       || !role
+      || !AUTH_SOURCES.has(authSource)
       || !Number.isFinite(issuedAt)
       || !Number.isFinite(expiresAt)
       || issuedAt > now + AUTH_CLOCK_SKEW_MS
@@ -184,7 +194,7 @@ function readAuthSession(req) {
       return null;
     }
 
-    return { username, role, tenantId, issuedAt, exp: expiresAt };
+    return { username, role, tenantId, authSource, issuedAt, exp: expiresAt };
   } catch (error) {
     return null;
   }
@@ -342,8 +352,14 @@ async function resolveActiveSession(session) {
   }
 
   const envAdmin = String(process.env.ADMIN_USERNAME || '').trim();
-  if (session.role === 'WEBMASTER' && envAdmin && session.username === envAdmin) {
-    return { ...session, platformAccessLevel: 'OWNER' };
+  if (envAdmin && session.username === envAdmin) {
+    if (session.role === 'WEBMASTER' && session.authSource === 'environment') {
+      return { ...session, platformAccessLevel: 'OWNER' };
+    }
+    return null;
+  }
+  if (session.authSource !== 'database') {
+    return null;
   }
 
   const user = await queryToDocument(User.findOne({ username: session.username }));
@@ -412,16 +428,22 @@ async function verifyCredentials(username, password) {
   const envAdmin = String(process.env.ADMIN_USERNAME || '').trim();
   const envHash = String(process.env.ADMIN_PASSWORD_HASH || '').trim();
   
-  if (envAdmin && normalizedUsername === envAdmin && envHash) {
-    if (await bcrypt.compare(String(password), envHash)) {
-      return {
-        success: true,
-        username: envAdmin,
-        role: 'WEBMASTER',
-        tenantId: null,
-        platformAccessLevel: 'OWNER'
-      };
+  if (envAdmin && normalizedUsername === envAdmin) {
+    try {
+      if (envHash && await bcrypt.compare(String(password), envHash)) {
+        return {
+          success: true,
+          username: envAdmin,
+          role: 'WEBMASTER',
+          tenantId: null,
+          platformAccessLevel: 'OWNER',
+          authSource: 'environment'
+        };
+      }
+    } catch (error) {
+      return { success: false };
     }
+    return { success: false };
   }
 
   try {
@@ -439,12 +461,16 @@ async function verifyCredentials(username, password) {
       if (isTenantRole(role) && !(await loadActiveTenant(user.tenantId))) {
         return { success: false };
       }
+      if (role === 'WEBMASTER' && !['OWNER', 'ADMIN'].includes(user.platformAccessLevel)) {
+        return { success: false };
+      }
       return {
         success: true,
         username: user.username,
         role,
         tenantId: user.tenantId || null,
-        ...(role === 'WEBMASTER' ? { platformAccessLevel: user.platformAccessLevel || null } : {})
+        authSource: 'database',
+        ...(role === 'WEBMASTER' ? { platformAccessLevel: user.platformAccessLevel } : {})
       };
     }
     return { success: false };
@@ -474,7 +500,8 @@ async function basicAuth(req, res, next) {
       username: authResult.username,
       role: authResult.role,
       tenantId: authResult.tenantId,
-      ...(authResult.role === 'WEBMASTER' ? { platformAccessLevel: authResult.platformAccessLevel || 'OWNER' } : {})
+      authSource: authResult.authSource,
+      ...(authResult.role === 'WEBMASTER' ? { platformAccessLevel: authResult.platformAccessLevel } : {})
     };
     return next();
   }

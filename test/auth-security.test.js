@@ -12,7 +12,8 @@ const {
   createAuthToken,
   getAuthConfigurationIssues,
   readAuthSession,
-  requireRole
+  requireRole,
+  verifyCredentials
 } = require('../src/auth');
 const User = require('../src/models/User');
 const Tenant = require('../src/models/Tenant');
@@ -149,7 +150,6 @@ test('credential verification rejects suspended accounts', async () => {
 });
 
 test('credential verification accepts email only for active users with an active tenant', async () => {
-  const { verifyCredentials } = require('../src/auth');
   const originalFindOne = User.findOne;
   const originalFindById = Tenant.findById;
   const passwordHash = await bcrypt.hash('correct-horse-battery-staple', 4);
@@ -170,5 +170,53 @@ test('credential verification accepts email only for active users with an active
   } finally {
     User.findOne = originalFindOne;
     Tenant.findById = originalFindById;
+  }
+});
+
+test('reserved environment username never falls through to a database Webmaster credential', async () => {
+  const originalFindOne = User.findOne;
+  const originalAdminUsername = process.env.ADMIN_USERNAME;
+  const originalAdminPasswordHash = process.env.ADMIN_PASSWORD_HASH;
+  const databasePasswordHash = await bcrypt.hash('database-password', 4);
+  process.env.ADMIN_USERNAME = 'root';
+  process.env.ADMIN_PASSWORD_HASH = await bcrypt.hash('environment-password', 4);
+  User.findOne = async () => ({
+    username: 'root',
+    email: 'root@example.com',
+    password_hash: databasePasswordHash,
+    role: 'WEBMASTER',
+    status: 'active',
+    platformAccessLevel: 'ADMIN',
+    tenantId: null
+  });
+
+  try {
+    assert.deepEqual(await verifyCredentials('root', 'database-password'), { success: false });
+  } finally {
+    User.findOne = originalFindOne;
+    if (originalAdminUsername === undefined) delete process.env.ADMIN_USERNAME;
+    else process.env.ADMIN_USERNAME = originalAdminUsername;
+    if (originalAdminPasswordHash === undefined) delete process.env.ADMIN_PASSWORD_HASH;
+    else process.env.ADMIN_PASSWORD_HASH = originalAdminPasswordHash;
+  }
+});
+
+test('credential verification rejects active Webmasters without platform access', async () => {
+  const originalFindOne = User.findOne;
+  const passwordHash = await bcrypt.hash('database-password', 4);
+  User.findOne = async () => ({
+    username: 'unassigned-wm',
+    email: 'unassigned-wm@example.com',
+    password_hash: passwordHash,
+    role: 'WEBMASTER',
+    status: 'active',
+    platformAccessLevel: null,
+    tenantId: null
+  });
+
+  try {
+    assert.deepEqual(await verifyCredentials('unassigned-wm', 'database-password'), { success: false });
+  } finally {
+    User.findOne = originalFindOne;
   }
 });

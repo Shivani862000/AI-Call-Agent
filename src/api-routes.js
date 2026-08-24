@@ -152,7 +152,12 @@ module.exports = function mountApiRoutes(app) {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const token = createAuthToken(authResult.username, authResult.role, authResult.tenantId);
+    const token = createAuthToken(
+      authResult.username,
+      authResult.role,
+      authResult.tenantId,
+      authResult.authSource
+    );
     setAuthCookie(req, res, token);
     logger.info('USER_LOGIN', { user: authResult.username, role: authResult.role, tenantId: authResult.tenantId });
     return res.json({
@@ -161,7 +166,7 @@ module.exports = function mountApiRoutes(app) {
       role: authResult.role,
       tenantId: authResult.tenantId,
       ...(authResult.role === 'WEBMASTER'
-        ? { platformAccessLevel: authResult.platformAccessLevel || 'OWNER' }
+        ? { platformAccessLevel: authResult.platformAccessLevel }
         : {})
     });
   });

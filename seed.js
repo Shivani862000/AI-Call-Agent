@@ -4,6 +4,7 @@ const bcrypt = require('bcrypt');
 const Tenant = require('./src/models/Tenant');
 const User = require('./src/models/User');
 const Customer = require('./src/models/Customer');
+const { SEED_WEBMASTER } = require('./src/seed-data');
 
 async function seed() {
   await mongoose.connect(process.env.MONGODB_URI, { family: 4 });
@@ -17,10 +18,8 @@ async function seed() {
 
   // 1. Create Webmaster (Global Admin)
   const webmaster = await User.create({
-    username: 'webmaster@vikitech.in',
-    email: 'webmaster@vikitech.in',
+    ...SEED_WEBMASTER,
     password_hash: passwordHash,
-    role: 'WEBMASTER',
     isActive: true
   });
 
