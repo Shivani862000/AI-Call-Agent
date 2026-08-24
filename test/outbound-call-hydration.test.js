@@ -63,11 +63,16 @@ function createMemoryCallModel({ onCreate, failCreate = false, failUpdateAttempt
 }
 
 function createContextBoundary(CallModel, events = []) {
+  const fixedNow = new Date('2026-08-24T10:00:00.000Z');
   const repository = createOutboundCallContextRepository({
     CallModel,
-    now: () => new Date('2026-08-24T10:00:00.000Z')
+    now: () => fixedNow
   });
-  const coordinator = createOutboundCallContextCoordinator({ repository });
+  const coordinator = createOutboundCallContextCoordinator({
+    repository,
+    recoveryTokenSecret: 'round-six-test-recovery-secret-with-32-bytes',
+    now: () => fixedNow
+  });
   const place = (context, sid) => coordinator.initiate({
     ...context,
     placeProviderCall: async () => {
@@ -195,6 +200,8 @@ test('unpersistable context prevents provider side effects and transient accepte
 
   assert.equal(providerCalls, 1);
   assert.deepEqual(placement.persistence, { state: 'provider_accepted', retryable: false });
+  assert.match(placement.recoveryToken, /^v1\./);
+  assert.doesNotMatch(placement.recoveryToken, /provider-retry-safe|9876543210|64b64c8f0f1e2d3c4b5a6911/);
   assert.equal(retryModel.updateAttempts, 3);
   const repeated = await retryBoundary.repository.markProviderAccepted({
     tenantId,
@@ -235,14 +242,12 @@ test('exhausted accepted finalization stays non-hydratable and reconciles idempo
   const finalized = await coordinator.reconcile({
     tenantId: tenantA,
     contextId: placement.context.id,
-    disposition: 'accepted',
-    providerCallId: 'provider-needs-reconciliation'
+    recoveryToken: placement.recoveryToken
   });
   const repeated = await coordinator.reconcile({
     tenantId: tenantA,
     contextId: placement.context.id,
-    disposition: 'accepted',
-    providerCallId: 'provider-needs-reconciliation'
+    recoveryToken: placement.recoveryToken
   });
 
   assert.deepEqual(finalized.persistence, { state: 'provider_accepted', retryable: false });
@@ -255,8 +260,7 @@ test('exhausted accepted finalization stays non-hydratable and reconciles idempo
     coordinator.reconcile({
       tenantId: tenantB,
       contextId: placement.context.id,
-      disposition: 'accepted',
-      providerCallId: 'provider-needs-reconciliation'
+      recoveryToken: placement.recoveryToken
     }),
     (error) => error.code === 'OUTBOUND_CONTEXT_NOT_FOUND'
   );
@@ -300,12 +304,12 @@ test('provider rejection remains excluded when provider_failed persistence is in
   const reconciled = await coordinator.reconcile({
     tenantId,
     contextId: rejection.outboundCallContext.context.id,
-    disposition: 'failed'
+    recoveryToken: rejection.outboundCallContext.recoveryToken
   });
   const repeated = await coordinator.reconcile({
     tenantId,
     contextId: rejection.outboundCallContext.context.id,
-    disposition: 'failed'
+    recoveryToken: rejection.outboundCallContext.recoveryToken
   });
 
   assert.deepEqual(reconciled.persistence, { state: 'provider_failed', retryable: false });
@@ -314,6 +318,86 @@ test('provider rejection remains excluded when provider_failed persistence is in
   assert.equal(await repository.findRecentByPhone({
     phone: '+919876543210', tenantId, customerId: 42
   }), null);
+});
+
+test('numeric Mongo error codes retry exactly three times and retain attested recovery metadata', async () => {
+  // Mutation caught: generic error.code classification treats Mongo code 91 as a domain conflict and skips bounded retries.
+  const tenantId = '64b64c8f0f1e2d3c4b5a6911';
+  const contextId = '64b64c8f0f1e2d3c4b5a6999';
+  let reconciliationAttempts = 0;
+  let providerCalls = 0;
+  const coordinator = createOutboundCallContextCoordinator({
+    repository: {
+      async prepareInitiatedCall() { return { id: contextId, state: 'prepared' }; },
+      async readState() { return { id: contextId, state: 'prepared' }; },
+      async reconcileProviderOutcome() {
+        reconciliationAttempts += 1;
+        const error = new Error('Primary stepped down');
+        error.code = 91;
+        throw error;
+      }
+    },
+    recoveryTokenSecret: 'round-six-test-recovery-secret-with-32-bytes',
+    now: () => new Date('2026-08-24T10:00:00.000Z')
+  });
+
+  const placement = await coordinator.initiate({
+    tenantId,
+    customerId: 42,
+    customerPhone: '+919876543210',
+    callType: 'REVIEW_CALL',
+    placeProviderCall: async () => {
+      providerCalls += 1;
+      return { sid: 'provider-accepted-before-mongo-failure' };
+    }
+  });
+
+  assert.equal(reconciliationAttempts, 3);
+  assert.equal(providerCalls, 1);
+  assert.deepEqual(placement.context, { id: contextId, state: 'prepared' });
+  assert.deepEqual(placement.persistence, { state: 'prepared', retryable: true });
+  assert.match(placement.recoveryToken, /^v1\./);
+  assert.equal(placement.errorCode, 'OUTBOUND_CONTEXT_PERSISTENCE_UNAVAILABLE');
+});
+
+test('expired recovery evidence is rejected without touching persistence', async () => {
+  // Mutation caught: an unbounded recovery credential remains usable indefinitely after provider placement.
+  const tenantId = '64b64c8f0f1e2d3c4b5a6911';
+  const contextId = '64b64c8f0f1e2d3c4b5a6999';
+  let now = new Date('2026-08-24T10:00:00.000Z');
+  let persistenceCalls = 0;
+  const coordinator = createOutboundCallContextCoordinator({
+    repository: {
+      async prepareInitiatedCall() { return { id: contextId, state: 'prepared' }; },
+      async readState() { return { id: contextId, state: 'provider_accepted' }; },
+      async reconcileProviderOutcome() {
+        persistenceCalls += 1;
+        return { id: contextId, state: 'provider_accepted' };
+      }
+    },
+    recoveryTokenSecret: 'round-six-test-recovery-secret-with-32-bytes',
+    recoveryTokenTtlMs: 60_000,
+    now: () => now
+  });
+  const placement = await coordinator.initiate({
+    tenantId,
+    customerId: 42,
+    customerPhone: '+919876543210',
+    callType: 'REVIEW_CALL',
+    placeProviderCall: async () => ({ sid: 'provider-expiring-evidence' })
+  });
+  const callsAfterPlacement = persistenceCalls;
+  now = new Date(now.getTime() + 60_001);
+
+  await assert.rejects(
+    coordinator.reconcile({
+      tenantId,
+      contextId,
+      recoveryToken: placement.recoveryToken
+    }),
+    (error) => error.code === 'OUTBOUND_CONTEXT_RECOVERY_TOKEN_EXPIRED' && error.status === 400
+  );
+  assert.equal(persistenceCalls, callsAfterPlacement);
 });
 
 test('provider media hydrates safe persisted context without a separate Mongoose Customer document', async () => {

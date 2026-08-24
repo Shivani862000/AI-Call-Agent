@@ -13,7 +13,9 @@ const PROVIDER_ACCEPTED = 'provider_accepted';
 const PROVIDER_FAILED = 'provider_failed';
 const ACTIVE_CONTEXT_STATES = [PROVIDER_ACCEPTANCE_PENDING, PROVIDER_ACCEPTED];
 const MAX_RECONCILIATION_ATTEMPTS = 3;
+const DEFAULT_RECOVERY_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const configuredReferenceSecret = String(process.env.AUTH_SIGNING_SECRET || '').trim();
+const developmentRecoverySecret = crypto.randomBytes(32);
 
 class OutboundCallContextError extends Error {
   constructor(code, message, status = 409) {
@@ -56,9 +58,109 @@ function requireProviderCallId(disposition, providerCallId) {
 
 function requireObjectId(value, label) {
   if (!mongoose.isObjectIdOrHexString(value)) {
-    throw new TypeError(`${label} must be a valid ObjectId`);
+    throw new OutboundCallContextError(
+      'OUTBOUND_CONTEXT_ID_INVALID',
+      `${label} must be a valid ObjectId`,
+      400
+    );
   }
   return String(value);
+}
+
+function recoveryTokenError(code = 'OUTBOUND_CONTEXT_RECOVERY_TOKEN_INVALID') {
+  return new OutboundCallContextError(
+    code,
+    code === 'OUTBOUND_CONTEXT_RECOVERY_TOKEN_EXPIRED'
+      ? 'Outbound call recovery evidence has expired'
+      : 'Outbound call recovery evidence is invalid',
+    400
+  );
+}
+
+function createRecoveryTokenCodec({ secret, now, ttlMs }) {
+  const secretMaterial = secret === undefined
+    ? (configuredReferenceSecret || developmentRecoverySecret)
+    : secret;
+  const key = crypto.createHmac('sha256', secretMaterial)
+    .update('outbound-call-recovery:v1')
+    .digest();
+  const aad = Buffer.from('outbound-call-recovery:v1', 'utf8');
+
+  function issue({ tenantId, contextId, disposition, providerCallId = null }) {
+    const scopedTenantId = requireObjectId(tenantId, 'Authorized tenant');
+    const scopedContextId = requireObjectId(contextId, 'Call context');
+    const normalizedDisposition = normalizeDisposition(disposition);
+    const providerId = requireProviderCallId(normalizedDisposition, providerCallId);
+    const issuedAt = now().getTime();
+    const payload = Buffer.from(JSON.stringify({
+      version: 1,
+      tenantId: scopedTenantId,
+      contextId: scopedContextId,
+      disposition: normalizedDisposition,
+      providerCallId: providerId || null,
+      issuedAt,
+      exp: issuedAt + ttlMs
+    }), 'utf8');
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    cipher.setAAD(aad);
+    const ciphertext = Buffer.concat([cipher.update(payload), cipher.final()]);
+    return `v1.${iv.toString('base64url')}.${ciphertext.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}`;
+  }
+
+  function verify(token) {
+    try {
+      const parts = String(token || '').split('.');
+      if (parts.length !== 4 || parts[0] !== 'v1') throw recoveryTokenError();
+      const iv = Buffer.from(parts[1], 'base64url');
+      const ciphertext = Buffer.from(parts[2], 'base64url');
+      const authTag = Buffer.from(parts[3], 'base64url');
+      if (iv.length !== 12 || !ciphertext.length || authTag.length !== 16) throw recoveryTokenError();
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAAD(aad);
+      decipher.setAuthTag(authTag);
+      const evidence = JSON.parse(Buffer.concat([
+        decipher.update(ciphertext),
+        decipher.final()
+      ]).toString('utf8'));
+      const scopedTenantId = requireObjectId(evidence?.tenantId, 'Authorized tenant');
+      const scopedContextId = requireObjectId(evidence?.contextId, 'Call context');
+      const disposition = normalizeDisposition(evidence?.disposition);
+      const providerCallId = requireProviderCallId(disposition, evidence?.providerCallId);
+      const issuedAt = Number(evidence?.issuedAt);
+      const expiresAt = Number(evidence?.exp);
+      const currentTime = now().getTime();
+      if (
+        evidence?.version !== 1
+        || !Number.isFinite(issuedAt)
+        || !Number.isFinite(expiresAt)
+        || expiresAt <= issuedAt
+        || expiresAt - issuedAt !== ttlMs
+        || issuedAt > currentTime + 60_000
+      ) {
+        throw recoveryTokenError();
+      }
+      if (expiresAt <= currentTime) {
+        throw recoveryTokenError('OUTBOUND_CONTEXT_RECOVERY_TOKEN_EXPIRED');
+      }
+      return {
+        tenantId: scopedTenantId,
+        contextId: scopedContextId,
+        disposition,
+        providerCallId
+      };
+    } catch (error) {
+      if (
+        error instanceof OutboundCallContextError
+        && error.code === 'OUTBOUND_CONTEXT_RECOVERY_TOKEN_EXPIRED'
+      ) {
+        throw error;
+      }
+      throw recoveryTokenError();
+    }
+  }
+
+  return { issue, verify };
 }
 
 function requireLegacyCompatibleCustomerId(value) {
@@ -336,8 +438,21 @@ function createOutboundCallContextRepository({ CallModel = Call, now = () => new
   };
 }
 
-function createOutboundCallContextCoordinator({ repository } = {}) {
+function createOutboundCallContextCoordinator({
+  repository,
+  recoveryTokenSecret,
+  recoveryTokenTtlMs = DEFAULT_RECOVERY_TOKEN_TTL_MS,
+  now = () => new Date()
+} = {}) {
   if (!repository) throw new TypeError('Outbound call context repository is required');
+  if (!Number.isSafeInteger(recoveryTokenTtlMs) || recoveryTokenTtlMs <= 0) {
+    throw new TypeError('Outbound call recovery token TTL must be a positive integer');
+  }
+  const recoveryTokens = createRecoveryTokenCodec({
+    secret: recoveryTokenSecret,
+    now,
+    ttlMs: recoveryTokenTtlMs
+  });
 
   async function currentState({ tenantId, contextId }, fallback) {
     try {
@@ -347,8 +462,7 @@ function createOutboundCallContextCoordinator({ repository } = {}) {
     }
   }
 
-  async function reconcile({ tenantId, contextId, disposition, providerCallId = null }) {
-    const normalizedDisposition = normalizeDisposition(disposition);
+  async function reconcileAttestedOutcome({ tenantId, contextId, disposition, providerCallId = null }) {
     let lastError;
 
     for (let attempt = 0; attempt < MAX_RECONCILIATION_ATTEMPTS; attempt += 1) {
@@ -356,7 +470,7 @@ function createOutboundCallContextCoordinator({ repository } = {}) {
         const context = await repository.reconcileProviderOutcome({
           tenantId,
           contextId,
-          disposition: normalizedDisposition,
+          disposition,
           providerCallId
         });
         return {
@@ -365,7 +479,10 @@ function createOutboundCallContextCoordinator({ repository } = {}) {
         };
       } catch (error) {
         lastError = error;
-        if (error.code && error.code !== 'OUTBOUND_CONTEXT_PERSISTENCE_UNAVAILABLE') {
+        if (
+          error instanceof OutboundCallContextError
+          && error.code !== 'OUTBOUND_CONTEXT_PERSISTENCE_UNAVAILABLE'
+        ) {
           throw error;
         }
       }
@@ -384,8 +501,22 @@ function createOutboundCallContextCoordinator({ repository } = {}) {
     return {
       context,
       persistence: { state: context.state, retryable: true },
-      errorCode: lastError?.code || 'OUTBOUND_CONTEXT_PERSISTENCE_UNAVAILABLE'
+      errorCode: 'OUTBOUND_CONTEXT_PERSISTENCE_UNAVAILABLE'
     };
+  }
+
+  async function reconcile({ tenantId, contextId, recoveryToken }) {
+    const scopedTenantId = requireObjectId(tenantId, 'Authorized tenant');
+    const scopedContextId = requireObjectId(contextId, 'Call context');
+    const evidence = recoveryTokens.verify(recoveryToken);
+    if (evidence.tenantId !== scopedTenantId || evidence.contextId !== scopedContextId) {
+      throw new OutboundCallContextError(
+        'OUTBOUND_CONTEXT_NOT_FOUND',
+        'Outbound call context was not found for the authorized tenant',
+        404
+      );
+    }
+    return reconcileAttestedOutcome(evidence);
   }
 
   async function initiate({ placeProviderCall, ...context }) {
@@ -395,31 +526,40 @@ function createOutboundCallContextCoordinator({ repository } = {}) {
     try {
       providerCall = await placeProviderCall();
     } catch (error) {
+      const evidence = {
+        tenantId: context.tenantId,
+        contextId: prepared.id,
+        disposition: 'failed',
+        providerCallId: null
+      };
+      const recoveryToken = recoveryTokens.issue(evidence);
       try {
-        error.outboundCallContext = await reconcile({
-          tenantId: context.tenantId,
-          contextId: prepared.id,
-          disposition: 'failed'
-        });
+        error.outboundCallContext = {
+          ...await reconcileAttestedOutcome(evidence),
+          recoveryToken
+        };
       } catch (_reconciliationError) {
         error.outboundCallContext = {
           context: await currentState(
             { tenantId: context.tenantId, contextId: prepared.id },
             prepared
           ),
-          persistence: { state: PREPARED, retryable: true }
+          persistence: { state: PREPARED, retryable: true },
+          recoveryToken
         };
       }
       throw error;
     }
 
-    const reconciled = await reconcile({
+    const evidence = {
       tenantId: context.tenantId,
       contextId: prepared.id,
       disposition: 'accepted',
       providerCallId: providerCall?.sid
-    });
-    return { providerCall, ...reconciled };
+    };
+    const recoveryToken = recoveryTokens.issue(evidence);
+    const reconciled = await reconcileAttestedOutcome(evidence);
+    return { providerCall, ...reconciled, recoveryToken };
   }
 
   return { initiate, reconcile };

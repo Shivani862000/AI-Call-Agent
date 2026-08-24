@@ -108,8 +108,42 @@ function safeOutboundContextFields(error) {
   return {
     callId: reconciliation.context.id,
     contextPersistence: reconciliation.persistence.state,
-    contextRetryable: Boolean(reconciliation.persistence.retryable)
+    contextRetryable: Boolean(reconciliation.persistence.retryable),
+    ...(reconciliation.recoveryToken
+      ? { contextRecoveryToken: reconciliation.recoveryToken }
+      : {})
   };
+}
+
+function safeOutboundPlacementFields(placement, ancillary) {
+  return {
+    callId: placement.context.id,
+    contextPersistence: placement.persistence.state,
+    contextRetryable: Boolean(placement.persistence.retryable),
+    ...(placement.recoveryToken ? { contextRecoveryToken: placement.recoveryToken } : {}),
+    ancillaryPersistence: ancillary.state,
+    ancillaryRetryable: ancillary.retryable,
+    providerAccepted: true,
+    reinitiationRequired: false
+  };
+}
+
+async function runOutboundAncillaryWork(work, { callId, trigger }) {
+  try {
+    await work();
+    return { state: 'completed', retryable: false };
+  } catch (_error) {
+    try {
+      logger.error('OUTBOUND_ANCILLARY_PERSISTENCE_FAILED', {
+        callId,
+        trigger,
+        reason: 'Post-provider persistence unavailable'
+      });
+    } catch (_loggingError) {
+      // A diagnostic sink cannot obscure an already accepted provider call.
+    }
+    return { state: 'failed', retryable: true };
+  }
 }
 
 module.exports = function mountApiRoutes(app, {
@@ -204,8 +238,7 @@ module.exports = function mountApiRoutes(app, {
         const reconciliation = await outboundCoordinator.reconcile({
           tenantId: req.tenantId,
           contextId: req.params.contextId,
-          disposition: req.body?.disposition,
-          providerCallId: req.body?.providerCallId
+          recoveryToken: req.body?.recoveryToken
         });
         return res.status(reconciliation.persistence.retryable ? 202 : 200).json({
           callId: reconciliation.context.id,
@@ -342,40 +375,40 @@ module.exports = function mountApiRoutes(app, {
       });
       const call = placement.providerCall;
       const result = placement.context;
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
-      
-      const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
-        [customer.id]
-      );
-      const attempt = callsTodayRow ? callsTodayRow.count : 1;
-      logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone || customerPhone, attempt });
-      
-      logger.info('CALL_STARTED', {
+      const ancillary = await runOutboundAncillaryWork(async () => {
+        await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+        const callsTodayRow = await dbGet(
+          `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+          [customer.id]
+        );
+        const attempt = callsTodayRow ? callsTodayRow.count : 1;
+        logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone || customerPhone, attempt });
+        logger.info('CALL_STARTED', {
+          callId: result.id,
+          customerId: customer.id,
+          patient: customer.name || customerName,
+          phone: customer.phone || customerPhone,
+          type: logger.formatCallType(callType),
+          provider: 'icallmate',
+          providerCallId: call.sid
+        });
+        schedulePendingCallDiagnostic(call.sid, {
+          customerId: customer.id,
+          customerPhone,
+          customerName: customer.name || customerName,
+          agentId: agentConfig?.id || null,
+          trigger: '/call/start'
+        });
+      }, {
         callId: result.id,
-        customerId: customer.id,
-        patient: customer.name || customerName,
-        phone: customer.phone || customerPhone,
-        type: logger.formatCallType(callType),
-        provider: 'icallmate',
-        providerCallId: call.sid
-      });
-
-      schedulePendingCallDiagnostic(call.sid, {
-        customerId: customer.id,
-        customerPhone,
-        customerName: customer.name || customerName,
-        agentId: agentConfig?.id || null,
         trigger: '/call/start'
       });
-      res.status(placement.persistence.retryable ? 202 : 200).json({
+      res.status(placement.persistence.retryable || ancillary.retryable ? 202 : 200).json({
         success: true,
         sid: call.sid,
-        callId: result.id,
         customerId: customer.id,
         agentId: agentConfig?.id || null,
-        contextPersistence: placement.persistence.state,
-        contextRetryable: placement.persistence.retryable
+        ...safeOutboundPlacementFields(placement, ancillary)
       });
     } catch (error) {
       if (customer?.id) {
@@ -630,39 +663,41 @@ module.exports = function mountApiRoutes(app, {
       const call = placement.providerCall;
       const result = placement.context;
 
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
-      
-      const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
-        [customer.id]
-      );
-      const attempt = callsTodayRow ? callsTodayRow.count : 1;
-      logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone, attempt });
-
-      logger.info('CALL_STARTED', {
+      const ancillary = await runOutboundAncillaryWork(async () => {
+        await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+        const callsTodayRow = await dbGet(
+          `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+          [customer.id]
+        );
+        const attempt = callsTodayRow ? callsTodayRow.count : 1;
+        logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone, attempt });
+        logger.info('CALL_STARTED', {
+          callId: result.id,
+          customerId: customer.id,
+          patient: customer.name,
+          phone: customer.phone,
+          type: logger.formatCallType(callType),
+          provider: 'icallmate',
+          providerCallId: call.sid
+        });
+        schedulePendingCallDiagnostic(call.sid, {
+          customerId: customer.id,
+          customerPhone: customer.phone,
+          customerName: customer.name,
+          agentId: agentConfig?.id || null,
+          trigger: '/api/calls/initiate/:customerId'
+        });
+      }, {
         callId: result.id,
-        customerId: customer.id,
-        patient: customer.name,
-        phone: customer.phone,
-        type: logger.formatCallType(callType),
-        provider: 'icallmate',
-        providerCallId: call.sid
-      });
-      schedulePendingCallDiagnostic(call.sid, {
-        customerId: customer.id,
-        customerPhone: customer.phone,
-        customerName: customer.name,
-        agentId: agentConfig?.id || null,
         trigger: '/api/calls/initiate/:customerId'
       });
-      res.status(placement.persistence.retryable ? 202 : 200).json({
+      res.status(placement.persistence.retryable || ancillary.retryable ? 202 : 200).json({
+        success: true,
         message: 'Call initiated',
-        callId: result.id,
         sid: call.sid,
         agentId: agentConfig?.id || null,
         agentName: agentConfig?.name || null,
-        contextPersistence: placement.persistence.state,
-        contextRetryable: placement.persistence.retryable
+        ...safeOutboundPlacementFields(placement, ancillary)
       });
     } catch (error) {
       if (customer?.id) {
@@ -1120,34 +1155,37 @@ module.exports = function mountApiRoutes(app, {
       const call = placement.providerCall;
       const result = placement.context;
 
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
-      logger.info('CALL_STARTED', {
+      const ancillary = await runOutboundAncillaryWork(async () => {
+        await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+        logger.info('CALL_STARTED', {
+          callId: result.id,
+          customerId: customer.id,
+          patient: customer.name || customerName,
+          phone: customer.phone || phone,
+          type: logger.formatCallType(callType),
+          provider: 'icallmate-masterpost',
+          providerCallId: call.sid
+        });
+        schedulePendingCallDiagnostic(call.sid, {
+          customerId: customer.id,
+          customerPhone: phone,
+          customerName: customer.name || customerName,
+          agentId: agentConfig?.id || null,
+          trigger: '/api/icallmate/outgoing-call'
+        });
+      }, {
         callId: result.id,
-        customerId: customer.id,
-        patient: customer.name || customerName,
-        phone: customer.phone || phone,
-        type: logger.formatCallType(callType),
-        provider: 'icallmate-masterpost',
-        providerCallId: call.sid
-      });
-      schedulePendingCallDiagnostic(call.sid, {
-        customerId: customer.id,
-        customerPhone: phone,
-        customerName: customer.name || customerName,
-        agentId: agentConfig?.id || null,
         trigger: '/api/icallmate/outgoing-call'
       });
 
-      res.status(placement.persistence.retryable ? 202 : 200).json({
+      res.status(placement.persistence.retryable || ancillary.retryable ? 202 : 200).json({
         success: true,
         message: 'Outgoing call initiated',
         sid: call.sid,
-        callId: result.id,
         customerId: customer.id,
         agentId: agentConfig?.id || null,
         provider: 'icallmate-masterpost',
-        contextPersistence: placement.persistence.state,
-        contextRetryable: placement.persistence.retryable,
+        ...safeOutboundPlacementFields(placement, ancillary),
         payload
       });
     } catch (error) {
