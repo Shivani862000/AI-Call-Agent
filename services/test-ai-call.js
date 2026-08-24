@@ -80,11 +80,12 @@ function serialize(session, extra = {}) {
   };
 }
 
-async function generateLlmReply(session, userText) {
-  return generateGeminiReply({
+async function generateLlmReply(session, userText, generateReply = generateGeminiReply) {
+  return generateReply({
     systemPrompt: session.systemPrompt,
     transcript: session.transcript,
-    userText
+    userText,
+    tenantId: session.tenantId ?? null
   });
 }
 
@@ -127,7 +128,7 @@ function buildSummary(transcript) {
   };
 }
 
-async function startBrowserTestCall() {
+async function startBrowserTestCall({ tenantId = null } = {}) {
   const promptConfig = await getOutboundPrompt();
   const customerId = await getOrCreateBrowserTestCustomer();
   const providerCallId = `test-ai-call-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -157,6 +158,7 @@ async function startBrowserTestCall() {
     id: providerCallId,
     callId: callResult.lastID,
     customerId,
+    tenantId,
     status: 'live',
     step: 0,
     systemPrompt: promptConfig.prompt,
@@ -279,6 +281,7 @@ module.exports = {
   handleUserMessage,
   endBrowserTestCall,
   _test: {
-    buildSummary
+    buildSummary,
+    generateLlmReply
   }
 };

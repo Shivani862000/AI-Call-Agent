@@ -173,7 +173,8 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
 
   if (recordingLocalPath) {
     const audioTranscript = await transcribeAudioFile(recordingLocalPath, {
-      language: callRecord.language || 'hi'
+      language: callRecord.language || 'hi',
+      tenantId: callRecord.tenant_id ?? callRecord.tenantId ?? null
     });
 
     if (audioTranscript && audioTranscript.trim()) {
@@ -204,7 +205,8 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   const analysis = await analyzeCallTranscript(transcriptText, {
     customerName: callRecord.customer_name,
     clientName: process.env.CLIENT_NAME,
-    callType: callRecord.call_type
+    callType: callRecord.call_type,
+    tenantId: callRecord.tenant_id ?? callRecord.tenantId ?? null
   });
   const productAnalysis = buildCallAnalysis({
     ...callRecord,
@@ -391,7 +393,12 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   );
 
   try {
-    await syncCallToCrm({ dbGet, dbRun, callId: updatedCall.id });
+    await syncCallToCrm({
+      dbGet,
+      dbRun,
+      callId: updatedCall.id,
+      tenantId: updatedCall.tenant_id ?? updatedCall.tenantId ?? callRecord.tenant_id ?? callRecord.tenantId ?? null
+    });
   } catch (error) {
     console.error('[CRM SYNC ERROR]', error.message);
   }

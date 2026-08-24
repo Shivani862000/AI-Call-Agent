@@ -74,36 +74,55 @@ async function generateGeminiReply(options = {}) {
     fetchImpl = global.fetch
   } = options;
   const runtime = await getIntegrationRuntimeConfig('gemini', tenantId);
-  const model = options.model || runtime.settings.model || DEFAULT_GEMINI_MODEL;
-  const apiKey = options.apiKey || runtime.secrets.apiKey;
+  if (runtime.settings?.enabled === false) {
+    const error = new Error('Gemini integration is disabled');
+    error.code = 'INTEGRATION_DISABLED';
+    throw error;
+  }
+  const model = options.model ?? runtime.settings.model ?? DEFAULT_GEMINI_MODEL;
+  const apiKey = options.apiKey ?? runtime.secrets.apiKey;
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is not configured');
   }
 
   const url = `${GEMINI_API_BASE_URL}/models/${encodeURIComponent(model)}:generateContent`;
-  const response = await fetchImpl(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey
-    },
-    body: JSON.stringify({
-      system_instruction: {
-        parts: [{ text: String(systemPrompt || '').trim() }]
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey
       },
-      contents: buildGeminiConversationContents(transcript, userText),
-      generationConfig: {
-        temperature: Number(options.temperature ?? runtime.settings.temperature ?? 0.3),
-        maxOutputTokens: maxTokens || Number(runtime.settings.maxOutputTokens || 60),
-        thinkingConfig: {
-          thinkingBudget: Number(options.thinkingBudget ?? runtime.settings.thinkingBudget ?? 0)
+      body: JSON.stringify({
+        system_instruction: {
+          parts: [{ text: String(systemPrompt || '').trim() }]
         },
-        ...(responseMimeType ? { responseMimeType } : {})
-      }
-    })
-  });
+        contents: buildGeminiConversationContents(transcript, userText),
+        generationConfig: {
+          temperature: Number(options.temperature ?? runtime.settings.temperature ?? 0.3),
+          maxOutputTokens: maxTokens ?? Number(runtime.settings.maxOutputTokens ?? 60),
+          thinkingConfig: {
+            thinkingBudget: Number(options.thinkingBudget ?? runtime.settings.thinkingBudget ?? 0)
+          },
+          ...(responseMimeType ? { responseMimeType } : {})
+        }
+      })
+    });
+  } catch (_error) {
+    const error = new Error('Gemini request failed');
+    error.code = 'GEMINI_REQUEST_FAILED';
+    throw error;
+  }
 
-  const rawText = await response.text();
+  let rawText;
+  try {
+    rawText = await response.text();
+  } catch (_error) {
+    const error = new Error('Gemini response could not be read');
+    error.code = 'GEMINI_RESPONSE_READ_FAILED';
+    throw error;
+  }
   let payload = {};
   try {
     payload = rawText ? JSON.parse(rawText) : {};
@@ -112,7 +131,9 @@ async function generateGeminiReply(options = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(`Gemini request failed (${response.status}): ${rawText || response.statusText}`);
+    const error = new Error(`Gemini request failed with HTTP ${response.status}`);
+    error.code = 'GEMINI_REQUEST_FAILED';
+    throw error;
   }
 
   const text = extractGeminiText(payload);
@@ -205,9 +226,8 @@ RATING SCALE GUIDELINES:
       systemPrompt,
       userText: transcriptText || '(No transcript provided)',
       responseMimeType: 'application/json',
-      model: 'gemini-2.5-flash',
       maxTokens: 800,
-      tenantId: context.tenantId || null
+      tenantId: context.tenantId ?? null
     });
 
     const analysis = JSON.parse(rawAiResponse);
@@ -258,13 +278,14 @@ async function transcribeAudioFile(filePath, options = {}) {
     const audioData = fs.readFileSync(filePath);
     
     const getIntegrationRuntimeConfig = options.getIntegrationRuntimeConfig || defaultRuntimeConfigResolver;
-    const runtime = await getIntegrationRuntimeConfig('deepgram', options.tenantId || null);
-    const apiKey = options.apiKey || runtime.secrets.apiKey;
+    const runtime = await getIntegrationRuntimeConfig('deepgram', options.tenantId ?? null);
+    if (runtime.settings?.enabled === false) return null;
+    const apiKey = options.apiKey ?? runtime.secrets.apiKey;
     if (apiKey) {
       const url = new URL('https://api.deepgram.com/v1/listen');
       url.searchParams.set('smart_format', 'true');
-      url.searchParams.set('language', options.language || runtime.settings.language || 'hi');
-      url.searchParams.set('model', runtime.settings.listenModel || 'nova-2');
+      url.searchParams.set('language', options.language ?? runtime.settings.language ?? 'hi');
+      url.searchParams.set('model', runtime.settings.listenModel ?? 'nova-2');
       url.searchParams.set('diarize', 'true');
       const fetchImpl = options.fetchImpl || global.fetch;
       const response = await fetchImpl(url, {
@@ -281,13 +302,13 @@ async function transcribeAudioFile(filePath, options = {}) {
         if (paragraphs) return paragraphs;
         return result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || null;
       }
-      const errText = await response.text();
-      console.error('[DEEPGRAM TRANSCRIBE ERROR]', response.status, errText);
+      await response.text();
+      console.error('[DEEPGRAM TRANSCRIBE ERROR]', { status: response.status, code: 'DEEPGRAM_REQUEST_FAILED' });
     }
     
     return null;
   } catch (error) {
-    console.error('[TRANSCRIBE AUDIO ERROR]', error.message);
+    console.error('[TRANSCRIBE AUDIO ERROR]', { code: 'DEEPGRAM_TRANSCRIPTION_FAILED' });
     return null;
   }
 }

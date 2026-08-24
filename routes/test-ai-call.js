@@ -19,7 +19,7 @@ function sendError(res, error) {
 
 router.post('/start', async (req, res) => {
   try {
-    const result = await startBrowserTestCall();
+    const result = await startBrowserTestCall({ tenantId: req.tenantId ?? null });
     res.json(result);
   } catch (error) {
     sendError(res, error);

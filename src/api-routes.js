@@ -187,7 +187,8 @@ function sanitizeIcallMateMacros(macros) {
 
 function mountApiRoutes(app, {
   outboundCoordinator = outboundCallContextCoordinator,
-  getIntegrationRuntimeConfig = defaultRuntimeConfigResolver
+  getIntegrationRuntimeConfig = defaultRuntimeConfigResolver,
+  fetchImpl = global.fetch
 } = {}) {
   app.get('/health', (req, res) => {
     res.json({
@@ -890,11 +891,15 @@ function mountApiRoutes(app, {
     }
   });
 
-  app.get('/api/icallmate/config', async (req, res) => {
-    const requestBaseUrl = getRequestPublicBaseUrl(req);
-    const token = createMediaToken();
-    const runtime = await getIntegrationRuntimeConfig('icallmate', req.tenantId || null);
-    res.json(createIcallMateConfigDto({ requestBaseUrl, token, runtime }));
+  app.get('/api/icallmate/config', async (req, res, next) => {
+    try {
+      const requestBaseUrl = getRequestPublicBaseUrl(req);
+      const token = createMediaToken();
+      const runtime = await getIntegrationRuntimeConfig('icallmate', req.tenantId ?? null);
+      res.json(createIcallMateConfigDto({ requestBaseUrl, token, runtime }));
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post('/api/icallmate/callback', async (req, res) => {
@@ -1017,6 +1022,9 @@ function mountApiRoutes(app, {
       const requestBaseUrl = getRequestPublicBaseUrl(req);
       const runtime = await getIntegrationRuntimeConfig('icallmate', req.tenantId || null);
       const settings = runtime.settings || {};
+      if (settings.enabled === false) {
+        return res.status(503).json({ success: false, code: 'ICALLMATE_INTEGRATION_DISABLED' });
+      }
       const dnisNo = String(req.body.dnisNo || req.body.virtualNumber || settings.did || ICALLMATE_DEFAULT_DID).trim();
       if (!dnisNo) {
         return res.status(400).json({ error: 'dnisNo or virtualNumber is required' });
@@ -1042,7 +1050,7 @@ function mountApiRoutes(app, {
         return res.json({ endpoint, macros: safeMacros, dryRun: true });
       }
 
-      const response = await fetch(endpoint, {
+      const response = await fetchImpl(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(macros)
@@ -1058,13 +1066,13 @@ function mountApiRoutes(app, {
 
       res.status(providerSuccess ? 200 : (response.ok ? 502 : response.status)).json({
         success: providerSuccess,
+        code: providerSuccess ? 'ICALLMATE_CONFIG_APPLIED' : 'ICALLMATE_CONFIG_REJECTED',
         endpoint,
-        macros: safeMacros,
-        response: text
+        macros: safeMacros
       });
-    } catch (error) {
-      console.error('[ICALLMATE INCOMING CONFIG ERROR]', error.message);
-      res.status(500).json({ error: error.message });
+    } catch (_error) {
+      console.error('[ICALLMATE INCOMING CONFIG ERROR]', { code: 'ICALLMATE_CONFIG_REQUEST_FAILED' });
+      res.status(500).json({ success: false, code: 'ICALLMATE_CONFIG_REQUEST_FAILED' });
     }
   });
 

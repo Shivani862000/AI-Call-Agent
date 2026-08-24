@@ -120,11 +120,12 @@ async function getOutboundFeedbackPrompt(patientName) {
   };
 }
 
-async function generateLlmReply(session, userText) {
-  return generateGeminiReply({
+async function generateLlmReply(session, userText, generateReply = generateGeminiReply) {
+  return generateReply({
     systemPrompt: session.systemPrompt,
     transcript: session.transcript,
-    userText
+    userText,
+    tenantId: session.tenantId ?? null
   });
 }
 
@@ -159,7 +160,7 @@ function toPlainTranscript(transcript) {
   return transcript.map((turn) => `${turn.role}: ${turn.text}`).join('\n');
 }
 
-async function startTestCall({ patientName, phone }) {
+async function startTestCall({ patientName, phone, tenantId = null }) {
   const nameError = validateName(patientName);
   const phoneError = validatePhone(phone);
   const fieldErrors = {};
@@ -202,6 +203,7 @@ async function startTestCall({ patientName, phone }) {
     id: providerCallId,
     callId: callResult.lastID,
     customerId,
+    tenantId,
     patientName: name,
     phone: normalizedPhone,
     status: 'live',
@@ -409,6 +411,7 @@ module.exports = {
   endTestCall,
   saveTestFeedback,
   _test: {
-    buildFallbackOutboundFeedbackPrompt
+    buildFallbackOutboundFeedbackPrompt,
+    generateLlmReply
   }
 };

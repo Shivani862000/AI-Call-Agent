@@ -64,7 +64,11 @@ function cloneValue(value) {
 
 function parseEnvironmentValue(raw, definition) {
   if (raw === undefined || raw === null || raw === '') return cloneValue(definition.fallback);
-  if (definition.type === 'boolean') return /^(1|true|yes|on)$/i.test(String(raw));
+  if (definition.type === 'boolean') {
+    if (/^(1|true|yes|on)$/i.test(String(raw))) return true;
+    if (/^(0|false|no|off)$/i.test(String(raw))) return false;
+    return undefined;
+  }
   if (definition.type === 'integer' || definition.type === 'number') return Number(raw);
   if (definition.type === 'array') {
     return String(raw).split(',').map((item) => item.trim()).filter(Boolean);
@@ -74,7 +78,10 @@ function parseEnvironmentValue(raw, definition) {
 
 function environmentFallback(definition, env) {
   const key = (definition.env || []).find((candidate) => env[candidate] !== undefined && env[candidate] !== '');
-  return parseEnvironmentValue(key ? env[key] : undefined, definition);
+  const candidate = parseEnvironmentValue(key ? env[key] : undefined, definition);
+  return valueIsValid(candidate, definition)
+    ? candidate
+    : cloneValue(definition.fallback);
 }
 
 function valueIsValid(value, definition) {
@@ -157,15 +164,38 @@ function safeVersion(value) {
 
 function normalizedOverrides(record) {
   const raw = record?.settingsOverrides;
-  if (raw instanceof Map) return Object.fromEntries(raw.entries());
-  if (!isPlainObject(raw)) return {};
+  const normalized = raw instanceof Map ? Object.fromEntries(raw.entries()) : raw;
+  if (!isPlainObject(normalized)) return {};
   const overrides = {};
-  for (const [path, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(raw))) {
+  for (const [path, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(normalized))) {
     if (!Object.hasOwn(descriptor, 'value') || !OVERRIDABLE_KEYS.has(path)) continue;
     const definition = ALL_SAFE_DEFINITIONS[path];
     if (definition && valueIsValid(descriptor.value, definition)) overrides[path] = cloneValue(descriptor.value);
   }
   return overrides;
+}
+
+function validateSectionInvariants(settings, section, code = 'INVALID_SETTING_VALUE') {
+  if (section === 'policies') {
+    const minLength = getPath(settings, 'policies.password.minLength');
+    const maxLength = getPath(settings, 'policies.password.maxLength');
+    if (Number.isInteger(minLength) && Number.isInteger(maxLength) && minLength > maxLength) {
+      throw settingsError(400, code, 'One or more settings are invalid', {
+        'policies.password.minLength': 'Must not exceed maximum password length',
+        'policies.password.maxLength': 'Must not be less than minimum password length'
+      });
+    }
+  }
+  if (section === 'defaults') {
+    const concurrent = getPath(settings, 'defaults.limits.maxConcurrentCalls');
+    const daily = getPath(settings, 'defaults.limits.maxCallsPerDay');
+    if (Number.isInteger(concurrent) && Number.isInteger(daily) && concurrent > daily) {
+      throw settingsError(400, code, 'One or more settings are invalid', {
+        'defaults.limits.maxConcurrentCalls': 'Must not exceed maximum calls per day',
+        'defaults.limits.maxCallsPerDay': 'Must not be less than maximum concurrent calls'
+      });
+    }
+  }
 }
 
 function safeResolvedGlobal(record, env) {
@@ -234,6 +264,9 @@ function createSettingsService({
     }
 
     const before = await getGlobal();
+    const candidate = cloneValue(before.global);
+    for (const [path, value] of Object.entries(validated)) setPath(candidate, path, cloneValue(value));
+    validateSectionInvariants(candidate, normalizedSection);
     let updated;
     try {
       updated = await leanResult(PlatformSettingsModel.findOneAndUpdate(
@@ -303,6 +336,12 @@ function createSettingsService({
       }
       validated[path] = validateValue(path, descriptor.value, ALL_SAFE_DEFINITIONS[path], 'INVALID_OVERRIDE_VALUE');
     }
+    const globalResult = await getGlobal();
+    const effectiveCandidate = cloneValue(globalResult.global);
+    for (const [path, value] of Object.entries(validated)) setPath(effectiveCandidate, path, cloneValue(value));
+    for (const section of new Set(Object.keys(validated).map((path) => path.split('.')[0]))) {
+      validateSectionInvariants(effectiveCandidate, section, 'INVALID_OVERRIDE_VALUE');
+    }
     const before = await readTenantRecord(tenantId);
     const updated = await leanResult(TenantModel.findOneAndUpdate(
       { _id: String(tenantId), __v: expectedVersion },
@@ -360,7 +399,7 @@ function defaultSettingsService() {
   const { createSecretService } = require('./secret-service');
   const secretService = createSecretService({
     IntegrationSecretModel: IntegrationSecret,
-    environmentKeyFor: environmentKeyForSecret
+    environmentKeyFor: (integration, key) => environmentKeyForSecret(integration, key, process.env)
   });
   defaultService = createSettingsService({ PlatformSettingsModel: PlatformSettings, TenantModel: Tenant, secretService });
   return defaultService;

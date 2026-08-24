@@ -76,6 +76,72 @@ test('Gemini resolves database model and API key at request time', async () => {
   assert.equal(body.generationConfig.thinkingConfig.thinkingBudget, 4);
 });
 
+test('disabled Gemini rejects before a request and provider error text stays private', async () => {
+  let requests = 0;
+  await assert.rejects(
+    generateGeminiReply({
+      systemPrompt: 'Safe',
+      userText: 'Hello',
+      getIntegrationRuntimeConfig: async () => ({ settings: { enabled: false }, secrets: { apiKey: 'key' } }),
+      fetchImpl: async () => { requests += 1; throw new Error('must not request'); }
+    }),
+    (error) => error.code === 'INTEGRATION_DISABLED' && error.message === 'Gemini integration is disabled'
+  );
+  assert.equal(requests, 0);
+
+  const echoedSecret = 'gemini-provider-echoed-secret';
+  await assert.rejects(
+    generateGeminiReply({
+      systemPrompt: 'Safe',
+      userText: 'Hello',
+      getIntegrationRuntimeConfig: async () => ({
+        settings: { enabled: true, model: 'safe-model' },
+        secrets: { apiKey: 'key' }
+      }),
+      fetchImpl: async () => ({
+        ok: false,
+        status: 500,
+        statusText: 'Failed',
+        async text() { return echoedSecret; }
+      })
+    }),
+    (error) => error.code === 'GEMINI_REQUEST_FAILED'
+      && !error.message.includes(echoedSecret)
+  );
+
+  await assert.rejects(
+    generateGeminiReply({
+      systemPrompt: 'Safe',
+      userText: 'Hello',
+      getIntegrationRuntimeConfig: async () => ({
+        settings: { enabled: true, model: 'safe-model' },
+        secrets: { apiKey: 'key' }
+      }),
+      fetchImpl: async () => { throw new Error(echoedSecret); }
+    }),
+    (error) => error.code === 'GEMINI_REQUEST_FAILED'
+      && !error.message.includes(echoedSecret)
+  );
+
+  await assert.rejects(
+    generateGeminiReply({
+      systemPrompt: 'Safe',
+      userText: 'Hello',
+      getIntegrationRuntimeConfig: async () => ({
+        settings: { enabled: true, model: 'safe-model' },
+        secrets: { apiKey: 'key' }
+      }),
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        async text() { throw new Error(echoedSecret); }
+      })
+    }),
+    (error) => error.code === 'GEMINI_RESPONSE_READ_FAILED'
+      && !error.message.includes(echoedSecret)
+  );
+});
+
 test('recording transcription resolves Deepgram configuration at request time', async (t) => {
   // Mutation caught: recording transcription bypasses managed Deepgram configuration.
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'deepgram-runtime-'));
@@ -111,6 +177,38 @@ test('recording transcription resolves Deepgram configuration at request time', 
   assert.equal(url.searchParams.get('model'), 'database-listen-model');
   assert.equal(url.searchParams.get('language'), 'en');
   assert.equal(request.options.headers.Authorization, 'Token database-deepgram-key');
+});
+
+test('disabled Deepgram skips before a request and error logs omit provider response text', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'deepgram-disabled-'));
+  const recording = path.join(directory, 'recording.mp3');
+  fs.writeFileSync(recording, Buffer.from('test-audio'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  let requests = 0;
+
+  const disabled = await transcribeAudioFile(recording, {
+    getIntegrationRuntimeConfig: async () => ({ settings: { enabled: false }, secrets: { apiKey: 'key' } }),
+    fetchImpl: async () => { requests += 1; throw new Error('must not request'); }
+  });
+  assert.equal(disabled, null);
+  assert.equal(requests, 0);
+
+  const echoedSecret = 'deepgram-provider-echoed-secret';
+  const logs = [];
+  const originalError = console.error;
+  console.error = (...values) => logs.push(values.join(' '));
+  try {
+    await transcribeAudioFile(recording, {
+      getIntegrationRuntimeConfig: async () => ({
+        settings: { enabled: true, listenModel: 'model', language: 'en' },
+        secrets: { apiKey: 'key' }
+      }),
+      fetchImpl: async () => ({ ok: false, status: 500, async text() { return echoedSecret; } })
+    });
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(logs.join('\n').includes(echoedSecret), false);
 });
 
 test('Deepgram live URL enables interim speech and utterance fallback events', () => {

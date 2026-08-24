@@ -22,7 +22,8 @@ router.post('/start', async (req, res) => {
   try {
     const result = await startTestCall({
       patientName: req.body.patientName || req.body.name,
-      phone: req.body.phone
+      phone: req.body.phone,
+      tenantId: req.tenantId ?? null
     });
     res.json(result);
   } catch (error) {

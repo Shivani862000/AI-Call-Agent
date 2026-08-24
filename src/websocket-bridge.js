@@ -84,6 +84,16 @@ async function resolveLiveProviderConfig({ tenantId = null, getIntegrationRuntim
     getIntegrationRuntimeConfig('gemini', tenantId),
     getIntegrationRuntimeConfig('deepgram', tenantId)
   ]);
+  if (gemini.settings?.enabled === false) {
+    const error = new Error('Gemini integration is disabled');
+    error.code = 'INTEGRATION_DISABLED';
+    throw error;
+  }
+  if (deepgram.settings?.enabled === false) {
+    const error = new Error('Deepgram integration is disabled');
+    error.code = 'INTEGRATION_DISABLED';
+    throw error;
+  }
   return { gemini, deepgram };
 }
 

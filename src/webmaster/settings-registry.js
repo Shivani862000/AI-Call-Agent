@@ -1,5 +1,16 @@
 'use strict';
 
+function deepFreeze(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) {
+    if (value && typeof value === 'object') {
+      for (const nested of Object.values(value)) deepFreeze(nested);
+    }
+    return value;
+  }
+  for (const nested of Object.values(value)) deepFreeze(nested);
+  return Object.freeze(value);
+}
+
 function setting(type, fallback, options = {}) {
   const normalized = { type, fallback, ...options };
   for (const key of ['env', 'values', 'items', 'protocols']) {
@@ -124,7 +135,7 @@ const INTEGRATION_DEFINITIONS = Object.freeze({
   webhook: Object.freeze({
     settings: Object.freeze({
       enabled: setting('boolean', true, { env: ['WEBHOOKS_ENABLED'], tenantOverridable: true }),
-      endpoint: setting('url', '', { env: ['OUTBOUND_WEBHOOK_URL'], allowEmpty: true, tenantOverridable: true }),
+      endpoint: setting('url', '', { env: ['CRM_WEBHOOK_URL', 'OUTBOUND_WEBHOOK_URL'], allowEmpty: true, tenantOverridable: true }),
       timeoutMs: setting('integer', 5000, { env: ['WEBHOOK_TIMEOUT_MS'], min: 100, max: 120000, tenantOverridable: true })
     }),
     secrets: Object.freeze({ signingSecret: Object.freeze({ env: ['WEBHOOK_SIGNING_SECRET', 'WEBHOOK_SECRET'] }) })
@@ -150,8 +161,14 @@ const OVERRIDABLE_KEYS = Object.freeze({
   [Symbol.iterator]: () => overridableKeys[Symbol.iterator]()
 });
 
-function environmentKeyForSecret(integration, key) {
-  return INTEGRATION_DEFINITIONS[integration]?.secrets?.[key]?.env?.[0] || null;
+deepFreeze(SETTING_DEFINITIONS);
+deepFreeze(INTEGRATION_DEFINITIONS);
+
+function environmentKeyForSecret(integration, key, env = process.env) {
+  const aliases = INTEGRATION_DEFINITIONS[integration]?.secrets?.[key]?.env || [];
+  return aliases.find((candidate) => typeof env[candidate] === 'string' && env[candidate].length > 0)
+    || aliases[0]
+    || null;
 }
 
 module.exports = {

@@ -22,7 +22,7 @@ module.exports = function createSupportTicketsRouter({ dbRun, dbGet, dbAll, noti
         await dbRun('COMMIT');
       } catch (error) { await dbRun('ROLLBACK').catch(() => {}); throw error; }
       const admin_url = `${payload.context.pageUrl.replace(/\/[^/]*$/, '')}/support-tickets.html?ticket=${encodeURIComponent(ticket.ticket_id)}`;
-      notifyNewTicket({ ...ticket, admin_url }).catch(() => {});
+      notifyNewTicket({ ...ticket, tenant_id: req.tenantId ?? null, admin_url }).catch(() => {});
       res.status(201).json({ ticket });
     } catch (error) { next(error); }
   });

@@ -7,7 +7,8 @@ const { createSecretService } = require('../src/webmaster/secret-service');
 const {
   INTEGRATION_DEFINITIONS,
   OVERRIDABLE_KEYS,
-  SETTING_DEFINITIONS
+  SETTING_DEFINITIONS,
+  environmentKeyForSecret
 } = require('../src/webmaster/settings-registry');
 const { createSettingsService } = require('../src/webmaster/settings-service');
 const { createEmailService } = require('../src/services/email-service');
@@ -357,6 +358,102 @@ test('tenant override wins over persisted global and environment fallback', asyn
   assert.equal(result.version, 2);
 });
 
+test('legacy Map overrides are filtered through the registered tenant allowlist', async () => {
+  const stores = fakeSettingsStores({
+    global: { singletonKey: 'platform', defaults: { timezone: 'UTC' }, __v: 1 },
+    tenant: {
+      _id: 'tenant-1',
+      settingsOverrides: new Map([
+        ['defaults.timezone', 'Asia/Kolkata'],
+        ['policies.password.minLength', 8],
+        ['providers.gemini.temperature', 99]
+      ]),
+      __v: 1
+    }
+  });
+  const service = createSettingsService({ ...stores, env: {} });
+
+  const result = await service.getEffectiveForTenant('tenant-1');
+
+  assert.equal(result.effective.defaults.timezone, 'Asia/Kolkata');
+  assert.equal(result.effective.policies.password.minLength, 12);
+  assert.equal(result.effective.providers.gemini.temperature, 0.3);
+  assert.equal(result.overrides.policies, undefined);
+});
+
+test('invalid environment settings fall back to registry-safe values', async () => {
+  const stores = fakeSettingsStores({
+    global: { singletonKey: 'platform', __v: 1 },
+    tenant: { _id: 'tenant-1', settingsOverrides: {}, __v: 1 }
+  });
+  const service = createSettingsService({
+    ...stores,
+    env: {
+      GEMINI_TEMPERATURE: '99',
+      GEMINI_ENABLED: 'not-a-boolean',
+      DEFAULT_TIMEZONE: 'Mars/Olympus_Mons',
+      SMTP_PORT: '70000'
+    }
+  });
+
+  const global = (await service.getGlobal()).global;
+
+  assert.equal(global.providers.gemini.temperature, 0.3);
+  assert.equal(global.providers.gemini.enabled, true);
+  assert.equal(global.defaults.timezone, 'UTC');
+  assert.equal(global.providers.smtp.port, 587);
+});
+
+test('settings updates validate section-wide cross-field invariants before writing', async () => {
+  const stores = fakeSettingsStores({
+    global: {
+      singletonKey: 'platform',
+      policies: { password: { minLength: 12, maxLength: 128 } },
+      __v: 2
+    },
+    tenant: { _id: 'tenant-1', settingsOverrides: {}, __v: 1 }
+  });
+  const service = createSettingsService({ ...stores, env: {} });
+
+  await assert.rejects(
+    service.updateSection('policies', { password: { minLength: 128, maxLength: 32 } }, 2, OWNER),
+    (error) => Boolean(error.code === 'INVALID_SETTING_VALUE'
+      && error.fieldErrors['policies.password.minLength']
+      && error.fieldErrors['policies.password.maxLength'])
+  );
+});
+
+test('tenant override patches validate cross-field invariants against inherited values', async () => {
+  const stores = fakeSettingsStores({
+    global: {
+      singletonKey: 'platform',
+      defaults: { limits: { maxConcurrentCalls: 5, maxCallsPerDay: 100 } },
+      __v: 2
+    },
+    tenant: { _id: 'tenant-1', settingsOverrides: {}, __v: 1 }
+  });
+  const service = createSettingsService({ ...stores, env: {} });
+
+  await assert.rejects(
+    service.setTenantOverrides('tenant-1', {
+      'defaults.limits.maxConcurrentCalls': 101
+    }, 1, OWNER),
+    (error) => error.code === 'INVALID_OVERRIDE_VALUE'
+      && Boolean(error.fieldErrors['defaults.limits.maxConcurrentCalls'])
+  );
+});
+
+test('registry metadata is deeply immutable and secret environment aliases are scanned', () => {
+  assert.equal(Object.isFrozen(INTEGRATION_DEFINITIONS.gemini.secrets.apiKey.env), true);
+  const before = INTEGRATION_DEFINITIONS.gemini.secrets.apiKey.env[0];
+  assert.throws(() => { INTEGRATION_DEFINITIONS.gemini.secrets.apiKey.env[0] = 'MUTATED'; }, TypeError);
+  assert.equal(INTEGRATION_DEFINITIONS.gemini.secrets.apiKey.env[0], before);
+  assert.equal(
+    environmentKeyForSecret('gemini', 'apiKey', { GOOGLE_API_KEY: 'alias-value' }),
+    'GOOGLE_API_KEY'
+  );
+});
+
 test('tenant override writes reject unknown and security-sensitive keys', async () => {
   // Mutation caught: arbitrary dotted paths can alter platform security invariants per tenant.
   const stores = fakeSettingsStores({
@@ -538,4 +635,22 @@ test('Slack notifier resolves the write-only webhook immediately before delivery
   assert.equal(requests[0].url, 'https://hooks.slack.test/database-secret');
   assert.deepEqual(result, { delivered: true });
   assert.equal(JSON.stringify(result).includes('database-secret'), false);
+});
+
+test('Slack delivery logs fixed metadata rather than transport errors that may echo secrets', async () => {
+  const echoedSecret = 'transport-echoed-slack-webhook-secret';
+  const warnings = [];
+  const notify = createSlackSupportNotifier({
+    getIntegrationRuntimeConfig: async () => ({
+      settings: { enabled: true },
+      secrets: { supportWebhookUrl: 'https://hooks.slack.test/database-secret' }
+    }),
+    fetchImpl: async () => { throw new Error(echoedSecret); },
+    logger: { warn(...values) { warnings.push(values); } }
+  });
+
+  const result = await notify({ ticket_id: 'BUG-2', type: 'BUG', description: 'Safe' });
+
+  assert.deepEqual(result, { delivered: false });
+  assert.equal(JSON.stringify(warnings).includes(echoedSecret), false);
 });

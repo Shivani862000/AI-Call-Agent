@@ -37,13 +37,13 @@ async function sendReportsForTime(timeString) {
 
       for (const admin of admins) {
         if (admin.email) {
-          await sendDailyReportToAdmin(admin.email, tenant.name, reportData);
+          await sendDailyReportToAdmin(admin.email, tenant.name, reportData, { tenantId: String(tenant._id) });
         }
       }
       logger.info('CRON_DAILY_REPORT_SENT', { tenantId: tenant._id, tenantName: tenant.name, adminCount: admins.length });
     }
   } catch (error) {
-    logger.error('CRON_DAILY_REPORT_ERROR', { error: error.message });
+    logger.error('CRON_DAILY_REPORT_ERROR', { code: 'DAILY_REPORT_DELIVERY_FAILED' });
   }
 }
 

@@ -1,17 +1,36 @@
 
+const crypto = require('crypto');
+const { getIntegrationRuntimeConfig: defaultRuntimeConfigResolver } = require('../src/webmaster/settings-service');
 
-async function postJson(url, payload) {
-  const response = await fetch(url, {
+async function postJson(url, payload, { fetchImpl = global.fetch, timeoutMs = 5000, signingSecret = '' } = {}) {
+  const body = JSON.stringify(payload);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const headers = { 'Content-Type': 'application/json' };
+  if (signingSecret) {
+    headers['X-Webhook-Signature'] = crypto.createHmac('sha256', signingSecret).update(body).digest('hex');
+  }
+  let response;
+  try {
+    response = await fetchImpl(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(payload)
-  });
+      headers,
+      body,
+      signal: controller.signal
+    });
+  } catch (_error) {
+    const error = new Error('CRM webhook delivery failed');
+    error.code = 'WEBHOOK_DELIVERY_FAILED';
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`CRM webhook failed (${response.status}): ${body.slice(0, 200)}`);
+    await response.text();
+    const error = new Error(`CRM webhook delivery failed with HTTP ${response.status}`);
+    error.code = 'WEBHOOK_DELIVERY_FAILED';
+    throw error;
   }
 
   return response;
@@ -53,21 +72,34 @@ function buildCrmPayload({ customer, call, feedback }) {
   };
 }
 
-async function syncCallToCrm({ dbGet, dbRun, callId }) {
-  if (!process.env.CRM_WEBHOOK_URL) {
-    return { skipped: true, reason: 'missing_crm_webhook_url' };
-  }
-
+async function syncCallToCrm({
+  dbGet,
+  dbRun,
+  callId,
+  tenantId = null,
+  getIntegrationRuntimeConfig = defaultRuntimeConfigResolver,
+  fetchImpl = global.fetch
+}) {
   const call = await dbGet('SELECT * FROM calls WHERE id = ?', [callId]);
   if (!call) {
     return { skipped: true, reason: 'call_not_found' };
+  }
+
+  const runtime = await getIntegrationRuntimeConfig('webhook', tenantId ?? call.tenant_id ?? call.tenantId ?? null);
+  const endpoint = runtime.settings?.endpoint;
+  if (runtime.settings?.enabled === false || !endpoint) {
+    return { skipped: true, reason: 'webhook_disabled_or_unconfigured' };
   }
 
   const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [call.customer_id]);
   const feedback = await dbGet('SELECT * FROM feedback WHERE call_id = ?', [call.id]);
 
   try {
-    await postJson(process.env.CRM_WEBHOOK_URL, buildCrmPayload({ customer, call, feedback }));
+    await postJson(endpoint, buildCrmPayload({ customer, call, feedback }), {
+      fetchImpl,
+      timeoutMs: runtime.settings?.timeoutMs ?? 5000,
+      signingSecret: runtime.secrets?.signingSecret ?? ''
+    });
     await dbRun('UPDATE calls SET crm_sync_status = ? WHERE id = ?', ['completed', call.id]);
     return { ok: true };
   } catch (error) {
