@@ -4,6 +4,11 @@ const mongoose = require('mongoose');
 const { isSafeMachineCode, sanitizeForAudit } = require('../webmaster/redaction');
 
 const REDACTED = '[redacted]';
+const DELIVERY_STATUSES = new Set(['pending', 'delivered', 'failed']);
+const STATUS_ERROR_MESSAGE = 'Notification status must be pending, delivered, or failed';
+const RETRY_COUNT_ERROR_MESSAGE = 'Notification retry count must be a non-negative integer';
+const FAILURE_CODE_ERROR_MESSAGE = 'Notification failure code is not in the operational allowlist';
+const INVALID_NOTIFICATION_VALUE = '[invalid-notification-value]';
 
 function retainedDataError(code, message) {
   const error = new Error(message);
@@ -22,6 +27,18 @@ function sanitizeMetadataAssignment(value) {
   return sanitizeForAudit(value);
 }
 
+function preserveStatusInput(value) {
+  return value === undefined || typeof value === 'string' ? value : INVALID_NOTIFICATION_VALUE;
+}
+
+function preserveRetryCountInput(value) {
+  return value === undefined || typeof value === 'number' ? value : INVALID_NOTIFICATION_VALUE;
+}
+
+function preserveFailureCodeInput(value) {
+  return value == null || typeof value === 'string' ? value : INVALID_NOTIFICATION_VALUE;
+}
+
 const notificationDeliverySchema = new mongoose.Schema({
   tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', default: null },
   accountId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -33,19 +50,31 @@ const notificationDeliverySchema = new mongoose.Schema({
   template: { type: String, required: true, trim: true, maxlength: 128 },
   event: { type: String, required: true, trim: true, maxlength: 128 },
   metadata: { type: mongoose.Schema.Types.Mixed, default: {}, set: sanitizeMetadataAssignment },
-  status: { type: String, enum: ['pending', 'delivered', 'failed'], default: 'pending' },
+  status: {
+    type: mongoose.Schema.Types.Mixed,
+    default: 'pending',
+    set: preserveStatusInput,
+    validate: {
+      validator: isDeliveryStatus,
+      message: STATUS_ERROR_MESSAGE
+    }
+  },
   retryCount: {
-    type: Number,
-    min: 0,
+    type: mongoose.Schema.Types.Mixed,
     default: 0,
-    validate: { validator: Number.isInteger, message: 'Retry count must be an integer' }
+    set: preserveRetryCountInput,
+    validate: {
+      validator: isNonNegativeInteger,
+      message: RETRY_COUNT_ERROR_MESSAGE
+    }
   },
   failureCode: {
-    type: String,
+    type: mongoose.Schema.Types.Mixed,
     default: null,
+    set: preserveFailureCodeInput,
     validate: {
       validator: (value) => value == null || isSafeMachineCode(value),
-      message: 'Failure code must use safe machine-code vocabulary'
+      message: FAILURE_CODE_ERROR_MESSAGE
     }
   },
   failureReason: {
@@ -79,12 +108,20 @@ function sanitizeMetadataUpdate(update) {
     update.failureReason = sanitizeFailureReason(update.failureReason);
   }
   if (Object.hasOwn(update, 'failureCode')) assertSafeFailureCode(update.failureCode);
+  if (Object.hasOwn(update, 'status')) assertDeliveryStatus(update.status);
+  if (Object.hasOwn(update, 'retryCount')) assertRetryCount(update.retryCount);
 
   const hasOperators = Object.keys(update).some((key) => key.startsWith('$'));
   if (!hasOperators) return update;
 
   for (const [operator, values] of Object.entries(update)) {
-    if (!operator.startsWith('$') || !values || typeof values !== 'object') continue;
+    if (!operator.startsWith('$')) continue;
+    if (!isPlainRecord(values)) {
+      throw retainedDataError(
+        'UNSUPPORTED_NOTIFICATION_OPERATOR_OPERAND',
+        'Notification update operator operands must be plain records'
+      );
+    }
 
     if (operator === '$rename') {
       for (const [source, destination] of Object.entries(values)) {
@@ -128,7 +165,11 @@ function isDeliveryInvariantPath(path) {
 }
 
 function validateDeliveryInvariantMutation(operator, path, value) {
-  if (operator === '$set' || operator === '$setOnInsert') return;
+  if (operator === '$set' || operator === '$setOnInsert') {
+    if (path === 'status') assertDeliveryStatus(value);
+    if (path === 'retryCount') assertRetryCount(value);
+    return;
+  }
   if (operator === '$inc' && path === 'retryCount') {
     if (isNonNegativeInteger(value)) return;
     throw retainedDataError(
@@ -142,8 +183,32 @@ function validateDeliveryInvariantMutation(operator, path, value) {
   );
 }
 
+function isPlainRecord(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function isDeliveryStatus(value) {
+  return typeof value === 'string' && DELIVERY_STATUSES.has(value);
+}
+
 function isNonNegativeInteger(value) {
   return Number.isInteger(value) && value >= 0;
+}
+
+function assertDeliveryStatus(value) {
+  if (isDeliveryStatus(value)) return;
+  throw retainedDataError('INVALID_NOTIFICATION_STATUS', STATUS_ERROR_MESSAGE);
+}
+
+function assertRetryCount(value) {
+  if (isNonNegativeInteger(value)) return;
+  throw retainedDataError('INVALID_NOTIFICATION_RETRY_COUNT', RETRY_COUNT_ERROR_MESSAGE);
 }
 
 function isRetainedPath(path) {
@@ -157,7 +222,7 @@ function assertSafeFailureCode(value) {
   if (value == null || isSafeMachineCode(value)) return;
   throw retainedDataError(
     'INVALID_NOTIFICATION_FAILURE_CODE',
-    'Notification failure code is not in the operational allowlist'
+    FAILURE_CODE_ERROR_MESSAGE
   );
 }
 
@@ -187,6 +252,8 @@ notificationDeliverySchema.pre([
 notificationDeliverySchema.pre('save', function sanitizeRetainedNotificationSave() {
   this.metadata = sanitizeForAudit(this.metadata);
   this.failureReason = sanitizeFailureReason(this.failureReason);
+  assertDeliveryStatus(this.status);
+  assertRetryCount(this.retryCount);
   assertSafeFailureCode(this.failureCode);
 });
 
@@ -198,7 +265,7 @@ notificationDeliverySchema.pre('bulkWrite', function rejectRetainedNotificationB
 });
 
 notificationDeliverySchema.pre('insertMany', function guardNotificationInsertMany(next, _documents, options) {
-  if (options?.lean === true) {
+  if (options?.lean) {
     return next(retainedDataError(
       'UNSUPPORTED_NOTIFICATION_LEAN_INSERT_MANY',
       'Lean notification inserts are not supported'

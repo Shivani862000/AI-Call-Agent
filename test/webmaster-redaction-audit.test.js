@@ -313,6 +313,69 @@ test('sensitive semantics win over operational suffixes and current PHI variants
   });
 });
 
+test('compact compound PII and PHI keys win over numeric suffix policies without normal-field false positives', () => {
+  // Mutation caught: compact sensitive phrases such as `phonenumberCount` fall through to suffix allowlisting.
+  const sanitized = sanitizeForAudit({
+    phonenumberCount: 2,
+    PHONE_NUMBER_RATE: 0.5,
+    emailaddressDays: 30,
+    AadhaarNumberCount: 1,
+    aadharnumberRate: 0.25,
+    mrnnumberDays: 90,
+    SSN_NUMBER_COUNT: 3,
+    patientidentifierRate: 0.1,
+    medicalrecordDays: 14,
+    clinicalnoteCount: 4,
+    healthcareRate: 0.75,
+    healthinsuranceDays: 365,
+    ehealthCount: 8,
+    requestbodyCount: 5,
+    requestpayloadRate: 0.2,
+    requestmessageDays: 7,
+    phonenumberConfigured: true,
+    medicalrecordProvider: 'smtp',
+    requestmessageStatus: 'active',
+    passwordresetCount: 6,
+    credentialHealthRate: 0.4,
+    requestId: 'request-9137',
+    recordCount: 12,
+    insuranceRate: 0.6,
+    careQueueDepth: 9,
+    serviceLatencyRate: 0.03,
+    retentionDays: 90
+  });
+
+  assert.deepEqual(sanitized, {
+    phonenumberCount: '[redacted]',
+    PHONE_NUMBER_RATE: '[redacted]',
+    emailaddressDays: '[redacted]',
+    AadhaarNumberCount: '[redacted]',
+    aadharnumberRate: '[redacted]',
+    mrnnumberDays: '[redacted]',
+    SSN_NUMBER_COUNT: '[redacted]',
+    patientidentifierRate: '[redacted]',
+    medicalrecordDays: '[redacted]',
+    clinicalnoteCount: '[redacted]',
+    healthcareRate: '[redacted]',
+    healthinsuranceDays: '[redacted]',
+    ehealthCount: '[redacted]',
+    requestbodyCount: '[redacted]',
+    requestpayloadRate: '[redacted]',
+    requestmessageDays: '[redacted]',
+    phonenumberConfigured: '[redacted]',
+    medicalrecordProvider: '[redacted]',
+    requestmessageStatus: '[redacted]',
+    passwordresetCount: '[redacted]',
+    credentialHealthRate: '[redacted]',
+    requestId: 'request-9137',
+    recordCount: 12,
+    insuranceRate: 0.6,
+    careQueueDepth: 9,
+    serviceLatencyRate: 0.03,
+    retentionDays: 90
+  });
+});
+
 test('all binary views redact without exposing bytes while dates and object ids stay useful', () => {
   // Mutation caught: Uint8Array and ArrayBuffer are enumerated into retained byte values.
   const objectId = new mongoose.Types.ObjectId('507f1f77bcf86cd799439011');

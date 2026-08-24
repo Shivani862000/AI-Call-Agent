@@ -8,6 +8,16 @@ const {
 } = require('../webmaster/redaction');
 
 const immutableString = (options = {}) => ({ type: String, immutable: true, ...options });
+const immutableMixed = (options = {}) => ({
+  type: mongoose.Schema.Types.Mixed,
+  immutable: true,
+  ...options
+});
+const INVALID_REQUEST_ID_VALUE = '[invalid-request-id]';
+
+function preserveRequestIdInput(value) {
+  return value == null || typeof value === 'string' ? value : INVALID_REQUEST_ID_VALUE;
+}
 
 const auditEventSchema = new mongoose.Schema({
   actor: immutableString({ required: true, maxlength: 128 }),
@@ -18,9 +28,9 @@ const auditEventSchema = new mongoose.Schema({
   tenantId: immutableString({ default: null, maxlength: 128 }),
   before: { type: mongoose.Schema.Types.Mixed, default: null, immutable: true, set: sanitizeForAudit },
   after: { type: mongoose.Schema.Types.Mixed, default: null, immutable: true, set: sanitizeForAudit },
-  requestId: immutableString({
+  requestId: immutableMixed({
     default: null,
-    maxlength: 128,
+    set: preserveRequestIdInput,
     validate: {
       validator: (value) => value == null || isSafeCorrelationId(value),
       message: 'Request ID must be a bounded correlation identifier'

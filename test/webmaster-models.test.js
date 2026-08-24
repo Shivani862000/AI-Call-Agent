@@ -87,6 +87,45 @@ test('audit request ids reject free text and accept bounded correlation identifi
   );
 });
 
+test('audit request ids reject non-string originals without coercion or value disclosure', async () => {
+  // Mutation caught: Mongoose String casting accepts numbers, arrays, boxed values, or attacker coercion.
+  const privateMarker = 'private-request-marker-9137';
+  let coercionCount = 0;
+  const coerciveRequestId = {
+    privateMarker,
+    toString() {
+      coercionCount += 1;
+      return 'request-9137';
+    },
+    valueOf() {
+      coercionCount += 1;
+      return 'request-9137';
+    }
+  };
+  const base = {
+    actor: 'actor-1',
+    actorAccessLevel: 'SYSTEM',
+    action: 'settings.update',
+    targetType: 'platform-settings',
+    outcome: 'success'
+  };
+
+  for (const requestId of [9137, true, ['request-9137'], new String('request-9137'), {}, coerciveRequestId]) {
+    await assert.rejects(
+      new AuditEvent({ ...base, requestId }).validate(),
+      (error) => {
+        assert.equal(error.errors?.requestId?.message, 'Request ID must be a bounded correlation identifier');
+        assert.equal(error.message.includes(privateMarker), false);
+        return true;
+      }
+    );
+  }
+
+  await new AuditEvent({ ...base }).validate();
+  await new AuditEvent({ ...base, requestId: null }).validate();
+  assert.equal(coercionCount, 0);
+});
+
 test('notification delivery model redacts unsafe nested metadata before persistence', async () => {
   // Mutation caught: a notification retry record persists credentials or recipient PII.
   const delivery = new NotificationDelivery({
@@ -362,6 +401,79 @@ test('notification insertMany sanitizes normal documents and rejects lean bypass
   assert.equal(JSON.stringify(persistedBatches).includes('Jane Smith'), false);
 });
 
+test('notification insertMany rejects every truthy lean option without coercion before collection', async () => {
+  // Mutation caught: checking only `lean === true` lets other truthy values bypass hydration and validation.
+  const originalInsertMany = NotificationDelivery.collection.insertMany;
+  const persistedBatches = [];
+  let coercionCount = 0;
+  const coerciveLean = {
+    toString() {
+      coercionCount += 1;
+      return 'true';
+    },
+    valueOf() {
+      coercionCount += 1;
+      return true;
+    }
+  };
+  NotificationDelivery.collection.insertMany = async (documents) => {
+    persistedBatches.push(documents);
+    return {
+      acknowledged: true,
+      insertedCount: documents.length,
+      insertedIds: Object.fromEntries(documents.map((document, index) => [index, document._id]))
+    };
+  };
+
+  const unsafeDocument = {
+    recipientCategory: 'owner',
+    template: 'tenant-suspended',
+    event: 'tenant.suspended',
+    metadata: { responseBody: 'private-lean-marker-9137' },
+    status: 'failed',
+    retryCount: 0,
+    failureCode: 'PATIENT_JANE'
+  };
+
+  try {
+    for (const lean of [1, 'true', new Boolean(true), new Boolean(false), {}, [], coerciveLean]) {
+      await assert.rejects(
+        NotificationDelivery.insertMany([unsafeDocument], { lean }),
+        (error) => error.code === 'UNSUPPORTED_NOTIFICATION_LEAN_INSERT_MANY'
+          && !error.message.includes('private-lean-marker-9137')
+      );
+    }
+
+    const falsyLeanValues = [undefined, null, false, 0, ''];
+    for (const lean of falsyLeanValues) {
+      await NotificationDelivery.insertMany([{
+        recipientCategory: 'owner',
+        template: 'tenant-restored',
+        event: 'tenant.restored',
+        metadata: { responseBody: 'private-normal-marker-9137', provider: 'smtp' },
+        status: 'delivered',
+        retryCount: 1
+      }], { lean });
+    }
+    await NotificationDelivery.insertMany([{
+      recipientCategory: 'owner',
+      template: 'tenant-restored',
+      event: 'tenant.restored',
+      metadata: { responseBody: 'private-omitted-marker-9137', provider: 'smtp' },
+      status: 'delivered',
+      retryCount: 1
+    }]);
+  } finally {
+    NotificationDelivery.collection.insertMany = originalInsertMany;
+  }
+
+  assert.equal(coercionCount, 0);
+  assert.equal(persistedBatches.length, 6);
+  for (const batch of persistedBatches) {
+    assert.deepEqual(batch[0].metadata, { responseBody: '[redacted]', provider: 'smtp' });
+  }
+});
+
 test('notification assignment, replacement, and update paths sanitize before collection persistence', async () => {
   // Mutation caught: a retry path bypasses the metadata setter with `$set: { "metadata.errorMessage": ... }`.
   const originalUpdateOne = NotificationDelivery.collection.updateOne;
@@ -537,6 +649,71 @@ test('notification structural removals remain intact and unsupported mutation pa
   assert.equal(bulkWriteCount, 0);
 });
 
+test('notification update operators require plain record operands while metadata Map values remain supported', async () => {
+  // Mutation caught: Map/Set/class/binary operator operands evade path checks for status, retry, or failure data.
+  const originalUpdateOne = NotificationDelivery.collection.updateOne;
+  const persistedUpdates = [];
+  const privateMarker = 'private-operator-marker-9137';
+  class AssignmentOperand {
+    constructor() {
+      this.failureCode = 'PATIENT_JANE';
+      this.privateMarker = privateMarker;
+    }
+  }
+  NotificationDelivery.collection.updateOne = async (_filter, update) => {
+    persistedUpdates.push(update);
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+
+  const invalidUpdates = [
+    { $set: new Map([['status', 'sent'], ['privateMarker', privateMarker]]) },
+    { $set: new Set([['status', 'sent']]) },
+    { $setOnInsert: new AssignmentOperand() },
+    { $inc: new Uint8Array([1]) },
+    { $unset: Buffer.from(privateMarker) },
+    { $rename: new DataView(new ArrayBuffer(8)) }
+  ];
+
+  try {
+    for (const update of invalidUpdates) {
+      await assert.rejects(
+        NotificationDelivery.updateOne({ _id: '507f1f77bcf86cd799439011' }, update),
+        (error) => error.code === 'UNSUPPORTED_NOTIFICATION_OPERATOR_OPERAND'
+          && !error.message.includes(privateMarker)
+      );
+    }
+
+    await NotificationDelivery.updateOne(
+      { _id: '507f1f77bcf86cd799439011' },
+      {
+        $set: {
+          metadata: new Map([
+            ['provider', 'smtp'],
+            ['responseBody', privateMarker]
+          ]),
+          status: 'failed',
+          failureCode: 'DELIVERY_FAILED'
+        },
+        $unset: { failureReason: 1 },
+        $inc: { retryCount: 1 }
+      }
+    );
+  } finally {
+    NotificationDelivery.collection.updateOne = originalUpdateOne;
+  }
+
+  assert.equal(persistedUpdates.length, 1);
+  assert.deepEqual(persistedUpdates[0].$set.metadata, {
+    provider: 'smtp',
+    responseBody: '[redacted]'
+  });
+  assert.equal(persistedUpdates[0].$set.status, 'failed');
+  assert.equal(persistedUpdates[0].$set.failureCode, 'DELIVERY_FAILED');
+  assert.equal(persistedUpdates[0].$unset.failureReason, 1);
+  assert.equal(persistedUpdates[0].$inc.retryCount, 1);
+  assert.equal(JSON.stringify(persistedUpdates).includes(privateMarker), false);
+});
+
 test('unknown notification failure codes are rejected before collection persistence', async () => {
   // Mutation caught: identifier-looking PII reaches a stored failureCode through an update.
   const originalUpdateOne = NotificationDelivery.collection.updateOne;
@@ -621,4 +798,110 @@ test('notification queries enforce status and retry invariants before collection
   assert.equal(persistedUpdates[0].$set.status, 'delivered');
   assert.equal(persistedUpdates[0].$inc.retryCount, 1);
   assert.equal(replacementCallCount, 0);
+});
+
+test('notification status retry and failure values reject hostile types with fixed private errors on every write path', async () => {
+  // Mutation caught: Mongoose String/Number casts call attacker coercion or echo values on save/insert/update/replace.
+  const originalInsertOne = NotificationDelivery.collection.insertOne;
+  const originalInsertMany = NotificationDelivery.collection.insertMany;
+  const originalUpdateOne = NotificationDelivery.collection.updateOne;
+  const originalReplaceOne = NotificationDelivery.collection.replaceOne;
+  const privateMarker = 'private-validation-marker-9137';
+  let collectionCallCount = 0;
+  let coercionCount = 0;
+  const coerciveValue = (castValue) => ({
+    privateMarker,
+    toString() {
+      coercionCount += 1;
+      return String(castValue);
+    },
+    valueOf() {
+      coercionCount += 1;
+      return castValue;
+    }
+  });
+  const base = {
+    recipientCategory: 'owner',
+    template: 'tenant-restored',
+    event: 'tenant.restored',
+    metadata: {}
+  };
+  const spy = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true };
+  };
+  NotificationDelivery.collection.insertOne = spy;
+  NotificationDelivery.collection.insertMany = spy;
+  NotificationDelivery.collection.updateOne = spy;
+  NotificationDelivery.collection.replaceOne = spy;
+
+  const assertPrivateRejection = async (operation) => {
+    await assert.rejects(operation, (error) => {
+      assert.equal(error.message.includes(privateMarker), false);
+      assert.match(error.message, /Notification (status|retry count|failure code)/);
+      return true;
+    });
+  };
+
+  try {
+    await assertPrivateRejection(new NotificationDelivery({
+      ...base,
+      status: privateMarker,
+      retryCount: 1
+    }).validate());
+    await assertPrivateRejection(new NotificationDelivery({
+      ...base,
+      status: 'pending',
+      retryCount: privateMarker
+    }).validate());
+    await assertPrivateRejection(new NotificationDelivery({
+      ...base,
+      status: coerciveValue('delivered'),
+      retryCount: 1
+    }).validate());
+    await assertPrivateRejection(new NotificationDelivery({
+      ...base,
+      status: 'pending',
+      retryCount: coerciveValue(1)
+    }).save({ validateBeforeSave: false }));
+    await assertPrivateRejection(NotificationDelivery.insertMany([{
+      ...base,
+      status: ['delivered'],
+      retryCount: 1
+    }]));
+    await assertPrivateRejection(NotificationDelivery.updateOne(
+      { _id: '507f1f77bcf86cd799439011' },
+      { $set: { status: coerciveValue('delivered') } },
+      { runValidators: false }
+    ));
+    await assertPrivateRejection(NotificationDelivery.updateOne(
+      { _id: '507f1f77bcf86cd799439011' },
+      { $setOnInsert: { retryCount: coerciveValue(1) } },
+      { upsert: true, runValidators: false }
+    ));
+    await assertPrivateRejection(NotificationDelivery.replaceOne(
+      { _id: '507f1f77bcf86cd799439011' },
+      {
+        ...base,
+        status: 'pending',
+        retryCount: coerciveValue(1),
+        failureCode: null
+      },
+      { runValidators: false }
+    ));
+    await assertPrivateRejection(new NotificationDelivery({
+      ...base,
+      status: 'failed',
+      retryCount: 1,
+      failureCode: coerciveValue('DELIVERY_FAILED')
+    }).validate());
+  } finally {
+    NotificationDelivery.collection.insertOne = originalInsertOne;
+    NotificationDelivery.collection.insertMany = originalInsertMany;
+    NotificationDelivery.collection.updateOne = originalUpdateOne;
+    NotificationDelivery.collection.replaceOne = originalReplaceOne;
+  }
+
+  assert.equal(collectionCallCount, 0);
+  assert.equal(coercionCount, 0);
 });

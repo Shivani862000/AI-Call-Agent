@@ -18,7 +18,9 @@ const OPERATIONAL_FAILURE_CODES = Object.freeze([
   'INVALID_AUDIT_OUTCOME',
   'INVALID_INPUT',
   'INVALID_NOTIFICATION_FAILURE_CODE',
+  'INVALID_NOTIFICATION_RETRY_COUNT',
   'INVALID_NOTIFICATION_RETRY_INCREMENT',
+  'INVALID_NOTIFICATION_STATUS',
   'INVALID_NOTIFICATION_STATE_MUTATION',
   'INVALID_OVERRIDE_KEY',
   'INVALID_SECRET_IDENTIFIER',
@@ -46,6 +48,7 @@ const OPERATIONAL_FAILURE_CODES = Object.freeze([
   'UNSUPPORTED_NOTIFICATION_BULK_WRITE',
   'UNSUPPORTED_NOTIFICATION_LEAN_INSERT_MANY',
   'UNSUPPORTED_NOTIFICATION_METADATA_UPDATE',
+  'UNSUPPORTED_NOTIFICATION_OPERATOR_OPERAND',
   'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE',
   'UNSUPPORTED_NOTIFICATION_UPDATE_PIPELINE',
   'VALIDATION_FAILED',
@@ -232,49 +235,74 @@ const SENSITIVE_TOKENS = new Set([
 
 const SENSITIVE_COMPACT_PATTERNS = [
   'accesskey',
+  'aadhaar',
+  'aadhar',
   'apikey',
   'authtag',
+  'authentication',
+  'authorization',
   'birthdate',
   'ciphertext',
+  'clinicalnote',
   'connectionstring',
   'connectionuri',
+  'credential',
+  'customer',
   'databaseurl',
   'databaseuri',
   'datasourceurl',
   'dburi',
   'dburl',
   'dateofbirth',
+  'diagnosis',
+  'ehealth',
+  'emailaddress',
   'externalid',
   'externalidentifier',
   'followuppending',
   'freetext',
+  'healthcare',
+  'healthinsurance',
   'initializationvector',
   'interestedservice',
   'jdbcurl',
   'lastvisit',
+  'medicalrecord',
   'mongodburl',
   'mongodburi',
   'mongouri',
+  'mrnnumber',
   'outstandingissue',
+  'password',
   'pendingfollowup',
+  'patientidentifier',
+  'phonenumber',
   'postgresurl',
   'previousvisit',
   'privatekey',
+  'recording',
   'redisurl',
+  'requestbody',
+  'requestmessage',
+  'requestpayload',
   'serviceinterest',
   'sessioncookie',
   'socialsecuritynumber',
+  'ssnnumber',
+  'transcript',
   'ukey',
   'visitdate'
 ];
 
 function keyParts(key) {
-  const separated = String(key || '')
+  if (typeof key !== 'string') return { compact: '', normalized: '', tokens: [] };
+  const separated = key
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .toLowerCase();
   const tokens = separated.split(/[^a-z0-9]+/).filter(Boolean);
-  return { normalized: tokens.join(''), tokens };
+  const compact = key.toLowerCase().replace(/[^a-z0-9]+/g, '');
+  return { compact, normalized: tokens.join(''), tokens };
 }
 
 function isSafeMachineCode(value) {
@@ -339,7 +367,9 @@ function isSensitiveSemantic(parts) {
     || parts.normalized.endsWith('name')) {
     return true;
   }
-  if (SENSITIVE_COMPACT_PATTERNS.some((pattern) => parts.normalized.includes(pattern))) return true;
+  if (SENSITIVE_COMPACT_PATTERNS.some((pattern) => (
+    parts.normalized.includes(pattern) || parts.compact.includes(pattern)
+  ))) return true;
   return parts.tokens.some((token) => SENSITIVE_TOKENS.has(token));
 }
 
@@ -373,7 +403,7 @@ function sanitizeFeatureFlags(value) {
   const entries = value instanceof Map ? value.entries() : Object.entries(value);
   const clone = {};
   for (const [rawKey, flagValue] of entries) {
-    const key = String(rawKey);
+    const key = typeof rawKey === 'string' ? rawKey : REDACTED;
     const parts = keyParts(key);
     const safe = isSafeFeatureFlagKey(key)
       && !isSensitiveSemantic(parts)
@@ -430,7 +460,7 @@ function cloneEntry(key, entry, seen) {
 function cloneEntries(entries, seen) {
   const clone = {};
   for (const [rawKey, entry] of entries) {
-    const key = String(rawKey);
+    const key = typeof rawKey === 'string' ? rawKey : REDACTED;
     setOwn(clone, key, cloneEntry(key, entry, seen));
   }
   return clone;
