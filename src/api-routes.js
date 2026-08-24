@@ -121,6 +121,7 @@ function safeOutboundPlacementFields(placement, ancillary) {
     contextPersistence: placement.persistence.state,
     contextRetryable: Boolean(placement.persistence.retryable),
     ...(placement.recoveryToken ? { contextRecoveryToken: placement.recoveryToken } : {}),
+    ...(placement.errorCode ? { contextErrorCode: placement.errorCode } : {}),
     ancillaryPersistence: ancillary.state,
     ancillaryRetryable: ancillary.retryable,
     providerAccepted: true,
@@ -128,7 +129,8 @@ function safeOutboundPlacementFields(placement, ancillary) {
   };
 }
 
-async function runOutboundAncillaryWork(work, { callId, trigger }) {
+async function runOutboundAncillaryWork(work, { callId, trigger, skip = false }) {
+  if (skip) return { state: 'skipped', retryable: false };
   try {
     await work();
     return { state: 'completed', retryable: false };
@@ -235,6 +237,19 @@ module.exports = function mountApiRoutes(app, {
     requireRole('WEBMASTER', 'CLIENT_ADMIN'),
     async (req, res) => {
       try {
+        const body = req.body;
+        if (
+          !body
+          || Array.isArray(body)
+          || Object.keys(body).length !== 1
+          || !Object.prototype.hasOwnProperty.call(body, 'recoveryToken')
+          || typeof body.recoveryToken !== 'string'
+          || !body.recoveryToken.trim()
+        ) {
+          return res.status(400).json({
+            error: 'Invalid outbound call context reconciliation request'
+          });
+        }
         const reconciliation = await outboundCoordinator.reconcile({
           tenantId: req.tenantId,
           contextId: req.params.contextId,
@@ -401,9 +416,10 @@ module.exports = function mountApiRoutes(app, {
         });
       }, {
         callId: result.id,
-        trigger: '/call/start'
+        trigger: '/call/start',
+        skip: Boolean(placement.errorCode)
       });
-      res.status(placement.persistence.retryable || ancillary.retryable ? 202 : 200).json({
+      res.status(placement.errorCode || placement.persistence.retryable || ancillary.retryable ? 202 : 200).json({
         success: true,
         sid: call.sid,
         customerId: customer.id,
@@ -689,9 +705,10 @@ module.exports = function mountApiRoutes(app, {
         });
       }, {
         callId: result.id,
-        trigger: '/api/calls/initiate/:customerId'
+        trigger: '/api/calls/initiate/:customerId',
+        skip: Boolean(placement.errorCode)
       });
-      res.status(placement.persistence.retryable || ancillary.retryable ? 202 : 200).json({
+      res.status(placement.errorCode || placement.persistence.retryable || ancillary.retryable ? 202 : 200).json({
         success: true,
         message: 'Call initiated',
         sid: call.sid,
@@ -1175,10 +1192,11 @@ module.exports = function mountApiRoutes(app, {
         });
       }, {
         callId: result.id,
-        trigger: '/api/icallmate/outgoing-call'
+        trigger: '/api/icallmate/outgoing-call',
+        skip: Boolean(placement.errorCode)
       });
 
-      res.status(placement.persistence.retryable || ancillary.retryable ? 202 : 200).json({
+      res.status(placement.errorCode || placement.persistence.retryable || ancillary.retryable ? 202 : 200).json({
         success: true,
         message: 'Outgoing call initiated',
         sid: call.sid,

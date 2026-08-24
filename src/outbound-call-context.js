@@ -558,7 +558,26 @@ function createOutboundCallContextCoordinator({
       providerCallId: providerCall?.sid
     };
     const recoveryToken = recoveryTokens.issue(evidence);
-    const reconciled = await reconcileAttestedOutcome(evidence);
+    let reconciled;
+    try {
+      reconciled = await reconcileAttestedOutcome(evidence);
+    } catch (error) {
+      const contextState = await currentState(
+        { tenantId: context.tenantId, contextId: prepared.id },
+        prepared
+      );
+      const typedConflict = error instanceof OutboundCallContextError;
+      reconciled = {
+        context: contextState,
+        persistence: {
+          state: contextState.state,
+          retryable: !typedConflict
+        },
+        errorCode: typedConflict
+          ? error.code
+          : 'OUTBOUND_CONTEXT_PERSISTENCE_UNAVAILABLE'
+      };
+    }
     return { providerCall, ...reconciled, recoveryToken };
   }
 

@@ -6,6 +6,14 @@ const express = require('express');
 const http = require('node:http');
 const { Duplex } = require('node:stream');
 
+function matches(record, filter) {
+  return Object.entries(filter).every(([key, expected]) => {
+    const actual = record[key];
+    if (expected && typeof expected === 'object' && '$ne' in expected) return actual !== expected.$ne;
+    return String(actual) === String(expected);
+  });
+}
+
 async function request(app, path, tenantId, body = null) {
   const payload = JSON.stringify(body || {
     phone: '+919876543210',
@@ -150,12 +158,14 @@ test('mounted tenant reconciliation accepts only server-attested provider eviden
   let state = 'prepared';
   let persistenceOnline = false;
   let providerCalls = 0;
+  let reconciliationCalls = 0;
   const { createOutboundCallContextCoordinator } = require('../src/outbound-call-context');
   const outboundCoordinator = createOutboundCallContextCoordinator({
     repository: {
       async prepareInitiatedCall() { return { id: contextId, state }; },
       async readState() { return { id: contextId, state }; },
       async reconcileProviderOutcome(input) {
+        reconciliationCalls += 1;
         if (!persistenceOnline) {
           const error = new Error('Primary stepped down');
           error.code = 91;
@@ -184,6 +194,7 @@ test('mounted tenant reconciliation accepts only server-attested provider eviden
     }
   });
   persistenceOnline = true;
+  const placementReconciliationCalls = reconciliationCalls;
 
   const Tenant = require('../src/models/Tenant');
   Tenant.findById = (requestedTenantId) => ({
@@ -205,6 +216,16 @@ test('mounted tenant reconciliation accepts only server-attested provider eviden
   mountApiRoutes(app, { outboundCoordinator });
   app.use((_req, res) => res.status(404).json({ error: 'Endpoint not found' }));
 
+  const legacyProviderFacts = await request(
+    app,
+    `/api/calls/outbound-context/${contextId}/reconcile`,
+    tenantId,
+    {
+      recoveryToken: placement.recoveryToken,
+      disposition: 'accepted',
+      providerCallId: 'client-invented-provider-id'
+    }
+  );
   const forged = await request(app, `/api/calls/outbound-context/${contextId}/reconcile`, tenantId, {
     disposition: 'accepted',
     providerCallId: 'client-invented-provider-id'
@@ -221,6 +242,7 @@ test('mounted tenant reconciliation accepts only server-attested provider eviden
   });
   const malformedId = await request(app, '/api/calls/outbound-context/not-an-object-id/reconcile', tenantId, recoveryBody);
 
+  assert.equal(legacyProviderFacts.status, 400);
   assert.equal(forged.status, 400);
   assert.equal(first.status, 200);
   assert.equal(repeated.status, 200);
@@ -234,6 +256,136 @@ test('mounted tenant reconciliation accepts only server-attested provider eviden
   });
   assert.equal(state, 'provider_accepted');
   assert.equal(providerCalls, 1);
+  assert.equal(reconciliationCalls, placementReconciliationCalls + 2);
+});
+
+test('post-provider typed archive conflicts preserve recovery identity and claims for every mounted entrypoint', async () => {
+  // Mutation caught: rethrowing a typed NOT_FOUND after provider acceptance returns 500 and releases the customer claim.
+  const tenantId = '64b64c8f0f1e2d3c4b5a6911';
+  const customer = {
+    id: 42,
+    tenant_id: tenantId,
+    name: 'Legacy Customer',
+    phone: '+919876543210',
+    status: 'pending',
+    call_type: 'REVIEW_CALL',
+    is_manual: 1
+  };
+  const records = [];
+  const Call = require('../src/models/Call');
+  const CallModel = {
+    records,
+    async create(input) {
+      const document = new Call(input);
+      await document.validate();
+      const stored = document.toObject();
+      records.push(stored);
+      return { ...stored };
+    },
+    findOne(filter) {
+      return {
+        async lean() {
+          const record = [...records].reverse().find((candidate) => matches(candidate, filter));
+          return record ? { ...record } : null;
+        }
+      };
+    },
+    async updateOne() {
+      throw new Error('Archived contexts must not be made active');
+    }
+  };
+
+  const {
+    createOutboundCallContextRepository,
+    createOutboundCallContextCoordinator
+  } = require('../src/outbound-call-context');
+  const outboundCoordinator = createOutboundCallContextCoordinator({
+    repository: createOutboundCallContextRepository({ CallModel }),
+    recoveryTokenSecret: 'round-seven-test-recovery-secret-with-32-bytes'
+  });
+  let providerCalls = 0;
+  let releases = 0;
+  let legacyWrites = 0;
+
+  const archivePreparedContext = () => {
+    providerCalls += 1;
+    records.at(-1).status = 'archived';
+  };
+
+  const db = require('../db');
+  db.dbGet = async (sql) => {
+    if (/SELECT \* FROM customers/i.test(sql)) return { ...customer };
+    if (/COUNT\(\*\)/i.test(sql)) return { count: 0 };
+    return null;
+  };
+  db.dbRun = async () => {
+    legacyWrites += 1;
+    return { changes: 1, lastID: 42 };
+  };
+  db.dbAll = async () => [];
+
+  const callManagement = require('../src/call-management');
+  callManagement.ensureCustomerForCall = async () => ({ ...customer });
+  callManagement.claimCustomerForOutboundCall = async () => true;
+  callManagement.releaseCustomerOutboundClaim = async () => { releases += 1; };
+  callManagement.hydratePreCallIntelligence = async (record) => record;
+  callManagement.shouldBlockCustomerCall = async () => null;
+  callManagement.placeRealtimeCall = async () => {
+    archivePreparedContext();
+    return { sid: `campaign-${providerCalls}`, status: 'queued' };
+  };
+
+  const icallmate = require('../services/icallmate');
+  icallmate.initiateCall = async () => {
+    archivePreparedContext();
+    return { sid: `masterpost-${providerCalls}`, status: 'queued' };
+  };
+
+  const promptBuilder = require('../src/prompt-builder');
+  promptBuilder.getDefaultAgentConfig = async () => null;
+  promptBuilder.getAgentConfigById = async () => null;
+
+  const helpers = require('../src/helpers');
+  helpers.schedulePendingCallDiagnostic = () => {};
+
+  const Tenant = require('../src/models/Tenant');
+  Tenant.findById = () => ({ lean: async () => ({ _id: tenantId, status: 'active' }) });
+
+  delete require.cache[require.resolve('../src/api-routes')];
+  const mountApiRoutes = require('../src/api-routes');
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.adminSession = {
+      username: 'client-admin',
+      role: 'CLIENT_ADMIN',
+      tenantId: req.headers['x-test-tenant']
+    };
+    next();
+  });
+  mountApiRoutes(app, { outboundCoordinator });
+
+  const responses = [
+    await request(app, '/call/start', tenantId),
+    await request(app, '/api/calls/initiate/42', tenantId),
+    await request(app, '/api/icallmate/outgoing-call', tenantId)
+  ];
+
+  assert.deepEqual(responses.map(({ status }) => status), [202, 202, 202]);
+  for (const [index, response] of responses.entries()) {
+    const body = JSON.parse(response.body);
+    assert.equal(body.callId, String(records[index]._id));
+    assert.match(body.contextRecoveryToken, /^v1\./);
+    assert.equal(body.contextPersistence, 'prepared');
+    assert.equal(body.contextRetryable, false);
+    assert.equal(body.contextErrorCode, 'OUTBOUND_CONTEXT_NOT_FOUND');
+    assert.equal(body.providerAccepted, true);
+    assert.equal(body.reinitiationRequired, false);
+  }
+  assert.equal(providerCalls, 3);
+  assert.equal(releases, 0);
+  assert.equal(legacyWrites, 0);
+  assert.ok(records.every((record) => record.status === 'archived'));
 });
 
 test('post-provider legacy failures return accepted recovery responses for every mounted entrypoint', async () => {
