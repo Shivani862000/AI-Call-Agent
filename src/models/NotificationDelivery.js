@@ -22,6 +22,32 @@ const REDACTED = '[redacted]';
 const DELIVERY_STATUSES = new Set(['pending', 'delivered', 'failed']);
 const RECIPIENT_CATEGORIES = new Set(['tenant_admin', 'account', 'owner', 'support']);
 const MACHINE_IDENTIFIER = /^[a-z0-9._:-]+$/i;
+const NOTIFICATION_FILTER_FIELDS = new Set([
+  '_id',
+  'tenantId',
+  'accountId',
+  'recipientCategory',
+  'template',
+  'event',
+  'status',
+  'retryCount',
+  'failureCode'
+]);
+const NOTIFICATION_UPDATE_FIELDS = new Set([
+  'tenantId',
+  'accountId',
+  'recipientCategory',
+  'template',
+  'event',
+  'metadata',
+  'status',
+  'retryCount',
+  'failureCode',
+  'failureReason',
+  'lastAttemptAt',
+  'sentAt'
+]);
+const NOTIFICATION_UPDATE_OPERATORS = new Set(['$set', '$setOnInsert', '$inc', '$unset', '$rename']);
 const STATUS_ERROR_MESSAGE = 'Notification status must be pending, delivered, or failed';
 const RETRY_COUNT_ERROR_MESSAGE = 'Notification retry count must be a non-negative integer';
 const FAILURE_CODE_ERROR_MESSAGE = 'Notification failure code is not in the operational allowlist';
@@ -118,7 +144,115 @@ notificationDeliverySchema.pre('validate', function validateAndSanitizeRetainedN
   assertValidNotificationDocument(this);
 });
 
-function sanitizeMetadataUpdate(update) {
+function invalidNotificationUpdate() {
+  return retainedDataError('INVALID_NOTIFICATION_UPDATE', 'Notification updates must use allowed fields and operators');
+}
+
+function hasUnsafeRecordDescriptors(value) {
+  if (!value || typeof value !== 'object' || utilTypes.isProxy(value)) return utilTypes.isProxy(value);
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    return Reflect.ownKeys(descriptors).some((key) => (
+      typeof key !== 'string' || !Object.hasOwn(descriptors[key], 'value')
+    ));
+  } catch (_error) {
+    return true;
+  }
+}
+
+function isSafeInternalUpdateValue(path, value) {
+  if (path === '__v') return isNonNegativeInteger(value);
+  if (path !== 'created_at' && path !== 'updated_at') return false;
+  const normalized = normalizeNullableDate(value);
+  return normalized instanceof Date;
+}
+
+function isAllowedNotificationUpdatePath(path) {
+  if (NOTIFICATION_UPDATE_FIELDS.has(path)) return true;
+  if (!path.startsWith('metadata.')) return false;
+  const segments = path.slice('metadata.'.length).split('.');
+  return segments.every((segment) => (
+    segment
+    && !segment.startsWith('$')
+    && !['__proto__', 'constructor', 'prototype'].includes(segment)
+  ));
+}
+
+function normalizeNotificationReplacement(entries, { allowInternalTimestamps }) {
+  const replacement = {};
+  for (const [path, value] of entries) {
+    if (allowInternalTimestamps && isSafeInternalUpdateValue(path, value)) {
+      defineFilterValue(replacement, path, value);
+      continue;
+    }
+    if (!NOTIFICATION_UPDATE_FIELDS.has(path)) throw invalidNotificationUpdate();
+    defineFilterValue(replacement, path, normalizeNotificationUpdateValue(path, value));
+  }
+  for (const requiredPath of ['recipientCategory', 'template', 'event']) {
+    if (!Object.hasOwn(replacement, requiredPath)) {
+      const { code, message } = notificationFieldError(requiredPath);
+      throw retainedDataError(code, message);
+    }
+  }
+  return replacement;
+}
+
+function normalizeNotificationOperator(operator, entries, { allowInternalTimestamps }) {
+  if (!NOTIFICATION_UPDATE_OPERATORS.has(operator)) throw invalidNotificationUpdate();
+  if (operator === '$rename') {
+    throw retainedDataError(
+      'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE',
+      'Notification retained and state field renames are not supported'
+    );
+  }
+
+  const normalizedOperand = {};
+  for (const [path, value] of entries) {
+    if (allowInternalTimestamps && isSafeInternalUpdateValue(path, value)) {
+      defineFilterValue(normalizedOperand, path, value);
+      continue;
+    }
+    if (!isAllowedNotificationUpdatePath(path)) throw invalidNotificationUpdate();
+
+    if (operator === '$inc') {
+      if (path !== 'retryCount') {
+        throw retainedDataError(
+          'INVALID_NOTIFICATION_STATE_MUTATION',
+          'Notification state mutation operator is not supported'
+        );
+      }
+      defineFilterValue(normalizedOperand, path, validateNotificationFieldMutation(operator, path, value));
+      continue;
+    }
+
+    if (operator === '$unset') {
+      if (['recipientCategory', 'template', 'event', 'status', 'retryCount'].includes(path)) {
+        throw retainedDataError(
+          'INVALID_NOTIFICATION_STATE_MUTATION',
+          'Notification state mutation operator is not supported'
+        );
+      }
+      if (value !== 1 && value !== true && value !== '') {
+        throw retainedDataError(
+          'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE',
+          'Notification retained-field removal uses an unsupported marker'
+        );
+      }
+      defineFilterValue(normalizedOperand, path, value);
+      continue;
+    }
+
+    const normalized = isRetainedPath(path)
+      ? sanitizeRetainedUpdateValue(path, value)
+      : normalizeNotificationUpdateValue(path, value);
+    defineFilterValue(normalizedOperand, path, normalized);
+  }
+  return normalizedOperand;
+}
+
+function sanitizeMetadataUpdate(update, { allowInternalTimestamps = false } = {}) {
   if (update == null) return update;
   if (Array.isArray(update)) {
     throw retainedDataError(
@@ -135,74 +269,28 @@ function sanitizeMetadataUpdate(update) {
   }
 
   const hasOperators = updateEntries.some(([key]) => key.startsWith('$'));
-  if (!hasOperators) {
-    for (const [path, value] of updateEntries) {
-      update[path] = normalizeNotificationUpdateValue(path, value);
-    }
-    for (const requiredPath of ['recipientCategory', 'template', 'event']) {
-      if (!Object.hasOwn(update, requiredPath)) {
-        throw retainedDataError(
-          notificationFieldError(requiredPath).code,
-          notificationFieldError(requiredPath).message
-        );
-      }
-    }
-    return update;
-  }
+  if (!hasOperators) return normalizeNotificationReplacement(updateEntries, { allowInternalTimestamps });
+  if (updateEntries.some(([key]) => !key.startsWith('$'))) throw invalidNotificationUpdate();
 
+  const normalizedUpdate = {};
   for (const [operator, values] of updateEntries) {
-    if (!operator.startsWith('$')) continue;
     const valueEntries = dataEntries(values);
     if (!valueEntries) {
+      if (hasUnsafeRecordDescriptors(values)) {
+        throw retainedDataError('UNSAFE_NOTIFICATION_UPDATE', 'Notification updates must be plain data');
+      }
       throw retainedDataError(
         'UNSUPPORTED_NOTIFICATION_OPERATOR_OPERAND',
         'Notification update operator operands must be plain records'
       );
     }
-
-    if (operator === '$rename') {
-      for (const [source, destination] of valueEntries) {
-        if (typeof destination !== 'string') {
-          throw retainedDataError(
-            'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE',
-            'Notification retained and state field renames are not supported'
-          );
-        }
-        if (isRetainedPath(source)
-          || isRetainedPath(destination)
-          || isNotificationValidatedPath(source)
-          || isNotificationValidatedPath(destination)) {
-          throw retainedDataError(
-            'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE',
-            'Notification retained and state field renames are not supported'
-          );
-        }
-      }
-      continue;
-    }
-
-    for (const [path, value] of valueEntries) {
-      if (isNotificationValidatedPath(path)) {
-        values[path] = validateNotificationFieldMutation(operator, path, value);
-      }
-      if (!isRetainedPath(path)) continue;
-      if (operator === '$unset') {
-        if (value === 1 || value === true || value === '') continue;
-        throw retainedDataError(
-          'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE',
-          'Notification retained-field removal uses an unsupported marker'
-        );
-      }
-      if (operator !== '$set' && operator !== '$setOnInsert') {
-        throw retainedDataError(
-          'UNSUPPORTED_NOTIFICATION_METADATA_UPDATE',
-          'Notification retained-field mutation operator is not supported'
-        );
-      }
-      values[path] = sanitizeRetainedUpdateValue(path, value);
-    }
+    defineFilterValue(
+      normalizedUpdate,
+      operator,
+      normalizeNotificationOperator(operator, valueEntries, { allowInternalTimestamps })
+    );
   }
-  return update;
+  return normalizedUpdate;
 }
 
 function notificationFieldError(path) {
@@ -300,7 +388,58 @@ function invalidNotificationFilter() {
   return retainedDataError('INVALID_NOTIFICATION_FILTER', 'Notification filters must be plain data');
 }
 
-function normalizeNotificationFilter(filter, seen = new WeakSet()) {
+function normalizeNotificationFilterScalar(path, value) {
+  const normalized = path === '_id'
+    ? normalizeNotificationFilterId(value)
+    : normalizeNotificationFieldValue(path, value);
+  if (!isInvalidRetainedValue(normalized)) return normalized;
+
+  if (path === '_id' || path === 'tenantId' || path === 'accountId') {
+    throw retainedDataError(
+      'INVALID_NOTIFICATION_FILTER_ID',
+      'Notification filter IDs must be 24-character hexadecimal identifiers'
+    );
+  }
+  const { code, message } = notificationFieldError(path);
+  throw retainedDataError(code, message);
+}
+
+function normalizeNotificationFilterValue(path, value) {
+  const direct = path === '_id'
+    ? normalizeNotificationFilterId(value)
+    : normalizeNotificationFieldValue(path, value);
+  if (!isInvalidRetainedValue(direct)) return direct;
+
+  const operatorEntries = dataEntries(value);
+  if (!operatorEntries
+    || operatorEntries.length === 0
+    || operatorEntries.some(([operator]) => !operator.startsWith('$'))) {
+    return normalizeNotificationFilterScalar(path, value);
+  }
+
+  const allowedOperators = path === 'retryCount'
+    ? new Set(['$eq', '$lt', '$lte', '$gt', '$gte', '$in'])
+    : new Set(['$eq', '$in']);
+  const normalizedOperators = {};
+  for (const [operator, operand] of operatorEntries) {
+    if (!allowedOperators.has(operator)) throw invalidNotificationFilter();
+    if (operator === '$in') {
+      const values = dataArrayValues(operand);
+      if (!values) throw invalidNotificationFilter();
+      defineFilterValue(
+        normalizedOperators,
+        operator,
+        values.map((item) => normalizeNotificationFilterScalar(path, item))
+      );
+      continue;
+    }
+    defineFilterValue(normalizedOperators, operator, normalizeNotificationFilterScalar(path, operand));
+  }
+  return normalizedOperators;
+}
+
+function normalizeNotificationFilter(filter, seen = new WeakSet(), { root = true } = {}) {
+  if (root && filter == null) return {};
   const filterEntries = dataEntries(filter);
   if (!filterEntries || seen.has(filter)) throw invalidNotificationFilter();
 
@@ -313,36 +452,13 @@ function normalizeNotificationFilter(filter, seen = new WeakSet()) {
       defineFilterValue(
         normalizedFilter,
         path,
-        clauses.map((clause) => normalizeNotificationFilter(clause, seen))
+        clauses.map((clause) => normalizeNotificationFilter(clause, seen, { root: false }))
       );
       continue;
     }
     if (path.startsWith('$')) throw invalidNotificationFilter();
-
-    if (path === '_id' || path === 'tenantId' || path === 'accountId') {
-      const normalized = normalizeNotificationFilterId(value);
-      if (isInvalidRetainedValue(normalized)) {
-        throw retainedDataError(
-          'INVALID_NOTIFICATION_FILTER_ID',
-          'Notification filter IDs must be 24-character hexadecimal identifiers'
-        );
-      }
-      defineFilterValue(normalizedFilter, path, normalized);
-      continue;
-    }
-
-    if (isNotificationValidatedPath(path)) {
-      defineFilterValue(normalizedFilter, path, normalizeNotificationUpdateValue(path, value));
-      continue;
-    }
-
-    if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
-      throw invalidNotificationFilter();
-    }
-    if (typeof value === 'symbol' || typeof value === 'bigint') {
-      throw invalidNotificationFilter();
-    }
-    defineFilterValue(normalizedFilter, path, value);
+    if (!NOTIFICATION_FILTER_FIELDS.has(path)) throw invalidNotificationFilter();
+    defineFilterValue(normalizedFilter, path, normalizeNotificationFilterValue(path, value));
   }
   seen.delete(filter);
   return normalizedFilter;
@@ -461,7 +577,7 @@ notificationDeliverySchema.pre([
 ], function sanitizeRetainedNotificationUpdate() {
   this.setOptions({ runValidators: true });
   this.setQuery(assertSafeNotificationFilter(this.getFilter()));
-  this.setUpdate(sanitizeMetadataUpdate(this.getUpdate()));
+  this.setUpdate(sanitizeMetadataUpdate(this.getUpdate(), { allowInternalTimestamps: true }));
 });
 
 notificationDeliverySchema.pre('save', function sanitizeRetainedNotificationSave() {
@@ -470,10 +586,32 @@ notificationDeliverySchema.pre('save', function sanitizeRetainedNotificationSave
   assertValidNotificationDocument(this);
 });
 
+notificationDeliverySchema.method('updateOne', function guardedNotificationDocumentUpdate(update, options) {
+  return this.constructor.updateOne({ _id: this._id }, update, options);
+}, { suppressWarning: true });
+
+notificationDeliverySchema.method('deleteOne', function rejectNotificationDocumentDelete() {
+  return Promise.reject(retainedDataError(
+    'IMMUTABLE_NOTIFICATION_DELIVERY',
+    'Notification delivery records cannot be deleted'
+  ));
+}, { suppressWarning: true });
+
 notificationDeliverySchema.pre('bulkWrite', function rejectRetainedNotificationBulkWrites() {
   throw retainedDataError(
     'UNSUPPORTED_NOTIFICATION_BULK_WRITE',
     'Notification bulk writes are not supported'
+  );
+});
+
+notificationDeliverySchema.pre([
+  'deleteOne',
+  'deleteMany',
+  'findOneAndDelete'
+], function rejectNotificationDelete() {
+  throw retainedDataError(
+    'IMMUTABLE_NOTIFICATION_DELIVERY',
+    'Notification delivery records cannot be deleted'
   );
 });
 
@@ -502,4 +640,161 @@ notificationDeliverySchema.pre('insertMany', function guardNotificationInsertMan
 notificationDeliverySchema.index({ tenantId: 1, status: 1, created_at: -1 });
 notificationDeliverySchema.index({ status: 1, created_at: -1 });
 
-module.exports = mongoose.model('NotificationDelivery', notificationDeliverySchema);
+const NotificationDelivery = mongoose.model('NotificationDelivery', notificationDeliverySchema);
+
+function rejectNotificationQueryMutation() {
+  return Promise.reject(retainedDataError(
+    'UNSUPPORTED_NOTIFICATION_QUERY_MUTATION',
+    'Notification query mutations must use guarded model methods'
+  ));
+}
+
+function throwNotificationQueryMutation() {
+  throw retainedDataError(
+    'UNSUPPORTED_NOTIFICATION_QUERY_MUTATION',
+    'Notification query mutations must use guarded model methods'
+  );
+}
+
+function rejectNotificationDeleteBoundary() {
+  return Promise.reject(retainedDataError(
+    'IMMUTABLE_NOTIFICATION_DELIVERY',
+    'Notification delivery records cannot be deleted'
+  ));
+}
+
+function rejectNotificationBulkBoundary() {
+  return Promise.reject(retainedDataError(
+    'UNSUPPORTED_NOTIFICATION_BULK_WRITE',
+    'Notification bulk writes are not supported'
+  ));
+}
+
+function sealNotificationQuery(query) {
+  for (const method of ['where', 'and', 'or', 'nor', 'merge', 'toConstructor']) {
+    Object.defineProperty(query, method, {
+      configurable: true,
+      value: throwNotificationQueryMutation,
+      writable: false
+    });
+  }
+  for (const method of [
+    'updateOne',
+    'updateMany',
+    'replaceOne',
+    'findOneAndUpdate',
+    'findOneAndReplace',
+    'deleteOne',
+    'deleteMany',
+    'findOneAndDelete'
+  ]) {
+    Object.defineProperty(query, method, {
+      configurable: true,
+      value: rejectNotificationQueryMutation,
+      writable: false
+    });
+  }
+  if (typeof query.clone === 'function') {
+    const clone = query.clone;
+    Object.defineProperty(query, 'clone', {
+      configurable: true,
+      value() {
+        return sealNotificationQuery(clone.call(this));
+      },
+      writable: false
+    });
+  }
+  return query;
+}
+
+function installGuardedRead(method, normalizeArguments) {
+  const read = NotificationDelivery[method];
+  Object.defineProperty(NotificationDelivery, method, {
+    configurable: true,
+    value(...args) {
+      try {
+        return sealNotificationQuery(read.apply(this, normalizeArguments(args)));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+    writable: false
+  });
+}
+
+for (const method of ['find', 'findOne', 'countDocuments', 'exists']) {
+  installGuardedRead(method, (args) => [assertSafeNotificationFilter(args[0]), ...args.slice(1)]);
+}
+
+installGuardedRead('findById', (args) => {
+  const filter = assertSafeNotificationFilter({ _id: args[0] });
+  return [filter._id, ...args.slice(1)];
+});
+
+installGuardedRead('distinct', (args) => {
+  if (typeof args[0] !== 'string' || !NOTIFICATION_FILTER_FIELDS.has(args[0])) {
+    throw invalidNotificationFilter();
+  }
+  return [args[0], assertSafeNotificationFilter(args[1]), ...args.slice(2)];
+});
+
+function installGuardedUpdate(method) {
+  const write = NotificationDelivery[method];
+  Object.defineProperty(NotificationDelivery, method, {
+    configurable: true,
+    value(filter, update, ...args) {
+      try {
+        const normalizedFilter = assertSafeNotificationFilter(filter);
+        const normalizedUpdate = sanitizeMetadataUpdate(update);
+        return sealNotificationQuery(write.call(this, normalizedFilter, normalizedUpdate, ...args));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+    writable: false
+  });
+}
+
+for (const method of ['updateOne', 'updateMany', 'findOneAndUpdate', 'findOneAndReplace', 'replaceOne']) {
+  installGuardedUpdate(method);
+}
+
+const guardedFindOneAndUpdate = NotificationDelivery.findOneAndUpdate;
+Object.defineProperty(NotificationDelivery, 'findByIdAndUpdate', {
+  configurable: true,
+  value(id, update, ...args) {
+    return guardedFindOneAndUpdate.call(this, { _id: id }, update, ...args);
+  },
+  writable: false
+});
+
+for (const method of [
+  'deleteOne',
+  'deleteMany',
+  'findOneAndDelete',
+  'findByIdAndDelete',
+  'findOneAndRemove',
+  'findByIdAndRemove'
+]) {
+  Object.defineProperty(NotificationDelivery, method, {
+    configurable: true,
+    value: rejectNotificationDeleteBoundary,
+    writable: false
+  });
+}
+
+for (const method of ['bulkWrite', 'bulkSave']) {
+  Object.defineProperty(NotificationDelivery, method, {
+    configurable: true,
+    value: rejectNotificationBulkBoundary,
+    writable: false
+  });
+}
+
+Object.defineProperty(NotificationDelivery, 'where', {
+  configurable: true,
+  value: throwNotificationQueryMutation,
+  writable: false
+});
+
+module.exports = NotificationDelivery;

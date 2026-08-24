@@ -127,8 +127,12 @@ function normalizeNullableDate(value) {
     return INVALID_RETAINED_VALUE;
   }
   if (prototype !== Date.prototype) return INVALID_RETAINED_VALUE;
-  const timestamp = Date.prototype.getTime.call(value);
-  return Number.isNaN(timestamp) ? INVALID_RETAINED_VALUE : new Date(timestamp);
+  try {
+    const timestamp = Date.prototype.getTime.call(value);
+    return Number.isNaN(timestamp) ? INVALID_RETAINED_VALUE : new Date(timestamp);
+  } catch (_error) {
+    return INVALID_RETAINED_VALUE;
+  }
 }
 
 function normalizeNullableObjectId(value, ObjectId) {
@@ -138,12 +142,36 @@ function normalizeNullableObjectId(value, ObjectId) {
   }
   if (typeof value !== 'object' || utilTypes.isProxy(value)) return INVALID_RETAINED_VALUE;
   let prototype;
+  let descriptors;
   try {
     prototype = Object.getPrototypeOf(value);
+    descriptors = Object.getOwnPropertyDescriptors(value);
   } catch (_error) {
     return INVALID_RETAINED_VALUE;
   }
-  return prototype === ObjectId.prototype ? value : INVALID_RETAINED_VALUE;
+  if (prototype !== ObjectId.prototype) return INVALID_RETAINED_VALUE;
+
+  const bufferDescriptor = descriptors.buffer;
+  if (!bufferDescriptor
+    || !Object.hasOwn(bufferDescriptor, 'value')
+    || !Buffer.isBuffer(bufferDescriptor.value)
+    || utilTypes.isProxy(bufferDescriptor.value)
+    || bufferDescriptor.value.length !== 12) {
+    return INVALID_RETAINED_VALUE;
+  }
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== 'string' || !Object.hasOwn(descriptors[key], 'value')) {
+      return INVALID_RETAINED_VALUE;
+    }
+  }
+
+  try {
+    const bytes = Buffer.allocUnsafe(12);
+    Buffer.prototype.copy.call(bufferDescriptor.value, bytes, 0, 0, 12);
+    return new ObjectId(bytes);
+  } catch (_error) {
+    return INVALID_RETAINED_VALUE;
+  }
 }
 
 function isInvalidRetainedValue(value) {

@@ -118,10 +118,20 @@ auditEventSchema.pre('validate', function validateAndSanitizeRetainedAuditMetada
 });
 
 auditEventSchema.pre('save', function validateRetainedAuditSave() {
+  if (!this.isNew) {
+    throw valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable');
+  }
   this.before = sanitizeForAudit(this.before);
   this.after = sanitizeForAudit(this.after);
   assertValidAuditEvent(this);
 });
+
+function rejectAuditDocumentMutation() {
+  return Promise.reject(valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable'));
+}
+
+auditEventSchema.method('updateOne', rejectAuditDocumentMutation, { suppressWarning: true });
+auditEventSchema.method('deleteOne', rejectAuditDocumentMutation, { suppressWarning: true });
 
 auditEventSchema.pre('insertMany', function rejectUnsafeAuditInsertMany(next, documents, options) {
   try {
@@ -168,4 +178,112 @@ auditEventSchema.pre('bulkWrite', function rejectAuditBulkWrite() {
 auditEventSchema.index({ created_at: -1 });
 auditEventSchema.index({ tenantId: 1, created_at: -1 });
 
-module.exports = mongoose.model('AuditEvent', auditEventSchema);
+const AuditEvent = mongoose.model('AuditEvent', auditEventSchema);
+
+const saveNewAuditEvent = AuditEvent.prototype.save;
+
+function guardAuditDocumentSave(...args) {
+  if (!this.isNew) {
+    return Promise.reject(valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable'));
+  }
+  return saveNewAuditEvent.apply(this, args);
+}
+
+Object.defineProperty(AuditEvent.prototype, 'save', {
+  configurable: true,
+  value: guardAuditDocumentSave,
+  writable: false
+});
+Object.defineProperty(AuditEvent.prototype, '$save', {
+  configurable: true,
+  value: guardAuditDocumentSave,
+  writable: false
+});
+
+function rejectAuditMutationBoundary() {
+  return Promise.reject(valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable'));
+}
+
+function throwAuditMutationBoundary() {
+  throw valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable');
+}
+
+function sealAuditReadQuery(query) {
+  for (const method of ['where', 'and', 'or', 'nor', 'merge', 'toConstructor']) {
+    Object.defineProperty(query, method, {
+      configurable: true,
+      value: throwAuditMutationBoundary,
+      writable: false
+    });
+  }
+  for (const method of [
+    'updateOne',
+    'updateMany',
+    'replaceOne',
+    'findOneAndUpdate',
+    'findOneAndReplace',
+    'deleteOne',
+    'deleteMany',
+    'findOneAndDelete'
+  ]) {
+    Object.defineProperty(query, method, {
+      configurable: true,
+      value: rejectAuditMutationBoundary,
+      writable: false
+    });
+  }
+  if (typeof query.clone === 'function') {
+    const clone = query.clone;
+    Object.defineProperty(query, 'clone', {
+      configurable: true,
+      value() {
+        return sealAuditReadQuery(clone.call(this));
+      },
+      writable: false
+    });
+  }
+  return query;
+}
+
+for (const method of ['find', 'findOne', 'findById', 'countDocuments', 'estimatedDocumentCount']) {
+  const read = AuditEvent[method];
+  if (typeof read !== 'function') continue;
+  Object.defineProperty(AuditEvent, method, {
+    configurable: true,
+    value(...args) {
+      return sealAuditReadQuery(read.apply(this, args));
+    },
+    writable: false
+  });
+}
+
+for (const method of [
+  'updateOne',
+  'updateMany',
+  'replaceOne',
+  'findOneAndUpdate',
+  'findOneAndReplace',
+  'findByIdAndUpdate',
+  'deleteOne',
+  'deleteMany',
+  'findOneAndDelete',
+  'findByIdAndDelete',
+  'findOneAndRemove',
+  'findByIdAndRemove',
+  'bulkWrite',
+  'bulkSave'
+]) {
+  Object.defineProperty(AuditEvent, method, {
+    configurable: true,
+    value: rejectAuditMutationBoundary,
+    writable: false
+  });
+}
+
+Object.defineProperty(AuditEvent, 'where', {
+  configurable: true,
+  value: throwAuditMutationBoundary,
+  writable: false
+});
+
+module.exports = AuditEvent;

@@ -1479,3 +1479,302 @@ test('hydrated audit documents cannot bypass immutability with document deletion
 
   assert.equal(collectionCallCount, 0);
 });
+
+test('every existing audit document save rejects while an initial insert remains valid', async () => {
+  // Mutation caught: a hydrated document can update an append-only event through Document#save().
+  const originalInsertOne = AuditEvent.collection.insertOne;
+  const originalFindOne = AuditEvent.collection.findOne;
+  const originalUpdateOne = AuditEvent.collection.updateOne;
+  let insertCount = 0;
+  let existingCollectionCount = 0;
+  const base = {
+    _id: new mongoose.Types.ObjectId('507f1f77bcf86cd799439011'),
+    actor: 'actor-1',
+    actorAccessLevel: 'SYSTEM',
+    action: 'settings.update',
+    targetType: 'platform-settings',
+    outcome: 'success',
+    created_at: new Date('2026-08-24T12:00:00.000Z')
+  };
+  AuditEvent.collection.insertOne = async (document) => {
+    insertCount += 1;
+    return { acknowledged: true, insertedId: document._id };
+  };
+  AuditEvent.collection.findOne = async () => {
+    existingCollectionCount += 1;
+    return base;
+  };
+  AuditEvent.collection.updateOne = async () => {
+    existingCollectionCount += 1;
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+
+  try {
+    await new AuditEvent({ ...base, _id: undefined, created_at: undefined }).save();
+
+    for (const prepare of [
+      (event) => event,
+      (event) => event.increment(),
+      (event) => {
+        event.before = { status: 'active' };
+        event.markModified('before');
+      }
+    ]) {
+      const event = AuditEvent.hydrate(base);
+      prepare(event);
+      await assert.rejects(
+        event.save(),
+        (error) => error.code === 'IMMUTABLE_AUDIT_EVENT'
+          && error.message === 'Audit events are immutable'
+      );
+    }
+  } finally {
+    AuditEvent.collection.insertOne = originalInsertOne;
+    AuditEvent.collection.findOne = originalFindOne;
+    AuditEvent.collection.updateOne = originalUpdateOne;
+  }
+
+  assert.equal(insertCount, 1);
+  assert.equal(existingCollectionCount, 0);
+});
+
+test('existing audit save aliases reject before validation or save-option observation', async () => {
+  // Mutation caught: validation and SaveOptions processing happen before pre-save immutability middleware.
+  const marker = 'private-audit-save-options-marker-6421';
+  let observationCount = 0;
+  const options = {};
+  Object.defineProperty(options, 'validateBeforeSave', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      throw new Error(marker);
+    }
+  });
+  const event = AuditEvent.hydrate({
+    _id: new mongoose.Types.ObjectId('507f1f77bcf86cd799439011'),
+    actor: 'actor-1',
+    actorAccessLevel: 'SYSTEM',
+    action: 'settings.update',
+    targetType: 'platform-settings',
+    outcome: marker,
+    created_at: new Date('2026-08-24T12:00:00.000Z')
+  });
+
+  for (const save of [
+    () => event.save(options),
+    () => event.$save(options)
+  ]) {
+    await assert.rejects(
+      async () => save(),
+      (error) => assertPrivateValidationError(error, marker, 'IMMUTABLE_AUDIT_EVENT')
+    );
+  }
+  assert.equal(observationCount, 0);
+});
+
+test('audit model document and query mutations reject before observing hostile inputs', async () => {
+  // Mutation caught: Mongoose clones mutation arguments before immutable schema middleware executes.
+  const originalUpdateOne = AuditEvent.collection.updateOne;
+  const marker = 'private-audit-mutation-marker-6421';
+  let observationCount = 0;
+  let collectionCallCount = 0;
+  const update = { $set: {} };
+  Object.defineProperty(update.$set, 'outcome', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      return marker;
+    }
+  });
+  AuditEvent.collection.updateOne = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+  const event = AuditEvent.hydrate({
+    _id: new mongoose.Types.ObjectId('507f1f77bcf86cd799439011'),
+    actor: 'actor-1',
+    actorAccessLevel: 'SYSTEM',
+    action: 'settings.update',
+    targetType: 'platform-settings',
+    outcome: 'success',
+    created_at: new Date('2026-08-24T12:00:00.000Z')
+  });
+
+  try {
+    for (const mutate of [
+      () => AuditEvent.updateOne({}, update),
+      () => event.updateOne(update),
+      () => AuditEvent.find({}).updateOne(update)
+    ]) {
+      await assert.rejects(
+        async () => mutate(),
+        (error) => assertPrivateValidationError(error, marker, 'IMMUTABLE_AUDIT_EVENT')
+      );
+    }
+  } finally {
+    AuditEvent.collection.updateOne = originalUpdateOne;
+  }
+
+  assert.equal(observationCount, 0);
+  assert.equal(collectionCallCount, 0);
+});
+
+test('notification ObjectIds require safe branded state without observing spoofed accessors', async () => {
+  // Mutation caught: ObjectId.prototype identity alone accepts an attacker-controlled object.
+  const marker = 'private-object-id-marker-6421';
+  let observationCount = 0;
+  const spoofedObjectId = Object.create(mongoose.Types.ObjectId.prototype);
+  Object.defineProperty(spoofedObjectId, 'buffer', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      return Buffer.from(marker);
+    }
+  });
+  Object.defineProperty(spoofedObjectId, 'toString', {
+    enumerable: true,
+    value() {
+      observationCount += 1;
+      return '507f1f77bcf86cd799439011';
+    }
+  });
+  const base = {
+    recipientCategory: 'owner',
+    template: 'tenant-restored',
+    event: 'tenant.restored'
+  };
+
+  await assert.rejects(
+    new NotificationDelivery({ ...base, tenantId: spoofedObjectId }).validate(),
+    (error) => assertPrivateValidationError(error, marker, 'INVALID_NOTIFICATION_TENANT_ID')
+  );
+  await new NotificationDelivery({
+    ...base,
+    tenantId: new mongoose.Types.ObjectId('507f1f77bcf86cd799439011'),
+    accountId: '507f1f77bcf86cd799439012'
+  }).validate();
+
+  assert.equal(observationCount, 0);
+});
+
+test('notification static query boundary rejects unsafe filters and updates before observation', async () => {
+  // Mutation caught: schema query middleware runs after Mongoose clones raw public API inputs.
+  const originalFind = NotificationDelivery.collection.find;
+  const originalUpdateOne = NotificationDelivery.collection.updateOne;
+  const marker = 'private-notification-boundary-marker-6421';
+  let observationCount = 0;
+  let collectionCallCount = 0;
+  const accessorFilter = {};
+  Object.defineProperty(accessorFilter, 'status', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      throw new Error(marker);
+    }
+  });
+  const accessorUpdate = { $set: {} };
+  Object.defineProperty(accessorUpdate.$set, 'status', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      throw new Error(marker);
+    }
+  });
+  NotificationDelivery.collection.find = () => {
+    collectionCallCount += 1;
+    return { toArray: async () => [] };
+  };
+  NotificationDelivery.collection.updateOne = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+
+  try {
+    const cases = [
+      [() => NotificationDelivery.find(accessorFilter), 'INVALID_NOTIFICATION_FILTER'],
+      [() => NotificationDelivery.updateOne(accessorFilter, { $set: { status: 'delivered' } }), 'INVALID_NOTIFICATION_FILTER'],
+      [() => NotificationDelivery.updateOne({ status: 'failed' }, accessorUpdate), 'UNSAFE_NOTIFICATION_UPDATE'],
+      [() => NotificationDelivery.find({ unknownField: marker }), 'INVALID_NOTIFICATION_FILTER'],
+      [() => NotificationDelivery.find({ metadata: marker }), 'INVALID_NOTIFICATION_FILTER'],
+      [() => NotificationDelivery.find({ 'metadata.status': marker }), 'INVALID_NOTIFICATION_FILTER'],
+      [() => NotificationDelivery.find({ created_at: marker }), 'INVALID_NOTIFICATION_FILTER'],
+      [() => NotificationDelivery.updateOne({ status: 'failed' }, { $set: { _id: marker } }), 'INVALID_NOTIFICATION_UPDATE'],
+      [() => NotificationDelivery.updateOne({ status: 'failed' }, null), 'INVALID_NOTIFICATION_UPDATE']
+    ];
+    for (const [operation, code] of cases) {
+      await assert.rejects(
+        async () => operation(),
+        (error) => assertPrivateValidationError(error, marker, code)
+      );
+    }
+  } finally {
+    NotificationDelivery.collection.find = originalFind;
+    NotificationDelivery.collection.updateOne = originalUpdateOne;
+  }
+
+  assert.equal(observationCount, 0);
+  assert.equal(collectionCallCount, 0);
+});
+
+test('notification guarded statics preserve known Task 7 filters and block query-chain writes and deletion', async () => {
+  // Mutation caught: the early boundary either blocks valid retry transitions or leaves alternate write paths open.
+  const originalFind = NotificationDelivery.collection.find;
+  const originalUpdateOne = NotificationDelivery.collection.updateOne;
+  const originalDeleteOne = NotificationDelivery.collection.deleteOne;
+  const collectionFilters = [];
+  const collectionUpdates = [];
+  let deleteCount = 0;
+  NotificationDelivery.collection.find = (filter) => {
+    collectionFilters.push(filter);
+    return { toArray: async () => [] };
+  };
+  NotificationDelivery.collection.updateOne = async (filter, update) => {
+    collectionFilters.push(filter);
+    collectionUpdates.push(update);
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+  NotificationDelivery.collection.deleteOne = async () => {
+    deleteCount += 1;
+    return { acknowledged: true, deletedCount: 1 };
+  };
+
+  try {
+    await NotificationDelivery.find({
+      tenantId: '507f1f77bcf86cd799439011',
+      status: 'failed',
+      retryCount: { $lt: 3 }
+    }).lean();
+    await NotificationDelivery.updateOne(
+      {
+        _id: '507f1f77bcf86cd799439012',
+        status: 'failed',
+        retryCount: { $lt: 3 }
+      },
+      {
+        $set: { status: 'pending', lastAttemptAt: '2026-08-24T12:00:00.000Z' },
+        $inc: { retryCount: 1 }
+      }
+    );
+    await assert.rejects(
+      NotificationDelivery.find({ status: 'failed' }).updateOne({ $set: { status: 'pending' } }),
+      (error) => error.code === 'UNSUPPORTED_NOTIFICATION_QUERY_MUTATION'
+    );
+    await assert.rejects(
+      NotificationDelivery.deleteOne({ _id: '507f1f77bcf86cd799439012' }),
+      (error) => error.code === 'IMMUTABLE_NOTIFICATION_DELIVERY'
+    );
+  } finally {
+    NotificationDelivery.collection.find = originalFind;
+    NotificationDelivery.collection.updateOne = originalUpdateOne;
+    NotificationDelivery.collection.deleteOne = originalDeleteOne;
+  }
+
+  assert.equal(collectionFilters.length, 2);
+  assert.ok(collectionFilters[0].tenantId instanceof mongoose.Types.ObjectId);
+  assert.deepEqual(collectionFilters[0].retryCount, { $lt: 3 });
+  assert.ok(collectionFilters[1]._id instanceof mongoose.Types.ObjectId);
+  assert.deepEqual(collectionFilters[1].retryCount, { $lt: 3 });
+  assert.ok(collectionUpdates[0].$set.lastAttemptAt instanceof Date);
+  assert.equal(collectionUpdates[0].$inc.retryCount, 1);
+  assert.equal(deleteCount, 0);
+});
