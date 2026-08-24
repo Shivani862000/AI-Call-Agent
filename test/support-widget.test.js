@@ -24,6 +24,11 @@ test('mobile Customers New Call control stays left of the right-side support lau
   assert.match(shellCss, /\.customers-page #mobileFloatingNewCallButton\.mobile-floating-cta\s*\{[^}]*left:\s*max\(14px, env\(safe-area-inset-left\)\);[^}]*right:\s*auto;/);
 });
 
+test('mobile Overview New Call control stays left of the right-side support launcher', () => {
+  const shellCss = fs.readFileSync(path.join(__dirname, '..', 'public', 'app-shell.css'), 'utf8');
+  assert.match(shellCss, /\.overview-page \.mobile-floating-cta\s*\{[^}]*left:\s*max\(14px, env\(safe-area-inset-left\)\);[^}]*right:\s*auto;/);
+});
+
 test('mobile Customers call-card actions keep Analysis and More in the same row', () => {
   const shellCss = fs.readFileSync(path.join(__dirname, '..', 'public', 'app-shell.css'), 'utf8');
   const actionsRule = shellCss.match(/\.customers-page \.mobile-call-actions \{[^}]*\}/)?.[0] || '';
