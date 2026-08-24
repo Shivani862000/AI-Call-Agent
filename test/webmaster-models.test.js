@@ -70,6 +70,23 @@ test('audit schema is append-only shaped and does not carry lifecycle deletion f
   }
 });
 
+test('audit request ids reject free text and accept bounded correlation identifiers', async () => {
+  // Mutation caught: direct model construction retains a request description in the correlation field.
+  const base = {
+    actor: 'actor-1',
+    actorAccessLevel: 'SYSTEM',
+    action: 'settings.update',
+    targetType: 'platform-settings',
+    outcome: 'success'
+  };
+
+  await new AuditEvent({ ...base, requestId: 'request-01J60F8M6Q7JQ5Y2DDBF59YQ9N' }).validate();
+  await assert.rejects(
+    new AuditEvent({ ...base, requestId: 'patient@example.com request details' }).validate(),
+    (error) => !error.message.includes('patient@example.com')
+  );
+});
+
 test('notification delivery model redacts unsafe nested metadata before persistence', async () => {
   // Mutation caught: a notification retry record persists credentials or recipient PII.
   const delivery = new NotificationDelivery({
@@ -272,6 +289,79 @@ test('notification save remains fail-closed when document validation is explicit
   assert.equal(JSON.stringify(persisted[0]).includes('patient@example.com'), false);
 });
 
+test('notification insertMany sanitizes normal documents and rejects lean bypass before collection', async () => {
+  // Mutation caught: insertMany lean mode skips hydration, setters, defaults, and validation.
+  const originalInsertMany = NotificationDelivery.collection.insertMany;
+  const persistedBatches = [];
+  NotificationDelivery.collection.insertMany = async (documents) => {
+    persistedBatches.push(documents);
+    return {
+      acknowledged: true,
+      insertedCount: documents.length,
+      insertedIds: Object.fromEntries(documents.map((document, index) => [index, document._id]))
+    };
+  };
+
+  try {
+    await assert.rejects(
+      NotificationDelivery.insertMany([{
+        recipientCategory: 'owner',
+        template: 'tenant-suspended',
+        event: 'tenant.suspended',
+        metadata: 'lean patient@example.com',
+        status: 'failed',
+        retryCount: 0,
+        failureCode: 'PATIENT_JANE',
+        failureReason: 'Jane Smith'
+      }], { lean: true }),
+      (error) => error.code === 'UNSUPPORTED_NOTIFICATION_LEAN_INSERT_MANY'
+        && !error.message.includes('patient@example.com')
+    );
+
+    await assert.rejects(NotificationDelivery.insertMany([{
+      recipientCategory: 'owner',
+      template: 'tenant-suspended',
+      event: 'tenant.suspended',
+      metadata: {},
+      status: 'sent',
+      retryCount: 0
+    }]));
+
+    await NotificationDelivery.insertMany([
+      {
+        recipientCategory: 'owner',
+        template: 'tenant-suspended',
+        event: 'tenant.suspended',
+        metadata: ['patient@example.com', { provider: 'smtp' }],
+        status: 'pending',
+        retryCount: 0
+      },
+      {
+        recipientCategory: 'support',
+        template: 'tenant-restored',
+        event: 'tenant.restored',
+        metadata: { status: 'failed', responseBody: 'Jane Smith' },
+        status: 'failed',
+        retryCount: 1,
+        failureCode: 'DELIVERY_FAILED',
+        failureReason: 'patient@example.com'
+      }
+    ]);
+  } finally {
+    NotificationDelivery.collection.insertMany = originalInsertMany;
+  }
+
+  assert.equal(persistedBatches.length, 1);
+  assert.deepEqual(persistedBatches[0][0].metadata, ['[redacted]', { provider: 'smtp' }]);
+  assert.deepEqual(persistedBatches[0][1].metadata, {
+    status: 'failed',
+    responseBody: '[redacted]'
+  });
+  assert.equal(persistedBatches[0][1].failureReason, '[redacted]');
+  assert.equal(JSON.stringify(persistedBatches).includes('patient@example.com'), false);
+  assert.equal(JSON.stringify(persistedBatches).includes('Jane Smith'), false);
+});
+
 test('notification assignment, replacement, and update paths sanitize before collection persistence', async () => {
   // Mutation caught: a retry path bypasses the metadata setter with `$set: { "metadata.errorMessage": ... }`.
   const originalUpdateOne = NotificationDelivery.collection.updateOne;
@@ -470,4 +560,65 @@ test('unknown notification failure codes are rejected before collection persiste
   }
 
   assert.equal(collectionCallCount, 0);
+});
+
+test('notification queries enforce status and retry invariants before collection persistence', async () => {
+  // Mutation caught: callers disable validators or use fractional $inc to persist invalid delivery state.
+  const originalUpdateOne = NotificationDelivery.collection.updateOne;
+  const originalReplaceOne = NotificationDelivery.collection.replaceOne;
+  const persistedUpdates = [];
+  let replacementCallCount = 0;
+  NotificationDelivery.collection.updateOne = async (_filter, update) => {
+    persistedUpdates.push(update);
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+  NotificationDelivery.collection.replaceOne = async () => {
+    replacementCallCount += 1;
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+
+  const filter = { _id: '507f1f77bcf86cd799439011' };
+  try {
+    await assert.rejects(NotificationDelivery.updateOne(
+      filter,
+      { $set: { status: 'sent' } },
+      { runValidators: false }
+    ));
+    await assert.rejects(NotificationDelivery.updateOne(
+      filter,
+      { $set: { retryCount: 1.5 } }
+    ));
+    for (const invalidIncrement of [0.5, -1]) {
+      await assert.rejects(
+        NotificationDelivery.updateOne(filter, { $inc: { retryCount: invalidIncrement } }),
+        (error) => error.code === 'INVALID_NOTIFICATION_RETRY_INCREMENT'
+      );
+    }
+    await assert.rejects(NotificationDelivery.replaceOne(
+      filter,
+      {
+        recipientCategory: 'owner',
+        template: 'tenant-restored',
+        event: 'tenant.restored',
+        metadata: {},
+        status: 'sent',
+        retryCount: 1
+      },
+      { runValidators: false }
+    ));
+
+    await NotificationDelivery.updateOne(
+      filter,
+      { $set: { status: 'delivered' }, $inc: { retryCount: 1 } },
+      { runValidators: false }
+    );
+  } finally {
+    NotificationDelivery.collection.updateOne = originalUpdateOne;
+    NotificationDelivery.collection.replaceOne = originalReplaceOne;
+  }
+
+  assert.equal(persistedUpdates.length, 1);
+  assert.equal(persistedUpdates[0].$set.status, 'delivered');
+  assert.equal(persistedUpdates[0].$inc.retryCount, 1);
+  assert.equal(replacementCallCount, 0);
 });

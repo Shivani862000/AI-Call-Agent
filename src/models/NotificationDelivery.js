@@ -88,10 +88,13 @@ function sanitizeMetadataUpdate(update) {
 
     if (operator === '$rename') {
       for (const [source, destination] of Object.entries(values)) {
-        if (isRetainedPath(source) || isRetainedPath(destination)) {
+        if (isRetainedPath(source)
+          || isRetainedPath(destination)
+          || isDeliveryInvariantPath(source)
+          || isDeliveryInvariantPath(destination)) {
           throw retainedDataError(
             'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE',
-            'Notification retained-field renames are not supported'
+            'Notification retained and state field renames are not supported'
           );
         }
       }
@@ -99,6 +102,7 @@ function sanitizeMetadataUpdate(update) {
     }
 
     for (const [path, value] of Object.entries(values)) {
+      if (isDeliveryInvariantPath(path)) validateDeliveryInvariantMutation(operator, path, value);
       if (!isRetainedPath(path)) continue;
       if (operator === '$unset') {
         if (value === 1 || value === true || value === '') continue;
@@ -117,6 +121,29 @@ function sanitizeMetadataUpdate(update) {
     }
   }
   return update;
+}
+
+function isDeliveryInvariantPath(path) {
+  return path === 'retryCount' || path === 'status';
+}
+
+function validateDeliveryInvariantMutation(operator, path, value) {
+  if (operator === '$set' || operator === '$setOnInsert') return;
+  if (operator === '$inc' && path === 'retryCount') {
+    if (isNonNegativeInteger(value)) return;
+    throw retainedDataError(
+      'INVALID_NOTIFICATION_RETRY_INCREMENT',
+      'Notification retry increments must be non-negative integers'
+    );
+  }
+  throw retainedDataError(
+    'INVALID_NOTIFICATION_STATE_MUTATION',
+    'Notification state mutation operator is not supported'
+  );
+}
+
+function isNonNegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0;
 }
 
 function isRetainedPath(path) {
@@ -153,6 +180,7 @@ notificationDeliverySchema.pre([
   'findOneAndReplace',
   'replaceOne'
 ], function sanitizeRetainedNotificationUpdate() {
+  this.setOptions({ runValidators: true });
   this.setUpdate(sanitizeMetadataUpdate(this.getUpdate()));
 });
 
@@ -167,6 +195,16 @@ notificationDeliverySchema.pre('bulkWrite', function rejectRetainedNotificationB
     'UNSUPPORTED_NOTIFICATION_BULK_WRITE',
     'Notification bulk writes are not supported'
   );
+});
+
+notificationDeliverySchema.pre('insertMany', function guardNotificationInsertMany(next, _documents, options) {
+  if (options?.lean === true) {
+    return next(retainedDataError(
+      'UNSUPPORTED_NOTIFICATION_LEAN_INSERT_MANY',
+      'Lean notification inserts are not supported'
+    ));
+  }
+  return next();
 });
 
 notificationDeliverySchema.index({ tenantId: 1, status: 1, created_at: -1 });

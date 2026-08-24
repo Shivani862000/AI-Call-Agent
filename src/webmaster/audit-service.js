@@ -1,6 +1,10 @@
 'use strict';
 
-const { isSafeMachineCode, sanitizeForAudit } = require('./redaction');
+const {
+  isSafeCorrelationId,
+  isSafeMachineCode,
+  sanitizeForAudit
+} = require('./redaction');
 
 function safeIdentifier(value, fallback = null, maxLength = 128) {
   const normalized = value == null ? '' : String(value).trim();
@@ -15,6 +19,10 @@ function stableActorId(actor) {
   if (persistedId) return persistedId;
   if (actor?.source === 'environment') return 'environment-owner';
   return 'system';
+}
+
+function safeCorrelationId(value) {
+  return isSafeCorrelationId(value) ? value : null;
 }
 
 function actorAccessLevel(actor) {
@@ -72,7 +80,7 @@ function createAuditService({ AuditEventModel }) {
       tenantId: safeIdentifier(tenantId),
       before: sanitizeForAudit(before),
       after: sanitizeForAudit(after),
-      requestId: safeIdentifier(requestId),
+      requestId: safeCorrelationId(requestId),
       outcome: safeOutcome(outcome),
       failureCode: safeFailureCode(failureCode)
     };

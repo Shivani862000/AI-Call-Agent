@@ -1,7 +1,11 @@
 'use strict';
 
 const mongoose = require('mongoose');
-const { isSafeMachineCode, sanitizeForAudit } = require('../webmaster/redaction');
+const {
+  isSafeCorrelationId,
+  isSafeMachineCode,
+  sanitizeForAudit
+} = require('../webmaster/redaction');
 
 const immutableString = (options = {}) => ({ type: String, immutable: true, ...options });
 
@@ -14,7 +18,14 @@ const auditEventSchema = new mongoose.Schema({
   tenantId: immutableString({ default: null, maxlength: 128 }),
   before: { type: mongoose.Schema.Types.Mixed, default: null, immutable: true, set: sanitizeForAudit },
   after: { type: mongoose.Schema.Types.Mixed, default: null, immutable: true, set: sanitizeForAudit },
-  requestId: immutableString({ default: null, maxlength: 128 }),
+  requestId: immutableString({
+    default: null,
+    maxlength: 128,
+    validate: {
+      validator: (value) => value == null || isSafeCorrelationId(value),
+      message: 'Request ID must be a bounded correlation identifier'
+    }
+  }),
   outcome: immutableString({ enum: ['success', 'failure'], required: true }),
   failureCode: immutableString({
     default: null,

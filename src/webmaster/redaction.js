@@ -14,8 +14,16 @@ const OPERATIONAL_FAILURE_CODES = Object.freeze([
   'INTEGRATION_NOT_CONFIGURED',
   'INTEGRATION_UNAVAILABLE',
   'INTERNAL_ERROR',
+  'INVALID_AUDIT_FAILURE_CODE',
+  'INVALID_AUDIT_OUTCOME',
   'INVALID_INPUT',
+  'INVALID_NOTIFICATION_FAILURE_CODE',
+  'INVALID_NOTIFICATION_RETRY_INCREMENT',
+  'INVALID_NOTIFICATION_STATE_MUTATION',
   'INVALID_OVERRIDE_KEY',
+  'INVALID_SECRET_IDENTIFIER',
+  'INVALID_SECRET_VALUE',
+  'INVALID_WEBMASTER_SECRETS_KEY',
   'LAST_OWNER_REQUIRED',
   'MAINTENANCE_MODE',
   'NETWORK_ERROR',
@@ -25,6 +33,8 @@ const OPERATIONAL_FAILURE_CODES = Object.freeze([
   'PROVIDER_TIMEOUT',
   'PROVIDER_UNAVAILABLE',
   'RATE_LIMITED',
+  'SECRET_DECRYPTION_FAILED',
+  'SECRET_ENCRYPTION_FAILED',
   'SETTINGS_CONFLICT',
   'SMTP_AUTH_FAILED',
   'SMTP_TIMEOUT',
@@ -33,8 +43,16 @@ const OPERATIONAL_FAILURE_CODES = Object.freeze([
   'TENANT_INACTIVE',
   'TIMEOUT',
   'UNAUTHORIZED',
+  'UNSUPPORTED_NOTIFICATION_BULK_WRITE',
+  'UNSUPPORTED_NOTIFICATION_LEAN_INSERT_MANY',
+  'UNSUPPORTED_NOTIFICATION_METADATA_UPDATE',
+  'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE',
+  'UNSUPPORTED_NOTIFICATION_UPDATE_PIPELINE',
   'VALIDATION_FAILED',
-  'VERSION_CONFLICT'
+  'VERSION_CONFLICT',
+  'WEBMASTER_ACCESS_UNASSIGNED',
+  'WEBMASTER_FORBIDDEN',
+  'WEBMASTER_OWNER_REQUIRED'
 ]);
 
 const OPERATIONAL_FAILURE_CODE_SET = new Set(OPERATIONAL_FAILURE_CODES);
@@ -63,13 +81,45 @@ const SAFE_MACHINE_STRING_KEYS = new Set([
 
 const SAFE_BOOLEAN_KEYS = new Set(['configured']);
 const SAFE_INTEGER_KEYS = new Set([
+  'active',
+  'archived',
   'attempts',
+  'completed',
+  'delivered',
   'encryptionversion',
+  'failed',
+  'inactive',
+  'limit',
+  'pending',
   'retrycount',
   'schemaversion',
-  'statuscode'
+  'statuscode',
+  'suspended',
+  'total',
+  'usage',
+  'used',
+  'version'
 ]);
 const SAFE_DATE_KEYS = new Set(['createdat', 'created_at', 'updatedat', 'updated_at']);
+const SAFE_SLUG_KEYS = new Set([
+  'integrationid',
+  'model',
+  'modelid',
+  'plan',
+  'providerid',
+  'section'
+]);
+const OPERATIONAL_INTEGER_SUFFIXES = new Set([
+  'count',
+  'days',
+  'depth',
+  'limit',
+  'minutes',
+  'total',
+  'usage',
+  'version'
+]);
+const OPERATIONAL_RATE_SUFFIXES = new Set(['percent', 'percentage', 'rate', 'ratio']);
 
 const PROVIDER_VALUES = new Set(['deepgram', 'gemini', 'icallmate', 'slack', 'smtp', 'webhook']);
 const STATUS_VALUES = new Set([
@@ -94,7 +144,7 @@ const STATUS_VALUES = new Set([
   'unhealthy'
 ]);
 const SAFE_ENUM_FIELDS = new Map([
-  ['actoraccesslevel', new Set(['ADMIN', 'OWNER'])],
+  ['actoraccesslevel', new Set(['ADMIN', 'OWNER', 'SYSTEM'])],
   ['deliverystatus', STATUS_VALUES],
   ['integration', PROVIDER_VALUES],
   ['integrationstatus', STATUS_VALUES],
@@ -106,14 +156,15 @@ const SAFE_ENUM_FIELDS = new Map([
   ['status', STATUS_VALUES]
 ]);
 
-// These aggregate/configuration fields have non-identifying value shapes and are
-// explicitly registered rather than inferred from suffixes.
-const SAFE_SENSITIVE_OPERATIONAL_FIELDS = new Map([
-  ['apikeyconfigured', (value) => typeof value === 'boolean'],
-  ['customercount', isFiniteNumber],
-  ['emailprovider', (value) => PROVIDER_VALUES.has(value)],
-  ['patientcount', isFiniteNumber],
-  ['patientfailurerate', isFiniteNumber]
+const PRE_SENSITIVE_EXACT_FIELDS = new Map([
+  ['featureflags', sanitizeFeatureFlags],
+  ['health', sanitizeHealthValue],
+  ['healthstatus', sanitizeHealthValue],
+  ['integrationhealth', sanitizeHealthValue],
+  ['providerhealth', sanitizeHealthValue],
+  ['requestid', (value) => isSafeCorrelationId(value) ? value : REDACTED],
+  ['servicehealth', sanitizeHealthValue],
+  ['systemhealth', sanitizeHealthValue]
 ]);
 
 const SENSITIVE_TOKENS = new Set([
@@ -230,8 +281,23 @@ function isSafeMachineCode(value) {
   return typeof value === 'string' && OPERATIONAL_FAILURE_CODE_SET.has(value);
 }
 
+function isSafeCorrelationId(value) {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= 128
+    && /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/.test(value);
+}
+
 function isFiniteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isNonNegativeNumber(value) {
+  return isFiniteNumber(value) && value >= 0;
+}
+
+function isNonNegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0;
 }
 
 function isMachineString(value) {
@@ -239,6 +305,30 @@ function isMachineString(value) {
     && value.length > 0
     && value.length <= 128
     && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
+}
+
+function isSafeSlug(value) {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= 64
+    && /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(value);
+}
+
+function isSafeFeatureFlagKey(value) {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= 64
+    && /^[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)*$/.test(value);
+}
+
+function isSafeTimezone(value) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
+    return true;
+  } catch (_error) {
+    return false;
+  }
 }
 
 function isSensitiveSemantic(parts) {
@@ -254,18 +344,49 @@ function isSensitiveSemantic(parts) {
 }
 
 function isExplicitlySafeOperational(value, parts) {
-  const { normalized } = parts;
+  const { normalized, tokens } = parts;
   const enumValues = SAFE_ENUM_FIELDS.get(normalized);
   if (enumValues) return typeof value === 'string' && enumValues.has(value);
   if (SAFE_MACHINE_STRING_KEYS.has(normalized)) return isMachineString(value);
-  if (SAFE_BOOLEAN_KEYS.has(normalized)) return typeof value === 'boolean';
-  if (SAFE_INTEGER_KEYS.has(normalized)) return Number.isInteger(value);
+  if (SAFE_BOOLEAN_KEYS.has(normalized)
+    || normalized === 'enabled'
+    || normalized === 'inherited'
+    || normalized === 'maintenancemode') {
+    return typeof value === 'boolean';
+  }
+  if (SAFE_INTEGER_KEYS.has(normalized)) return isNonNegativeInteger(value);
+  if (SAFE_SLUG_KEYS.has(normalized)) return isSafeSlug(value);
+  if (normalized === 'timezone') return isSafeTimezone(value);
+  const suffix = tokens.at(-1);
+  if (OPERATIONAL_INTEGER_SUFFIXES.has(suffix)) return isNonNegativeInteger(value);
+  if (OPERATIONAL_RATE_SUFFIXES.has(suffix)) return isNonNegativeNumber(value);
   if (SAFE_DATE_KEYS.has(normalized)) {
     return value instanceof Date
       || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
   }
   if (normalized === 'failurecode') return isSafeMachineCode(value);
   return false;
+}
+
+function sanitizeFeatureFlags(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return REDACTED;
+  const entries = value instanceof Map ? value.entries() : Object.entries(value);
+  const clone = {};
+  for (const [rawKey, flagValue] of entries) {
+    const key = String(rawKey);
+    const parts = keyParts(key);
+    const safe = isSafeFeatureFlagKey(key)
+      && !isSensitiveSemantic(parts)
+      && typeof flagValue === 'boolean';
+    setOwn(clone, key, safe ? flagValue : REDACTED);
+  }
+  return clone;
+}
+
+function sanitizeHealthValue(value, seen) {
+  if (typeof value === 'string') return STATUS_VALUES.has(value) ? value : REDACTED;
+  if (!value || typeof value !== 'object') return REDACTED;
+  return cloneSanitized(value, seen || new WeakSet());
 }
 
 function isObjectId(value) {
@@ -293,12 +414,11 @@ function setOwn(target, key, value) {
 
 function cloneEntry(key, entry, seen) {
   const parts = keyParts(key);
-  const sensitive = isSensitiveSemantic(parts);
+  const exactSanitizer = PRE_SENSITIVE_EXACT_FIELDS.get(parts.normalized);
+  if (exactSanitizer) return exactSanitizer(entry, seen);
 
-  if (sensitive) {
-    const safeSensitiveShape = SAFE_SENSITIVE_OPERATIONAL_FIELDS.get(parts.normalized);
-    return safeSensitiveShape?.(entry) ? entry : REDACTED;
-  }
+  const sensitive = isSensitiveSemantic(parts);
+  if (sensitive) return REDACTED;
 
   if (entry === null) return null;
   if (typeof entry !== 'object') {
@@ -355,6 +475,7 @@ function sanitizeForAudit(value) {
 
 module.exports = {
   OPERATIONAL_FAILURE_CODES,
+  isSafeCorrelationId,
   isSafeMachineCode,
   sanitizeForAudit
 };

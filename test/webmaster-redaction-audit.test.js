@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 
 const {
   OPERATIONAL_FAILURE_CODES,
+  isSafeCorrelationId,
   isSafeMachineCode,
   sanitizeForAudit
 } = require('../src/webmaster/redaction');
@@ -89,10 +90,10 @@ test('redaction covers encrypted envelopes and free-text customer content while 
   assert.deepEqual(sanitized, {
     integration: 'deepgram',
     configured: true,
-    customerCount: 17,
-    patientFailureRate: 0.25,
-    apiKeyConfigured: true,
-    emailProvider: 'smtp',
+    customerCount: '[redacted]',
+    patientFailureRate: '[redacted]',
+    apiKeyConfigured: '[redacted]',
+    emailProvider: '[redacted]',
     encryptionVersion: 1,
     ciphertext: '[redacted]',
     iv: '[redacted]',
@@ -205,7 +206,7 @@ test('redaction fails closed for semantic credential, identity, and free-text va
     aadhaarNumber: '[redacted]',
     nested: [{ cookieValue: '[redacted]', statusCode: 503 }],
     providerStatus: 'degraded',
-    patientCount: 4
+    patientCount: '[redacted]'
   });
 });
 
@@ -344,7 +345,15 @@ test('failure codes come only from an exported operational allowlist', () => {
     'VALIDATION_FAILED',
     'INTERNAL_ERROR',
     'SMTP_UNAVAILABLE',
-    'PROVIDER_TIMEOUT'
+    'PROVIDER_TIMEOUT',
+    'INVALID_SECRET_IDENTIFIER',
+    'INVALID_SECRET_VALUE',
+    'INVALID_WEBMASTER_SECRETS_KEY',
+    'SECRET_ENCRYPTION_FAILED',
+    'SECRET_DECRYPTION_FAILED',
+    'WEBMASTER_FORBIDDEN',
+    'WEBMASTER_OWNER_REQUIRED',
+    'WEBMASTER_ACCESS_UNASSIGNED'
   ]) {
     assert.ok(OPERATIONAL_FAILURE_CODES.includes(requiredCode), requiredCode);
     assert.equal(isSafeMachineCode(requiredCode), true, requiredCode);
@@ -393,6 +402,152 @@ test('operational string fields retain only controlled value shapes and vocabula
       provider: '[redacted]',
       source: '[redacted]'
     }
+  });
+});
+
+test('request ids use an exact correlation-id rule while request payload variants redact', () => {
+  // Mutation caught: generic request sensitivity either removes safe correlation IDs or retains request free text.
+  for (const safeId of [
+    'request-01J60F8M6Q7JQ5Y2DDBF59YQ9N',
+    '01J60F8M6Q7JQ5Y2DDBF59YQ9N',
+    '550e8400-e29b-41d4-a716-446655440000'
+  ]) {
+    assert.equal(isSafeCorrelationId(safeId), true, safeId);
+    assert.equal(sanitizeForAudit({ requestId: safeId }).requestId, safeId);
+  }
+
+  for (const unsafeId of [
+    'patient@example.com',
+    'request contains patient details',
+    'request/../../private',
+    'r'.repeat(129)
+  ]) {
+    assert.equal(isSafeCorrelationId(unsafeId), false, unsafeId);
+    assert.equal(sanitizeForAudit({ requestId: unsafeId }).requestId, '[redacted]');
+  }
+
+  assert.deepEqual(sanitizeForAudit({
+    requestId: 'request-123',
+    requestBody: { status: 'active' },
+    requestPayload: 'private',
+    requestMessage: 'private'
+  }), {
+    requestId: 'request-123',
+    requestBody: '[redacted]',
+    requestPayload: '[redacted]',
+    requestMessage: '[redacted]'
+  });
+});
+
+test('audit service drops malformed correlation ids before model construction', async () => {
+  // Mutation caught: the service's generic identifier rule permits colon-delimited request content.
+  const created = [];
+  const service = createAuditService({
+    AuditEventModel: {
+      async create(payload) {
+        created.push(payload);
+        return payload;
+      }
+    }
+  });
+
+  await service.record({
+    actor: { id: 'actor-1', platformAccessLevel: 'SYSTEM' },
+    action: 'dashboard.read',
+    target: { type: 'dashboard', id: 'platform' },
+    requestId: 'request:private',
+    outcome: 'success'
+  });
+  await service.record({
+    actor: { id: 'actor-1', platformAccessLevel: 'SYSTEM' },
+    action: 'dashboard.read',
+    target: { type: 'dashboard', id: 'platform' },
+    requestId: 'request-123',
+    outcome: 'success'
+  });
+
+  assert.equal(created[0].requestId, null);
+  assert.equal(created[1].requestId, 'request-123');
+  assert.equal(created[1].actorAccessLevel, 'SYSTEM');
+});
+
+test('Task 4 settings audits retain registered operational values and redact arbitrary text', () => {
+  // Mutation caught: fail-closed redaction removes all useful settings evidence or suffix rules reopen free text.
+  assert.deepEqual(sanitizeForAudit({
+    section: 'platform-defaults',
+    timezone: 'Asia/Kolkata',
+    plan: 'enterprise',
+    version: 4,
+    provider: 'gemini',
+    source: 'database',
+    enabled: true,
+    maintenanceMode: false,
+    retentionDays: 90,
+    rateLimit: 120,
+    featureFlags: {
+      smartRetry: true,
+      beta_dashboard: false,
+      patientLookupEnabled: true,
+      'invalid flag': true,
+      freeform: 'yes'
+    },
+    maintenanceMessage: 'Patient Jane is unavailable',
+    arbitraryLabel: 'JaneSmith',
+    passwordMinLength: 12,
+    apiKeyEnabled: true
+  }), {
+    section: 'platform-defaults',
+    timezone: 'Asia/Kolkata',
+    plan: 'enterprise',
+    version: 4,
+    provider: 'gemini',
+    source: 'database',
+    enabled: true,
+    maintenanceMode: false,
+    retentionDays: 90,
+    rateLimit: 120,
+    featureFlags: {
+      smartRetry: true,
+      beta_dashboard: false,
+      patientLookupEnabled: '[redacted]',
+      'invalid flag': '[redacted]',
+      freeform: '[redacted]'
+    },
+    maintenanceMessage: '[redacted]',
+    arbitraryLabel: '[redacted]',
+    passwordMinLength: '[redacted]',
+    apiKeyEnabled: '[redacted]'
+  });
+});
+
+test('Task 8 dashboard audits retain aggregate operations and system actor metadata', () => {
+  // Mutation caught: aggregate snapshots collapse into redaction or health is mistaken for clinical content.
+  assert.deepEqual(sanitizeForAudit({
+    actorAccessLevel: 'SYSTEM',
+    tenants: { total: 12, active: 10, suspended: 1, archived: 1 },
+    users: { total: 48, active: 43 },
+    usage: { usageTotal: 850, limit: 1000, usageRate: 0.85 },
+    calls: { completed: 700, failed: 15, completionRate: 0.98 },
+    health: { status: 'healthy', queueDepth: 3 },
+    integrations: {
+      gemini: { provider: 'gemini', configured: true, health: 'healthy' }
+    },
+    notifications: { pending: 4, failed: 2 },
+    summary: 'Patient Jane is waiting',
+    patientQueueDepth: 2
+  }), {
+    actorAccessLevel: 'SYSTEM',
+    tenants: { total: 12, active: 10, suspended: 1, archived: 1 },
+    users: { total: 48, active: 43 },
+    usage: { usageTotal: 850, limit: 1000, usageRate: 0.85 },
+    calls: { completed: 700, failed: 15, completionRate: 0.98 },
+    health: { status: 'healthy', queueDepth: 3 },
+    integrations: {
+      gemini: { provider: 'gemini', configured: true, health: 'healthy' }
+    },
+    notifications: { pending: 4, failed: 2 },
+    summary: '[redacted]',
+    patientQueueDepth: '[redacted]'
   });
 });
 
