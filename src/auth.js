@@ -14,6 +14,7 @@ const Tenant = require('./models/Tenant');
 
 const PROTECTED_HTML_PATHS = new Set([
   '/admin.html',
+  '/webmaster.html',
   '/support-tickets.html',
   '/incoming-calls.html',
   '/customers.html',
@@ -289,16 +290,76 @@ function validateMediaToken(token) {
 
 function requireAdminAuth(req, res, next) {
   const session = readAuthSession(req);
-  if (session) {
-    req.adminSession = session;
-    return next();
+  if (!session) {
+    if (req.path.startsWith('/api/') || req.path === '/call/start') {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    return res.redirect('/login.html');
   }
 
-  if (req.path.startsWith('/api/') || req.path === '/call/start') {
-    return res.status(401).json({ error: 'Authentication required' });
+  return resolveActiveSession(session)
+    .then((activeSession) => {
+      if (!activeSession) {
+        if (req.path.startsWith('/api/') || req.path === '/call/start') {
+          return res.status(401).json({ error: 'Authentication required' });
+        }
+        return res.redirect('/login.html');
+      }
+      req.adminSession = activeSession;
+      return next();
+    })
+    .catch(() => {
+      if (req.path.startsWith('/api/') || req.path === '/call/start') {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      return res.redirect('/login.html');
+    });
+}
+
+function isTenantRole(role) {
+  return role === 'CLIENT_ADMIN' || role === 'CLIENT_AGENT';
+}
+
+async function queryToDocument(query) {
+  if (query && typeof query.lean === 'function') {
+    return query.lean();
+  }
+  return query;
+}
+
+async function loadActiveTenant(tenantId) {
+  if (!tenantId) {
+    return null;
+  }
+  const tenant = await queryToDocument(Tenant.findById(tenantId));
+  return tenant?.status === 'active' ? tenant : null;
+}
+
+async function resolveActiveSession(session) {
+  if (!session) {
+    return null;
   }
 
-  return res.redirect('/login.html');
+  const envAdmin = String(process.env.ADMIN_USERNAME || '').trim();
+  if (session.role === 'WEBMASTER' && envAdmin && session.username === envAdmin) {
+    return { ...session, platformAccessLevel: 'OWNER' };
+  }
+
+  const user = await queryToDocument(User.findOne({ username: session.username }));
+  const role = normalizeRole(user?.role);
+  if (!user || user.status !== 'active' || role !== session.role) {
+    return null;
+  }
+  if (isTenantRole(role) && !(await loadActiveTenant(user.tenantId))) {
+    return null;
+  }
+
+  return {
+    ...session,
+    tenantId: user.tenantId ? String(user.tenantId) : null,
+    ...(role === 'WEBMASTER' ? { platformAccessLevel: user.platformAccessLevel || null } : {})
+  };
 }
 
 function requireRole(...allowedRoles) {
@@ -324,32 +385,15 @@ async function requireTenantAccess(req, res, next) {
   }
 
   if (session.role === 'WEBMASTER' || session.role === 'SUPPORT_TEAM') {
-    if (req.query.tenantId || req.body.tenantId) {
-      req.tenantId = req.query.tenantId || req.body.tenantId;
-      return next();
+    const requestedTenantId = req.query?.tenantId || req.body?.tenantId;
+    if (!requestedTenantId || !(await loadActiveTenant(requestedTenantId))) {
+      return res.status(403).json({ error: 'Forbidden: An active tenant context is required' });
     }
-    try {
-      // For Webmaster interacting with the legacy UI, fallback to the first tenant
-      let tenant = await Tenant.findOne();
-      if (!tenant) {
-        // Create a default tenant if none exists
-        tenant = await Tenant.create({
-          name: 'Default Tenant',
-          slug: 'default-tenant',
-          dbConnectionString: process.env.MONGODB_URI,
-          ownerEmail: 'admin@vikitechsolutions.in'
-        });
-      }
-      req.tenantId = tenant._id;
-      return next();
-    } catch (err) {
-      console.error('Error fetching/creating fallback tenant:', err);
-      // We must not proceed without a tenantId if we expect it downstream
-      return res.status(500).json({ error: 'Failed to assign a tenant context to the Webmaster.' });
-    }
+    req.tenantId = requestedTenantId;
+    return next();
   }
 
-  if (session.tenantId) {
+  if (session.tenantId && await loadActiveTenant(session.tenantId)) {
     // Inject tenantId into req for easy filtering in downstream controllers
     req.tenantId = session.tenantId;
     return next();
@@ -370,15 +414,38 @@ async function verifyCredentials(username, password) {
   
   if (envAdmin && normalizedUsername === envAdmin && envHash) {
     if (await bcrypt.compare(String(password), envHash)) {
-      return { success: true, username: envAdmin, role: 'WEBMASTER', tenantId: null };
+      return {
+        success: true,
+        username: envAdmin,
+        role: 'WEBMASTER',
+        tenantId: null,
+        platformAccessLevel: 'OWNER'
+      };
     }
   }
 
   try {
-    const user = await User.findOne({ username: normalizedUsername });
+    const normalizedEmail = normalizedUsername.toLowerCase();
+    const user = await User.findOne({
+      $or: [{ username: normalizedUsername }, { email: normalizedEmail }]
+    });
     const role = normalizeRole(user?.role);
-    if (user?.password_hash && role && await bcrypt.compare(String(password), user.password_hash)) {
-      return { success: true, username: user.username, role, tenantId: user.tenantId };
+    if (
+      user?.status === 'active'
+      && user?.password_hash
+      && role
+      && await bcrypt.compare(String(password), user.password_hash)
+    ) {
+      if (isTenantRole(role) && !(await loadActiveTenant(user.tenantId))) {
+        return { success: false };
+      }
+      return {
+        success: true,
+        username: user.username,
+        role,
+        tenantId: user.tenantId || null,
+        ...(role === 'WEBMASTER' ? { platformAccessLevel: user.platformAccessLevel || null } : {})
+      };
     }
     return { success: false };
   } catch (error) {
@@ -403,7 +470,12 @@ async function basicAuth(req, res, next) {
 
   const authResult = await verifyCredentials(login, password);
   if (authResult.success) {
-    req.adminSession = { username: authResult.username, role: authResult.role, tenantId: authResult.tenantId };
+    req.adminSession = {
+      username: authResult.username,
+      role: authResult.role,
+      tenantId: authResult.tenantId,
+      ...(authResult.role === 'WEBMASTER' ? { platformAccessLevel: authResult.platformAccessLevel || 'OWNER' } : {})
+    };
     return next();
   }
 
@@ -421,6 +493,7 @@ module.exports = {
   parseCookies,
   createAuthToken,
   readAuthSession,
+  resolveActiveSession,
   setAuthCookie,
   clearAuthCookie,
   requireAdminAuth,

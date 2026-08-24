@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 
+const PLATFORM_ACCESS_LEVELS = ['OWNER', 'ADMIN'];
+
 const userSchema = new mongoose.Schema({
   username: {
     type: String,
@@ -23,6 +25,17 @@ const userSchema = new mongoose.Schema({
     enum: ['WEBMASTER', 'SUPPORT_TEAM', 'CLIENT_ADMIN', 'CLIENT_AGENT'],
     required: true
   },
+  platformAccessLevel: {
+    type: String,
+    enum: PLATFORM_ACCESS_LEVELS,
+    default: null,
+    validate: {
+      validator(value) {
+        return this.role === 'WEBMASTER' ? Boolean(value) : value == null;
+      },
+      message: 'Platform access level is valid only for Webmaster accounts'
+    }
+  },
   tenantId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Tenant',
@@ -33,18 +46,15 @@ const userSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['active', 'inactive'],
+    enum: ['active', 'suspended', 'archived'],
     default: 'active'
   },
-  created_at: {
+  password_changed_at: {
     type: Date,
-    default: Date.now
+    default: null
   }
+}, {
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
 });
-
-// Index to ensure email is unique globally, and username is unique globally
-// Mongoose handles unique fields with unique:true but we should ensure they are explicit
-userSchema.index({ username: 1 }, { unique: true });
-userSchema.index({ email: 1 }, { unique: true });
 
 module.exports = mongoose.model('User', userSchema);

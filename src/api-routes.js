@@ -19,6 +19,9 @@ const reportsRouter = require('../routes/reports');
 const agentsRouter = require('../routes/agents');
 const testCallRouter = require('../routes/test-call');
 const testAiCallRouter = require('../routes/test-ai-call');
+const User = require('./models/User');
+const Tenant = require('./models/Tenant');
+const { createWebmasterAuthorization } = require('./webmaster/authorization');
 
 const {
   CALL_MODE,
@@ -36,6 +39,7 @@ const {
 
 const {
   readAuthSession,
+  resolveActiveSession,
   setAuthCookie,
   requireAdminAuth,
   requireRole,
@@ -43,7 +47,6 @@ const {
   clearAuthCookie,
   createAuthToken,
   createMediaToken,
-  ADMIN_USERNAME,
   verifyCredentials
 } = require('./auth');
 
@@ -92,6 +95,7 @@ const {
   hasValidIcallMateWebhookSecret
 } = require('./icallmate-webhook');
 const logger = require('../services/system-logger');
+const webmasterAuthorization = createWebmasterAuthorization({ UserModel: User, TenantModel: Tenant });
 
 module.exports = function mountApiRoutes(app) {
   app.get('/health', (req, res) => {
@@ -106,23 +110,33 @@ module.exports = function mountApiRoutes(app) {
   });
 
   app.get('/', (req, res) => {
-    if (readAuthSession(req)) {
-      return res.redirect('/admin.html');
+    const session = readAuthSession(req);
+    if (session) {
+      return res.redirect(session.role === 'WEBMASTER' ? '/webmaster.html' : '/admin.html');
     }
 
     return res.redirect('/login.html');
   });
 
-  app.get('/api/auth/session', (req, res) => {
-    const session = readAuthSession(req);
-    if (!session) {
+  app.get('/api/auth/session', async (req, res) => {
+    let activeSession = null;
+    try {
+      activeSession = await resolveActiveSession(readAuthSession(req));
+    } catch (error) {
+      activeSession = null;
+    }
+    if (!activeSession) {
+      clearAuthCookie(req, res);
       return res.status(401).json({ authenticated: false });
     }
 
     return res.json({
       authenticated: true,
-      username: session.username,
-      role: session.role
+      username: activeSession.username,
+      role: activeSession.role,
+      ...(activeSession.role === 'WEBMASTER'
+        ? { platformAccessLevel: activeSession.platformAccessLevel }
+        : {})
     });
   });
 
@@ -138,14 +152,17 @@ module.exports = function mountApiRoutes(app) {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const token = createAuthToken(username, authResult.role, authResult.tenantId);
+    const token = createAuthToken(authResult.username, authResult.role, authResult.tenantId);
     setAuthCookie(req, res, token);
-    logger.info('USER_LOGIN', { user: username, role: authResult.role, tenantId: authResult.tenantId });
+    logger.info('USER_LOGIN', { user: authResult.username, role: authResult.role, tenantId: authResult.tenantId });
     return res.json({
       success: true,
-      username,
+      username: authResult.username,
       role: authResult.role,
-      tenantId: authResult.tenantId
+      tenantId: authResult.tenantId,
+      ...(authResult.role === 'WEBMASTER'
+        ? { platformAccessLevel: authResult.platformAccessLevel || 'OWNER' }
+        : {})
     });
   });
 
@@ -156,7 +173,7 @@ module.exports = function mountApiRoutes(app) {
     return res.json({ success: true });
   });
 
-  app.use('/api/tenants', requireRole('WEBMASTER'), tenantsRouter);
+  app.use('/api/tenants', webmasterAuthorization.requireWebmaster, tenantsRouter);
   app.use('/api/users', requireTenantAccess, usersRouter);
   
   app.use('/api/customers', requireTenantAccess, customersRouter);

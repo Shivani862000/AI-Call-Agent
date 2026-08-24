@@ -14,6 +14,9 @@ const rateLimit = require('express-rate-limit');
 // Import modular components
 const { PORT } = require('./src/config');
 const { PROTECTED_HTML_PATHS, requireAdminAuth, requireRole, basicAuth } = require('./src/auth');
+const User = require('./src/models/User');
+const Tenant = require('./src/models/Tenant');
+const { createWebmasterAuthorization } = require('./src/webmaster/authorization');
 const { isAdminOnlyRequest } = require('./src/authorization');
 const mountApiRoutes = require('./src/api-routes');
 const setupWebSocketBridge = require('./src/websocket-bridge');
@@ -21,6 +24,7 @@ const startServer = require('./src/server');
 require('./src/cron/daily-reports');
 
 const app = express();
+const webmasterAuthorization = createWebmasterAuthorization({ UserModel: User, TenantModel: Tenant });
 app.set('trust proxy', 1);
 
 app.disable('x-powered-by');
@@ -84,6 +88,13 @@ app.use((req, res, next) => {
     return requireAdminAuth(req, res, next);
   }
 
+  return next();
+});
+
+app.use((req, res, next) => {
+  if (req.path === '/webmaster.html' || req.path.startsWith('/api/webmaster')) {
+    return webmasterAuthorization.requireWebmaster(req, res, next);
+  }
   return next();
 });
 

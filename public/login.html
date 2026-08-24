@@ -321,7 +321,8 @@
       try {
         const res = await fetch('/api/auth/session', { cache: 'no-store' });
         if (res.ok) {
-          window.location.replace('/admin.html');
+          const session = await res.json();
+          window.location.replace(session.role === 'WEBMASTER' ? '/webmaster.html' : '/admin.html');
         }
       } catch (e) {
         // Let the user continue to login if the session check fails.
@@ -368,7 +369,7 @@
           throw new Error(payload.error || 'Unable to sign in');
         }
 
-        window.location.replace('/admin.html');
+        window.location.replace(payload.role === 'WEBMASTER' ? '/webmaster.html' : '/admin.html');
       } catch (error) {
         errorEl.textContent = error.message;
       } finally {

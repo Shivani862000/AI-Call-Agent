@@ -14,23 +14,11 @@ const tenantSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['active', 'inactive', 'suspended'],
+    enum: ['active', 'suspended', 'archived'],
     default: 'active'
-  },
-  created_at: {
-    type: Date,
-    default: Date.now
-  },
-  updated_at: {
-    type: Date,
-    default: Date.now
   }
-});
-
-// Update timestamp before saving
-tenantSchema.pre('save', function(next) {
-  this.updated_at = Date.now();
-  next();
+}, {
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
 });
 
 module.exports = mongoose.model('Tenant', tenantSchema);

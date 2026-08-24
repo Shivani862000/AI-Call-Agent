@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const bcrypt = require('bcrypt');
 
 process.env.NODE_ENV = 'test';
 process.env.AUTH_SIGNING_SECRET = 'test-only-auth-signing-secret-with-more-than-32-bytes';
@@ -13,6 +14,8 @@ const {
   readAuthSession,
   requireRole
 } = require('../src/auth');
+const User = require('../src/models/User');
+const Tenant = require('../src/models/Tenant');
 const { isAdminOnlyRequest } = require('../src/authorization');
 
 function requestForToken(token) {
@@ -23,11 +26,11 @@ function requestForToken(token) {
 }
 
 test('signed sessions preserve a valid role and reject payload tampering', () => {
-  const token = createAuthToken('agent1', 'AGENT');
+  const token = createAuthToken('webmaster1', 'WEBMASTER');
   const session = readAuthSession(requestForToken(token));
 
-  assert.equal(session.username, 'agent1');
-  assert.equal(session.role, 'AGENT');
+  assert.equal(session.username, 'webmaster1');
+  assert.equal(session.role, 'WEBMASTER');
 
   const [encodedPayload, signature] = token.split('.');
   const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
@@ -35,15 +38,13 @@ test('signed sessions preserve a valid role and reject payload tampering', () =>
   const tamperedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
 
   assert.equal(readAuthSession(requestForToken(`${tamperedPayload}.${signature}`)), null);
-  assert.throws(() => createAuthToken('agent1', 'OWNER'), /invalid user or role/);
-  assert.throws(() => createAuthToken('agent1'), /invalid user or role/);
-  assert.notEqual(createAuthToken('agent1', 'AGENT'), token);
+  assert.throws(() => createAuthToken('webmaster1', 'OWNER'), /invalid user or role/);
+  assert.throws(() => createAuthToken('webmaster1'), /invalid user or role/);
+  assert.notEqual(createAuthToken('webmaster1', 'WEBMASTER'), token);
 });
 
-test('production auth configuration requires dedicated strong values', () => {
+test('production auth configuration requires a dedicated strong signing secret', () => {
   const missingIssues = getAuthConfigurationIssues({ NODE_ENV: 'production' });
-  assert.ok(missingIssues.some((issue) => issue.includes('ADMIN_USERNAME')));
-  assert.ok(missingIssues.some((issue) => issue.includes('ADMIN_PASSWORD_HASH')));
   assert.ok(missingIssues.some((issue) => issue.includes('AUTH_SIGNING_SECRET')));
 
   const reusedSecret = 'provider-secret-that-is-definitely-longer-than-thirty-two-bytes';
@@ -65,8 +66,8 @@ test('production auth configuration requires dedicated strong values', () => {
   assert.deepEqual(validIssues, []);
 });
 
-test('admin role middleware denies agents and permits admins', () => {
-  const middleware = requireRole('ADMIN');
+test('client administrator middleware denies client agents and permits client administrators', () => {
+  const middleware = requireRole('CLIENT_ADMIN');
   let nextCalled = false;
   const response = {
     statusCode: 200,
@@ -82,7 +83,7 @@ test('admin role middleware denies agents and permits admins', () => {
   };
 
   middleware(
-    { path: '/api/feedback', adminSession: { username: 'agent1', role: 'AGENT' } },
+    { path: '/api/feedback', adminSession: { username: 'agent1', role: 'CLIENT_AGENT' } },
     response,
     () => { nextCalled = true; }
   );
@@ -90,7 +91,7 @@ test('admin role middleware denies agents and permits admins', () => {
   assert.equal(response.statusCode, 403);
 
   middleware(
-    { path: '/api/feedback', adminSession: { username: 'admin', role: 'ADMIN' } },
+    { path: '/api/feedback', adminSession: { username: 'admin', role: 'CLIENT_ADMIN' } },
     response,
     () => { nextCalled = true; }
   );
@@ -122,4 +123,52 @@ test('route policy protects sensitive operations while retaining agent workflows
     { method: 'GET', path: '/api/calls/recent' }
   ];
   agentRequests.forEach((request) => assert.equal(isAdminOnlyRequest(request), false));
+});
+
+test('credential verification rejects suspended accounts', async () => {
+  const { verifyCredentials } = require('../src/auth');
+  const originalFindOne = User.findOne;
+  const passwordHash = await bcrypt.hash('correct-horse-battery-staple', 4);
+  User.findOne = async () => ({
+    username: 'suspended-wm',
+    password_hash: passwordHash,
+    role: 'WEBMASTER',
+    status: 'suspended',
+    platformAccessLevel: 'ADMIN',
+    tenantId: null
+  });
+
+  try {
+    assert.deepEqual(
+      await verifyCredentials('suspended-wm', 'correct-horse-battery-staple'),
+      { success: false }
+    );
+  } finally {
+    User.findOne = originalFindOne;
+  }
+});
+
+test('credential verification accepts email only for active users with an active tenant', async () => {
+  const { verifyCredentials } = require('../src/auth');
+  const originalFindOne = User.findOne;
+  const originalFindById = Tenant.findById;
+  const passwordHash = await bcrypt.hash('correct-horse-battery-staple', 4);
+  User.findOne = async () => ({
+    username: 'client-admin',
+    password_hash: passwordHash,
+    role: 'CLIENT_ADMIN',
+    status: 'active',
+    tenantId: 'tenant-1'
+  });
+  Tenant.findById = async () => ({ status: 'suspended' });
+
+  try {
+    assert.deepEqual(
+      await verifyCredentials('admin@example.com', 'correct-horse-battery-staple'),
+      { success: false }
+    );
+  } finally {
+    User.findOne = originalFindOne;
+    Tenant.findById = originalFindById;
+  }
 });
