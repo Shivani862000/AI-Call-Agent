@@ -4,6 +4,7 @@ const User = require('../models/User');
 const Call = require('../models/Call');
 const { sendDailyReportToAdmin } = require('../services/email-service');
 const logger = require('../../services/system-logger');
+const { activeRecordFilter } = require('../webmaster/lifecycle');
 
 async function sendReportsForTime(timeString) {
   try {
@@ -23,10 +24,10 @@ async function sendReportsForTime(timeString) {
       if (admins.length === 0) continue;
 
       // Aggregate call stats for this tenant today
-      const callsToday = await Call.find({
+      const callsToday = await Call.find(activeRecordFilter({
         tenantId: tenant._id,
         created_at: { $gte: startOfDay, $lte: endOfDay }
-      });
+      }));
 
       const totalCalls = callsToday.length;
       const successful = callsToday.filter(c => c.status === 'completed' || c.status === 'answered').length;

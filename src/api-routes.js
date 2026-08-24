@@ -96,6 +96,15 @@ const {
 } = require('./icallmate-webhook');
 const logger = require('../services/system-logger');
 const webmasterAuthorization = createWebmasterAuthorization({ UserModel: User, TenantModel: Tenant });
+const {
+  recordFilterFromRequest,
+  restoreFields,
+  createMongooseArchiveHandlers
+} = require('./webmaster/lifecycle');
+const callArchiveHandlers = createMongooseArchiveHandlers({
+  Model: Call,
+  resourceName: 'Call'
+});
 
 module.exports = function mountApiRoutes(app) {
   app.get('/health', (req, res) => {
@@ -183,11 +192,11 @@ module.exports = function mountApiRoutes(app) {
   
   app.use('/api/customers', requireTenantAccess, customersRouter);
   app.use('/api/clients', requireTenantAccess, clientsRouter);
-  app.use('/api/campaigns', campaignsRouter);
+  app.use('/api/campaigns', requireTenantAccess, campaignsRouter);
   app.use('/api/feedback', feedbackRouter);
   app.use('/api/support-tickets', createSupportTicketsRouter({ dbRun, dbGet, dbAll, notifyNewTicket: createSlackSupportNotifier({ webhookUrl: process.env.SLACK_SUPPORT_WEBHOOK_URL }) }));
   app.use('/api/reports', reportsRouter);
-  app.use('/api/agents', agentsRouter);
+  app.use('/api/agents', requireTenantAccess, agentsRouter);
   app.use('/api/test-call', testCallRouter);
   app.use('/api/test-ai-call', testAiCallRouter);
 
@@ -525,7 +534,10 @@ module.exports = function mountApiRoutes(app) {
   app.post('/api/calls/initiate/:customerId', async (req, res) => {
     let customer = null;
     try {
-      customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.customerId]);
+      customer = await dbGet(
+        "SELECT * FROM customers WHERE id = ? AND tenant_id = ? AND status <> 'archived'",
+        [req.params.customerId, String(req.tenantId)]
+      );
       if (!customer) {
         return res.status(404).json({ error: 'Customer not found' });
       }
@@ -682,6 +694,7 @@ module.exports = function mountApiRoutes(app) {
          SUM(CASE WHEN DATE(called_at) = DATE('now') THEN 1 ELSE 0 END) AS today_count,
          SUM(COALESCE(media_packets, 0)) AS media_packets
        FROM calls
+       WHERE status <> 'archived'
        GROUP BY COALESCE(call_direction, 'outbound'), COALESCE(outcome, 'unknown')`
       );
 
@@ -1006,6 +1019,9 @@ module.exports = function mountApiRoutes(app) {
         customerName,
         customerPhone: phone
       });
+      if (String(customer?.status || '').toLowerCase() === 'archived') {
+        return res.status(404).json({ error: 'Customer not found' });
+      }
       customer = await hydratePreCallIntelligence(customer);
       const agentConfig = requestedAgentId ? await getAgentConfigById(requestedAgentId) : await getDefaultAgentConfig();
       const blockedReason = await shouldBlockCustomerCall(customer);
@@ -1128,7 +1144,7 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/recent', async (req, res) => {
     try {
-      const calls = await Call.find({ tenantId: req.tenantId })
+      const calls = await Call.find(recordFilterFromRequest(req, { tenantId: req.tenantId }))
         .populate('customerId')
         .sort({ started_at: -1 })
         .limit(25)
@@ -1490,20 +1506,21 @@ module.exports = function mountApiRoutes(app) {
     }
   });
 
-  app.delete('/api/calls/bulk', async (req, res) => {
+  app.post('/api/calls/bulk/archive', callArchiveHandlers.archiveBulk);
+  app.delete('/api/calls/bulk', callArchiveHandlers.archiveBulk);
+  app.post('/api/calls/bulk/restore', async (req, res) => {
     try {
-      const counts = await dbGet('SELECT COUNT(*) AS call_count FROM calls');
-      await dbRun('DELETE FROM call_supervisor_events');
-      await dbRun('DELETE FROM calls');
-      logger.warn('ALL_RECORDS_DELETED', {
-        deletedBy: req.adminSession?.username || 'admin',
-        calls: counts?.call_count || 0,
-        scope: 'call_history'
+      const result = await Call.updateMany(
+        { tenantId: req.tenantId, status: 'archived' },
+        { $set: restoreFields('active') }
+      );
+      res.status(200).json({
+        message: 'Call records restored successfully',
+        restoredCount: Number(result?.modifiedCount || 0),
+        resource: { status: 'active' }
       });
-      res.json({ message: 'All call history deleted successfully' });
     } catch (error) {
-      console.error('Error in calls bulk delete:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: 'Unable to restore call records' });
     }
   });
 

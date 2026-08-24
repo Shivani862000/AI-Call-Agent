@@ -1,6 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { dbAll, dbGet, dbRun } = require('../db');
+const { createSqlArchiveHandlers } = require('../src/webmaster/lifecycle');
+
+const campaignArchiveHandlers = createSqlArchiveHandlers({
+  dbAll,
+  dbGet,
+  dbRun,
+  tableName: 'campaign_configs',
+  resourceName: 'Campaign'
+});
 
 function normalizePayload(payload = {}) {
   return {
@@ -13,7 +22,11 @@ function normalizePayload(payload = {}) {
 
 router.get('/', async (req, res) => {
   try {
-    const rows = await dbAll('SELECT * FROM campaign_configs ORDER BY created_at DESC, name ASC');
+    const archived = String(req.query.status || '').toLowerCase() === 'archived';
+    const rows = await dbAll(
+      `SELECT * FROM campaign_configs WHERE tenant_id = ? AND status ${archived ? '=' : '<>'} 'archived' ORDER BY created_at DESC, name ASC`,
+      [String(req.tenantId)]
+    );
     res.json(rows);
   } catch (error) {
     console.error('Error fetching campaigns:', error);
@@ -29,8 +42,8 @@ router.post('/', async (req, res) => {
     }
 
     const result = await dbRun(
-      'INSERT INTO campaign_configs (name, service_name, monthly_spend_inr, status) VALUES (?, ?, ?, ?)',
-      [payload.name, payload.service_name || null, payload.monthly_spend_inr, payload.status]
+      'INSERT INTO campaign_configs (name, service_name, monthly_spend_inr, status, tenant_id) VALUES (?, ?, ?, ?, ?)',
+      [payload.name, payload.service_name || null, payload.monthly_spend_inr, payload.status, String(req.tenantId)]
     );
     res.json({ id: result.lastID, message: 'Campaign created successfully' });
   } catch (error) {
@@ -41,7 +54,10 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM campaign_configs WHERE id = ?', [req.params.id]);
+    const existing = await dbGet(
+      "SELECT * FROM campaign_configs WHERE id = ? AND tenant_id = ? AND status <> 'archived'",
+      [req.params.id, String(req.tenantId)]
+    );
     if (!existing) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
@@ -52,8 +68,8 @@ router.put('/:id', async (req, res) => {
     }
 
     await dbRun(
-      'UPDATE campaign_configs SET name = ?, service_name = ?, monthly_spend_inr = ?, status = ? WHERE id = ?',
-      [payload.name, payload.service_name || null, payload.monthly_spend_inr, payload.status, req.params.id]
+      "UPDATE campaign_configs SET name = ?, service_name = ?, monthly_spend_inr = ?, status = ? WHERE id = ? AND tenant_id = ? AND status <> 'archived'",
+      [payload.name, payload.service_name || null, payload.monthly_spend_inr, payload.status, req.params.id, String(req.tenantId)]
     );
     res.json({ message: 'Campaign updated successfully' });
   } catch (error) {
@@ -62,14 +78,8 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
-  try {
-    await dbRun('DELETE FROM campaign_configs WHERE id = ?', [req.params.id]);
-    res.json({ message: 'Campaign deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting campaign:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+router.post('/:id/archive', campaignArchiveHandlers.archive);
+router.post('/:id/restore', campaignArchiveHandlers.restore);
+router.delete('/:id', campaignArchiveHandlers.archive);
 
 module.exports = router;

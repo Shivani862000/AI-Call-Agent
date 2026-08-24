@@ -1,6 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { dbRun, dbGet, dbAll } = require('../db');
+const { createSqlArchiveHandlers } = require('../src/webmaster/lifecycle');
+
+const agentArchiveHandlers = createSqlArchiveHandlers({
+  dbRun,
+  dbGet,
+  tableName: 'agents',
+  resourceName: 'Agent'
+});
 
 function slugify(value) {
   return String(value || '')
@@ -79,11 +87,11 @@ function validateAgentPayload(payload) {
 async function clearDefaultAgentIfNeeded(payload, currentId = null) {
   if (!payload.is_default) return;
   if (currentId) {
-    await dbRun('UPDATE agents SET is_default = 0, updated_at = ? WHERE id != ?', [new Date().toISOString(), currentId]);
+    await dbRun("UPDATE agents SET is_default = 0, updated_at = ? WHERE id != ? AND tenant_id = ? AND status <> 'archived'", [new Date().toISOString(), currentId, String(payload.tenantId)]);
     return;
   }
 
-  await dbRun('UPDATE agents SET is_default = 0, updated_at = ?', [new Date().toISOString()]);
+  await dbRun("UPDATE agents SET is_default = 0, updated_at = ? WHERE tenant_id = ? AND status <> 'archived'", [new Date().toISOString(), String(payload.tenantId)]);
 }
 
 function handleSqliteError(error, res) {
@@ -101,7 +109,11 @@ function handleSqliteError(error, res) {
 
 router.get('/', async (req, res) => {
   try {
-    const rows = await dbAll('SELECT * FROM agents ORDER BY is_default DESC, is_active DESC, name ASC');
+    const archived = String(req.query.status || '').toLowerCase() === 'archived';
+    const rows = await dbAll(
+      `SELECT * FROM agents WHERE tenant_id = ? AND status ${archived ? '=' : '<>'} 'archived' ORDER BY is_default DESC, is_active DESC, name ASC`,
+      [String(req.tenantId)]
+    );
     res.json(rows);
   } catch (error) {
     console.error('Error fetching agents:', error);
@@ -111,7 +123,10 @@ router.get('/', async (req, res) => {
 
 router.get('/default', async (req, res) => {
   try {
-    const agent = await dbGet('SELECT * FROM agents WHERE is_default = 1 ORDER BY id ASC LIMIT 1');
+    const agent = await dbGet(
+      "SELECT * FROM agents WHERE tenant_id = ? AND is_default = 1 AND status <> 'archived' ORDER BY id ASC LIMIT 1",
+      [String(req.tenantId)]
+    );
     if (!agent) {
       return res.status(404).json({ error: 'Default agent not found' });
     }
@@ -125,7 +140,11 @@ router.get('/default', async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const agent = await dbGet('SELECT * FROM agents WHERE id = ?', [req.params.id]);
+    const archived = String(req.query.status || '').toLowerCase() === 'archived';
+    const agent = await dbGet(
+      `SELECT * FROM agents WHERE id = ? AND tenant_id = ? AND status ${archived ? '=' : '<>'} 'archived'`,
+      [req.params.id, String(req.tenantId)]
+    );
     if (!agent) {
       return res.status(404).json({ error: 'Agent not found' });
     }
@@ -140,6 +159,7 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const payload = normalizeAgentPayload(req.body);
+    payload.tenantId = req.tenantId;
     const fieldErrors = validateAgentPayload(payload);
 
     if (Object.keys(fieldErrors).length) {
@@ -152,8 +172,8 @@ router.post('/', async (req, res) => {
       `INSERT INTO agents (
         name, slug, description, client_name, language, voice_pipeline, stt_provider,
         llm_provider, llm_model, tts_provider, tts_voice, system_prompt, opening_prompt,
-        is_default, is_active, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        is_default, is_active, updated_at, tenant_id, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         payload.name,
         payload.slug,
@@ -170,7 +190,9 @@ router.post('/', async (req, res) => {
         payload.opening_prompt || null,
         payload.is_default,
         payload.is_active,
-        now
+        now,
+        String(req.tenantId),
+        'active'
       ]
     );
 
@@ -182,12 +204,16 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM agents WHERE id = ?', [req.params.id]);
+    const existing = await dbGet(
+      "SELECT * FROM agents WHERE id = ? AND tenant_id = ? AND status <> 'archived'",
+      [req.params.id, String(req.tenantId)]
+    );
     if (!existing) {
       return res.status(404).json({ error: 'Agent not found' });
     }
 
     const payload = normalizeAgentPayload(req.body);
+    payload.tenantId = req.tenantId;
     const fieldErrors = validateAgentPayload(payload);
 
     if (Object.keys(fieldErrors).length) {
@@ -213,7 +239,7 @@ router.put('/:id', async (req, res) => {
               is_default = ?,
               is_active = ?,
               updated_at = ?
-        WHERE id = ?`,
+        WHERE id = ? AND tenant_id = ? AND status <> 'archived'`,
       [
         payload.name,
         payload.slug,
@@ -231,7 +257,8 @@ router.put('/:id', async (req, res) => {
         payload.is_default,
         payload.is_active,
         new Date().toISOString(),
-        existing.id
+        existing.id,
+        String(req.tenantId)
       ]
     );
 
@@ -241,28 +268,8 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
-  try {
-    const existing = await dbGet('SELECT * FROM agents WHERE id = ?', [req.params.id]);
-    if (!existing) {
-      return res.status(404).json({ error: 'Agent not found' });
-    }
-
-    if (existing.is_default) {
-      return res.status(409).json({ error: 'Default agent cannot be deleted until another default agent is selected' });
-    }
-
-    const callsUsingAgent = await dbGet('SELECT COUNT(*) AS count FROM calls WHERE agent_id = ?', [existing.id]);
-    if (Number(callsUsingAgent?.count || 0) > 0) {
-      return res.status(409).json({ error: 'This agent is already used in call history and cannot be deleted' });
-    }
-
-    await dbRun('DELETE FROM agents WHERE id = ?', [existing.id]);
-    res.json({ message: 'Agent deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting agent:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+router.post('/:id/archive', agentArchiveHandlers.archive);
+router.post('/:id/restore', agentArchiveHandlers.restore);
+router.delete('/:id', agentArchiveHandlers.archive);
 
 module.exports = router;

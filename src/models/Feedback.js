@@ -8,6 +8,10 @@ const feedbackSchema = new mongoose.Schema({
   review_text: { type: String }, // equivalent to comments
   category: { type: String },
   source: { type: String, default: 'manual' },
+  status: { type: String, enum: ['active', 'archived'], default: 'active' },
+  archived_at: { type: Date, default: null },
+  archived_by: { type: String, default: null },
+  archive_reason: { type: String, default: null },
   created_at: { type: Date, default: Date.now } // equivalent to submitted_at
 });
 

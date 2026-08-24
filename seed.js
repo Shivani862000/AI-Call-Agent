@@ -8,91 +8,70 @@ const { SEED_WEBMASTER } = require('./src/seed-data');
 
 async function seed() {
   await mongoose.connect(process.env.MONGODB_URI, { family: 4 });
-  
-  // Clear existing users and tenants for a clean slate
-  await User.deleteMany({});
-  await Tenant.deleteMany({});
-  await Customer.deleteMany({});
 
   const passwordHash = await bcrypt.hash('password123', 10);
+  const activeLifecycle = {
+    status: 'active',
+    archived_at: null,
+    archived_by: null,
+    archive_reason: null
+  };
 
   // 1. Create Webmaster (Global Admin)
-  const webmaster = await User.create({
-    ...SEED_WEBMASTER,
-    password_hash: passwordHash,
-    isActive: true
-  });
+  await User.findOneAndUpdate(
+    { username: SEED_WEBMASTER.username },
+    { $set: { ...SEED_WEBMASTER, password_hash: passwordHash, ...activeLifecycle } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
   // 2. Create Support Team User
-  const supportUser = await User.create({
-    username: 'support@vikitech.in',
-    email: 'support@vikitech.in',
-    password_hash: passwordHash,
-    role: 'SUPPORT_TEAM',
-    isActive: true
-  });
+  await User.findOneAndUpdate(
+    { username: 'support@vikitech.in' },
+    { $set: { username: 'support@vikitech.in', email: 'support@vikitech.in', password_hash: passwordHash, role: 'SUPPORT_TEAM', ...activeLifecycle } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
   // 3. Create Tenant 1 (Apollo Hospital)
-  const apollo = await Tenant.create({
-    name: 'Apollo Hospital',
-    slug: 'apollo',
-    ownerEmail: 'admin@apollo.in',
-    dbConnectionString: process.env.MONGODB_URI
-  });
+  const apollo = await Tenant.findOneAndUpdate(
+    { name: 'Apollo Hospital' },
+    { $set: { name: 'Apollo Hospital', ...activeLifecycle } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
-  const apolloAdmin = await User.create({
-    username: 'admin@apollo.in',
-    email: 'admin@apollo.in',
-    password_hash: passwordHash,
-    role: 'CLIENT_ADMIN',
-    tenantId: apollo._id,
-    isActive: true
-  });
+  await User.findOneAndUpdate(
+    { username: 'admin@apollo.in' },
+    { $set: { username: 'admin@apollo.in', email: 'admin@apollo.in', password_hash: passwordHash, role: 'CLIENT_ADMIN', tenantId: apollo._id, ...activeLifecycle } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
-  const apolloAgent = await User.create({
-    username: 'agent@apollo.in',
-    email: 'agent@apollo.in',
-    password_hash: passwordHash,
-    role: 'CLIENT_AGENT',
-    tenantId: apollo._id,
-    isActive: true
-  });
+  await User.findOneAndUpdate(
+    { username: 'agent@apollo.in' },
+    { $set: { username: 'agent@apollo.in', email: 'agent@apollo.in', password_hash: passwordHash, role: 'CLIENT_AGENT', tenantId: apollo._id, ...activeLifecycle } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
   // Add a test customer for Apollo
-  await Customer.create({
-    tenantId: apollo._id,
-    name: 'Rahul Sharma',
-    phone: '+919876543210',
-    call_type: 'REVIEW_CALL',
-    status: 'pending',
-    is_manual: 1
-  });
+  await Customer.findOneAndUpdate(
+    { tenantId: apollo._id, phone: '+919876543210' },
+    { $set: { tenantId: apollo._id, name: 'Rahul Sharma', phone: '+919876543210', call_type: 'REVIEW_CALL', status: 'pending', is_manual: 1, archived_at: null, archived_by: null, archive_reason: null } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
   // 4. Create Tenant 2 (Max Hospital)
-  const max = await Tenant.create({
-    name: 'Max Hospital',
-    slug: 'max',
-    ownerEmail: 'admin@max.in',
-    dbConnectionString: process.env.MONGODB_URI
-  });
+  const max = await Tenant.findOneAndUpdate(
+    { name: 'Max Hospital' },
+    { $set: { name: 'Max Hospital', ...activeLifecycle } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
-  const maxAdmin = await User.create({
-    username: 'admin@max.in',
-    email: 'admin@max.in',
-    password_hash: passwordHash,
-    role: 'CLIENT_ADMIN',
-    tenantId: max._id,
-    isActive: true
-  });
+  await User.findOneAndUpdate(
+    { username: 'admin@max.in' },
+    { $set: { username: 'admin@max.in', email: 'admin@max.in', password_hash: passwordHash, role: 'CLIENT_ADMIN', tenantId: max._id, ...activeLifecycle } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
   console.log('Seed completed successfully!');
-  console.log('--- CREDENTIALS (All passwords are "password123") ---');
-  console.log('1. Webmaster: webmaster@vikitech.in');
-  console.log('2. Support Team: support@vikitech.in');
-  console.log('3. Apollo Admin: admin@apollo.in');
-  console.log('4. Apollo Agent: agent@apollo.in');
-  console.log('5. Max Admin: admin@max.in');
-  
+  console.log('Seed identities were upserted without removing retained records.');
   process.exit(0);
 }
 

@@ -2,6 +2,18 @@ const express = require('express');
 const router = express.Router();
 const User = require('../src/models/User');
 const bcrypt = require('bcrypt');
+const {
+  recordFilterFromRequest,
+  createMongooseArchiveHandlers
+} = require('../src/webmaster/lifecycle');
+
+const userArchiveHandlers = createMongooseArchiveHandlers({
+  Model: User,
+  resourceName: 'Agent',
+  scopeFromRequest(req, extra = {}) {
+    return { ...extra, tenantId: req.tenantId, role: 'CLIENT_AGENT' };
+  }
+});
 
 // Get all agents for the current tenant (CLIENT_ADMIN only)
 router.get('/agents', async (req, res) => {
@@ -10,10 +22,10 @@ router.get('/agents', async (req, res) => {
       return res.status(403).json({ error: 'Only Client Admins can view agents' });
     }
 
-    const agents = await User.find({ 
+    const agents = await User.find(recordFilterFromRequest(req, {
       tenantId: req.tenantId, 
       role: 'CLIENT_AGENT' 
-    }).select('-password_hash').sort({ created_at: -1 });
+    })).select('-password_hash').sort({ created_at: -1 });
     
     res.json(agents.map(a => ({ ...a.toObject(), id: a._id })));
   } catch (error) {
@@ -54,23 +66,17 @@ router.post('/agents', async (req, res) => {
   }
 });
 
-// Delete an agent
-router.delete('/agents/:id', async (req, res) => {
-  try {
+function requireClientAdmin(handler) {
+  return async (req, res) => {
     if (req.adminSession.role !== 'CLIENT_ADMIN') {
-      return res.status(403).json({ error: 'Only Client Admins can remove agents' });
+      return res.status(403).json({ error: 'Only Client Admins can archive or restore agents' });
     }
+    return handler(req, res);
+  };
+}
 
-    const agent = await User.findOne({ _id: req.params.id, tenantId: req.tenantId, role: 'CLIENT_AGENT' });
-    if (!agent) {
-      return res.status(404).json({ error: 'Agent not found in this tenant' });
-    }
-
-    await User.deleteOne({ _id: req.params.id, tenantId: req.tenantId });
-    res.json({ message: 'Agent removed successfully' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+router.post('/agents/:id/archive', requireClientAdmin(userArchiveHandlers.archive));
+router.post('/agents/:id/restore', requireClientAdmin(userArchiveHandlers.restore));
+router.delete('/agents/:id', requireClientAdmin(userArchiveHandlers.archive));
 
 module.exports = router;

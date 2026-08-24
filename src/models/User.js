@@ -49,6 +49,18 @@ const userSchema = new mongoose.Schema({
     enum: ['active', 'suspended', 'archived'],
     default: 'active'
   },
+  archived_at: {
+    type: Date,
+    default: null
+  },
+  archived_by: {
+    type: String,
+    default: null
+  },
+  archive_reason: {
+    type: String,
+    default: null
+  },
   password_changed_at: {
     type: Date,
     default: null

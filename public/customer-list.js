@@ -1,5 +1,20 @@
 let allCustomers = [];
 
+async function archiveCustomer(customerId) {
+  try {
+    const actions = CustomerArchival.createCustomerArchivalActions({
+      confirmAction: window.confirm,
+      fetchJson: AppShell.fetchJson,
+      showAlert: AppShell.showAlert,
+      reload: loadCustomerData,
+      apiBase: AppShell.API_BASE
+    });
+    await actions.archiveCustomer(customerId);
+  } catch (error) {
+    AppShell.showAlert(error.message, 'error');
+  }
+}
+
 async function loadCustomerData() {
   try {
     const response = await AppShell.fetchJson(`${AppShell.API_BASE}/customers`);
@@ -52,7 +67,9 @@ function renderCustomerTable(customers) {
       <td>${AppShell.escapeHtml(customer.phone)}</td>
       <td>${AppShell.escapeHtml(customer.preferred_slot || '--')}</td>
       <td><span class="status-badge active">${AppShell.escapeHtml(formatLanguage(customer.preferred_language))}</span></td>
+      <td><button class="danger admin-only-control" type="button" data-archive-customer="${AppShell.escapeHtml(String(customer.id))}">Archive</button></td>
     `;
+    tr.querySelector('[data-archive-customer]').addEventListener('click', () => archiveCustomer(customer.id));
     tbody.appendChild(tr);
   });
 
@@ -68,6 +85,7 @@ function changeCustomerPage(pageNumber) {
 }
 
 window.changeCustomerPage = changeCustomerPage;
+window.archiveCustomer = archiveCustomer;
 window.addEventListener('app:pagination:resize', handleSearch);
 
 function handleSearch() {

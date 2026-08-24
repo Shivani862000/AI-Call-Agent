@@ -4,6 +4,7 @@ const Customer = require('../src/models/Customer');
 const Feedback = require('../src/models/Feedback');
 const Call = require('../src/models/Call');
 const { categorizeFeedback } = require('../services/gemini');
+const { activeRecordFilter } = require('../src/webmaster/lifecycle');
 
 // Manual feedback entry
 router.post('/manual', async (req, res) => {
@@ -33,7 +34,7 @@ router.post('/manual', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
-    const customer = await Customer.findOne({ _id: customer_id, tenantId: req.tenantId });
+    const customer = await Customer.findOne(activeRecordFilter({ _id: customer_id, tenantId: req.tenantId }));
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found', fieldErrors: { customer_id: 'Selected customer no longer exists' } });
     }
@@ -104,7 +105,7 @@ function getFollowUpAnswers(analysisJson) {
 }
 
 async function listUnifiedFeedback(tenantId) {
-  const manualFeedbacks = await Feedback.find({ tenantId })
+  const manualFeedbacks = await Feedback.find(activeRecordFilter({ tenantId }))
     .populate('customerId', 'name phone')
     .populate('callId')
     .sort({ created_at: -1 })
@@ -113,14 +114,14 @@ async function listUnifiedFeedback(tenantId) {
 
   const linkedCallIds = new Set(manualFeedbacks.map(f => f.callId?._id?.toString()).filter(Boolean));
 
-  const analyzedCalls = await Call.find({
+  const analyzedCalls = await Call.find(activeRecordFilter({
     tenantId,
     $or: [
       { extracted_rating: { $ne: null } },
       { sentiment: { $ne: null } },
       { analysis_summary: { $ne: null } }
     ]
-  })
+  }))
     .populate('customerId', 'name phone')
     .sort({ analysis_completed_at: -1, started_at: -1 })
     .limit(500)

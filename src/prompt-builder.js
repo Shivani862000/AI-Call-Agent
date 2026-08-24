@@ -13,6 +13,7 @@ const { buildThreeMonthFollowupPrompt, buildThreeMonthFollowupOpeningPrompt } = 
 const { CALL_TYPES } = require('./config');
 const { normalizeOutboundCallType, applyAgentTemplate } = require('./helpers');
 const { dbGet } = require('../db');
+const { activeRecordFilter } = require('./webmaster/lifecycle');
 
 function buildCallTypeSystemPrompt(callType, clientName, customerName, extraOptions = {}) {
   const normalizedCallType = normalizeOutboundCallType(callType);
@@ -63,11 +64,11 @@ function buildOpeningPrompt(clientName, customerName, agentConfig = null, callTy
 
 async function getAgentConfigById(agentId) {
   if (!agentId) return null;
-  return Agent.findOne({ _id: agentId, is_active: true });
+  return Agent.findOne(activeRecordFilter({ _id: agentId, is_active: true }));
 }
 
 async function getDefaultAgentConfig() {
-  return Agent.findOne({ is_default: true, is_active: true }).sort({ _id: 1 });
+  return Agent.findOne(activeRecordFilter({ is_default: true, is_active: true })).sort({ _id: 1 });
 }
 
 module.exports = {

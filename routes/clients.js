@@ -1,6 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { dbRun, dbGet, dbAll } = require('../db');
+const { createSqlArchiveHandlers } = require('../src/webmaster/lifecycle');
+
+const clientArchiveHandlers = createSqlArchiveHandlers({
+  dbRun,
+  dbGet,
+  tableName: 'clients',
+  resourceName: 'Client'
+});
 
 const PHONE_PATTERN = /^\+\d{10,15}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -120,15 +128,18 @@ function handleSqliteError(error, res) {
   return res.status(500).json({ error: error.message });
 }
 
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
   try {
+    const archived = String(req.query.status || '').toLowerCase() === 'archived';
     const clients = await dbAll(
       `SELECT *
        FROM clients
+       WHERE tenant_id = ? AND status ${archived ? '=' : '<>'} 'archived'
        ORDER BY
          CASE WHEN status = 'active' THEN 0 ELSE 1 END,
          COALESCE(next_annual_reminder_date, '9999-12-31') ASC,
-         created_at DESC`
+         created_at DESC`,
+      [String(req.tenantId)]
     );
     res.json(clients);
   } catch (error) {
@@ -139,7 +150,11 @@ router.get('/', async (_req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const client = await dbGet('SELECT * FROM clients WHERE id = ?', [req.params.id]);
+    const archived = String(req.query.status || '').toLowerCase() === 'archived';
+    const client = await dbGet(
+      `SELECT * FROM clients WHERE id = ? AND tenant_id = ? AND status ${archived ? '=' : '<>'} 'archived'`,
+      [req.params.id, String(req.tenantId)]
+    );
     if (!client) {
       return res.status(404).json({ error: 'Client not found' });
     }
@@ -163,8 +178,8 @@ router.post('/', async (req, res) => {
       `INSERT INTO clients (
         name, phone, date_of_birth, last_visit_date, treatment_type,
         annual_reminder_enabled, annual_reminder_slot, next_annual_reminder_date,
-        notes, status, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        notes, status, updated_at, tenant_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         payload.name,
         payload.phone,
@@ -176,7 +191,8 @@ router.post('/', async (req, res) => {
         reminderFields.next_annual_reminder_date,
         payload.notes || null,
         payload.status,
-        new Date().toISOString()
+        new Date().toISOString(),
+        String(req.tenantId)
       ]
     );
 
@@ -188,7 +204,10 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM clients WHERE id = ?', [req.params.id]);
+    const existing = await dbGet(
+      "SELECT * FROM clients WHERE id = ? AND tenant_id = ? AND status <> 'archived'",
+      [req.params.id, String(req.tenantId)]
+    );
     if (!existing) {
       return res.status(404).json({ error: 'Client not found' });
     }
@@ -214,7 +233,7 @@ router.put('/:id', async (req, res) => {
               notes = ?,
               status = ?,
               updated_at = ?
-        WHERE id = ?`,
+        WHERE id = ? AND tenant_id = ? AND status <> 'archived'`,
       [
         payload.name,
         payload.phone,
@@ -227,7 +246,8 @@ router.put('/:id', async (req, res) => {
         payload.notes || null,
         payload.status,
         new Date().toISOString(),
-        req.params.id
+        req.params.id,
+        String(req.tenantId)
       ]
     );
 
@@ -237,19 +257,8 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
-  try {
-    const existing = await dbGet('SELECT id FROM clients WHERE id = ?', [req.params.id]);
-    if (!existing) {
-      return res.status(404).json({ error: 'Client not found' });
-    }
-
-    await dbRun('DELETE FROM clients WHERE id = ?', [req.params.id]);
-    res.json({ message: 'Client deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting client:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+router.post('/:id/archive', clientArchiveHandlers.archive);
+router.post('/:id/restore', clientArchiveHandlers.restore);
+router.delete('/:id', clientArchiveHandlers.archive);
 
 module.exports = router;

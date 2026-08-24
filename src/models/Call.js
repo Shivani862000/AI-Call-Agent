@@ -5,6 +5,9 @@ const callSchema = new mongoose.Schema({
   customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
   call_type: { type: String, required: true },
   status: { type: String, required: true },
+  archived_at: { type: Date, default: null },
+  archived_by: { type: String, default: null },
+  archive_reason: { type: String, default: null },
   outcome: { type: String }, // e.g., initiated, scheduled_initiated, answered, no_answer
   recording_url: { type: String, default: null },
   transcript: { type: String, default: null }, // previously transcript_text

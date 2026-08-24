@@ -71,13 +71,13 @@ function computeNextAnnualReminderDate(lastVisitDate, referenceDate = new Date()
 
 async function ensureCustomerForCall({ customerId, customerName, customerPhone }) {
   if (customerId) {
-    const existingById = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
+    const existingById = await dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [customerId]);
     if (existingById) {
       return existingById;
     }
   }
 
-  const existingByPhone = await dbGet('SELECT * FROM customers WHERE phone = ?', [customerPhone]);
+  const existingByPhone = await dbGet("SELECT * FROM customers WHERE phone = ? AND status <> 'archived'", [customerPhone]);
   if (existingByPhone) {
     return existingByPhone;
   }
@@ -93,7 +93,7 @@ async function ensureCustomerForCall({ customerId, customerName, customerPhone }
     ]
   );
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  return dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [result.lastID]);
 }
 
 async function claimCustomerForOutboundCall(customerId) {
@@ -102,7 +102,8 @@ async function claimCustomerForOutboundCall(customerId) {
         SET status = ?,
             last_called_at = ?
       WHERE id = ?
-        AND COALESCE(status, 'pending') != 'calling'`,
+        AND COALESCE(status, 'pending') != 'calling'
+        AND status <> 'archived'`,
     ['calling', new Date().toISOString(), customerId]
   );
 
@@ -123,11 +124,11 @@ async function ensureCustomerForClientReminder(client) {
   let customer = null;
 
   if (client.linked_customer_id) {
-    customer = await dbGet('SELECT * FROM customers WHERE id = ?', [client.linked_customer_id]);
+    customer = await dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [client.linked_customer_id]);
   }
 
   if (!customer) {
-    customer = await dbGet('SELECT * FROM customers WHERE phone = ?', [client.phone]);
+    customer = await dbGet("SELECT * FROM customers WHERE phone = ? AND status <> 'archived'", [client.phone]);
   }
 
   if (customer) {
@@ -138,7 +139,7 @@ async function ensureCustomerForClientReminder(client) {
               preferred_slot = ?,
               service_interest = ?,
               status = CASE WHEN status = 'completed' THEN 'pending' ELSE status END
-        WHERE id = ?`,
+        WHERE id = ? AND status <> 'archived'`,
       [
         client.name,
         client.phone,
@@ -151,7 +152,7 @@ async function ensureCustomerForClientReminder(client) {
       'UPDATE clients SET linked_customer_id = ?, updated_at = ? WHERE id = ?',
       [customer.id, new Date().toISOString(), client.id]
     );
-    return dbGet('SELECT * FROM customers WHERE id = ?', [customer.id]);
+    return dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [customer.id]);
   }
 
   const result = await dbRun(
@@ -173,14 +174,14 @@ async function ensureCustomerForClientReminder(client) {
     [result.lastID, new Date().toISOString(), client.id]
   );
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  return dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [result.lastID]);
 }
 
 async function findCustomerByPhone(phoneValue) {
   const normalized = normalizePhoneLookupValue(phoneValue);
   if (!normalized) return null;
 
-  const customers = await dbAll('SELECT * FROM customers ORDER BY id DESC LIMIT 200');
+  const customers = await dbAll("SELECT * FROM customers WHERE status <> 'archived' ORDER BY id DESC LIMIT 200");
   return customers.find((customer) => normalizePhoneLookupValue(customer.phone) === normalized) || null;
 }
 
@@ -202,7 +203,7 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
     ]
   );
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  return dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [result.lastID]);
 }
 
 // ── Call Context & Intelligence ───────────────────────────────────────────────
@@ -288,7 +289,7 @@ async function getCustomerCallHistory(customerId, limit = 20) {
   return dbAll(
     `SELECT called_at, outcome, sentiment_label, transcript_text, analysis_summary, extracted_review_text
      FROM calls
-     WHERE customer_id = ?
+     WHERE customer_id = ? AND status <> 'archived'
      ORDER BY called_at DESC
      LIMIT ?`,
     [customerId, limit]

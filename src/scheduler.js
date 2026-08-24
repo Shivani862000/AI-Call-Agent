@@ -7,6 +7,7 @@ const { placeRealtimeCall, hydratePreCallIntelligence, shouldBlockCustomerCall }
 const logger = require('../services/system-logger');
 const { ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE } = require('../services/icallmate');
 const { getCurrentSlotLabel, computePriorityScore } = require('../services/call-orchestration');
+const { activeOperationalFilter } = require('./webmaster/lifecycle');
 
 let ownerDigestRunning = false;
 let schedulerRunning = false;
@@ -20,21 +21,27 @@ async function dispatchScheduledCalls() {
   const currentSlot = getCurrentSlotLabel(new Date());
   
   // Quick Mongoose port of the logic
-  const dueCustomers = await Customer.find({
+  const dueCustomers = await Customer.find(activeOperationalFilter({
     do_not_call: { $ne: true },
     wrong_number_flag: { $ne: true },
     admin_review_required: { $ne: true },
     consent_status: { $ne: 'denied' },
     status: { $in: ['pending', 'scheduled', 'retry_scheduled', 'callback_scheduled'] },
-    $or: [
-      { locked_at: null },
-      { locked_at: { $lte: new Date(Date.now() - 10 * 60 * 1000) } }
-    ],
-    $or: [
-      { attempt_count: { $exists: false } },
-      { attempt_count: { $lt: 3 } }
+    $and: [
+      {
+        $or: [
+          { locked_at: null },
+          { locked_at: { $lte: new Date(Date.now() - 10 * 60 * 1000) } }
+        ]
+      },
+      {
+        $or: [
+          { attempt_count: { $exists: false } },
+          { attempt_count: { $lt: 3 } }
+        ]
+      }
     ]
-  });
+  }));
 
   if (!dueCustomers.length) return;
 

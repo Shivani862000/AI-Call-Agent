@@ -3,11 +3,25 @@ const router = express.Router();
 const Tenant = require('../src/models/Tenant');
 const User = require('../src/models/User');
 const bcrypt = require('bcrypt');
+const {
+  activeRecordFilter,
+  archiveFields,
+  recordFilterFromRequest,
+  createMongooseArchiveHandlers
+} = require('../src/webmaster/lifecycle');
+
+const tenantArchiveHandlers = createMongooseArchiveHandlers({
+  Model: Tenant,
+  resourceName: 'Tenant',
+  scopeFromRequest(_req, extra = {}) {
+    return extra;
+  }
+});
 
 // Get all tenants (WEBMASTER only)
 router.get('/', async (req, res) => {
   try {
-    const tenants = await Tenant.find().sort({ created_at: -1 });
+    const tenants = await Tenant.find(recordFilterFromRequest(req)).sort({ created_at: -1 });
     res.json(tenants.map(t => ({ ...t.toObject(), id: t._id })));
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -61,9 +75,14 @@ router.put('/:id', async (req, res) => {
     const patch = {};
     if (name !== undefined) patch.name = name;
     if (dailyReportTime !== undefined) patch.dailyReportTime = dailyReportTime;
-    if (status !== undefined) patch.status = status;
+    if (status !== undefined && status !== 'archived') patch.status = status;
+    if (status === 'archived') Object.assign(patch, archiveFields(req.adminSession, req.body.reason));
 
-    const tenant = await Tenant.findByIdAndUpdate(req.params.id, patch, { new: true });
+    const tenant = await Tenant.findOneAndUpdate(
+      activeRecordFilter({ _id: req.params.id }),
+      { $set: patch },
+      { new: true }
+    );
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
     
     res.json({ message: 'Tenant updated successfully', tenant });
@@ -71,5 +90,8 @@ router.put('/:id', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+router.post('/:id/archive', tenantArchiveHandlers.archive);
+router.post('/:id/restore', tenantArchiveHandlers.restore);
 
 module.exports = router;
