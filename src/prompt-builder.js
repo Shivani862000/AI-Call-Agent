@@ -5,6 +5,8 @@
 
 'use strict';
 
+const Agent = require('./models/Agent');
+
 const { getGreeting } = require('../utils/greeting');
 const { buildReviewCallingPrompt, buildReviewCallingOpeningPrompt } = require('../prompts/review-calling.ts');
 const { buildThreeMonthFollowupPrompt, buildThreeMonthFollowupOpeningPrompt } = require('../prompts/three-month-followup.ts');
@@ -61,11 +63,11 @@ function buildOpeningPrompt(clientName, customerName, agentConfig = null, callTy
 
 async function getAgentConfigById(agentId) {
   if (!agentId) return null;
-  return dbGet('SELECT * FROM agents WHERE id = ? AND is_active = 1', [agentId]);
+  return Agent.findOne({ _id: agentId, is_active: true });
 }
 
 async function getDefaultAgentConfig() {
-  return dbGet('SELECT * FROM agents WHERE is_default = 1 AND is_active = 1 ORDER BY id ASC LIMIT 1');
+  return Agent.findOne({ is_default: true, is_active: true }).sort({ _id: 1 });
 }
 
 module.exports = {

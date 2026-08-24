@@ -60,14 +60,18 @@ async function dispatchScheduledCalls() {
       });
 
       const newCall = await Call.create({
-        customer_id: customer._id,
-        agent_id: agentConfig?.id || null,
+        tenantId: customer.tenantId,
+        customerId: customer._id,
+        agentId: agentConfig?._id || null, // Ensure to use _id
+        status: 'queued',
         outcome: 'scheduled_initiated',
         provider_call_id: call.sid,
-        called_at: new Date(),
+        started_at: new Date(),
         call_direction: 'outbound',
         call_type: customer.call_type
       });
+
+
 
       customer.status = 'called';
       customer.last_called_at = new Date();
