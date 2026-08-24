@@ -1743,7 +1743,7 @@ test('notification guarded statics preserve known Task 7 filters and block query
       tenantId: '507f1f77bcf86cd799439011',
       status: 'failed',
       retryCount: { $lt: 3 }
-    }).lean();
+    }, null, { lean: true }).exec();
     await NotificationDelivery.updateOne(
       {
         _id: '507f1f77bcf86cd799439012',
@@ -1756,7 +1756,7 @@ test('notification guarded statics preserve known Task 7 filters and block query
       }
     );
     await assert.rejects(
-      NotificationDelivery.find({ status: 'failed' }).updateOne({ $set: { status: 'pending' } }),
+      async () => NotificationDelivery.find({ status: 'failed' }).updateOne({ $set: { status: 'pending' } }),
       (error) => error.code === 'UNSUPPORTED_NOTIFICATION_QUERY_MUTATION'
     );
     await assert.rejects(
@@ -1777,4 +1777,260 @@ test('notification guarded statics preserve known Task 7 filters and block query
   assert.ok(collectionUpdates[0].$set.lastAttemptAt instanceof Date);
   assert.equal(collectionUpdates[0].$inc.retryCount, 1);
   assert.equal(deleteCount, 0);
+});
+
+test('sensitive public models reject every aggregate pipeline before stage observation or collection access', async () => {
+  // Mutation caught: Model.aggregate() bypasses immutable/sanitized write boundaries with $merge or $out.
+  const marker = 'private-aggregate-stage-marker-6421';
+  let observationCount = 0;
+  let collectionCallCount = 0;
+  const originalAuditAggregate = AuditEvent.collection.aggregate;
+  const originalNotificationAggregate = NotificationDelivery.collection.aggregate;
+  const collectionAggregate = () => {
+    collectionCallCount += 1;
+    return { toArray: async () => [] };
+  };
+  AuditEvent.collection.aggregate = collectionAggregate;
+  NotificationDelivery.collection.aggregate = collectionAggregate;
+
+  try {
+    for (const [Model, code] of [
+      [AuditEvent, 'UNSUPPORTED_AUDIT_AGGREGATION'],
+      [NotificationDelivery, 'UNSUPPORTED_NOTIFICATION_AGGREGATION']
+    ]) {
+      const accessorStage = {};
+      Object.defineProperty(accessorStage, '$set', {
+        enumerable: true,
+        get() {
+          observationCount += 1;
+          throw new Error(marker);
+        }
+      });
+
+      for (const pipeline of [
+        [{ $merge: { into: Model.collection.name } }],
+        [{ $out: Model.collection.name }],
+        [accessorStage]
+      ]) {
+        await assert.rejects(
+          async () => Model.aggregate(pipeline),
+          (error) => assertPrivateValidationError(error, marker, code)
+        );
+      }
+    }
+  } finally {
+    AuditEvent.collection.aggregate = originalAuditAggregate;
+    NotificationDelivery.collection.aggregate = originalNotificationAggregate;
+  }
+
+  assert.equal(observationCount, 0);
+  assert.equal(collectionCallCount, 0);
+});
+
+test('guarded query facades execute fixed reads and updates without exposing mutable internals', async () => {
+  // Mutation caught: getFilter/getUpdate expose live state and setQuery/setUpdate bypass the static guards.
+  const marker = 'private-query-facade-marker-6421';
+  let observationCount = 0;
+  const auditFilters = [];
+  const notificationFilters = [];
+  const notificationUpdates = [];
+  const originalAuditFind = AuditEvent.collection.find;
+  const originalNotificationFind = NotificationDelivery.collection.find;
+  const originalNotificationUpdateOne = NotificationDelivery.collection.updateOne;
+  AuditEvent.collection.find = (filter) => {
+    auditFilters.push(filter);
+    return { toArray: async () => [] };
+  };
+  NotificationDelivery.collection.find = (filter) => {
+    notificationFilters.push(filter);
+    return { toArray: async () => [] };
+  };
+  NotificationDelivery.collection.updateOne = async (filter, update) => {
+    notificationFilters.push(filter);
+    notificationUpdates.push(update);
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+
+  const accessorFilter = {};
+  Object.defineProperty(accessorFilter, 'status', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      throw new Error(marker);
+    }
+  });
+  const accessorUpdate = { $set: {} };
+  Object.defineProperty(accessorUpdate.$set, 'status', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      throw new Error(marker);
+    }
+  });
+  const accessorSort = {};
+  Object.defineProperty(accessorSort, 'created_at', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      throw new Error(marker);
+    }
+  });
+
+  try {
+    const auditRead = AuditEvent.find({ outcome: 'success' });
+    const exposedAuditFilter = auditRead.getFilter();
+    exposedAuditFilter.outcome = marker;
+    await assert.rejects(
+      async () => auditRead.setQuery(accessorFilter),
+      (error) => assertPrivateValidationError(error, marker, 'IMMUTABLE_AUDIT_EVENT')
+    );
+    await auditRead.exec();
+
+    const notificationRead = NotificationDelivery.find({ status: 'failed' });
+    const exposedNotificationFilter = notificationRead.getFilter();
+    exposedNotificationFilter.status = marker;
+    await assert.rejects(
+      async () => notificationRead.setQuery(accessorFilter),
+      (error) => assertPrivateValidationError(error, marker, 'UNSUPPORTED_NOTIFICATION_QUERY_MUTATION')
+    );
+    await assert.rejects(
+      async () => notificationRead.sort(accessorSort),
+      (error) => assertPrivateValidationError(error, marker, 'UNSUPPORTED_NOTIFICATION_QUERY_MUTATION')
+    );
+    await notificationRead.exec();
+
+    const notificationUpdate = NotificationDelivery.updateOne(
+      { status: 'failed' },
+      { $set: { status: 'pending' }, $inc: { retryCount: 1 } }
+    );
+    const exposedUpdate = notificationUpdate.getUpdate();
+    exposedUpdate.$set.status = marker;
+    await assert.rejects(
+      async () => notificationUpdate.setUpdate(accessorUpdate),
+      (error) => assertPrivateValidationError(error, marker, 'UNSUPPORTED_NOTIFICATION_QUERY_MUTATION')
+    );
+    await notificationUpdate.exec();
+  } finally {
+    AuditEvent.collection.find = originalAuditFind;
+    NotificationDelivery.collection.find = originalNotificationFind;
+    NotificationDelivery.collection.updateOne = originalNotificationUpdateOne;
+  }
+
+  assert.equal(observationCount, 0);
+  assert.equal(auditFilters.length, 1);
+  assert.equal(auditFilters[0].outcome, 'success');
+  assert.equal(notificationFilters.length, 2);
+  assert.equal(notificationFilters[0].status, 'failed');
+  assert.equal(notificationFilters[1].status, 'failed');
+  assert.equal(notificationUpdates[0].$set.status, 'pending');
+  assert.equal(notificationUpdates[0].$inc.retryCount, 1);
+});
+
+test('guarded statics validate audit and notification filters projections and options before Mongoose', async () => {
+  // Mutation caught: Mongoose observes projection/options accessors that bypass filter/update guards.
+  const marker = 'private-static-argument-marker-6421';
+  let observationCount = 0;
+  let collectionCallCount = 0;
+  const originalAuditFind = AuditEvent.collection.find;
+  const originalNotificationFind = NotificationDelivery.collection.find;
+  const originalNotificationUpdateOne = NotificationDelivery.collection.updateOne;
+  const originalNotificationReplaceOne = NotificationDelivery.collection.replaceOne;
+  const collectionFind = () => {
+    collectionCallCount += 1;
+    return { toArray: async () => [] };
+  };
+  AuditEvent.collection.find = collectionFind;
+  NotificationDelivery.collection.find = collectionFind;
+  NotificationDelivery.collection.updateOne = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+  NotificationDelivery.collection.replaceOne = async () => {
+    collectionCallCount += 1;
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+
+  function accessorRecord(key) {
+    const value = {};
+    Object.defineProperty(value, key, {
+      enumerable: true,
+      get() {
+        observationCount += 1;
+        throw new Error(marker);
+      }
+    });
+    return value;
+  }
+
+  const proxyOptions = new Proxy({ lean: true }, {
+    ownKeys() {
+      observationCount += 1;
+      throw new Error(marker);
+    },
+    get() {
+      observationCount += 1;
+      throw new Error(marker);
+    }
+  });
+  const validReplacement = {
+    recipientCategory: 'owner',
+    template: 'tenant-restored',
+    event: 'tenant.restored',
+    metadata: {},
+    status: 'pending',
+    retryCount: 0
+  };
+
+  try {
+    const cases = [
+      [() => AuditEvent.find(accessorRecord('outcome')), 'INVALID_AUDIT_FILTER'],
+      [() => AuditEvent.find({ outcome: 'success' }, accessorRecord('actor')), 'INVALID_AUDIT_PROJECTION'],
+      [() => AuditEvent.find({ outcome: 'success' }, null, accessorRecord('lean')), 'INVALID_AUDIT_OPTIONS'],
+      [() => AuditEvent.countDocuments({ outcome: 'success' }, proxyOptions), 'INVALID_AUDIT_OPTIONS'],
+      [() => AuditEvent.find({ before: marker }), 'INVALID_AUDIT_FILTER'],
+      [() => NotificationDelivery.find({ status: 'failed' }, accessorRecord('status')), 'INVALID_NOTIFICATION_PROJECTION'],
+      [() => NotificationDelivery.find({ status: 'failed' }, null, accessorRecord('lean')), 'INVALID_NOTIFICATION_OPTIONS'],
+      [() => NotificationDelivery.countDocuments({ status: 'failed' }, proxyOptions), 'INVALID_NOTIFICATION_OPTIONS'],
+      [() => NotificationDelivery.updateOne(
+        { status: 'failed' },
+        { $set: { status: 'pending' } },
+        accessorRecord('runValidators')
+      ), 'INVALID_NOTIFICATION_OPTIONS'],
+      [() => NotificationDelivery.replaceOne(
+        { status: 'failed' },
+        validReplacement,
+        accessorRecord('runValidators')
+      ), 'INVALID_NOTIFICATION_OPTIONS']
+    ];
+    for (const [operation, code] of cases) {
+      await assert.rejects(
+        async () => operation(),
+        (error) => assertPrivateValidationError(error, marker, code)
+      );
+    }
+
+    await AuditEvent.find(
+      { outcome: 'success', created_at: { $gte: '2026-08-01T00:00:00.000Z' } },
+      { actor: 1, outcome: 1, created_at: 1 },
+      { sort: { created_at: -1 }, skip: 0, limit: 10, lean: true }
+    ).exec();
+    await NotificationDelivery.find(
+      { status: 'failed', retryCount: { $lt: 3 } },
+      { status: 1, retryCount: 1, created_at: 1 },
+      { sort: { created_at: -1 }, skip: 0, limit: 10, lean: true }
+    ).exec();
+    await NotificationDelivery.updateOne(
+      { status: 'failed', retryCount: { $lt: 3 } },
+      { $set: { status: 'pending' }, $inc: { retryCount: 1 } },
+      { runValidators: false }
+    ).exec();
+  } finally {
+    AuditEvent.collection.find = originalAuditFind;
+    NotificationDelivery.collection.find = originalNotificationFind;
+    NotificationDelivery.collection.updateOne = originalNotificationUpdateOne;
+    NotificationDelivery.collection.replaceOne = originalNotificationReplaceOne;
+  }
+
+  assert.equal(observationCount, 0);
+  assert.equal(collectionCallCount, 3);
 });

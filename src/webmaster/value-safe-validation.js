@@ -3,6 +3,10 @@
 const { types: utilTypes } = require('node:util');
 
 const INVALID_RETAINED_VALUE = Symbol('invalid-retained-value');
+const TYPED_ARRAY_LENGTH = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  'length'
+).get;
 
 function valueSafeError(code, message) {
   const error = new Error(message);
@@ -155,8 +159,9 @@ function normalizeNullableObjectId(value, ObjectId) {
   if (!bufferDescriptor
     || !Object.hasOwn(bufferDescriptor, 'value')
     || !Buffer.isBuffer(bufferDescriptor.value)
+    || !utilTypes.isUint8Array(bufferDescriptor.value)
     || utilTypes.isProxy(bufferDescriptor.value)
-    || bufferDescriptor.value.length !== 12) {
+    || TYPED_ARRAY_LENGTH.call(bufferDescriptor.value) !== 12) {
     return INVALID_RETAINED_VALUE;
   }
   for (const key of Reflect.ownKeys(descriptors)) {
@@ -178,9 +183,162 @@ function isInvalidRetainedValue(value) {
   return value === INVALID_RETAINED_VALUE;
 }
 
+const QUERY_MUTATION_METHODS = Object.freeze([
+  'allowDiskUse',
+  'and',
+  'box',
+  'center',
+  'centerSphere',
+  'collation',
+  'count',
+  'countDocuments',
+  'cursor',
+  'deleteMany',
+  'deleteOne',
+  'distinct',
+  'error',
+  'estimatedDocumentCount',
+  'explain',
+  'find',
+  'findById',
+  'findByIdAndDelete',
+  'findByIdAndUpdate',
+  'findOne',
+  'findOneAndDelete',
+  'findOneAndRemove',
+  'findOneAndReplace',
+  'findOneAndUpdate',
+  'j',
+  'lean',
+  'limit',
+  'maxTimeMS',
+  'merge',
+  'mod',
+  'near',
+  'nearSphere',
+  'nor',
+  'or',
+  'orFail',
+  'populate',
+  'post',
+  'pre',
+  'read',
+  'replaceOne',
+  'sanitizeProjection',
+  'schemaLevelProjections',
+  'select',
+  'session',
+  'set',
+  'setOptions',
+  'setQuery',
+  'setUpdate',
+  'skip',
+  'slice',
+  'sort',
+  'tailable',
+  'toConstructor',
+  'transform',
+  'updateMany',
+  'updateOne',
+  'w',
+  'where',
+  'writeConcern',
+  'wtimeout'
+]);
+
+function createSealedQueryFacade(query, mutationError) {
+  const facade = Object.create(null);
+  const rejectMutation = () => {
+    throw mutationError();
+  };
+  const clonedQuery = () => query.clone();
+
+  Object.defineProperties(facade, {
+    exec: {
+      enumerable: true,
+      value(...args) {
+        if (args.length !== 0) throw mutationError();
+        return query.exec();
+      }
+    },
+    then: {
+      enumerable: true,
+      value(onFulfilled, onRejected) {
+        return query.then(onFulfilled, onRejected);
+      }
+    },
+    catch: {
+      enumerable: true,
+      value(onRejected) {
+        return query.catch(onRejected);
+      }
+    },
+    finally: {
+      enumerable: true,
+      value(onFinally) {
+        return query.finally(onFinally);
+      }
+    },
+    clone: {
+      enumerable: true,
+      value() {
+        return createSealedQueryFacade(query.clone(), mutationError);
+      }
+    },
+    getFilter: {
+      enumerable: true,
+      value() {
+        return clonedQuery().getFilter();
+      }
+    },
+    getQuery: {
+      enumerable: true,
+      value() {
+        return clonedQuery().getQuery();
+      }
+    },
+    getUpdate: {
+      enumerable: true,
+      value() {
+        return clonedQuery().getUpdate();
+      }
+    },
+    getOptions: {
+      enumerable: true,
+      value() {
+        return clonedQuery().getOptions();
+      }
+    },
+    mongooseOptions: {
+      enumerable: true,
+      value(...args) {
+        if (args.length !== 0) throw mutationError();
+        return clonedQuery().mongooseOptions();
+      }
+    },
+    projection: {
+      enumerable: true,
+      value(...args) {
+        if (args.length !== 0) throw mutationError();
+        return clonedQuery().projection();
+      }
+    }
+  });
+
+  for (const method of QUERY_MUTATION_METHODS) {
+    if (Object.hasOwn(facade, method)) continue;
+    Object.defineProperty(facade, method, {
+      enumerable: true,
+      value: rejectMutation
+    });
+  }
+  return Object.freeze(facade);
+}
+
 module.exports = {
   INVALID_RETAINED_VALUE,
   canonicalizeHydratedInsertOptions,
+  createSealedQueryFacade,
   dataArrayValues,
   dataEntries,
   isInvalidRetainedValue,

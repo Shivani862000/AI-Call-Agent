@@ -10,11 +10,15 @@ const {
 const {
   INVALID_RETAINED_VALUE,
   canonicalizeHydratedInsertOptions,
+  createSealedQueryFacade,
   dataArrayValues,
+  dataEntries,
   isInvalidRetainedValue,
   normalizeBoundedString,
   normalizeEnum,
   normalizeNullableBoundedString,
+  normalizeNullableDate,
+  normalizeNullableObjectId,
   ownDataDescriptors,
   valueSafeError
 } = require('../webmaster/value-safe-validation');
@@ -22,6 +26,25 @@ const {
 const ACTOR_ACCESS_LEVELS = new Set(['OWNER', 'ADMIN', 'SYSTEM']);
 const AUDIT_OUTCOMES = new Set(['success', 'failure']);
 const MACHINE_IDENTIFIER = /^[a-z0-9._:-]+$/i;
+const AUDIT_FILTER_FIELDS = new Set([
+  '_id',
+  'actor',
+  'actorAccessLevel',
+  'action',
+  'targetType',
+  'targetId',
+  'tenantId',
+  'requestId',
+  'outcome',
+  'failureCode',
+  'created_at'
+]);
+const AUDIT_PROJECTION_FIELDS = new Set([
+  ...AUDIT_FILTER_FIELDS,
+  'before',
+  'after'
+]);
+const AUDIT_READ_OPTION_FIELDS = new Set(['lean', 'limit', 'maxTimeMS', 'projection', 'skip', 'sort']);
 const immutableMixed = (options = {}) => ({
   type: mongoose.Schema.Types.Mixed,
   immutable: true,
@@ -44,6 +67,134 @@ function normalizeRequestId(value) {
 function normalizeFailureCode(value) {
   if (value == null) return null;
   return isSafeMachineCode(value) ? value : INVALID_RETAINED_VALUE;
+}
+
+function defineAuditValue(target, key, value) {
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true
+  });
+}
+
+function invalidAuditFilter() {
+  return valueSafeError('INVALID_AUDIT_FILTER', 'Audit filters must use allowed plain data fields');
+}
+
+function invalidAuditProjection() {
+  return valueSafeError('INVALID_AUDIT_PROJECTION', 'Audit projections must use allowed plain data fields');
+}
+
+function invalidAuditOptions() {
+  return valueSafeError('INVALID_AUDIT_OPTIONS', 'Audit query options must use allowed plain data fields');
+}
+
+function normalizeAuditFilterScalar(path, value) {
+  let normalized;
+  if (path === '_id') normalized = normalizeNullableObjectId(value, mongoose.Types.ObjectId);
+  else if (path === 'created_at') normalized = normalizeNullableDate(value);
+  else if (path === 'actorAccessLevel') normalized = normalizeEnum(value, ACTOR_ACCESS_LEVELS, { nullable: true });
+  else if (path === 'outcome') normalized = normalizeEnum(value, AUDIT_OUTCOMES, { nullable: true });
+  else if (path === 'requestId') normalized = normalizeRequestId(value);
+  else if (path === 'failureCode') normalized = normalizeFailureCode(value);
+  else normalized = normalizeNullableBoundedString(value, { maxLength: 128, pattern: MACHINE_IDENTIFIER });
+  if (isInvalidRetainedValue(normalized)) throw invalidAuditFilter();
+  return normalized;
+}
+
+function normalizeAuditFilterValue(path, value) {
+  try {
+    return normalizeAuditFilterScalar(path, value);
+  } catch (_error) {
+    const operatorEntries = dataEntries(value);
+    if (!operatorEntries || operatorEntries.length === 0) throw invalidAuditFilter();
+    const allowedOperators = path === 'created_at'
+      ? new Set(['$eq', '$gt', '$gte', '$in', '$lt', '$lte'])
+      : new Set(['$eq', '$in']);
+    const normalized = {};
+    for (const [operator, operand] of operatorEntries) {
+      if (!allowedOperators.has(operator)) throw invalidAuditFilter();
+      if (operator === '$in') {
+        const values = dataArrayValues(operand);
+        if (!values) throw invalidAuditFilter();
+        defineAuditValue(normalized, operator, values.map((entry) => normalizeAuditFilterScalar(path, entry)));
+      } else {
+        defineAuditValue(normalized, operator, normalizeAuditFilterScalar(path, operand));
+      }
+    }
+    return normalized;
+  }
+}
+
+function normalizeAuditFilter(filter, seen = new WeakSet(), { root = true } = {}) {
+  if (root && filter == null) return {};
+  const entries = dataEntries(filter);
+  if (!entries || seen.has(filter)) throw invalidAuditFilter();
+  seen.add(filter);
+  const normalized = {};
+  for (const [path, value] of entries) {
+    if (path === '$and' || path === '$or' || path === '$nor') {
+      const clauses = dataArrayValues(value);
+      if (!clauses) throw invalidAuditFilter();
+      defineAuditValue(
+        normalized,
+        path,
+        clauses.map((clause) => normalizeAuditFilter(clause, seen, { root: false }))
+      );
+      continue;
+    }
+    if (!AUDIT_FILTER_FIELDS.has(path)) throw invalidAuditFilter();
+    defineAuditValue(normalized, path, normalizeAuditFilterValue(path, value));
+  }
+  seen.delete(filter);
+  return normalized;
+}
+
+function normalizeAuditProjection(projection) {
+  if (projection == null) return projection;
+  const entries = dataEntries(projection);
+  if (!entries) throw invalidAuditProjection();
+  const normalized = {};
+  for (const [path, inclusion] of entries) {
+    if (!AUDIT_PROJECTION_FIELDS.has(path)
+      || ![0, 1, false, true].includes(inclusion)) throw invalidAuditProjection();
+    defineAuditValue(normalized, path, inclusion);
+  }
+  return normalized;
+}
+
+function normalizeAuditSort(sort) {
+  const entries = dataEntries(sort);
+  if (!entries) throw invalidAuditOptions();
+  const normalized = {};
+  for (const [path, direction] of entries) {
+    if (path !== 'created_at' || (direction !== 1 && direction !== -1)) throw invalidAuditOptions();
+    defineAuditValue(normalized, path, direction);
+  }
+  return normalized;
+}
+
+function normalizeAuditReadOptions(options) {
+  if (options == null) return undefined;
+  const entries = dataEntries(options);
+  if (!entries) throw invalidAuditOptions();
+  const normalized = {};
+  for (const [key, value] of entries) {
+    if (!AUDIT_READ_OPTION_FIELDS.has(key)) throw invalidAuditOptions();
+    if (key === 'projection') defineAuditValue(normalized, key, normalizeAuditProjection(value));
+    else if (key === 'sort') defineAuditValue(normalized, key, normalizeAuditSort(value));
+    else if (key === 'lean') {
+      if (typeof value !== 'boolean') throw invalidAuditOptions();
+      defineAuditValue(normalized, key, value);
+    } else {
+      if (!Number.isInteger(value) || value < 0 || (key === 'maxTimeMS' && value === 0)) {
+        throw invalidAuditOptions();
+      }
+      defineAuditValue(normalized, key, value);
+    }
+  }
+  return normalized;
 }
 
 function assertAuditField(document, field, code, message, { required = false } = {}) {
@@ -209,53 +360,112 @@ function throwAuditMutationBoundary() {
 }
 
 function sealAuditReadQuery(query) {
-  for (const method of ['where', 'and', 'or', 'nor', 'merge', 'toConstructor']) {
-    Object.defineProperty(query, method, {
-      configurable: true,
-      value: throwAuditMutationBoundary,
-      writable: false
-    });
-  }
-  for (const method of [
-    'updateOne',
-    'updateMany',
-    'replaceOne',
-    'findOneAndUpdate',
-    'findOneAndReplace',
-    'deleteOne',
-    'deleteMany',
-    'findOneAndDelete'
-  ]) {
-    Object.defineProperty(query, method, {
-      configurable: true,
-      value: rejectAuditMutationBoundary,
-      writable: false
-    });
-  }
-  if (typeof query.clone === 'function') {
-    const clone = query.clone;
-    Object.defineProperty(query, 'clone', {
-      configurable: true,
-      value() {
-        return sealAuditReadQuery(clone.call(this));
-      },
-      writable: false
-    });
-  }
-  return query;
+  return createSealedQueryFacade(query, () => (
+    valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable')
+  ));
 }
 
-for (const method of ['find', 'findOne', 'findById', 'countDocuments', 'estimatedDocumentCount']) {
-  const read = AuditEvent[method];
-  if (typeof read !== 'function') continue;
+const auditFind = AuditEvent.find;
+const auditFindOne = AuditEvent.findOne;
+const auditCountDocuments = AuditEvent.countDocuments;
+const auditEstimatedDocumentCount = AuditEvent.estimatedDocumentCount;
+
+for (const [method, read] of [['find', auditFind], ['findOne', auditFindOne]]) {
   Object.defineProperty(AuditEvent, method, {
     configurable: true,
-    value(...args) {
-      return sealAuditReadQuery(read.apply(this, args));
+    value(filter, projection, options, ...extraArguments) {
+      try {
+        if (extraArguments.length !== 0) throw invalidAuditOptions();
+        return sealAuditReadQuery(read.call(
+          this,
+          normalizeAuditFilter(filter),
+          normalizeAuditProjection(projection),
+          normalizeAuditReadOptions(options)
+        ));
+      } catch (error) {
+        return Promise.reject(error);
+      }
     },
     writable: false
   });
 }
+
+Object.defineProperty(AuditEvent, 'findById', {
+  configurable: true,
+  value(id, projection, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidAuditOptions();
+      const filter = normalizeAuditFilter({ _id: id });
+      return sealAuditReadQuery(auditFindOne.call(
+        this,
+        filter,
+        normalizeAuditProjection(projection),
+        normalizeAuditReadOptions(options)
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(AuditEvent, 'countDocuments', {
+  configurable: true,
+  value(filter, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidAuditOptions();
+      return sealAuditReadQuery(auditCountDocuments.call(
+        this,
+        normalizeAuditFilter(filter),
+        normalizeAuditReadOptions(options)
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(AuditEvent, 'estimatedDocumentCount', {
+  configurable: true,
+  value(options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidAuditOptions();
+      return sealAuditReadQuery(auditEstimatedDocumentCount.call(this, normalizeAuditReadOptions(options)));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(AuditEvent, 'exists', {
+  configurable: true,
+  value(filter, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidAuditOptions();
+      const normalizedOptions = normalizeAuditReadOptions(options) || {};
+      defineAuditValue(normalizedOptions, 'lean', true);
+      return sealAuditReadQuery(auditFindOne.call(
+        this,
+        normalizeAuditFilter(filter),
+        { _id: 1 },
+        normalizedOptions
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(AuditEvent, 'distinct', {
+  configurable: true,
+  value() {
+    throw valueSafeError('UNSUPPORTED_AUDIT_DISTINCT', 'Direct audit distinct queries are not supported');
+  },
+  writable: false
+});
 
 for (const method of [
   'updateOne',
@@ -283,6 +493,14 @@ for (const method of [
 Object.defineProperty(AuditEvent, 'where', {
   configurable: true,
   value: throwAuditMutationBoundary,
+  writable: false
+});
+
+Object.defineProperty(AuditEvent, 'aggregate', {
+  configurable: true,
+  value() {
+    throw valueSafeError('UNSUPPORTED_AUDIT_AGGREGATION', 'Direct audit aggregation is not supported');
+  },
   writable: false
 });
 

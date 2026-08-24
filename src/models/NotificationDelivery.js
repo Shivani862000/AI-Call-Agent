@@ -6,6 +6,7 @@ const { isSafeMachineCode, sanitizeForAudit } = require('../webmaster/redaction'
 const {
   INVALID_RETAINED_VALUE,
   canonicalizeHydratedInsertOptions,
+  createSealedQueryFacade,
   dataArrayValues,
   dataEntries,
   isInvalidRetainedValue,
@@ -48,6 +49,29 @@ const NOTIFICATION_UPDATE_FIELDS = new Set([
   'sentAt'
 ]);
 const NOTIFICATION_UPDATE_OPERATORS = new Set(['$set', '$setOnInsert', '$inc', '$unset', '$rename']);
+const NOTIFICATION_PROJECTION_FIELDS = new Set([
+  ...NOTIFICATION_FILTER_FIELDS,
+  'metadata',
+  'failureReason',
+  'lastAttemptAt',
+  'sentAt',
+  'created_at',
+  'updated_at'
+]);
+const NOTIFICATION_READ_OPTION_FIELDS = new Set(['lean', 'limit', 'maxTimeMS', 'projection', 'skip', 'sort']);
+const NOTIFICATION_WRITE_OPTION_FIELDS = new Set([
+  'includeResultMetadata',
+  'lean',
+  'new',
+  'projection',
+  'returnDocument',
+  'returnOriginal',
+  'runValidators',
+  'setDefaultsOnInsert',
+  'sort',
+  'timestamps',
+  'upsert'
+]);
 const STATUS_ERROR_MESSAGE = 'Notification status must be pending, delivered, or failed';
 const RETRY_COUNT_ERROR_MESSAGE = 'Notification retry count must be a non-negative integer';
 const FAILURE_CODE_ERROR_MESSAGE = 'Notification failure code is not in the operational allowlist';
@@ -253,7 +277,7 @@ function normalizeNotificationOperator(operator, entries, { allowInternalTimesta
 }
 
 function sanitizeMetadataUpdate(update, { allowInternalTimestamps = false } = {}) {
-  if (update == null) return update;
+  if (update == null) throw invalidNotificationUpdate();
   if (Array.isArray(update)) {
     throw retainedDataError(
       'UNSUPPORTED_NOTIFICATION_UPDATE_PIPELINE',
@@ -468,6 +492,93 @@ function assertSafeNotificationFilter(filter) {
   return normalizeNotificationFilter(filter);
 }
 
+function invalidNotificationProjection() {
+  return retainedDataError(
+    'INVALID_NOTIFICATION_PROJECTION',
+    'Notification projections must use allowed plain data fields'
+  );
+}
+
+function invalidNotificationOptions() {
+  return retainedDataError(
+    'INVALID_NOTIFICATION_OPTIONS',
+    'Notification query options must use allowed plain data fields'
+  );
+}
+
+function normalizeNotificationProjection(projection) {
+  if (projection == null) return projection;
+  const entries = dataEntries(projection);
+  if (!entries) throw invalidNotificationProjection();
+  const normalized = {};
+  for (const [path, inclusion] of entries) {
+    if (!NOTIFICATION_PROJECTION_FIELDS.has(path)
+      || ![0, 1, false, true].includes(inclusion)) throw invalidNotificationProjection();
+    defineFilterValue(normalized, path, inclusion);
+  }
+  return normalized;
+}
+
+function normalizeNotificationSort(sort) {
+  const entries = dataEntries(sort);
+  if (!entries) throw invalidNotificationOptions();
+  const normalized = {};
+  const allowedFields = new Set(['created_at', 'lastAttemptAt', 'retryCount', 'sentAt', 'status', 'updated_at']);
+  for (const [path, direction] of entries) {
+    if (!allowedFields.has(path) || (direction !== 1 && direction !== -1)) {
+      throw invalidNotificationOptions();
+    }
+    defineFilterValue(normalized, path, direction);
+  }
+  return normalized;
+}
+
+function normalizeNotificationReadOptions(options) {
+  if (options == null) return undefined;
+  const entries = dataEntries(options);
+  if (!entries) throw invalidNotificationOptions();
+  const normalized = {};
+  for (const [key, value] of entries) {
+    if (!NOTIFICATION_READ_OPTION_FIELDS.has(key)) throw invalidNotificationOptions();
+    if (key === 'projection') {
+      defineFilterValue(normalized, key, normalizeNotificationProjection(value));
+    } else if (key === 'sort') {
+      defineFilterValue(normalized, key, normalizeNotificationSort(value));
+    } else if (key === 'lean') {
+      if (typeof value !== 'boolean') throw invalidNotificationOptions();
+      defineFilterValue(normalized, key, value);
+    } else {
+      if (!Number.isInteger(value) || value < 0 || (key === 'maxTimeMS' && value === 0)) {
+        throw invalidNotificationOptions();
+      }
+      defineFilterValue(normalized, key, value);
+    }
+  }
+  return normalized;
+}
+
+function normalizeNotificationWriteOptions(options) {
+  const entries = options == null ? [] : dataEntries(options);
+  if (!entries) throw invalidNotificationOptions();
+  const normalized = {};
+  for (const [key, value] of entries) {
+    if (!NOTIFICATION_WRITE_OPTION_FIELDS.has(key)) throw invalidNotificationOptions();
+    if (key === 'projection') {
+      defineFilterValue(normalized, key, normalizeNotificationProjection(value));
+    } else if (key === 'sort') {
+      defineFilterValue(normalized, key, normalizeNotificationSort(value));
+    } else if (key === 'returnDocument') {
+      if (value !== 'before' && value !== 'after') throw invalidNotificationOptions();
+      defineFilterValue(normalized, key, value);
+    } else {
+      if (typeof value !== 'boolean') throw invalidNotificationOptions();
+      defineFilterValue(normalized, key, key === 'runValidators' ? true : value);
+    }
+  }
+  if (!Object.hasOwn(normalized, 'runValidators')) defineFilterValue(normalized, 'runValidators', true);
+  return normalized;
+}
+
 function isNonNegativeInteger(value) {
   return Number.isInteger(value) && value >= 0;
 }
@@ -671,49 +782,30 @@ function rejectNotificationBulkBoundary() {
 }
 
 function sealNotificationQuery(query) {
-  for (const method of ['where', 'and', 'or', 'nor', 'merge', 'toConstructor']) {
-    Object.defineProperty(query, method, {
-      configurable: true,
-      value: throwNotificationQueryMutation,
-      writable: false
-    });
-  }
-  for (const method of [
-    'updateOne',
-    'updateMany',
-    'replaceOne',
-    'findOneAndUpdate',
-    'findOneAndReplace',
-    'deleteOne',
-    'deleteMany',
-    'findOneAndDelete'
-  ]) {
-    Object.defineProperty(query, method, {
-      configurable: true,
-      value: rejectNotificationQueryMutation,
-      writable: false
-    });
-  }
-  if (typeof query.clone === 'function') {
-    const clone = query.clone;
-    Object.defineProperty(query, 'clone', {
-      configurable: true,
-      value() {
-        return sealNotificationQuery(clone.call(this));
-      },
-      writable: false
-    });
-  }
-  return query;
+  return createSealedQueryFacade(query, () => retainedDataError(
+    'UNSUPPORTED_NOTIFICATION_QUERY_MUTATION',
+    'Notification query mutations must use guarded model methods'
+  ));
 }
 
-function installGuardedRead(method, normalizeArguments) {
-  const read = NotificationDelivery[method];
+const notificationFind = NotificationDelivery.find;
+const notificationFindOne = NotificationDelivery.findOne;
+const notificationCountDocuments = NotificationDelivery.countDocuments;
+const notificationEstimatedDocumentCount = NotificationDelivery.estimatedDocumentCount;
+const notificationDistinct = NotificationDelivery.distinct;
+
+for (const [method, read] of [['find', notificationFind], ['findOne', notificationFindOne]]) {
   Object.defineProperty(NotificationDelivery, method, {
     configurable: true,
-    value(...args) {
+    value(filter, projection, options, ...extraArguments) {
       try {
-        return sealNotificationQuery(read.apply(this, normalizeArguments(args)));
+        if (extraArguments.length !== 0) throw invalidNotificationOptions();
+        return sealNotificationQuery(read.call(
+          this,
+          assertSafeNotificationFilter(filter),
+          normalizeNotificationProjection(projection),
+          normalizeNotificationReadOptions(options)
+        ));
       } catch (error) {
         return Promise.reject(error);
       }
@@ -722,31 +814,109 @@ function installGuardedRead(method, normalizeArguments) {
   });
 }
 
-for (const method of ['find', 'findOne', 'countDocuments', 'exists']) {
-  installGuardedRead(method, (args) => [assertSafeNotificationFilter(args[0]), ...args.slice(1)]);
-}
-
-installGuardedRead('findById', (args) => {
-  const filter = assertSafeNotificationFilter({ _id: args[0] });
-  return [filter._id, ...args.slice(1)];
+Object.defineProperty(NotificationDelivery, 'findById', {
+  configurable: true,
+  value(id, projection, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidNotificationOptions();
+      const filter = assertSafeNotificationFilter({ _id: id });
+      return sealNotificationQuery(notificationFindOne.call(
+        this,
+        filter,
+        normalizeNotificationProjection(projection),
+        normalizeNotificationReadOptions(options)
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
 });
 
-installGuardedRead('distinct', (args) => {
-  if (typeof args[0] !== 'string' || !NOTIFICATION_FILTER_FIELDS.has(args[0])) {
-    throw invalidNotificationFilter();
-  }
-  return [args[0], assertSafeNotificationFilter(args[1]), ...args.slice(2)];
+Object.defineProperty(NotificationDelivery, 'countDocuments', {
+  configurable: true,
+  value(filter, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidNotificationOptions();
+      return sealNotificationQuery(notificationCountDocuments.call(
+        this,
+        assertSafeNotificationFilter(filter),
+        normalizeNotificationReadOptions(options)
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
 });
 
-function installGuardedUpdate(method) {
-  const write = NotificationDelivery[method];
+Object.defineProperty(NotificationDelivery, 'estimatedDocumentCount', {
+  configurable: true,
+  value(options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidNotificationOptions();
+      return sealNotificationQuery(notificationEstimatedDocumentCount.call(
+        this,
+        normalizeNotificationReadOptions(options)
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(NotificationDelivery, 'exists', {
+  configurable: true,
+  value(filter, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidNotificationOptions();
+      const normalizedOptions = normalizeNotificationReadOptions(options) || {};
+      defineFilterValue(normalizedOptions, 'lean', true);
+      return sealNotificationQuery(notificationFindOne.call(
+        this,
+        assertSafeNotificationFilter(filter),
+        { _id: 1 },
+        normalizedOptions
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(NotificationDelivery, 'distinct', {
+  configurable: true,
+  value(field, filter, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidNotificationOptions();
+      if (typeof field !== 'string' || !NOTIFICATION_FILTER_FIELDS.has(field)) {
+        throw invalidNotificationFilter();
+      }
+      return sealNotificationQuery(notificationDistinct.call(
+        this,
+        field,
+        assertSafeNotificationFilter(filter),
+        normalizeNotificationReadOptions(options)
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+function installGuardedUpdate(method, write) {
   Object.defineProperty(NotificationDelivery, method, {
     configurable: true,
-    value(filter, update, ...args) {
+    value(filter, update, options, ...extraArguments) {
       try {
+        if (extraArguments.length !== 0) throw invalidNotificationOptions();
         const normalizedFilter = assertSafeNotificationFilter(filter);
         const normalizedUpdate = sanitizeMetadataUpdate(update);
-        return sealNotificationQuery(write.call(this, normalizedFilter, normalizedUpdate, ...args));
+        const normalizedOptions = normalizeNotificationWriteOptions(options);
+        return sealNotificationQuery(write.call(this, normalizedFilter, normalizedUpdate, normalizedOptions));
       } catch (error) {
         return Promise.reject(error);
       }
@@ -756,14 +926,15 @@ function installGuardedUpdate(method) {
 }
 
 for (const method of ['updateOne', 'updateMany', 'findOneAndUpdate', 'findOneAndReplace', 'replaceOne']) {
-  installGuardedUpdate(method);
+  installGuardedUpdate(method, NotificationDelivery[method]);
 }
 
 const guardedFindOneAndUpdate = NotificationDelivery.findOneAndUpdate;
 Object.defineProperty(NotificationDelivery, 'findByIdAndUpdate', {
   configurable: true,
-  value(id, update, ...args) {
-    return guardedFindOneAndUpdate.call(this, { _id: id }, update, ...args);
+  value(id, update, options, ...extraArguments) {
+    if (extraArguments.length !== 0) return Promise.reject(invalidNotificationOptions());
+    return guardedFindOneAndUpdate.call(this, { _id: id }, update, options);
   },
   writable: false
 });
@@ -794,6 +965,17 @@ for (const method of ['bulkWrite', 'bulkSave']) {
 Object.defineProperty(NotificationDelivery, 'where', {
   configurable: true,
   value: throwNotificationQueryMutation,
+  writable: false
+});
+
+Object.defineProperty(NotificationDelivery, 'aggregate', {
+  configurable: true,
+  value() {
+    throw retainedDataError(
+      'UNSUPPORTED_NOTIFICATION_AGGREGATION',
+      'Direct notification aggregation is not supported'
+    );
+  },
   writable: false
 });
 

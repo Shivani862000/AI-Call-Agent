@@ -527,6 +527,40 @@ test('unregistered binary and identifier fields redact while registered timestam
   assert.equal(JSON.stringify(sanitized).includes('112'), false);
 });
 
+test('registered identifiers render genuine ObjectIds without observing prototype spoofs', () => {
+  // Mutation caught: exact ObjectId.prototype identity invokes a hostile buffer accessor in toHexString().
+  const marker = 'private-redaction-object-id-marker-6421';
+  let observationCount = 0;
+  const accessorSpoof = Object.create(mongoose.Types.ObjectId.prototype);
+  Object.defineProperty(accessorSpoof, 'buffer', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      throw new Error(marker);
+    }
+  });
+  const bufferPrototypeSpoof = Object.create(mongoose.Types.ObjectId.prototype);
+  Object.defineProperty(bufferPrototypeSpoof, 'buffer', {
+    enumerable: true,
+    value: Object.create(Buffer.prototype)
+  });
+  const genuine = new mongoose.Types.ObjectId('507f1f77bcf86cd799439011');
+
+  const sanitized = sanitizeForAudit({
+    targetId: genuine,
+    tenantId: accessorSpoof,
+    actorId: bufferPrototypeSpoof
+  });
+
+  assert.deepEqual(sanitized, {
+    targetId: '507f1f77bcf86cd799439011',
+    tenantId: '[redacted]',
+    actorId: '[redacted]'
+  });
+  assert.equal(JSON.stringify(sanitized).includes(marker), false);
+  assert.equal(observationCount, 0);
+});
+
 test('failure codes come only from an exported operational allowlist', () => {
   // Mutation caught: syntactically machine-like PII and credential labels pass a heuristic validator.
   for (const requiredCode of [

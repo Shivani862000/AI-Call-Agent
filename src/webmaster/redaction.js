@@ -2,6 +2,10 @@
 
 const mongoose = require('mongoose');
 const { types: utilTypes } = require('node:util');
+const {
+  isInvalidRetainedValue,
+  normalizeNullableObjectId
+} = require('./value-safe-validation');
 
 const REDACTED = '[redacted]';
 const ACCESSOR_VALUE = Symbol('accessor-value');
@@ -550,12 +554,13 @@ function sanitizeIntegrationMap(value, seen) {
   return clone;
 }
 
-function isObjectId(value) {
-  if (!value || typeof value !== 'object' || utilTypes.isProxy(value)) return false;
+function safeObjectIdHex(value) {
+  const normalized = normalizeNullableObjectId(value, mongoose.Types.ObjectId);
+  if (normalized == null || isInvalidRetainedValue(normalized)) return null;
   try {
-    return Object.getPrototypeOf(value) === mongoose.Types.ObjectId.prototype;
+    return mongoose.Types.ObjectId.prototype.toHexString.call(normalized).toLowerCase();
   } catch (_error) {
-    return false;
+    return null;
   }
 }
 
@@ -623,8 +628,9 @@ function cloneEntry(key, entry, seen) {
     if (SAFE_DATE_KEYS.has(parts.normalized) && dateTimestamp(entry) !== NOT_A_DATE) {
       return cloneSanitized(entry, seen);
     }
-    if (SAFE_MACHINE_STRING_KEYS.has(parts.normalized) && isObjectId(entry)) {
-      return cloneSanitized(entry, seen);
+    if (SAFE_MACHINE_STRING_KEYS.has(parts.normalized)) {
+      const hex = safeObjectIdHex(entry);
+      if (hex) return hex;
     }
     return REDACTED;
   }
@@ -652,14 +658,8 @@ function cloneSanitized(value, seen) {
   const byteLength = binaryByteLength(value);
   if (byteLength !== null) return `[binary:${byteLength} bytes]`;
 
-  if (isObjectId(value)) {
-    try {
-      const hex = mongoose.Types.ObjectId.prototype.toHexString.call(value);
-      return /^[a-f0-9]{24}$/i.test(hex) ? hex.toLowerCase() : '[object-id]';
-    } catch (_error) {
-      return '[object-id]';
-    }
-  }
+  const objectIdHex = safeObjectIdHex(value);
+  if (objectIdHex) return objectIdHex;
   if (seen.has(value)) return '[circular]';
 
   seen.add(value);
