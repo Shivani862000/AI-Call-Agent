@@ -14,6 +14,8 @@ const campaignsRouter = require('../routes/campaigns');
 const feedbackRouter = require('../routes/feedback');
 const callArchiveRouter = require('../routes/call-archival');
 const Call = require('./models/Call');
+const SupportTicket = require('./models/SupportTicket');
+const SupportTicketCounter = require('./models/SupportTicketCounter');
 const createSupportTicketsRouter = require('../routes/support-tickets');
 const { createSlackSupportNotifier } = require('../services/slack-support');
 const reportsRouter = require('../routes/reports');
@@ -332,9 +334,8 @@ function mountApiRoutes(app, {
     callArchiveRouter
   });
   app.use('/api/support-tickets', createSupportTicketsRouter({
-    dbRun,
-    dbGet,
-    dbAll,
+    SupportTicket,
+    TicketCounter: SupportTicketCounter,
     notifyNewTicket: createSlackSupportNotifier({ getIntegrationRuntimeConfig })
   }));
   app.use('/api/reports', reportsRouter);

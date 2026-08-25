@@ -80,22 +80,28 @@ test('CRM sync wraps rejected provider-body reads without returning or logging t
   assert.equal(JSON.stringify(logs).includes(marker), false);
 });
 
-test('support ticket creation forwards the authorized tenant to Slack delivery', async () => {
+test('support ticket creation persists the ticket in MongoDB before notifying Slack', async () => {
   let notified = null;
-  const ticket = {
-    ticket_id: 'BUG-1001',
-    type: 'BUG',
-    description: 'Safe problem description',
-    reporter_role: 'CLIENT_ADMIN',
-    page_url: 'https://app.example.com/support.html'
+  const storedTickets = [];
+  const SupportTicket = {
+    async create(value) {
+      const ticket = { ...value, created_at: new Date(), updated_at: new Date() };
+      storedTickets.push(ticket);
+      return ticket;
+    }
+  };
+  const TicketCounter = {
+    async findOneAndUpdate() {
+      return { sequence: 1 };
+    }
   };
   const router = createSupportTicketsRouter({
-    dbRun: async (sql) => sql.startsWith('INSERT') ? { lastID: 1 } : { changes: 1 },
-    dbGet: async () => ticket,
-    dbAll: async () => [],
+    SupportTicket,
+    TicketCounter,
     notifyNewTicket: async (value) => { notified = value; }
   });
   const handler = router.stack.find((layer) => layer.route?.path === '/' && layer.route.methods.post).route.stack[0].handle;
+  const response = { statusCode: null, body: null, status(code) { this.statusCode = code; return this; }, json(value) { this.body = value; } };
 
   await handler({
     body: {
@@ -105,10 +111,31 @@ test('support ticket creation forwards the authorized tenant to Slack delivery',
     },
     adminSession: { username: 'admin@example.com', role: 'CLIENT_ADMIN' },
     tenantId: 'tenant-1'
-  }, { status() { return this; }, json() {} }, (error) => { throw error; });
+  }, response, (error) => { throw error; });
   await new Promise((resolve) => setImmediate(resolve));
 
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.body.ticket.ticket_id, 'BUG-1001');
+  assert.equal(storedTickets.length, 1);
+  assert.equal(storedTickets[0].tenant_id, 'tenant-1');
   assert.equal(notified.tenant_id, 'tenant-1');
+});
+
+test('support ticket list reads MongoDB tickets newest first', async () => {
+  const tickets = [{ ticket_id: 'IDEA-1002' }, { ticket_id: 'BUG-1001' }];
+  const SupportTicket = {
+    find(filter) {
+      assert.deepEqual(filter, {});
+      return { sort(sort) { assert.deepEqual(sort, { updated_at: -1 }); return { lean: async () => tickets }; } };
+    }
+  };
+  const router = createSupportTicketsRouter({ SupportTicket });
+  const handler = router.stack.find((layer) => layer.route?.path === '/' && layer.route.methods.get).route.stack[0].handle;
+  const response = { json(value) { this.body = value; } };
+
+  await handler({}, response, (error) => { throw error; });
+
+  assert.deepEqual(response.body, { tickets });
 });
 
 test('test-call Gemini consumers pass the session tenant to runtime resolution', async () => {

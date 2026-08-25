@@ -452,7 +452,7 @@
       };
 
       const cards = activityCards[activeOverviewFilter] || activityCards.patients;
-      const isAgent = window.AppShell.session?.role === 'AGENT';
+      const isAgent = window.AppShell.isTenantAgent();
       const visibleCards = isAgent ? cards.filter(item => item.label !== 'Feedback' && item.label !== 'Positive' && item.label !== 'Neutral' && item.label !== 'Negative') : cards;
 
       document.getElementById('overviewActivityTitle').textContent = 'Today\'s Activity';
@@ -743,7 +743,7 @@
     }
 
     async function loadOverview() {
-      const isAgent = window.AppShell.session?.role === 'AGENT';
+      const isAgent = window.AppShell.isTenantAgent();
 
       const promises = [
         AppShell.fetchJson(`${AppShell.API_BASE}/customers`),

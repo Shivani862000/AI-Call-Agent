@@ -9,7 +9,12 @@
     // Reports page disabled.
     // { href: '/reports.html', label: 'Reports', shortLabel: 'Reports' }
   ];
+  const ADMIN_ROLES = new Set(['WEBMASTER', 'CLIENT_ADMIN']);
   const SHOW_TEST_AI_CALL_WIDGET = false;
+
+  function isAdminRole(role) {
+    return ADMIN_ROLES.has(role);
+  }
 
   function redirectToLogin() {
     window.location.replace('/login.html');
@@ -100,9 +105,13 @@
     document.body.classList.add('tenant-user-navigation');
   }
 
+  function isTenantAgent(role = window.AppShell?.session?.role) {
+    return role === 'CLIENT_AGENT';
+  }
+
   async function ensureAuthenticatedSession() {
     const session = await fetchJson('/api/auth/session');
-    if (session.role === 'AGENT') {
+    if (isTenantAgent(session.role)) {
       document.body.classList.add('role-agent');
     }
     window.AppShell.session = session;
@@ -113,7 +122,7 @@
       }
       addTenantUserNavigation();
     }
-    if (session.role === 'ADMIN') {
+    if (isAdminRole(session.role)) {
       if (!NAV_ITEMS.some((item) => item.href === '/support-tickets.html')) {
         NAV_ITEMS.push({ href: '/support-tickets.html', label: 'Support Tickets', shortLabel: 'Support' });
         buildMobileTabbar();
@@ -1022,6 +1031,7 @@
     formatCallType,
     formatSentence,
     initializeShellChrome,
+    isTenantAgent,
     logoutAdmin,
     NewCallModal: createNewCallModal,
     normalizePhoneForApi,

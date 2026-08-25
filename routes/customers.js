@@ -236,25 +236,6 @@ router.post('/', async (req, res) => {
       is_manual: 1
     });
 
-    // Temp dual-write to SQLite so the legacy scheduler can pick it up
-    const { dbRun } = require('../db');
-    await dbRun(
-      'INSERT INTO customers (name, phone, call_type, preferred_slot, status, is_manual, created_at, scheduled_datetime, customer_value, urgency_level, priority_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [
-        payload.name || 'Customer',
-        payload.phone,
-        payload.call_type || 'REVIEW_CALL',
-        payload.preferred_slot || '10:00',
-        initialStatus,
-        1,
-        new Date().toISOString(),
-        payload.scheduled_datetime || null,
-        payload.customer_value || 'standard',
-        payload.urgency_level || 'normal',
-        50
-      ]
-    );
-
     logger.info('USER_CREATED_CALL', baseCustomerLogDetails(customer, { user: req.adminSession?.username || 'admin' }));
     logger.info('CALL_CREATED', baseCustomerLogDetails(customer));
     logger.info('CALL_PENDING', baseCustomerLogDetails(customer, { status: 'scheduled' }));
