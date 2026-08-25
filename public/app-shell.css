@@ -49,6 +49,30 @@ body.role-agent .admin-only-control {
   display: none !important;
 }
 
+body.embedded-tenant-view {
+  min-height: 100vh;
+}
+
+body.embedded-tenant-view .app-shell {
+  display: block;
+  min-height: 100vh;
+}
+
+body.embedded-tenant-view .sidebar,
+body.embedded-tenant-view .mobile-dock,
+body.embedded-tenant-view .mobile-tabbar,
+body.embedded-tenant-view .mobile-ops-header,
+body.embedded-tenant-view .sidebar-footer,
+body.embedded-tenant-view #logoutButton,
+body.embedded-tenant-view #mobileMenuSheet {
+  display: none !important;
+}
+
+body.embedded-tenant-view .main-panel {
+  width: 100%;
+  min-height: 100vh;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 1fr;

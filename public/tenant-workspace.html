@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Path Lab Console</title>
+  <link rel="stylesheet" href="/tenant-workspace.css">
+</head>
+<body class="tenant-workspace">
+  <div class="tenant-workspace-layout">
+    <aside class="tenant-workspace-sidebar" aria-label="Tenant navigation">
+      <div class="tenant-workspace-brand">
+        <div class="tenant-workspace-mark" aria-hidden="true">PL</div>
+        <div>
+          <strong>Path Lab Console</strong>
+          <span>Patient follow-up operations</span>
+        </div>
+      </div>
+      <nav id="tenantWorkspaceDesktopNav" class="tenant-workspace-nav" aria-label="Primary"></nav>
+      <button id="tenantWorkspaceLogout" class="tenant-workspace-logout" type="button">Logout</button>
+    </aside>
+    <main class="tenant-workspace-main">
+      <div id="tenantWorkspaceStatus" class="tenant-workspace-status" role="status" aria-live="polite">Loading workspace…</div>
+      <div id="tenantWorkspaceError" class="tenant-workspace-error" hidden>
+        <p>We could not load this page.</p>
+        <button id="tenantWorkspaceRetry" type="button">Try again</button>
+      </div>
+      <iframe id="tenantContentFrame" title="Tenant workspace content" hidden></iframe>
+    </main>
+  </div>
+  <nav id="tenantWorkspaceMobileNav" class="tenant-workspace-mobile-nav" aria-label="Primary"></nav>
+  <script src="/tenant-workspace.js"></script>
+</body>
+</html>

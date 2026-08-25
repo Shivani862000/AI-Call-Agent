@@ -16,6 +16,11 @@
     return ADMIN_ROLES.has(role);
   }
 
+  function isEmbeddedTenantView() {
+    return /(?:^|[?&])embedded=1(?:&|$)/.test(String(window.location.search || ''))
+      || window.self !== window.top;
+  }
+
   function redirectToLogin() {
     window.location.replace('/login.html');
   }
@@ -116,18 +121,22 @@
     }
     window.AppShell.session = session;
     if (session.role === 'CLIENT_ADMIN') {
-      if (!NAV_ITEMS.some((item) => item.href === '/users.html')) {
-        NAV_ITEMS.push({ href: '/users.html', label: 'Users', shortLabel: 'Users' });
-        buildMobileTabbar();
+      if (!isEmbeddedTenantView()) {
+        if (!NAV_ITEMS.some((item) => item.href === '/users.html')) {
+          NAV_ITEMS.push({ href: '/users.html', label: 'Users', shortLabel: 'Users' });
+          buildMobileTabbar();
+        }
+        addTenantUserNavigation();
       }
-      addTenantUserNavigation();
     }
     if (isAdminRole(session.role)) {
-      if (!NAV_ITEMS.some((item) => item.href === '/support-tickets.html')) {
-        NAV_ITEMS.push({ href: '/support-tickets.html', label: 'Support Tickets', shortLabel: 'Support' });
-        buildMobileTabbar();
+      if (!isEmbeddedTenantView()) {
+        if (!NAV_ITEMS.some((item) => item.href === '/support-tickets.html')) {
+          NAV_ITEMS.push({ href: '/support-tickets.html', label: 'Support Tickets', shortLabel: 'Support' });
+          buildMobileTabbar();
+        }
+        addAdminSupportNavigation();
       }
-      addAdminSupportNavigation();
     }
     return session;
   }
@@ -902,6 +911,7 @@
   }
 
   function initializeShellChrome() {
+    if (isEmbeddedTenantView()) return;
     buildMobileTabbar();
     if (!SHOW_TEST_AI_CALL_WIDGET) {
       document.querySelector('[data-test-ai-call-widget]')?.remove();
@@ -1031,6 +1041,7 @@
     formatCallType,
     formatSentence,
     initializeShellChrome,
+    isEmbeddedTenantView,
     isTenantAgent,
     logoutAdmin,
     NewCallModal: createNewCallModal,
