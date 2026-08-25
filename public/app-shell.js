@@ -76,12 +76,43 @@
     document.body.classList.add('admin-support-navigation');
   }
 
+  function addTenantUserNavigation() {
+    const currentPath = window.location.pathname || '/admin.html';
+    const navigationTargets = [
+      { selector: '.nav-list', className: 'nav-link', label: 'Users' },
+      { selector: '.mobile-dock', className: 'mobile-dock-link', label: 'Users' }
+    ];
+
+    navigationTargets.forEach(({ selector, className, label }) => {
+      const navigation = document.querySelector(selector);
+      if (!navigation || navigation.querySelector('a[href="/users.html"]')) return;
+      const link = document.createElement('a');
+      link.href = '/users.html';
+      link.className = className;
+      link.textContent = label;
+      if (currentPath === '/users.html') {
+        link.classList.add('active');
+        link.setAttribute('aria-current', 'page');
+      }
+      navigation.appendChild(link);
+    });
+
+    document.body.classList.add('tenant-user-navigation');
+  }
+
   async function ensureAuthenticatedSession() {
     const session = await fetchJson('/api/auth/session');
     if (session.role === 'AGENT') {
       document.body.classList.add('role-agent');
     }
     window.AppShell.session = session;
+    if (session.role === 'CLIENT_ADMIN') {
+      if (!NAV_ITEMS.some((item) => item.href === '/users.html')) {
+        NAV_ITEMS.push({ href: '/users.html', label: 'Users', shortLabel: 'Users' });
+        buildMobileTabbar();
+      }
+      addTenantUserNavigation();
+    }
     if (session.role === 'ADMIN') {
       if (!NAV_ITEMS.some((item) => item.href === '/support-tickets.html')) {
         NAV_ITEMS.push({ href: '/support-tickets.html', label: 'Support Tickets', shortLabel: 'Support' });

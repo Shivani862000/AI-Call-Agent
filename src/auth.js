@@ -18,6 +18,7 @@ const PROTECTED_HTML_PATHS = new Set([
   '/support-tickets.html',
   '/incoming-calls.html',
   '/customers.html',
+  '/users.html',
   '/clients.html',
   '/feedback.html',
   '/feedback-analysis.html',
