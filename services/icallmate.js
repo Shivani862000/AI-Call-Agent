@@ -4,15 +4,16 @@ const {
   redactIcallMateCallbackUrl
 } = require('../src/icallmate-webhook');
 const logger = require('./system-logger');
+const { getIntegrationRuntimeConfig: defaultRuntimeConfigResolver } = require('../src/webmaster/settings-service');
 
 const ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE = 'ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE';
 
-function getOutboundEndpoint() {
-  return `${String(process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in').replace(/\/+$/, '')}/OBDAPI/webresources/CreateOBDCampaignPost`;
+function getOutboundEndpoint(settings = {}) {
+  return `${String(settings.outboundApiEndpoint || process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in').replace(/\/+$/, '')}/OBDAPI/webresources/CreateOBDCampaignPost`;
 }
 
-function getDefaultMediaUrl() {
-  const configuredUrl = String(process.env.ICALLMATE_MASTER_POST_WSURL || '').trim();
+function getDefaultMediaUrl(settings = {}) {
+  const configuredUrl = String(settings.masterPostWsUrl || process.env.ICALLMATE_MASTER_POST_WSURL || '').trim();
   if (configuredUrl) {
     return configuredUrl;
   }
@@ -30,18 +31,23 @@ function getDefaultMediaUrl() {
   return `${publicBaseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:').replace(/\/+$/, '')}/icallmate/media`;
 }
 
-function getDefaultCallbackUrl() {
+function getDefaultCallbackUrl(webhookSecret = null) {
   const publicBaseUrl = String(
     process.env.APP_BASE_URL
     || process.env.NGROK_URL
     || process.env.WEBHOOK_URL
     || ''
   ).trim();
-  return publicBaseUrl ? buildIcallMateCallbackUrl(publicBaseUrl) : '';
+  return publicBaseUrl
+    ? buildIcallMateCallbackUrl(publicBaseUrl, {
+      ICALLMATE_WEBHOOK_SECRET: webhookSecret || process.env.ICALLMATE_WEBHOOK_SECRET,
+      WEBHOOK_SECRET: webhookSecret ? '' : process.env.WEBHOOK_SECRET
+    })
+    : '';
 }
 
-function ensureAuthenticatedMediaUrl(value) {
-  const rawUrl = String(value || getDefaultMediaUrl()).trim();
+function ensureAuthenticatedMediaUrl(value, settings = {}) {
+  const rawUrl = String(value || getDefaultMediaUrl(settings)).trim();
   if (!rawUrl) {
     return '';
   }
@@ -85,12 +91,17 @@ async function assertPublicMediaEndpointReachable(mediaUrl, options = {}) {
       signal: controller.signal
     });
     if (!response.ok) {
-      throw new Error(`public URL returned HTTP ${response.status}`);
+      const error = new Error('Public media URL returned a non-success response');
+      error.code = 'ICALLMATE_MEDIA_HTTP_ERROR';
+      error.status = response.status;
+      throw error;
     }
   } catch (error) {
     const reason = error?.name === 'AbortError'
       ? `timed out after ${timeoutMs}ms`
-      : String(error?.message || 'unreachable');
+      : error?.code === 'ICALLMATE_MEDIA_HTTP_ERROR'
+        ? `public URL returned HTTP ${error.status}`
+        : 'unreachable';
     const preflightError = new Error(
       `iCallMate media endpoint preflight failed: ${reason}. Keep the public tunnel running before placing calls.`
     );
@@ -124,6 +135,7 @@ function redactRequestPayload(payload) {
   }
 
   const copy = JSON.parse(JSON.stringify(payload));
+  if (Object.hasOwn(copy, 'ukey')) copy.ukey = '[redacted]';
   if (Array.isArray(copy.msisdnlist)) {
     copy.msisdnlist.forEach((entry) => {
       if (entry?.wsurl) entry.wsurl = redactMediaUrlToken(entry.wsurl);
@@ -139,8 +151,8 @@ function redactRequestPayload(payload) {
   return copy;
 }
 
-function getMasterPostEndpoint() {
-  return String(process.env.ICALLMATE_MASTER_POST_API_ENDPOINT || 'https://crm.icallmate.in/WebSVC111/setMasterPostAPI').trim();
+function getMasterPostEndpoint(settings = {}) {
+  return String(settings.masterPostApiEndpoint || process.env.ICALLMATE_MASTER_POST_API_ENDPOINT || 'https://crm.icallmate.in/WebSVC111/setMasterPostAPI').trim();
 }
 
 function normalizePhone(value) {
@@ -161,24 +173,25 @@ function buildOutboundCampaignPayload(customerPhone, customerId, options = {}) {
     ukey: options.ukey || process.env.ICALLMATE_UKEY || '',
     serviceno: options.serviceno || process.env.ICALLMATE_SERVICE_NO || '',
     ivrtemplateid: options.ivrtemplateid || process.env.ICALLMATE_IVR_TEMPLATE_ID || '',
-    maxTalkTimeInSec: Number(options.maxTalkTimeInSec || process.env.ICALLMATE_MAX_TALK_TIME_SEC || 0),
-    retryatmpt: String(options.retryatmpt || process.env.ICALLMATE_RETRY_ATTEMPT || '2'),
+    maxTalkTimeInSec: Number(options.maxTalkTimeInSec ?? process.env.ICALLMATE_MAX_TALK_TIME_SEC ?? 0),
+    retryatmpt: String(options.retryatmpt ?? process.env.ICALLMATE_RETRY_ATTEMPT ?? '2'),
     sendnow: String(options.sendnow || '0'),
     schddate: options.schddate || '',
-    retryduration: String(options.retryduration || process.env.ICALLMATE_RETRY_DURATION || '5'),
+    retryduration: String(options.retryduration ?? process.env.ICALLMATE_RETRY_DURATION ?? '5'),
     s_unique: options.s_unique || (customerId ? `customer-${customerId}-${Date.now()}` : `call-${Date.now()}`),
     msisdnlist: [
       {
         phoneno: phoneNo,
         customer_name: options.customerName || '',
         wsurl: options.wsurl || '',
-        agentid: String(options.agentId || process.env.ICALLMATE_AGENT_ID || '0'),
-        botid: String(options.botId || process.env.ICALLMATE_BOT_ID || '0'),
+        agentid: String(options.agentId ?? process.env.ICALLMATE_AGENT_ID ?? '0'),
+        botid: String(options.botId ?? process.env.ICALLMATE_BOT_ID ?? '0'),
         extraparam: JSON.stringify({
           callDirection: 'outbound',
           customerId: customerId || null,
           customerName: options.customerName || '',
           clientName: options.clientName || '',
+          tenantId: options.tenantId ?? null,
           callType: options.callType || 'REVIEW_CALL'
         }),
         iscallbackapi: String(options.iscallbackapi ?? process.env.ICALLMATE_IS_CALLBACK_API ?? '1'),
@@ -211,6 +224,7 @@ function buildMasterPostPayload(customerPhone, leadId, options = {}) {
           customerId: options.customerId || null,
           customerName: options.customerName || '',
           clientName: options.clientName || '',
+          tenantId: options.tenantId ?? null,
           callType: options.callType || 'REVIEW_CALL',
           leadId: resolvedLeadId
         })
@@ -248,21 +262,24 @@ function hasProviderCallSid(payload) {
   );
 }
 
-function getProviderReason(payload) {
-  if (typeof payload === 'string') {
-    return payload;
-  }
-  return String(payload?.reason || payload?.message || payload?.rawText || '');
-}
-
 function isFailurePayload(payload) {
   const status = String(payload?.status || payload?.Status || '').toLowerCase();
   const statusCode = Number(payload?.statuscode || payload?.statusCode || payload?.code || 0);
   return status === 'failure' || (statusCode >= 400 && statusCode !== 0);
 }
 
+async function readProviderResponseText(response) {
+  try {
+    return await response.text();
+  } catch (_error) {
+    const error = new Error('iCallMate provider response could not be read');
+    error.code = 'ICALLMATE_RESPONSE_READ_FAILED';
+    throw error;
+  }
+}
+
 async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
-  const endpoint = getMasterPostEndpoint();
+  const endpoint = getMasterPostEndpoint(options.runtimeSettings);
   const leadId = options.leadid || options.leadId || process.env.ICALLMATE_MASTER_POST_LEAD_ID || '1031';
   const payload = buildMasterPostPayload(customerPhone, leadId, { ...options, customerId });
 
@@ -275,12 +292,19 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
     `campid=${payload.campid} leadid=${payload.leadid}`
   );
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  const rawText = await response.text();
+  let response;
+  try {
+    response = await (options.fetchImpl || global.fetch)(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  } catch (_error) {
+    const error = new Error('iCallMate master-post request failed');
+    error.code = 'ICALLMATE_REQUEST_FAILED';
+    throw error;
+  }
+  const rawText = await readProviderResponseText(response);
   let parsed = {};
   try {
     parsed = rawText ? JSON.parse(rawText) : {};
@@ -298,41 +322,63 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
 
   const providerReturnedSid = hasProviderCallSid(parsed);
   const sid = extractCallSid(parsed, `icallmate-masterpost-${payload.leadid}-${Date.now()}`);
-  const providerReason = getProviderReason(parsed);
   const status = providerReturnedSid ? 'queued' : 'submitted';
-  console.log(`[ICALLMATE OUTBOUND] Call ${status} sid=${sid}${providerReason ? ` reason="${providerReason}"` : ''}`);
+  console.log(`[ICALLMATE OUTBOUND] Call ${status} sid=${sid}`);
   return {
     sid,
     status,
-    providerReturnedSid,
-    providerReason,
-    raw: parsed,
-    requestPayload: payload
+    providerReturnedSid
   };
 }
 
 async function initiateCall(customerPhone, customerId, options = {}) {
+  const getIntegrationRuntimeConfig = options.getIntegrationRuntimeConfig || defaultRuntimeConfigResolver;
+  const runtime = await getIntegrationRuntimeConfig('icallmate', options.tenantId ?? null);
+  const settings = runtime.settings || {};
+  if (settings.enabled === false) {
+    const error = new Error('iCallMate integration is disabled');
+    error.code = 'INTEGRATION_DISABLED';
+    throw error;
+  }
+  const callbackSecret = runtime.secrets?.webhookSecret || null;
+  let callbackapi = options.callbackapi || getDefaultCallbackUrl(callbackSecret);
+  if (callbackapi && callbackSecret) {
+    const callbackUrl = new URL(callbackapi);
+    callbackUrl.searchParams.set('secret', callbackSecret);
+    callbackapi = callbackUrl.toString();
+  }
   const authenticatedOptions = {
+    runtimeSettings: settings,
+    fetchImpl: options.fetchImpl || global.fetch,
     ...options,
-    wsurl: ensureAuthenticatedMediaUrl(options.wsurl),
-    callbackapi: options.callbackapi || getDefaultCallbackUrl()
+    ukey: options.ukey ?? runtime.secrets?.ukey ?? '',
+    serviceno: options.serviceno ?? settings.serviceNo ?? '',
+    ivrtemplateid: options.ivrtemplateid ?? settings.ivrTemplateId ?? '',
+    maxTalkTimeInSec: options.maxTalkTimeInSec ?? settings.maxTalkTimeSec,
+    retryatmpt: options.retryatmpt ?? settings.retryAttempt,
+    retryduration: options.retryduration ?? settings.retryDurationMinutes,
+    agentId: options.agentId ?? settings.agentId,
+    botId: options.botId ?? settings.botId,
+    leadid: options.leadid ?? options.leadId ?? settings.leadId,
+    campid: options.campid ?? settings.campaignId,
+    iscallbackapi: options.iscallbackapi ?? (settings.callbackEnabled ? '1' : '0'),
+    wsurl: ensureAuthenticatedMediaUrl(options.wsurl, settings),
+    callbackapi
   };
-  await assertPublicMediaEndpointReachable(authenticatedOptions.wsurl);
+  await assertPublicMediaEndpointReachable(authenticatedOptions.wsurl, { fetchImpl: authenticatedOptions.fetchImpl });
 
-  const provider = String(authenticatedOptions.provider || process.env.ICALLMATE_OUTBOUND_PROVIDER || '').toLowerCase();
+  const provider = String(authenticatedOptions.provider || settings.outboundProvider || process.env.ICALLMATE_OUTBOUND_PROVIDER || '').toLowerCase();
   if (provider === 'masterpost' || provider === 'master-post') {
-    const result = await initiateMasterPostCall(customerPhone, customerId, authenticatedOptions);
-    return { ...result, requestPayload: redactRequestPayload(result.requestPayload) };
+    return initiateMasterPostCall(customerPhone, customerId, authenticatedOptions);
   }
 
-  const endpoint = getOutboundEndpoint();
+  const endpoint = getOutboundEndpoint(settings);
   const payload = buildOutboundCampaignPayload(customerPhone, customerId, authenticatedOptions);
 
   if (!payload.ukey || !payload.serviceno || !payload.ivrtemplateid) {
-    if (process.env.ICALLMATE_MASTER_POST_API_ENDPOINT || process.env.ICALLMATE_MASTER_POST_WSURL) {
+    if (settings.masterPostApiEndpoint || settings.masterPostWsUrl || process.env.ICALLMATE_MASTER_POST_API_ENDPOINT || process.env.ICALLMATE_MASTER_POST_WSURL) {
       console.log('[ICALLMATE OUTBOUND] Falling back to masterpost provider due to missing campaign credentials');
-      const result = await initiateMasterPostCall(customerPhone, customerId, authenticatedOptions);
-      return { ...result, requestPayload: redactRequestPayload(result.requestPayload) };
+      return initiateMasterPostCall(customerPhone, customerId, authenticatedOptions);
     }
     throw new Error('Missing iCallMate outbound config: ICALLMATE_UKEY, ICALLMATE_SERVICE_NO, and ICALLMATE_IVR_TEMPLATE_ID are required.');
   }
@@ -342,12 +388,19 @@ async function initiateCall(customerPhone, customerId, options = {}) {
     `serviceNo=${payload.serviceno} ivrTemplate=${payload.ivrtemplateid}`
   );
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  const rawText = await response.text();
+  let response;
+  try {
+    response = await authenticatedOptions.fetchImpl(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+  } catch (_error) {
+    const error = new Error('iCallMate outbound request failed');
+    error.code = 'ICALLMATE_REQUEST_FAILED';
+    throw error;
+  }
+  const rawText = await readProviderResponseText(response);
   let parsed = {};
   try {
     parsed = rawText ? JSON.parse(rawText) : {};
@@ -367,9 +420,7 @@ async function initiateCall(customerPhone, customerId, options = {}) {
   console.log(`[ICALLMATE OUTBOUND] Call accepted sid=${sid}`);
   return {
     sid,
-    status: 'queued',
-    raw: parsed,
-    requestPayload: redactRequestPayload(payload)
+    status: 'queued'
   };
 }
 
@@ -381,5 +432,6 @@ module.exports = {
   assertPublicMediaEndpointReachable,
   ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE,
   redactMediaUrlToken,
+  redactRequestPayload,
   initiateCall,
 };

@@ -1,43 +1,63 @@
 'use strict';
 const express = require('express');
-const crypto = require('crypto');
 const { TICKET_STATUS, createTicketId, validateSubmission } = require('../src/support-ticket');
+const DefaultSupportTicket = require('../src/models/SupportTicket');
+const DefaultTicketCounter = require('../src/models/SupportTicketCounter');
 
-module.exports = function createSupportTicketsRouter({ dbRun, dbGet, dbAll, notifyNewTicket }) {
+function toPlain(ticket) {
+  return ticket?.toObject ? ticket.toObject() : ticket;
+}
+
+module.exports = function createSupportTicketsRouter({
+  SupportTicket = DefaultSupportTicket,
+  TicketCounter = DefaultTicketCounter,
+  notifyNewTicket
+} = {}) {
   const router = express.Router();
-  const select = `SELECT ticket_id, type, description, status, reporter_username, reporter_role, page_url, page_title, context_json, assignee_username, internal_update, resolution_note, created_at, updated_at FROM support_tickets`;
   router.post('/', async (req, res, next) => {
     try {
       const payload = validateSubmission(req.body);
       const session = req.adminSession;
-      const now = new Date().toISOString();
-      await dbRun('BEGIN IMMEDIATE');
-      let ticket;
-      try {
-        const insert = await dbRun(`INSERT INTO support_tickets (ticket_id,type,description,status,reporter_username,reporter_role,page_url,page_title,context_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-          [`PENDING-${crypto.randomUUID()}`, payload.type, payload.description, TICKET_STATUS.NEW, session.username, session.role, payload.context.pageUrl, payload.context.pageTitle, JSON.stringify(payload.context), now, now]);
-        const ticketId = createTicketId(payload.type, insert.lastID + 1000);
-        await dbRun('UPDATE support_tickets SET ticket_id = ? WHERE id = ?', [ticketId, insert.lastID]);
-        ticket = await dbGet(`${select} WHERE ticket_id = ?`, [ticketId]);
-        await dbRun('COMMIT');
-      } catch (error) { await dbRun('ROLLBACK').catch(() => {}); throw error; }
+      const counter = await TicketCounter.findOneAndUpdate(
+        { _id: 'support-tickets' },
+        { $inc: { sequence: 1 } },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      );
+      const sequence = counter.sequence + 1000;
+      const ticket = toPlain(await SupportTicket.create({
+        ticket_id: createTicketId(payload.type, sequence),
+        sequence,
+        tenant_id: req.tenantId ? String(req.tenantId) : null,
+        type: payload.type,
+        description: payload.description,
+        status: TICKET_STATUS.NEW,
+        reporter_username: session.username,
+        reporter_role: session.role,
+        page_url: payload.context.pageUrl,
+        page_title: payload.context.pageTitle,
+        context_json: payload.context
+      }));
       const admin_url = `${payload.context.pageUrl.replace(/\/[^/]*$/, '')}/support-tickets.html?ticket=${encodeURIComponent(ticket.ticket_id)}`;
-      notifyNewTicket({ ...ticket, admin_url }).catch(() => {});
+      notifyNewTicket?.({ ...ticket, tenant_id: ticket.tenant_id, admin_url }).catch(() => {});
       res.status(201).json({ ticket });
     } catch (error) { next(error); }
   });
-  router.get('/', async (req, res, next) => { try { res.json({ tickets: await dbAll(`${select} ORDER BY updated_at DESC`) }); } catch (error) { next(error); } });
-  router.get('/:ticketId', async (req, res, next) => { try { const ticket = await dbGet(`${select} WHERE ticket_id = ?`, [req.params.ticketId]); if (!ticket) return res.status(404).json({ error: 'Ticket not found' }); res.json({ ticket }); } catch (error) { next(error); } });
+  router.get('/', async (_req, res, next) => { try { res.json({ tickets: await SupportTicket.find({}).sort({ updated_at: -1 }).lean() }); } catch (error) { next(error); } });
+  router.get('/:ticketId', async (req, res, next) => { try { const ticket = await SupportTicket.findOne({ ticket_id: req.params.ticketId }).lean(); if (!ticket) return res.status(404).json({ error: 'Ticket not found' }); res.json({ ticket }); } catch (error) { next(error); } });
   router.patch('/:ticketId', async (req, res, next) => {
     try {
-      const current = await dbGet(`${select} WHERE ticket_id = ?`, [req.params.ticketId]);
+      const current = await SupportTicket.findOne({ ticket_id: req.params.ticketId }).lean();
       if (!current) return res.status(404).json({ error: 'Ticket not found' });
       const status = req.body.status || current.status;
       if (!Object.values(TICKET_STATUS).includes(status)) return res.status(400).json({ error: 'Invalid status' });
       const resolution = String(req.body.resolutionNote ?? current.resolution_note ?? '').trim();
       if (status === TICKET_STATUS.RESOLVED && !resolution) return res.status(400).json({ error: 'Resolution note is required' });
-      await dbRun('UPDATE support_tickets SET status=?, assignee_username=?, internal_update=?, resolution_note=?, updated_at=? WHERE ticket_id=?', [status, String(req.body.assigneeUsername ?? current.assignee_username ?? '').trim() || null, String(req.body.internalUpdate ?? current.internal_update ?? '').trim() || null, resolution || null, new Date().toISOString(), req.params.ticketId]);
-      res.json({ ticket: await dbGet(`${select} WHERE ticket_id = ?`, [req.params.ticketId]) });
+      const ticket = await SupportTicket.findOneAndUpdate(
+        { ticket_id: req.params.ticketId },
+        { $set: { status, assignee_username: String(req.body.assigneeUsername ?? current.assignee_username ?? '').trim() || null, internal_update: String(req.body.internalUpdate ?? current.internal_update ?? '').trim() || null, resolution_note: resolution || null, updated_at: new Date() } },
+        { new: true, runValidators: true }
+      ).lean();
+      res.json({ ticket });
     } catch (error) { next(error); }
   });
   return router;

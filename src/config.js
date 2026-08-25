@@ -143,24 +143,8 @@ function logConfigSnapshot(scope = 'CONFIG') {
 function validateConfig() {
   const missing = [];
 
-  if (AI_PROVIDER.startsWith('gemini') && !process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
-    missing.push('GEMINI_API_KEY or GOOGLE_API_KEY');
-  }
-
   if (!['gemini', 'gemini-live'].includes(AI_PROVIDER)) {
     missing.push('AI_PROVIDER must be gemini or gemini-live');
-  }
-
-  if (!process.env.DEEPGRAM_API_KEY) {
-    missing.push('DEEPGRAM_API_KEY');
-  }
-
-  if (
-    String(process.env.NODE_ENV || '').toLowerCase() === 'production'
-    && !process.env.ICALLMATE_WEBHOOK_SECRET
-    && !process.env.WEBHOOK_SECRET
-  ) {
-    missing.push('ICALLMATE_WEBHOOK_SECRET');
   }
 
   if (

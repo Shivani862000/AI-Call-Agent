@@ -9,17 +9,32 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 
 // Import modular components
 const { PORT } = require('./src/config');
 const { PROTECTED_HTML_PATHS, requireAdminAuth, requireRole, basicAuth } = require('./src/auth');
+const User = require('./src/models/User');
+const Tenant = require('./src/models/Tenant');
+const PlatformSettings = require('./src/models/PlatformSettings');
+const IntegrationSecret = require('./src/models/IntegrationSecret');
+const { createWebmasterAuthorization } = require('./src/webmaster/authorization');
+const { createSettingsService } = require('./src/webmaster/settings-service');
+const { createSecretService } = require('./src/webmaster/secret-service');
+const { environmentKeyForSecret } = require('./src/webmaster/settings-registry');
+const { createMaintenanceMiddleware, createConfiguredRateLimit, createFeatureFlagMiddleware } = require('./src/webmaster/policy-middleware');
 const { isAdminOnlyRequest } = require('./src/authorization');
+const { createTenantWorkspaceDispatcher } = require('./src/tenant-workspace-routes');
 const mountApiRoutes = require('./src/api-routes');
 const setupWebSocketBridge = require('./src/websocket-bridge');
 const startServer = require('./src/server');
+require('./src/cron/daily-reports');
+require('./src/cron/retention-archival').scheduleRetentionArchival();
 
 const app = express();
+const webmasterAuthorization = createWebmasterAuthorization({ UserModel: User, TenantModel: Tenant });
+const platformSecretService = createSecretService({ IntegrationSecretModel: IntegrationSecret, environmentKeyFor: (integration, key) => environmentKeyForSecret(integration, key, process.env) });
+const platformSettingsService = createSettingsService({ PlatformSettingsModel: PlatformSettings, TenantModel: Tenant, secretService: platformSecretService });
+const managedSettingsProvider = async () => (await platformSettingsService.getGlobal()).global;
 app.set('trust proxy', 1);
 
 app.disable('x-powered-by');
@@ -38,9 +53,9 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { error: 'Too many login attempts' } });
-const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, message: { error: 'Too many requests' } });
-const webhookLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, message: { error: 'Too many webhook requests' } });
+const loginLimiter = createConfiguredRateLimit({ settingsProvider: managedSettingsProvider, scope: 'loginPer15Minutes', fallback: 10, windowMs: 15 * 60 * 1000 });
+const apiLimiter = createConfiguredRateLimit({ settingsProvider: managedSettingsProvider, scope: 'apiPerMinute', fallback: 60 });
+const webhookLimiter = createConfiguredRateLimit({ settingsProvider: managedSettingsProvider, scope: 'webhookPerMinute', fallback: 300 });
 
 app.use('/api/auth/login', loginLimiter);
 app.use('/call/start', apiLimiter);
@@ -86,10 +101,23 @@ app.use((req, res, next) => {
   return next();
 });
 
+app.use((req, res, next) => {
+  if (req.path === '/webmaster.html' || req.path.startsWith('/api/webmaster')) {
+    return webmasterAuthorization.requireWebmaster(req, res, next);
+  }
+  return next();
+});
+
+app.use(createMaintenanceMiddleware({ settingsProvider: managedSettingsProvider }));
+app.use(createFeatureFlagMiddleware({ settingsProvider: async req => {
+  const tenantId = req.adminSession?.tenantId;
+  return tenantId ? (await platformSettingsService.getEffectiveForTenant(tenantId)).effective : managedSettingsProvider();
+} }));
+
 // Phase 1 RBAC: agents can work with patient records, schedules, and read-only
 // call history. Configuration, feedback, real calls, and destructive actions
 // remain admin-only.
-const requireAdminRole = requireRole('ADMIN');
+const requireAdminRole = requireRole('WEBMASTER', 'CLIENT_ADMIN');
 app.use((req, res, next) => {
   if (isAdminOnlyRequest(req)) {
     return requireAdminRole(req, res, next);
@@ -104,6 +132,8 @@ app.get('/incoming-calls.html', (req, res) => {
 app.get('/reports.html', (req, res) => {
   res.status(404).send('Reports page is disabled.');
 });
+
+app.use(createTenantWorkspaceDispatcher({ publicDirectory: path.join(__dirname, 'public') }));
 
 // Static files
 app.use(express.static(path.join(__dirname, 'public')));

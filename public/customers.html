@@ -49,7 +49,6 @@
           </div>
         </div>
         <div class="header-actions">
-          <!-- <button id="deleteAllCustomersButton" class="danger desktop-only" type="button" style="background-color: var(--color-danger); color: white; margin-right: 8px;">Delete All Records</button> -->
           <button id="refreshDataButton" class="secondary desktop-only" type="button" style="margin-right: 8px;">Refresh Data</button>
           <button id="newCallButton" class="primary" type="button">New Call</button>
           <button id="logoutButton" class="secondary" type="button">Logout</button>
@@ -59,11 +58,11 @@
       <div id="alertContainer" class="alert-stack"></div>
 
       <section class="desktop-filter-strip desktop-only" aria-label="Outbound call filters">
-        <button class="desktop-filter-pill active" type="button" data-customer-filter="completed" aria-pressed="true">
+        <button class="desktop-filter-pill" type="button" data-customer-filter="completed" aria-pressed="false">
           <span class="desktop-filter-count" id="desktopCompletedMetric">0</span>
           <span class="desktop-filter-label">Completed</span>
         </button>
-        <button class="desktop-filter-pill" type="button" data-customer-filter="scheduled" aria-pressed="false">
+        <button class="desktop-filter-pill active" type="button" data-customer-filter="scheduled" aria-pressed="true">
           <span class="desktop-filter-count" id="desktopScheduledMetric">0</span>
           <span class="desktop-filter-label">Scheduled</span>
         </button>
@@ -78,13 +77,13 @@
       </section>
 
       <section class="mobile-stat-strip mobile-only" aria-label="Call stats">
-        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-customer-filter="completed"
-          aria-pressed="true">
+        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="completed"
+          aria-pressed="false">
           <span class="mobile-stat-count" id="mobileCompletedMetric">0</span>
           <span class="mobile-stat-label">Completed</span>
         </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-customer-filter="scheduled"
-          aria-pressed="false">
+        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-customer-filter="scheduled"
+          aria-pressed="true">
           <span class="mobile-stat-count" id="mobileScheduledMetric">0</span>
           <span class="mobile-stat-label">Scheduled</span>
         </button>
@@ -303,8 +302,8 @@
       <div class="mobile-sheet-actions">
         <button id="mobileActionToggleRetry" class="mobile-sheet-action" type="button">Auto Retry: ON</button>
         <button id="mobileActionEdit" class="mobile-sheet-action" type="button">Edit</button>
-        <button id="mobileActionDelete" class="mobile-sheet-action mobile-sheet-action--danger admin-only-control"
-          type="button">Delete</button>
+        <button id="mobileActionArchive" class="mobile-sheet-action mobile-sheet-action--danger admin-only-control"
+          type="button">Archive</button>
         <button id="mobileActionAnalysis" class="mobile-sheet-action analysis-cta-button" type="button">View
           Analysis</button>
       </div>
@@ -312,12 +311,13 @@
   </div>
 
   <script src="/app-shell.js"></script>
+  <script src="/customer-archival.js"></script>
   <script>
     let customerCache = [];
     let recentCallsCache = [];
     let activeMobileActionCustomerId = null;
     let activeMobileActionCallId = null;
-    let activeCustomerMetricFilter = 'completed';
+    let activeCustomerMetricFilter = 'scheduled';
     let currentQueuePage = 1;
     let newCallModal = null;
 
@@ -545,12 +545,16 @@
       }
     }
 
-    async function deleteCustomer(customerId) {
-      if (!confirm('Delete this customer and related call data?')) return;
+    async function archiveCustomer(customerId) {
       try {
-        await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}`, { method: 'DELETE' });
-        AppShell.showAlert('Patient record deleted successfully');
-        await loadPageData();
+        const actions = CustomerArchival.createCustomerArchivalActions({
+          confirmAction: window.confirm,
+          fetchJson: AppShell.fetchJson,
+          showAlert: AppShell.showAlert,
+          reload: loadPageData,
+          apiBase: AppShell.API_BASE
+        });
+        await actions.archiveCustomer(customerId);
       } catch (error) {
         AppShell.showAlert(error.message, 'error');
       }
@@ -657,8 +661,8 @@
     }
 
     function openMobileActionSheet(customerId, callId = null, autoRetryEnabled = 1) {
-      activeMobileActionCustomerId = Number(customerId) || null;
-      activeMobileActionCallId = Number(callId) || null;
+      activeMobileActionCustomerId = customerId ? String(customerId) : null;
+      activeMobileActionCallId = callId ? String(callId) : null;
       document.getElementById('mobileActionAnalysis').style.display = activeMobileActionCallId ? 'block' : 'none';
       const isAutoRetryOn = autoRetryEnabled !== 0;
       document.getElementById('mobileActionToggleRetry').textContent = `Auto Retry: ${isAutoRetryOn ? 'ON' : 'OFF'}`;
@@ -848,7 +852,7 @@
                 ${contextButton}
                 <button class="secondary desktop-action-button" type="button" onclick="openNewCallModal(${customer.id})">Edit</button>
                 <button class="secondary desktop-action-button" type="button" onclick="toggleAutoRetry(${customer.id}, ${customer.auto_retry_enabled === 0 ? 'true' : 'false'})">Auto Retry: ${customer.auto_retry_enabled === 0 ? 'OFF' : 'ON'}</button>
-                <button class="danger desktop-action-button admin-only-control" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
+                <button class="danger desktop-action-button admin-only-control" type="button" onclick='archiveCustomer(${JSON.stringify(String(customer.id))})'>Archive</button>
               </div>
             </td>
           </tr>
@@ -901,7 +905,7 @@
             <div class="mobile-call-actions">
               <!-- <button class="warning mobile-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button> -->
               ${actionButton}
-              <button class="secondary mobile-more-button" type="button" onclick="openMobileActionSheet(${customer.id}, ${completedCall ? completedCall.id : 'null'}, ${customer.auto_retry_enabled === 0 ? 0 : 1})">More</button>
+              <button class="secondary mobile-more-button" type="button" onclick='openMobileActionSheet(${JSON.stringify(String(customer.id))}, ${completedCall ? JSON.stringify(String(completedCall.id)) : 'null'}, ${customer.auto_retry_enabled === 0 ? 0 : 1})'>More</button>
             </div>
           </article>
         `;
@@ -959,16 +963,6 @@
         loadPageData().catch(console.error);
       }, 30000);
       document.getElementById('newCallButton').addEventListener('click', () => openNewCallModal());
-      // document.getElementById('deleteAllCustomersButton').addEventListener('click', async () => {
-      //   if (!confirm('Are you sure you want to delete all patient and call records? This action cannot be undone.')) return;
-      //   try {
-      //     await AppShell.fetchJson(`${AppShell.API_BASE}/customers/bulk`, { method: 'DELETE' });
-      //     AppShell.showAlert('All records deleted successfully');
-      //     await loadPageData();
-      //   } catch (error) {
-      //     AppShell.showAlert(error.message, 'error');
-      //   }
-      // });
       document.getElementById('mobileFloatingNewCallButton').addEventListener('click', () => openNewCallModal(null, { mode: 'customer' }));
       document.getElementById('mobileHeaderMenuButton').addEventListener('click', openMobileMenuSheet);
       document.getElementById('mobileFilterButton').addEventListener('click', openMobileFilterSheet);
@@ -984,10 +978,10 @@
         if (activeMobileActionCustomerId) openNewCallModal(activeMobileActionCustomerId);
         closeMobileActionSheet();
       });
-      document.getElementById('mobileActionDelete').addEventListener('click', async () => {
+      document.getElementById('mobileActionArchive').addEventListener('click', async () => {
         const customerId = activeMobileActionCustomerId;
         closeMobileActionSheet();
-        if (customerId) await deleteCustomer(customerId);
+        if (customerId) await archiveCustomer(customerId);
       });
       document.getElementById('mobileActionAnalysis').addEventListener('click', async () => {
         const callId = activeMobileActionCallId;
@@ -1040,7 +1034,7 @@
 
     window.triggerCallNow = triggerCallNow;
     window.scheduleRetry = scheduleRetry;
-    window.deleteCustomer = deleteCustomer;
+    window.archiveCustomer = archiveCustomer;
     window.toggleAutoRetry = toggleAutoRetry;
     window.openAnalysisModal = openAnalysisModal;
     window.openAnalysisPage = openAnalysisPage;

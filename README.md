@@ -93,3 +93,23 @@ wss://<APP_BASE_URL>/icallmate/media
 
 The app expects `8000 Hz`, `LINEAR16`, `1 channel`, `16 bits` media payloads.
 ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -R 80:localhost:3000 ssh.localhost.run
+
+## Webmaster Console
+
+Authorized platform Owners and Webmaster Admins use `/webmaster.html`. The environment account named by `ADMIN_USERNAME` is the recovery Owner; its password is verified against `ADMIN_PASSWORD_HASH`. Persisted `WEBMASTER` accounts require an active status and an `OWNER` or `ADMIN` platform access level.
+
+Generate the production encryption key with:
+
+```bash
+openssl rand -base64 32
+```
+
+Store the result as `WEBMASTER_SECRETS_KEY`. Integration secrets saved from the console are encrypted with AES-256-GCM and override environment fallbacks. Secret values are write-only: the browser receives configured/source metadata, never the secret or encrypted envelope.
+
+The console manages tenants, tenant users, platform administrators, settings, integration configuration, maintenance policy, aggregate operational health, notification delivery state, and immutable audit history. Tenant operational snapshots are aggregate-only and exclude customer-level content.
+
+Application records are archived and restorable rather than permanently deleted. Maintenance mode blocks tenant mutations while Webmaster access remains available for recovery. Failed lifecycle notifications remain recorded and retryable; a delivery failure does not reverse the lifecycle change.
+
+Managed policy values are enforced at runtime: password bounds govern account creation and resets, session duration governs newly issued cookies, feature flags gate mapped operational mutations, and the daily archive-only retention job applies the configured customer/call/feedback ages. Lifecycle emails create immutable delivery records and failed deliveries can be retried manually from the console.
+
+For production, set a stable `AUTH_SIGNING_SECRET`, retain access to the environment Owner credentials, and back up MongoDB before schema rollout.

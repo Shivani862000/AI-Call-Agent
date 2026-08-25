@@ -54,7 +54,6 @@
           </div>
         </div>
         <div class="header-actions">
-          <!-- <button id="deleteAllAdminButton" class="danger desktop-only" type="button" style="background-color: var(--color-danger); color: white; margin-right: 8px;">Delete All Records</button> -->
           <button id="desktopOverviewNewCallButton" class="primary" type="button">Schedule New Call</button>
           <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
@@ -453,7 +452,7 @@
       };
 
       const cards = activityCards[activeOverviewFilter] || activityCards.patients;
-      const isAgent = window.AppShell.session?.role === 'AGENT';
+      const isAgent = window.AppShell.isTenantAgent();
       const visibleCards = isAgent ? cards.filter(item => item.label !== 'Feedback' && item.label !== 'Positive' && item.label !== 'Neutral' && item.label !== 'Negative') : cards;
 
       document.getElementById('overviewActivityTitle').textContent = 'Today\'s Activity';
@@ -744,7 +743,7 @@
     }
 
     async function loadOverview() {
-      const isAgent = window.AppShell.session?.role === 'AGENT';
+      const isAgent = window.AppShell.isTenantAgent();
 
       const promises = [
         AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
@@ -844,16 +843,6 @@
       });
       document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
       document.getElementById('desktopOverviewNewCallButton').addEventListener('click', openOverviewNewCallModal);
-      // document.getElementById('deleteAllAdminButton').addEventListener('click', async () => {
-      //   if (!confirm('Are you sure you want to delete all patient and call records? This action cannot be undone.')) return;
-      //   try {
-      //     await AppShell.fetchJson(`${AppShell.API_BASE}/customers/bulk`, { method: 'DELETE' });
-      //     AppShell.showAlert('All records deleted successfully');
-      //     await loadOverview();
-      //   } catch (error) {
-      //     AppShell.showAlert(error.message, 'error');
-      //   }
-      // });
       document.getElementById('desktopQuickNewCallButton').addEventListener('click', openOverviewNewCallModal);
       document.getElementById('mobileOverviewFloatingCta').addEventListener('click', openOverviewNewCallModal);
       document.getElementById('mobileOverviewMenuButton').addEventListener('click', () => openOverviewSheet('overviewMobileMenuSheet'));

@@ -20,12 +20,14 @@ const ADMIN_ONLY_HTML = new Set([
   '/support-tickets.html',
   '/feedback.html',
   '/feedback-analysis.html',
+  '/users.html',
   '/reports.html'
 ]);
 
 function isAdminOnlyRequest(req) {
   const method = String(req.method || 'GET').toUpperCase();
   const requestPath = String(req.path || '');
+  const requestedStatus = String(req.query?.status || '').toLowerCase();
   if (method === 'POST' && requestPath === '/api/support-tickets') return false;
 
   if (requestPath === '/api/icallmate/callback') {
@@ -45,6 +47,14 @@ function isAdminOnlyRequest(req) {
   }
 
   if (method === 'DELETE' && requestPath.startsWith('/api/')) {
+    return true;
+  }
+
+  if (method === 'POST' && /\/(archive|restore)$/.test(requestPath)) {
+    return true;
+  }
+
+  if (method === 'GET' && requestedStatus === 'archived' && requestPath.startsWith('/api/')) {
     return true;
   }
 

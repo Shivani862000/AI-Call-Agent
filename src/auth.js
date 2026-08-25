@@ -7,24 +7,30 @@
 
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
+const User = require('./models/User');
+const Tenant = require('./models/Tenant');
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const PROTECTED_HTML_PATHS = new Set([
   '/admin.html',
+  '/customer-list.html',
+  '/webmaster.html',
   '/support-tickets.html',
   '/incoming-calls.html',
   '/customers.html',
+  '/users.html',
   '/clients.html',
   '/feedback.html',
   '/feedback-analysis.html',
   '/reports.html'
 ]);
 
-const VALID_ROLES = new Set(['ADMIN', 'AGENT']);
-const ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || 'admin').trim();
+const VALID_ROLES = new Set(['WEBMASTER', 'SUPPORT_TEAM', 'CLIENT_ADMIN', 'CLIENT_AGENT']);
+const AUTH_SOURCES = new Set(['database', 'environment']);
 const AUTH_COOKIE_NAME = 'feedback_admin_session';
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const AUTH_SESSION_MAX_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const AUTH_CLOCK_SKEW_MS = 60 * 1000;
 const CONFIGURED_AUTH_SIGNING_SECRET = String(process.env.AUTH_SIGNING_SECRET || '').trim();
 const AUTH_SIGNING_SECRET = CONFIGURED_AUTH_SIGNING_SECRET
@@ -33,18 +39,8 @@ const AUTH_SIGNING_SECRET = CONFIGURED_AUTH_SIGNING_SECRET
 
 function getAuthConfigurationIssues(env = process.env) {
   const isProduction = String(env.NODE_ENV || '').toLowerCase() === 'production';
-  const username = String(env.ADMIN_USERNAME || '').trim();
-  const passwordHash = String(env.ADMIN_PASSWORD_HASH || '').trim();
   const signingSecret = String(env.AUTH_SIGNING_SECRET || '').trim();
   const issues = [];
-
-  if (isProduction && !username) {
-    issues.push('ADMIN_USERNAME is required in production');
-  }
-
-  if (isProduction && !/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(passwordHash)) {
-    issues.push('ADMIN_PASSWORD_HASH must be a valid bcrypt hash in production');
-  }
 
   if (isProduction && !signingSecret) {
     issues.push('AUTH_SIGNING_SECRET is required in production');
@@ -119,20 +115,31 @@ function signAuthValue(value) {
   return crypto.createHmac('sha256', AUTH_SIGNING_SECRET).update(value).digest();
 }
 
-function createAuthToken(username, role) {
+function createAuthToken(username, role, tenantId = null, authSource = 'database', options = {}) {
   const normalizedUsername = String(username || '').trim();
   const normalizedRole = normalizeRole(role);
-  if (!normalizedUsername || normalizedUsername.length > 100 || !normalizedRole) {
+  if (
+    !normalizedUsername
+    || normalizedUsername.length > 100
+    || !normalizedRole
+    || !AUTH_SOURCES.has(authSource)
+  ) {
     throw new Error('Cannot create a session for an invalid user or role');
   }
 
   const issuedAt = Date.now();
+  const requestedTtl = Number(options.ttlMs);
+  const ttlMs = Number.isFinite(requestedTtl)
+    ? Math.min(AUTH_SESSION_MAX_TTL_MS, Math.max(5 * 60 * 1000, requestedTtl))
+    : AUTH_SESSION_TTL_MS;
   const payload = Buffer.from(JSON.stringify({
-    version: 1,
+    version: 3,
     username: normalizedUsername,
     role: normalizedRole,
+    tenantId: tenantId ? tenantId.toString() : null,
+    authSource,
     issuedAt,
-    exp: issuedAt + AUTH_SESSION_TTL_MS,
+    exp: issuedAt + ttlMs,
     nonce: crypto.randomBytes(16).toString('base64url')
   })).toString('base64url');
   const signature = signAuthValue(payload).toString('base64url');
@@ -174,13 +181,16 @@ function readAuthSession(req) {
     const username = String(session?.username || '').trim();
     const issuedAt = Number(session?.issuedAt);
     const expiresAt = Number(session?.exp);
-    const validLifetime = expiresAt > issuedAt && expiresAt - issuedAt <= AUTH_SESSION_TTL_MS;
+    const tenantId = session?.tenantId || null;
+    const authSource = String(session?.authSource || '');
+    const validLifetime = expiresAt > issuedAt && expiresAt - issuedAt <= AUTH_SESSION_MAX_TTL_MS;
 
     if (
-      session?.version !== 1
-      || !username
+      !username
       || username.length > 100
+      || session?.version !== 3
       || !role
+      || !AUTH_SOURCES.has(authSource)
       || !Number.isFinite(issuedAt)
       || !Number.isFinite(expiresAt)
       || issuedAt > now + AUTH_CLOCK_SKEW_MS
@@ -191,7 +201,7 @@ function readAuthSession(req) {
       return null;
     }
 
-    return { username, role, issuedAt, exp: expiresAt };
+    return { username, role, tenantId, authSource, issuedAt, exp: expiresAt };
   } catch (error) {
     return null;
   }
@@ -216,14 +226,18 @@ function shouldUseSecureCookie(req) {
   return forwardedProto === 'https';
 }
 
-function setAuthCookie(req, res, token) {
+function setAuthCookie(req, res, token, options = {}) {
   const isSecure = shouldUseSecureCookie(req);
+  const requestedTtl = Number(options.ttlMs);
+  const ttlMs = Number.isFinite(requestedTtl)
+    ? Math.min(AUTH_SESSION_MAX_TTL_MS, Math.max(5 * 60 * 1000, requestedTtl))
+    : AUTH_SESSION_TTL_MS;
   const cookieParts = [
     `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
     'SameSite=Lax',
-    `Max-Age=${Math.floor(AUTH_SESSION_TTL_MS / 1000)}`
+    `Max-Age=${Math.floor(ttlMs / 1000)}`
   ];
 
   if (isSecure) {
@@ -297,16 +311,82 @@ function validateMediaToken(token) {
 
 function requireAdminAuth(req, res, next) {
   const session = readAuthSession(req);
-  if (session) {
-    req.adminSession = session;
-    return next();
+  if (!session) {
+    if (req.path.startsWith('/api/') || req.path === '/call/start') {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    return res.redirect('/login.html');
   }
 
-  if (req.path.startsWith('/api/') || req.path === '/call/start') {
-    return res.status(401).json({ error: 'Authentication required' });
+  return resolveActiveSession(session)
+    .then((activeSession) => {
+      if (!activeSession) {
+        if (req.path.startsWith('/api/') || req.path === '/call/start') {
+          return res.status(401).json({ error: 'Authentication required' });
+        }
+        return res.redirect('/login.html');
+      }
+      req.adminSession = activeSession;
+      return next();
+    })
+    .catch(() => {
+      if (req.path.startsWith('/api/') || req.path === '/call/start') {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      return res.redirect('/login.html');
+    });
+}
+
+function isTenantRole(role) {
+  return role === 'CLIENT_ADMIN' || role === 'CLIENT_AGENT';
+}
+
+async function queryToDocument(query) {
+  if (query && typeof query.lean === 'function') {
+    return query.lean();
+  }
+  return query;
+}
+
+async function loadActiveTenant(tenantId) {
+  if (!tenantId) {
+    return null;
+  }
+  const tenant = await queryToDocument(Tenant.findById(tenantId));
+  return tenant?.status === 'active' ? tenant : null;
+}
+
+async function resolveActiveSession(session) {
+  if (!session) {
+    return null;
   }
 
-  return res.redirect('/login.html');
+  const envAdmin = String(process.env.ADMIN_USERNAME || '').trim();
+  if (envAdmin && session.username === envAdmin) {
+    if (session.role === 'WEBMASTER' && session.authSource === 'environment') {
+      return { ...session, platformAccessLevel: 'OWNER' };
+    }
+    return null;
+  }
+  if (session.authSource !== 'database') {
+    return null;
+  }
+
+  const user = await queryToDocument(User.findOne({ username: session.username }));
+  const role = normalizeRole(user?.role);
+  if (!user || user.status !== 'active' || role !== session.role) {
+    return null;
+  }
+  if (isTenantRole(role) && !(await loadActiveTenant(user.tenantId))) {
+    return null;
+  }
+
+  return {
+    ...session,
+    tenantId: user.tenantId ? String(user.tenantId) : null,
+    ...(role === 'WEBMASTER' ? { platformAccessLevel: user.platformAccessLevel || null } : {})
+  };
 }
 
 function requireRole(...allowedRoles) {
@@ -325,21 +405,84 @@ function requireRole(...allowedRoles) {
   };
 }
 
+async function requireTenantAccess(req, res, next) {
+  const session = req.adminSession;
+  if (!session) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  if (session.role === 'WEBMASTER' || session.role === 'SUPPORT_TEAM') {
+    const requestedTenantId = req.query?.tenantId || req.body?.tenantId;
+    if (!requestedTenantId || !(await loadActiveTenant(requestedTenantId))) {
+      return res.status(403).json({ error: 'Forbidden: An active tenant context is required' });
+    }
+    req.tenantId = requestedTenantId;
+    return next();
+  }
+
+  if (session.tenantId && await loadActiveTenant(session.tenantId)) {
+    // Inject tenantId into req for easy filtering in downstream controllers
+    req.tenantId = session.tenantId;
+    return next();
+  }
+
+  return res.status(403).json({ error: 'Forbidden: No tenant context' });
+}
+
 async function verifyCredentials(username, password) {
   const normalizedUsername = String(username || '').trim();
   if (!normalizedUsername || !password) {
     return { success: false };
   }
 
-  const { dbGet } = require('../db');
+  // Fallback to .env admin for Webmaster access
+  const envAdmin = String(process.env.ADMIN_USERNAME || '').trim();
+  const envHash = String(process.env.ADMIN_PASSWORD_HASH || '').trim();
+  
+  if (envAdmin && normalizedUsername === envAdmin) {
+    try {
+      if (envHash && await bcrypt.compare(String(password), envHash)) {
+        return {
+          success: true,
+          username: envAdmin,
+          role: 'WEBMASTER',
+          tenantId: null,
+          platformAccessLevel: 'OWNER',
+          authSource: 'environment'
+        };
+      }
+    } catch (error) {
+      return { success: false };
+    }
+    return { success: false };
+  }
+
   try {
-    const user = await dbGet(
-      'SELECT username, password_hash, role FROM users WHERE username = ?',
-      [normalizedUsername]
-    );
+    const normalizedEmail = normalizedUsername.toLowerCase();
+    const user = await User.findOne({
+      $or: [{ username: normalizedUsername }, { email: normalizedEmail }]
+    });
     const role = normalizeRole(user?.role);
-    if (user?.password_hash && role && await bcrypt.compare(String(password), user.password_hash)) {
-      return { success: true, username: user.username, role };
+    if (
+      user?.status === 'active'
+      && user?.password_hash
+      && role
+      && await bcrypt.compare(String(password), user.password_hash)
+    ) {
+      if (isTenantRole(role) && !(await loadActiveTenant(user.tenantId))) {
+        return { success: false };
+      }
+      if (role === 'WEBMASTER' && !['OWNER', 'ADMIN'].includes(user.platformAccessLevel)) {
+        return { success: false };
+      }
+      return {
+        success: true,
+        username: user.username,
+        role,
+        tenantId: user.tenantId || null,
+        authSource: 'database',
+        ...(role === 'WEBMASTER' ? { platformAccessLevel: user.platformAccessLevel } : {})
+      };
     }
     return { success: false };
   } catch (error) {
@@ -364,7 +507,13 @@ async function basicAuth(req, res, next) {
 
   const authResult = await verifyCredentials(login, password);
   if (authResult.success) {
-    req.adminSession = { username: authResult.username, role: authResult.role };
+    req.adminSession = {
+      username: authResult.username,
+      role: authResult.role,
+      tenantId: authResult.tenantId,
+      authSource: authResult.authSource,
+      ...(authResult.role === 'WEBMASTER' ? { platformAccessLevel: authResult.platformAccessLevel } : {})
+    };
     return next();
   }
 
@@ -375,7 +524,6 @@ async function basicAuth(req, res, next) {
 module.exports = {
   PROTECTED_HTML_PATHS,
   VALID_ROLES,
-  ADMIN_USERNAME,
   AUTH_COOKIE_NAME,
   AUTH_SESSION_TTL_MS,
   getAuthConfigurationIssues,
@@ -383,10 +531,12 @@ module.exports = {
   parseCookies,
   createAuthToken,
   readAuthSession,
+  resolveActiveSession,
   setAuthCookie,
   clearAuthCookie,
   requireAdminAuth,
   requireRole,
+  requireTenantAccess,
   basicAuth,
   verifyCredentials,
   createMediaToken,

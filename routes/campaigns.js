@@ -1,75 +1,81 @@
+'use strict';
+
 const express = require('express');
-const router = express.Router();
-const { dbAll, dbGet, dbRun } = require('../db');
+const Campaign = require('../src/models/Campaign');
+const { activeRecordFilter, recordFilterFromRequest, createMongooseArchiveHandlers } = require('../src/webmaster/lifecycle');
 
 function normalizePayload(payload = {}) {
   return {
     name: String(payload.name || '').trim(),
-    service_name: String(payload.service_name || '').trim(),
+    service_name: String(payload.service_name || '').trim() || null,
     monthly_spend_inr: Number(payload.monthly_spend_inr || 0) || 0,
     status: String(payload.status || 'active').trim().toLowerCase() || 'active'
   };
 }
 
-router.get('/', async (req, res) => {
-  try {
-    const rows = await dbAll('SELECT * FROM campaign_configs ORDER BY created_at DESC, name ASC');
-    res.json(rows);
-  } catch (error) {
-    console.error('Error fetching campaigns:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+function serialize(record) {
+  const value = record?.toObject ? record.toObject() : { ...record };
+  if (value._id !== undefined) value.id = String(value._id);
+  delete value._id;
+  delete value.archived_by;
+  return value;
+}
 
-router.post('/', async (req, res) => {
-  try {
-    const payload = normalizePayload(req.body);
-    if (!payload.name) {
-      return res.status(400).json({ error: 'Campaign name is required' });
+function createCampaignsRouter({ Model = Campaign } = {}) {
+  const router = express.Router();
+  const archiveHandlers = createMongooseArchiveHandlers({ Model, resourceName: 'Campaign' });
+
+  router.get('/', async (req, res) => {
+    try {
+      const rows = await Model.find(recordFilterFromRequest(req, { tenantId: req.tenantId })).sort({ created_at: -1, name: 1 }).lean();
+      res.json(rows.map(serialize));
+    } catch (error) {
+      res.status(500).json({ error: error.message });
     }
+  });
 
-    const result = await dbRun(
-      'INSERT INTO campaign_configs (name, service_name, monthly_spend_inr, status) VALUES (?, ?, ?, ?)',
-      [payload.name, payload.service_name || null, payload.monthly_spend_inr, payload.status]
-    );
-    res.json({ id: result.lastID, message: 'Campaign created successfully' });
-  } catch (error) {
-    console.error('Error creating campaign:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-router.put('/:id', async (req, res) => {
-  try {
-    const existing = await dbGet('SELECT * FROM campaign_configs WHERE id = ?', [req.params.id]);
-    if (!existing) {
-      return res.status(404).json({ error: 'Campaign not found' });
+  router.post('/', async (req, res) => {
+    try {
+      const payload = normalizePayload(req.body);
+      if (!payload.name) return res.status(400).json({ error: 'Campaign name is required' });
+      const record = await Model.create({ ...payload, tenantId: req.tenantId });
+      res.json({ id: String(record._id), message: 'Campaign created successfully' });
+    } catch (error) {
+      res.status(error.code === 11000 ? 409 : 500).json({ error: error.code === 11000 ? 'Campaign already exists' : error.message });
     }
+  });
 
-    const payload = normalizePayload(req.body);
-    if (!payload.name) {
-      return res.status(400).json({ error: 'Campaign name is required' });
+  router.put('/:id', async (req, res) => {
+    try {
+      const normalizedStatus = req.body?.status === undefined
+        ? undefined
+        : String(req.body.status).trim().toLowerCase();
+      if (normalizedStatus === 'archived') {
+        return res.status(400).json({ error: 'Use the explicit archive endpoint to archive a campaign' });
+      }
+      if (normalizedStatus !== undefined && !['active', 'paused'].includes(normalizedStatus)) {
+        return res.status(400).json({ error: 'Campaign status must be active or paused' });
+      }
+      const payload = normalizePayload(req.body);
+      if (normalizedStatus !== undefined) payload.status = normalizedStatus;
+      if (!payload.name) return res.status(400).json({ error: 'Campaign name is required' });
+      const record = await Model.findOneAndUpdate(
+        activeRecordFilter({ _id: req.params.id, tenantId: req.tenantId }),
+        { $set: payload },
+        { new: true, runValidators: true }
+      );
+      if (!record) return res.status(404).json({ error: 'Campaign not found' });
+      res.json({ message: 'Campaign updated successfully' });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
     }
+  });
 
-    await dbRun(
-      'UPDATE campaign_configs SET name = ?, service_name = ?, monthly_spend_inr = ?, status = ? WHERE id = ?',
-      [payload.name, payload.service_name || null, payload.monthly_spend_inr, payload.status, req.params.id]
-    );
-    res.json({ message: 'Campaign updated successfully' });
-  } catch (error) {
-    console.error('Error updating campaign:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+  router.post('/:id/archive', archiveHandlers.archive);
+  router.post('/:id/restore', archiveHandlers.restore);
+  router.delete('/:id', archiveHandlers.archive);
+  return router;
+}
 
-router.delete('/:id', async (req, res) => {
-  try {
-    await dbRun('DELETE FROM campaign_configs WHERE id = ?', [req.params.id]);
-    res.json({ message: 'Campaign deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting campaign:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-module.exports = router;
+module.exports = createCampaignsRouter();
+module.exports.createCampaignsRouter = createCampaignsRouter;

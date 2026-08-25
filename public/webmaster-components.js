@@ -1,0 +1,3 @@
+export function status(value = 'unknown') { return `<span class="status ${value}">${String(value)}</span>`; }
+export function showAlert(message, kind = 'error') { const alert = document.querySelector('#alert'); alert.className = kind; alert.textContent = message; }
+export function confirmAction({ title, message, confirmLabel = 'Continue' }) { const dialog = document.querySelector('#confirm-dialog'); document.querySelector('#confirm-title').textContent = title; document.querySelector('#confirm-message').textContent = message; document.querySelector('#confirm-action').textContent = confirmLabel; dialog.showModal(); return new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'confirm'), { once: true })); }

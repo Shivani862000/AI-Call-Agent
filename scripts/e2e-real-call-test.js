@@ -64,8 +64,11 @@ async function runE2ETest() {
   if (loginRes.status !== 200) throw new Error('Login failed');
   console.log('✅ Admin Logged in');
 
-  // 2. Prepare test customer (Delete existing if any)
-  await dbRun('DELETE FROM customers WHERE phone = ?', ['+919354197715']);
+  // 2. Retain prior test records while removing them from active call flows.
+  await dbRun(
+    "UPDATE customers SET status = 'archived', archived_at = ?, archived_by = ?, archive_reason = ? WHERE phone = ? AND status <> 'archived'",
+    [new Date().toISOString(), 'e2e-real-call-test', 'superseded test fixture', '+919354197715']
+  );
   
   const createRes = await fetchJson('/customers', {
     method: 'POST',
@@ -132,7 +135,10 @@ async function runE2ETest() {
 
   // 9. Now let's test a SUCCESSFUL completion flow on a new patient to verify dashboard sync
   console.log('\nStarting successful call flow test...');
-  await dbRun('DELETE FROM customers WHERE phone = ?', ['+919354197715']);
+  await dbRun(
+    "UPDATE customers SET status = 'archived', archived_at = ?, archived_by = ?, archive_reason = ? WHERE phone = ? AND status <> 'archived'",
+    [new Date().toISOString(), 'e2e-real-call-test', 'completed retry-flow fixture', '+919354197715']
+  );
   const c2Res = await fetchJson('/customers', {
     method: 'POST',
     body: JSON.stringify({ 

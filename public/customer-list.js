@@ -1,5 +1,20 @@
 let allCustomers = [];
 
+async function archiveCustomer(customerId) {
+  try {
+    const actions = CustomerArchival.createCustomerArchivalActions({
+      confirmAction: window.confirm,
+      fetchJson: AppShell.fetchJson,
+      showAlert: AppShell.showAlert,
+      reload: loadCustomerData,
+      apiBase: AppShell.API_BASE
+    });
+    await actions.archiveCustomer(customerId);
+  } catch (error) {
+    AppShell.showAlert(error.message, 'error');
+  }
+}
+
 async function loadCustomerData() {
   try {
     const response = await AppShell.fetchJson(`${AppShell.API_BASE}/customers`);
@@ -22,7 +37,15 @@ async function loadCustomerData() {
   }
 }
 
+function formatLanguage(langCode) {
+  const map = { hi: 'Hindi', en: 'English', mixed: 'Mixed', hinglish: 'Hinglish' };
+  return map[langCode?.toLowerCase()] || 'Hindi';
+}
+
 let currentCustomerPage = 1;
+let editingCustomerId = null;
+let editingOriginalSlot = '';
+let editingScheduledDate = '';
 
 function renderCustomerTable(customers) {
   document.getElementById('totalCustomersMetric').textContent = customers.length;
@@ -46,8 +69,16 @@ function renderCustomerTable(customers) {
       <td><strong>${AppShell.escapeHtml(customer.name)}</strong></td>
       <td>${AppShell.escapeHtml(customer.phone)}</td>
       <td>${AppShell.escapeHtml(customer.preferred_slot || '--')}</td>
-      <td><span class="status-badge active">${AppShell.escapeHtml(customer.preferred_language || 'hindi')}</span></td>
+      <td><span class="status-badge active">${AppShell.escapeHtml(formatLanguage(customer.preferred_language))}</span></td>
+      <td>
+        <button class="secondary admin-only-control" type="button" data-edit-customer="${AppShell.escapeHtml(String(customer.id))}" aria-label="Edit ${AppShell.escapeHtml(customer.name)}" title="Edit customer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+        </button>
+        <button class="danger admin-only-control" type="button" data-archive-customer="${AppShell.escapeHtml(String(customer.id))}">Archive</button>
+      </td>
     `;
+    tr.querySelector('[data-edit-customer]').addEventListener('click', () => openEditCustomerModal(customer));
+    tr.querySelector('[data-archive-customer]').addEventListener('click', () => archiveCustomer(customer.id));
     tbody.appendChild(tr);
   });
 
@@ -63,6 +94,7 @@ function changeCustomerPage(pageNumber) {
 }
 
 window.changeCustomerPage = changeCustomerPage;
+window.archiveCustomer = archiveCustomer;
 window.addEventListener('app:pagination:resize', handleSearch);
 
 function handleSearch() {
@@ -72,6 +104,85 @@ function handleSearch() {
     return searchableString.includes(searchTerm);
   });
   renderCustomerTable(filtered);
+}
+
+function getNextScheduledDate(slot) {
+  if (!slot) return '';
+  const [hours, minutes] = slot.split(':').map(Number);
+  const scheduled = new Date();
+  scheduled.setHours(hours, minutes, 0, 0);
+  if (scheduled.getTime() <= Date.now()) scheduled.setDate(scheduled.getDate() + 1);
+  return `${scheduled.getFullYear()}-${String(scheduled.getMonth() + 1).padStart(2, '0')}-${String(scheduled.getDate()).padStart(2, '0')}`;
+}
+
+function openAddCustomerModal() {
+  const modal = document.getElementById('addCustomerModal');
+  editingCustomerId = null;
+  editingOriginalSlot = '';
+  editingScheduledDate = '';
+  document.getElementById('addCustomerForm').reset();
+  document.getElementById('addCustomerModalTitle').textContent = 'Add Customer';
+  document.getElementById('addCustomerModalSubtitle').textContent = 'Create a patient record manually.';
+  document.getElementById('submitAddCustomerBtn').textContent = 'Add Customer';
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  document.getElementById('addCustomerName').focus();
+}
+
+function dateValueFromIso(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function openEditCustomerModal(customer) {
+  editingCustomerId = customer.id;
+  editingOriginalSlot = customer.preferred_slot || '';
+  editingScheduledDate = dateValueFromIso(customer.scheduled_datetime);
+  document.getElementById('addCustomerName').value = customer.name || '';
+  document.getElementById('addCustomerPhone').value = customer.phone || '';
+  document.getElementById('addCustomerPreferredSlot').value = editingOriginalSlot;
+  document.getElementById('addCustomerPreferredLanguage').value = customer.preferred_language || 'hi';
+  document.getElementById('addCustomerModalTitle').textContent = 'Update Customer';
+  document.getElementById('addCustomerModalSubtitle').textContent = 'Edit this patient record.';
+  document.getElementById('submitAddCustomerBtn').textContent = 'Update Customer';
+  const modal = document.getElementById('addCustomerModal');
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  document.getElementById('addCustomerName').focus();
+}
+
+function closeAddCustomerModal() {
+  const modal = document.getElementById('addCustomerModal');
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+async function handleAddCustomerSubmit(event) {
+  event.preventDefault();
+  const name = document.getElementById('addCustomerName').value.trim();
+  const phone = AppShell.normalizePhoneForApi(document.getElementById('addCustomerPhone').value);
+  const preferredSlot = document.getElementById('addCustomerPreferredSlot').value;
+  const submitButton = document.getElementById('submitAddCustomerBtn');
+  const isEditing = Boolean(editingCustomerId);
+  const endpoint = editingCustomerId ? `${AppShell.API_BASE}/customers/${editingCustomerId}` : `${AppShell.API_BASE}/customers`;
+  submitButton.disabled = true;
+  submitButton.textContent = isEditing ? 'Updating...' : 'Adding...';
+  try {
+    await AppShell.fetchJson(endpoint, {
+      method: editingCustomerId ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, phone, preferred_slot: preferredSlot, preferred_language: document.getElementById('addCustomerPreferredLanguage').value, scheduled_date: isEditing && preferredSlot === editingOriginalSlot ? editingScheduledDate : getNextScheduledDate(preferredSlot) })
+    });
+    closeAddCustomerModal();
+    AppShell.showAlert(isEditing ? 'Customer updated successfully' : 'Customer added successfully');
+    await loadCustomerData();
+  } catch (error) {
+    AppShell.showAlert(error.message, 'error');
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = isEditing ? 'Update Customer' : 'Add Customer';
+  }
 }
 
 // Bulk Import Modal Logic
@@ -170,6 +281,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('refreshDataButton').addEventListener('click', loadCustomerData);
 
   // Bulk Import Listeners
+  document.getElementById('addCustomerButton').addEventListener('click', openAddCustomerModal);
+  document.getElementById('addCustomerModalClose').addEventListener('click', closeAddCustomerModal);
+  document.getElementById('cancelAddCustomerBtn').addEventListener('click', closeAddCustomerModal);
+  document.getElementById('addCustomerForm').addEventListener('submit', handleAddCustomerSubmit);
   document.getElementById('importCsvButton').addEventListener('click', openBulkImportModal);
   document.getElementById('bulkImportModalClose').addEventListener('click', closeBulkImportModal);
   document.getElementById('cancelImportBtn').addEventListener('click', closeBulkImportModal);

@@ -44,7 +44,7 @@ function birthDateYearsAgo(years, extraDays = 0) {
   return value.toISOString().slice(0, 10);
 }
 
-async function cleanupExistingSeedData(demoPhones, campaignNames) {
+async function archiveExistingSeedData(demoPhones, campaignNames) {
   const existingCustomers = await all(
     `SELECT id, phone FROM customers WHERE phone IN (${demoPhones.map(() => '?').join(',')})`,
     demoPhones
@@ -53,15 +53,20 @@ async function cleanupExistingSeedData(demoPhones, campaignNames) {
   const existingIds = existingCustomers.map((row) => row.id);
 
   if (existingIds.length) {
-    await run(`DELETE FROM feedback WHERE customer_id IN (${existingIds.map(() => '?').join(',')})`, existingIds);
-    await run(`DELETE FROM calls WHERE customer_id IN (${existingIds.map(() => '?').join(',')})`, existingIds);
-    await run(`DELETE FROM clients WHERE linked_customer_id IN (${existingIds.map(() => '?').join(',')})`, existingIds);
-    await run(`DELETE FROM customers WHERE id IN (${existingIds.map(() => '?').join(',')})`, existingIds);
+    const archivedAt = new Date().toISOString();
+    const lifecycle = [archivedAt, 'seed-demo-reports', 'superseded demo fixture', ...existingIds];
+    const placeholders = existingIds.map(() => '?').join(',');
+    await run(`UPDATE feedback SET status = 'archived', archived_at = ?, archived_by = ?, archive_reason = ? WHERE customer_id IN (${placeholders}) AND status <> 'archived'`, lifecycle);
+    await run(`UPDATE calls SET status = 'archived', archived_at = ?, archived_by = ?, archive_reason = ? WHERE customer_id IN (${placeholders}) AND status <> 'archived'`, lifecycle);
+    await run(`UPDATE clients SET status = 'archived', archived_at = ?, archived_by = ?, archive_reason = ? WHERE linked_customer_id IN (${placeholders}) AND status <> 'archived'`, lifecycle);
+    await run(`UPDATE customers SET status = 'archived', archived_at = ?, archived_by = ?, archive_reason = ? WHERE id IN (${placeholders}) AND status <> 'archived'`, lifecycle);
   }
 
   await run(
-    `DELETE FROM campaign_configs WHERE name IN (${campaignNames.map(() => '?').join(',')})`,
-    campaignNames
+    `UPDATE campaign_configs
+        SET status = 'archived', archived_at = ?, archived_by = ?, archive_reason = ?
+      WHERE name IN (${campaignNames.map(() => '?').join(',')}) AND status <> 'archived'`,
+    [new Date().toISOString(), 'seed-demo-reports', 'superseded demo fixture', ...campaignNames]
   );
 }
 
@@ -315,7 +320,7 @@ async function seed() {
     { name: 'Corporate Wellness Leads', service_name: 'Corporate package outreach', monthly_spend_inr: 32000, status: 'active' }
   ];
 
-  await cleanupExistingSeedData(patients.map((item) => item.phone), campaigns.map((item) => item.name));
+  await archiveExistingSeedData(patients.map((item) => item.phone), campaigns.map((item) => item.name));
   await seedCampaigns(campaigns);
 
   const customerIds = [];

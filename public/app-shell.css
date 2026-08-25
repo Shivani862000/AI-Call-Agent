@@ -41,10 +41,36 @@ body {
 
 body.role-agent [href="/feedback.html"],
 body.role-agent [href="/reports.html"],
+body.role-agent [href="/support-tickets.html"],
+body.role-agent [href="/users.html"],
 body.role-agent [data-overview-filter="feedback"],
 body.role-agent .analysis-cta-button,
 body.role-agent .admin-only-control {
   display: none !important;
+}
+
+body.embedded-tenant-view {
+  min-height: 100vh;
+}
+
+body.embedded-tenant-view .app-shell {
+  display: block;
+  min-height: 100vh;
+}
+
+body.embedded-tenant-view .sidebar,
+body.embedded-tenant-view .mobile-dock,
+body.embedded-tenant-view .mobile-tabbar,
+body.embedded-tenant-view .mobile-ops-header,
+body.embedded-tenant-view .sidebar-footer,
+body.embedded-tenant-view #logoutButton,
+body.embedded-tenant-view #mobileMenuSheet {
+  display: none !important;
+}
+
+body.embedded-tenant-view .main-panel {
+  width: 100%;
+  min-height: 100vh;
 }
 
 .app-shell {

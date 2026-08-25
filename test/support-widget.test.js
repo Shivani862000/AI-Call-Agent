@@ -46,18 +46,25 @@ test('mobile support dialog protects the title, fits the viewport, and scrolls i
   assert.match(css, /\.support-close\s*\{[^}]*width:\s*36px;[^}]*height:\s*36px/);
 });
 
-test('admin session refreshes navigation after adding the Support Tickets link', () => {
+test('Webmaster and client-admin sessions refresh navigation after adding the Support Tickets link', () => {
   const shell = fs.readFileSync(path.join(__dirname, '..', 'public', 'app-shell.js'), 'utf8');
   assert.match(shell, /NAV_ITEMS\.push\(\{ href: '\/support-tickets\.html'/);
-  assert.match(shell, /if \(session\.role === 'ADMIN'[\s\S]*?NAV_ITEMS\.push\([\s\S]*?\);\s*buildMobileTabbar\(\)/);
+  assert.match(shell, /const ADMIN_ROLES = new Set\(\['WEBMASTER', 'CLIENT_ADMIN'\]\)/);
+  assert.match(shell, /function isAdminRole\(role\)\s*\{\s*return ADMIN_ROLES\.has\(role\);\s*\}/);
+  assert.match(shell, /if \(isAdminRole\(session\.role\)\)[\s\S]*?NAV_ITEMS\.push\([\s\S]*?\);\s*buildMobileTabbar\(\)/);
 });
 
-test('admin session adds Support Tickets to the visible sidebar and mobile dock', () => {
+test('admin roles add Support Tickets to the visible sidebar and mobile dock on every shell page', () => {
   const shell = fs.readFileSync(path.join(__dirname, '..', 'public', 'app-shell.js'), 'utf8');
   assert.match(shell, /function addAdminSupportNavigation\(\)/);
   assert.match(shell, /selector: '\.nav-list'/);
   assert.match(shell, /selector: '\.mobile-dock'/);
-  assert.match(shell, /if \(session\.role === 'ADMIN'\)[\s\S]*?addAdminSupportNavigation\(\)/);
+  assert.match(shell, /if \(isAdminRole\(session\.role\)\)[\s\S]*?addAdminSupportNavigation\(\)/);
+
+  ['admin.html', 'customer-list.html', 'customers.html', 'feedback.html', 'support-tickets.html'].forEach((pageName) => {
+    const page = fs.readFileSync(path.join(__dirname, '..', 'public', pageName), 'utf8');
+    assert.match(page, /<script src="\/app-shell\.js"><\/script>/);
+  });
 });
 
 test('support tickets page shares the admin navigation shell', () => {

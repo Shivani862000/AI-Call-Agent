@@ -81,7 +81,8 @@
           <div class="page-subtitle">Manage patient records and bulk import customers via CSV.</div>
         </div>
         <div class="header-actions">
-          <button id="importCsvButton" class="primary" type="button">Bulk Import CSV</button>
+          <button id="addCustomerButton" class="primary" type="button">Add Customer</button>
+          <button id="importCsvButton" class="primary admin-only-control" type="button">Bulk Import CSV</button>
           <button id="refreshDataButton" class="secondary desktop-only" type="button">Refresh List</button>
           <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
@@ -117,6 +118,7 @@
                 <th>Phone Number</th>
                 <th>Preferred Slot</th>
                 <th>Language</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="customersTableBody">
@@ -127,6 +129,48 @@
         <div id="customerPagination"></div>
       </section>
     </main>
+  </div>
+
+  <div id="addCustomerModal" class="modal-backdrop" aria-hidden="true">
+    <div class="saas-modal-panel schedule-modal" role="dialog" aria-modal="true" aria-labelledby="addCustomerModalTitle">
+      <div class="saas-modal-header">
+        <div>
+          <h3 id="addCustomerModalTitle" class="saas-modal-title">Add Customer</h3>
+          <div id="addCustomerModalSubtitle" class="saas-modal-subtitle">Create a patient record manually.</div>
+        </div>
+        <button id="addCustomerModalClose" class="saas-modal-close" type="button" aria-label="Close">
+          <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <form id="addCustomerForm" class="saas-modal-body">
+        <div class="saas-field">
+          <label for="addCustomerName">Patient name</label>
+          <input id="addCustomerName" name="name" required minlength="2" maxlength="100" autocomplete="name">
+        </div>
+        <div class="saas-field">
+          <label for="addCustomerPhone">Mobile number</label>
+          <input id="addCustomerPhone" name="phone" required inputmode="tel" placeholder="+91 98765 43210" autocomplete="tel">
+        </div>
+        <div class="saas-field">
+          <label for="addCustomerPreferredSlot">Preferred slot <span class="text-muted">(optional)</span></label>
+          <input id="addCustomerPreferredSlot" name="preferred_slot" type="time" min="07:00" max="20:59">
+          <small class="form-help">When selected, the first follow-up is scheduled for the next occurrence of this time.</small>
+        </div>
+        <div class="saas-field">
+          <label for="addCustomerPreferredLanguage">Preferred language</label>
+          <select id="addCustomerPreferredLanguage" name="preferred_language">
+            <option value="hi" selected>Hindi</option>
+            <option value="en">English</option>
+            <option value="mixed">Mixed</option>
+            <option value="hinglish">Hinglish</option>
+          </select>
+        </div>
+        <div class="saas-modal-footer" style="padding: 24px 0 0; border-top: none;">
+          <button type="button" class="btn-ghost-saas" id="cancelAddCustomerBtn">Cancel</button>
+          <button type="submit" class="btn-primary-saas" id="submitAddCustomerBtn">Add Customer</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <!-- Mobile Footer Navigation -->
@@ -194,6 +238,7 @@
   </div>
 
   <script src="/app-shell.js"></script>
+  <script src="/customer-archival.js"></script>
   <script src="/customer-list.js"></script>
 </body>
 </html>

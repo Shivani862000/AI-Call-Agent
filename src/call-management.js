@@ -24,19 +24,22 @@ const {
   normalizeOutboundCallType,
   normalizePhoneLookupValue,
   normalizeCallDirection,
+  parseIcallMateExtraParams,
   getIncomingCallKey,
   normalizeIcallTimestamp
 } = require('./helpers');
 const { buildIcallMateCallbackUrl } = require('./icallmate-webhook');
+const { outboundCallContextRepository } = require('./outbound-call-context');
 
 // ── Call Initiation ────────────────────────────────────────────────────────────
 
-async function placeRealtimeCall({ customerPhone, customerName, customerId, clientName, agentId, callType }) {
+async function placeRealtimeCall({ customerPhone, customerName, customerId, clientName, agentId, callType, tenantId }) {
   return initiateCall(customerPhone, customerId, {
     baseUrl: PUBLIC_BASE_URL,
     customerName,
     clientName,
     agentId,
+    tenantId,
     callType: normalizeOutboundCallType(callType),
     wsurl: toWssUrl(PUBLIC_BASE_URL, '/icallmate/media'),
     callbackapi: buildIcallMateCallbackUrl(PUBLIC_BASE_URL)
@@ -69,31 +72,33 @@ function computeNextAnnualReminderDate(lastVisitDate, referenceDate = new Date()
   return candidate;
 }
 
-async function ensureCustomerForCall({ customerId, customerName, customerPhone }) {
+async function ensureCustomerForCall({ customerId, customerName, customerPhone, tenantId }) {
+  if (!tenantId) throw new TypeError('A concrete authorized tenant is required for outgoing calls');
   if (customerId) {
-    const existingById = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
+    const existingById = await dbGet("SELECT * FROM customers WHERE id = ? AND tenant_id = ? AND status <> 'archived'", [customerId, String(tenantId)]);
     if (existingById) {
       return existingById;
     }
   }
 
-  const existingByPhone = await dbGet('SELECT * FROM customers WHERE phone = ?', [customerPhone]);
+  const existingByPhone = await dbGet("SELECT * FROM customers WHERE phone = ? AND tenant_id = ? AND status <> 'archived'", [customerPhone, String(tenantId)]);
   if (existingByPhone) {
     return existingByPhone;
   }
 
   const result = await dbRun(
-    'INSERT INTO customers (name, phone, preferred_slot, status, created_at) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO customers (name, phone, preferred_slot, status, created_at, tenant_id) VALUES (?, ?, ?, ?, ?, ?)',
     [
       customerName || 'Customer',
       customerPhone,
       '10:00',
       'pending',
-      new Date().toISOString()
+      new Date().toISOString(),
+      String(tenantId)
     ]
   );
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  return dbGet("SELECT * FROM customers WHERE id = ? AND tenant_id = ? AND status <> 'archived'", [result.lastID, String(tenantId)]);
 }
 
 async function claimCustomerForOutboundCall(customerId) {
@@ -102,7 +107,8 @@ async function claimCustomerForOutboundCall(customerId) {
         SET status = ?,
             last_called_at = ?
       WHERE id = ?
-        AND COALESCE(status, 'pending') != 'calling'`,
+        AND COALESCE(status, 'pending') != 'calling'
+        AND status <> 'archived'`,
     ['calling', new Date().toISOString(), customerId]
   );
 
@@ -123,11 +129,11 @@ async function ensureCustomerForClientReminder(client) {
   let customer = null;
 
   if (client.linked_customer_id) {
-    customer = await dbGet('SELECT * FROM customers WHERE id = ?', [client.linked_customer_id]);
+    customer = await dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [client.linked_customer_id]);
   }
 
   if (!customer) {
-    customer = await dbGet('SELECT * FROM customers WHERE phone = ?', [client.phone]);
+    customer = await dbGet("SELECT * FROM customers WHERE phone = ? AND status <> 'archived'", [client.phone]);
   }
 
   if (customer) {
@@ -138,7 +144,7 @@ async function ensureCustomerForClientReminder(client) {
               preferred_slot = ?,
               service_interest = ?,
               status = CASE WHEN status = 'completed' THEN 'pending' ELSE status END
-        WHERE id = ?`,
+        WHERE id = ? AND status <> 'archived'`,
       [
         client.name,
         client.phone,
@@ -151,7 +157,7 @@ async function ensureCustomerForClientReminder(client) {
       'UPDATE clients SET linked_customer_id = ?, updated_at = ? WHERE id = ?',
       [customer.id, new Date().toISOString(), client.id]
     );
-    return dbGet('SELECT * FROM customers WHERE id = ?', [customer.id]);
+    return dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [customer.id]);
   }
 
   const result = await dbRun(
@@ -173,14 +179,14 @@ async function ensureCustomerForClientReminder(client) {
     [result.lastID, new Date().toISOString(), client.id]
   );
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  return dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [result.lastID]);
 }
 
 async function findCustomerByPhone(phoneValue) {
   const normalized = normalizePhoneLookupValue(phoneValue);
   if (!normalized) return null;
 
-  const customers = await dbAll('SELECT * FROM customers ORDER BY id DESC LIMIT 200');
+  const customers = await dbAll("SELECT * FROM customers WHERE status <> 'archived' ORDER BY id DESC LIMIT 200");
   return customers.find((customer) => normalizePhoneLookupValue(customer.phone) === normalized) || null;
 }
 
@@ -202,93 +208,67 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
     ]
   );
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  return dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [result.lastID]);
 }
 
 // ── Call Context & Intelligence ───────────────────────────────────────────────
 
-async function findRecentOutboundCallContextByPhone(phoneValue) {
-  const customer = await findCustomerByPhone(phoneValue);
-  if (!customer) {
-    return null;
-  }
-
-  const call = await dbGet(
-    `SELECT calls.*, agents.client_name AS agent_client_name
-       FROM calls
-       LEFT JOIN agents ON agents.id = calls.agent_id
-      WHERE calls.customer_id = ?
-        AND COALESCE(calls.call_direction, 'outbound') = 'outbound'
-        AND DATETIME(calls.called_at) >= DATETIME('now', '-30 minutes')
-      ORDER BY calls.id DESC
-      LIMIT 1`,
-    [customer.id]
-  );
-
-  if (!call) {
-    return null;
-  }
-
-  return { customer, call };
+async function findRecentOutboundCallContextByPhone(phoneValue, tenantId, customerId) {
+  if (!tenantId || customerId === null || customerId === undefined) return null;
+  return outboundCallContextRepository.findRecentByPhone({ phone: phoneValue, tenantId, customerId });
 }
 
-async function hydrateIcallMateSessionContext(session, message = {}, extraParams = {}) {
-  if (session.contextHydrated) {
-    return;
-  }
+function createIcallMateSessionHydrator({ contextRepository = outboundCallContextRepository } = {}) {
+  return async function hydrateIcallMateSessionContext(session, message = {}, extraParams = {}) {
+    if (session.contextHydrated) return;
+    if (session._hydrationPromise) return session._hydrationPromise;
 
-  // If hydration is already in progress, return the existing promise so callers can await it
-  if (session._hydrationPromise) {
-    return session._hydrationPromise;
-  }
-
-  if (extraParams.callDirection) {
-    session.callDirection = normalizeCallDirection(extraParams.callDirection, session.callDirection);
+    const tenantId = extraParams.tenantId || extraParams.tenant_id || session.tenantId;
+    if (!tenantId) return;
+    if (extraParams.callDirection) {
+      session.callDirection = normalizeCallDirection(extraParams.callDirection, session.callDirection);
+    }
     if (extraParams.callType || extraParams.call_type) {
       session.callType = normalizeOutboundCallType(extraParams.callType || extraParams.call_type);
     }
-    session.contextHydrated = true;
-    return;
-  }
 
-  session.contextHydrating = true;
-  session._hydrationPromise = (async () => {
-    try {
-      const context = await findRecentOutboundCallContextByPhone(message.callerId || session.callerId);
-      if (!context) {
-        return;
+    session.contextHydrating = true;
+    session._hydrationPromise = (async () => {
+      try {
+        const context = await contextRepository.findRecentByPhone({
+          phone: message.callerId || session.callerId,
+          tenantId,
+          customerId: extraParams.customerId || session.customerId
+        });
+        if (!context) return;
+
+        session.contextHydrated = true;
+        session.tenantId = String(tenantId);
+        session.callDirection = 'outbound';
+        session.customerName = extraParams.customerName || session.customerName || process.env.CUSTOMER_NAME || 'Customer';
+        session.clientName = extraParams.clientName || session.clientName || CLIENT_NAME;
+        session.customerId = extraParams.customerId || session.customerId || null;
+        session.callId = context.call.id;
+        session.providerCallId = context.call.providerCallId || '';
+        session.callType = normalizeOutboundCallType(extraParams.callType || extraParams.call_type || context.call.callType);
+      } finally {
+        session.contextHydrating = false;
+        session._hydrationPromise = null;
       }
+    })();
 
-      session.contextHydrated = true;
-      session.callDirection = 'outbound';
-      session.customerName = context.customer.name || session.customerName || process.env.CUSTOMER_NAME || 'Customer';
-      session.clientName = context.call.agent_client_name || session.clientName || CLIENT_NAME;
-      session.customerId = context.customer.id;
-      session.callId = context.call.id;
-      session.providerCallId = context.call.provider_call_id || '';
-      session.callType = normalizeOutboundCallType(context.call.call_type || context.customer.call_type);
-      session.videoSent = context.customer.video_sent === 1;
-      session.lastVisitDate = context.customer.last_visit_date || 'kal';
-
-      console.log(
-        `[ICALLMATE] Hydrated outbound context streamId=${message.streamId || session.streamId || ''} ` +
-        `phone=${message.callerId || session.callerId || ''} customerId=${session.customerId} ` +
-        `callId=${session.callId} callType=${session.callType}`
-      );
-    } finally {
-      session.contextHydrating = false;
-    }
-  })();
-
-  return session._hydrationPromise;
+    return session._hydrationPromise;
+  };
 }
+
+const hydrateIcallMateSessionContext = createIcallMateSessionHydrator();
 
 async function getCustomerCallHistory(customerId, limit = 20) {
   if (!customerId) return [];
   return dbAll(
     `SELECT called_at, outcome, sentiment_label, transcript_text, analysis_summary, extracted_review_text
      FROM calls
-     WHERE customer_id = ?
+     WHERE customer_id = ? AND status <> 'archived'
      ORDER BY called_at DESC
      LIMIT ?`,
     [customerId, limit]
@@ -423,6 +403,7 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
     eventName === 'hangup-call' ? 'missed' : 'active'
   );
 
+  const extraParams = parseIcallMateExtraParams(message.extraParams || message.extraparam || message.extra_param);
   const row = {
     id: key,
     stream_id: message.streamId || existing.stream_id || key,
@@ -442,6 +423,7 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
     botid: message.botid || existing.botid || '',
     userrefno: message.userrefno || existing.userrefno || '',
     sysrefno: message.sysrefno || existing.sysrefno || '',
+    tenantId: patch.tenantId || message.tenantId || extraParams.tenantId || existing.tenantId || null,
     extra_params: message.extraParams || existing.extra_params || ''
   };
 
@@ -618,6 +600,7 @@ module.exports = {
   ensureIncomingCustomerForCall,
   findRecentOutboundCallContextByPhone,
   hydrateIcallMateSessionContext,
+  createIcallMateSessionHydrator,
   getCustomerCallHistory,
   hydratePreCallIntelligence,
   shouldBlockCustomerCall,

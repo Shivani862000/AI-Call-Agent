@@ -8,17 +8,20 @@ async function fixDuplicates() {
     const customers = await dbAll('SELECT id FROM customers WHERE phone = ? ORDER BY id DESC', [dup.phone]);
     // keep the first one (most recent)
     const keepId = customers[0].id;
-    const deleteIds = customers.slice(1).map(c => c.id);
+    const archiveIds = customers.slice(1).map(c => c.id);
     
-    console.log(`Fixing duplicate phone ${dup.phone}. Keeping ID ${keepId}, deleting ${deleteIds.join(', ')}`);
+    console.log(`Archiving duplicate customer records while keeping ID ${keepId}.`);
     
-    for (const id of deleteIds) {
+    for (const id of archiveIds) {
       // Re-link calls
       await dbRun('UPDATE calls SET customer_id = ? WHERE customer_id = ?', [keepId, id]);
       // Re-link feedback
       await dbRun('UPDATE feedback SET customer_id = ? WHERE customer_id = ?', [keepId, id]);
-      // Delete old customer
-      await dbRun('DELETE FROM customers WHERE id = ?', [id]);
+      // Retain the duplicate as an archived, recoverable record.
+      await dbRun(
+        "UPDATE customers SET status = 'archived', archived_at = ?, archived_by = ?, archive_reason = ? WHERE id = ?",
+        [new Date().toISOString(), 'fix-duplicates', `merged into customer ${keepId}`, id]
+      );
     }
   }
   console.log('Duplicates resolved.');
