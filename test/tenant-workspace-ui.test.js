@@ -116,3 +116,10 @@ test('embedded legacy views have a dedicated presentation mode that suppresses d
   assert.match(shellCss, /body\.embedded-tenant-view \.sidebar/);
   assert.match(shellCss, /body\.embedded-tenant-view \.mobile-dock/);
 });
+
+test('workspace loading and error panels respect their hidden state', () => {
+  const shellCss = fs.readFileSync(path.join(projectRoot, 'public', 'tenant-workspace.css'), 'utf8');
+
+  assert.match(shellCss, /\.tenant-workspace-error\[hidden\]\s*\{\s*display:\s*none;/);
+  assert.match(shellCss, /\.tenant-workspace-main iframe\[hidden\]\s*\{\s*display:\s*none;/);
+});
