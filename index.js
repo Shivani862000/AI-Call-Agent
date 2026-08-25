@@ -23,6 +23,7 @@ const { createSecretService } = require('./src/webmaster/secret-service');
 const { environmentKeyForSecret } = require('./src/webmaster/settings-registry');
 const { createMaintenanceMiddleware, createConfiguredRateLimit, createFeatureFlagMiddleware } = require('./src/webmaster/policy-middleware');
 const { isAdminOnlyRequest } = require('./src/authorization');
+const { createTenantWorkspaceDispatcher } = require('./src/tenant-workspace-routes');
 const mountApiRoutes = require('./src/api-routes');
 const setupWebSocketBridge = require('./src/websocket-bridge');
 const startServer = require('./src/server');
@@ -131,6 +132,8 @@ app.get('/incoming-calls.html', (req, res) => {
 app.get('/reports.html', (req, res) => {
   res.status(404).send('Reports page is disabled.');
 });
+
+app.use(createTenantWorkspaceDispatcher({ publicDirectory: path.join(__dirname, 'public') }));
 
 // Static files
 app.use(express.static(path.join(__dirname, 'public')));

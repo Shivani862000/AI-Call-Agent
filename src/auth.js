@@ -14,6 +14,7 @@ const Tenant = require('./models/Tenant');
 
 const PROTECTED_HTML_PATHS = new Set([
   '/admin.html',
+  '/customer-list.html',
   '/webmaster.html',
   '/support-tickets.html',
   '/incoming-calls.html',

@@ -20,6 +20,7 @@ const ADMIN_ONLY_HTML = new Set([
   '/support-tickets.html',
   '/feedback.html',
   '/feedback-analysis.html',
+  '/users.html',
   '/reports.html'
 ]);
 
