@@ -246,7 +246,87 @@ const QUERY_MUTATION_METHODS = Object.freeze([
   'wtimeout'
 ]);
 
-function createSealedQueryFacade(query, mutationError) {
+function snapshotQueryValue(value, ObjectId, mutationError, seen = new WeakMap()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (utilTypes.isProxy(value)) throw mutationError();
+  if (seen.has(value)) return seen.get(value);
+
+  let prototype;
+  try {
+    prototype = Object.getPrototypeOf(value);
+  } catch (_error) {
+    throw mutationError();
+  }
+
+  if (prototype === Date.prototype) {
+    try {
+      return new Date(Date.prototype.getTime.call(value));
+    } catch (_error) {
+      throw mutationError();
+    }
+  }
+
+  if (ObjectId && prototype === ObjectId.prototype) {
+    const normalized = normalizeNullableObjectId(value, ObjectId);
+    if (isInvalidRetainedValue(normalized)) throw mutationError();
+    return normalized;
+  }
+
+  if (Buffer.isBuffer(value)) {
+    try {
+      if (!utilTypes.isUint8Array(value)) throw mutationError();
+      const clone = Buffer.allocUnsafe(TYPED_ARRAY_LENGTH.call(value));
+      Buffer.prototype.copy.call(value, clone);
+      return clone;
+    } catch (error) {
+      if (error?.code) throw error;
+      throw mutationError();
+    }
+  }
+
+  if (Array.isArray(value)) {
+    const values = dataArrayValues(value);
+    if (!values || prototype !== Array.prototype) throw mutationError();
+    const clone = [];
+    seen.set(value, clone);
+    for (const entry of values) clone.push(snapshotQueryValue(entry, ObjectId, mutationError, seen));
+    return clone;
+  }
+
+  if (prototype === Map.prototype) {
+    const clone = new Map();
+    seen.set(value, clone);
+    let entries;
+    try {
+      entries = Map.prototype.entries.call(value);
+    } catch (_error) {
+      throw mutationError();
+    }
+    for (const [key, entry] of entries) {
+      clone.set(
+        snapshotQueryValue(key, ObjectId, mutationError, seen),
+        snapshotQueryValue(entry, ObjectId, mutationError, seen)
+      );
+    }
+    return clone;
+  }
+
+  const descriptors = ownDataDescriptors(value);
+  if (!descriptors) throw mutationError();
+  const clone = Object.create(prototype);
+  seen.set(value, clone);
+  for (const key of Object.keys(descriptors)) {
+    Object.defineProperty(clone, key, {
+      configurable: true,
+      enumerable: descriptors[key].enumerable,
+      value: snapshotQueryValue(descriptors[key].value, ObjectId, mutationError, seen),
+      writable: true
+    });
+  }
+  return clone;
+}
+
+function createSealedQueryFacade(query, mutationError, ObjectId) {
   const facade = Object.create(null);
   const rejectMutation = () => {
     throw mutationError();
@@ -282,45 +362,45 @@ function createSealedQueryFacade(query, mutationError) {
     clone: {
       enumerable: true,
       value() {
-        return createSealedQueryFacade(query.clone(), mutationError);
+        return createSealedQueryFacade(query.clone(), mutationError, ObjectId);
       }
     },
     getFilter: {
       enumerable: true,
       value() {
-        return clonedQuery().getFilter();
+        return snapshotQueryValue(clonedQuery().getFilter(), ObjectId, mutationError);
       }
     },
     getQuery: {
       enumerable: true,
       value() {
-        return clonedQuery().getQuery();
+        return snapshotQueryValue(clonedQuery().getQuery(), ObjectId, mutationError);
       }
     },
     getUpdate: {
       enumerable: true,
       value() {
-        return clonedQuery().getUpdate();
+        return snapshotQueryValue(clonedQuery().getUpdate(), ObjectId, mutationError);
       }
     },
     getOptions: {
       enumerable: true,
       value() {
-        return clonedQuery().getOptions();
+        return snapshotQueryValue(clonedQuery().getOptions(), ObjectId, mutationError);
       }
     },
     mongooseOptions: {
       enumerable: true,
       value(...args) {
         if (args.length !== 0) throw mutationError();
-        return clonedQuery().mongooseOptions();
+        return snapshotQueryValue(clonedQuery().mongooseOptions(), ObjectId, mutationError);
       }
     },
     projection: {
       enumerable: true,
       value(...args) {
         if (args.length !== 0) throw mutationError();
-        return clonedQuery().projection();
+        return snapshotQueryValue(clonedQuery().projection(), ObjectId, mutationError);
       }
     }
   });

@@ -5,6 +5,7 @@ const Call = require('../models/Call');
 const { sendDailyReportToAdmin } = require('../services/email-service');
 const logger = require('../../services/system-logger');
 const { activeRecordFilter } = require('../webmaster/lifecycle');
+const { getEffectiveRuntimeSettings } = require('../webmaster/settings-service');
 
 async function sendReportsForTime(timeString) {
   try {
@@ -19,6 +20,8 @@ async function sendReportsForTime(timeString) {
     endOfDay.setHours(23, 59, 59, 999);
 
     for (const tenant of tenants) {
+      const settings = await getEffectiveRuntimeSettings(String(tenant._id));
+      if (settings.featureFlags?.dailyReports === false) continue;
       // Find the CLIENT_ADMINs for this tenant
       const admins = await User.find({ tenantId: tenant._id, role: 'CLIENT_ADMIN', status: 'active' });
       if (admins.length === 0) continue;

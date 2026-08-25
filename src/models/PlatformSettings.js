@@ -25,7 +25,8 @@ const platformSettingsSchema = new mongoose.Schema({
   providers: { type: mongoose.Schema.Types.Mixed, default: {} },
   notificationTemplates: { type: mongoose.Schema.Types.Mixed, default: {} },
   retention: { type: mongoose.Schema.Types.Mixed, default: {} },
-  maintenance: { type: mongoose.Schema.Types.Mixed, default: {} }
+  maintenance: { type: mongoose.Schema.Types.Mixed, default: {} },
+  ownershipGuardVersion: { type: Number, min: 0, default: 0, select: false }
 }, {
   strict: true,
   minimize: false,

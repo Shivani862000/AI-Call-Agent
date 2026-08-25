@@ -434,4 +434,14 @@ async function getIntegrationRuntimeConfig(integration, tenantId = null) {
   return { settings, secrets };
 }
 
-module.exports = { createSettingsService, getIntegrationRuntimeConfig };
+async function getGlobalRuntimeSettings() {
+  const service = defaultSettingsService();
+  return service ? (await service.getGlobal()).global : {};
+}
+
+async function getEffectiveRuntimeSettings(tenantId) {
+  const service = defaultSettingsService();
+  return service ? (await service.getEffectiveForTenant(tenantId)).effective : getGlobalRuntimeSettings();
+}
+
+module.exports = { createSettingsService, getIntegrationRuntimeConfig, getGlobalRuntimeSettings, getEffectiveRuntimeSettings };

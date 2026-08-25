@@ -1827,6 +1827,64 @@ test('sensitive public models reject every aggregate pipeline before stage obser
   assert.equal(collectionCallCount, 0);
 });
 
+test('sensitive public models block inherited runtime query escapes before observing arguments', async () => {
+  // Mutation caught: Model.$where(), watch(), or a restored mapReduce() bypasses guarded statics.
+  const marker = 'private-runtime-static-marker-6421';
+  let observationCount = 0;
+  let collectionCallCount = 0;
+  const originalAuditWatch = AuditEvent.collection.watch;
+  const originalNotificationWatch = NotificationDelivery.collection.watch;
+  const collectionWatch = () => {
+    collectionCallCount += 1;
+    return { close: async () => undefined, on() { return this; } };
+  };
+  AuditEvent.collection.watch = collectionWatch;
+  NotificationDelivery.collection.watch = collectionWatch;
+
+  const accessorArgument = {};
+  Object.defineProperty(accessorArgument, 'privateValue', {
+    enumerable: true,
+    get() {
+      observationCount += 1;
+      throw new Error(marker);
+    }
+  });
+  const proxyOptions = new Proxy({}, {
+    get() {
+      observationCount += 1;
+      throw new Error(marker);
+    },
+    set() {
+      observationCount += 1;
+      throw new Error(marker);
+    }
+  });
+
+  try {
+    for (const [Model, expectedCode] of [
+      [AuditEvent, 'UNSUPPORTED_AUDIT_RUNTIME_QUERY'],
+      [NotificationDelivery, 'UNSUPPORTED_NOTIFICATION_RUNTIME_QUERY']
+    ]) {
+      for (const operation of [
+        () => Model.$where(accessorArgument),
+        () => Model.watch([accessorArgument], proxyOptions),
+        () => Model.mapReduce(accessorArgument, proxyOptions)
+      ]) {
+        assert.throws(
+          operation,
+          (error) => assertPrivateValidationError(error, marker, expectedCode)
+        );
+      }
+    }
+  } finally {
+    AuditEvent.collection.watch = originalAuditWatch;
+    NotificationDelivery.collection.watch = originalNotificationWatch;
+  }
+
+  assert.equal(observationCount, 0);
+  assert.equal(collectionCallCount, 0);
+});
+
 test('guarded query facades execute fixed reads and updates without exposing mutable internals', async () => {
   // Mutation caught: getFilter/getUpdate expose live state and setQuery/setUpdate bypass the static guards.
   const marker = 'private-query-facade-marker-6421';
@@ -1924,6 +1982,99 @@ test('guarded query facades execute fixed reads and updates without exposing mut
   assert.equal(notificationFilters[1].status, 'failed');
   assert.equal(notificationUpdates[0].$set.status, 'pending');
   assert.equal(notificationUpdates[0].$inc.retryCount, 1);
+});
+
+test('guarded query facade snapshots deeply isolate BSON dates arrays and nested options', async () => {
+  // Mutation caught: Query#clone shares ObjectId buffers with getFilter/getUpdate snapshots.
+  const originalFilterId = '507f1f77bcf86cd799439011';
+  const originalTenantId = '507f1f77bcf86cd799439012';
+  const originalAttemptAt = '2026-08-24T12:00:00.000Z';
+  const collectionCalls = [];
+  const originalUpdateOne = NotificationDelivery.collection.updateOne;
+  NotificationDelivery.collection.updateOne = async (filter, update, options) => {
+    collectionCalls.push({ filter, update, options });
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+
+  try {
+    const guardedUpdate = NotificationDelivery.updateOne(
+      { _id: { $in: [new mongoose.Types.ObjectId(originalFilterId)] } },
+      {
+        $set: {
+          tenantId: new mongoose.Types.ObjectId(originalTenantId),
+          lastAttemptAt: new Date(originalAttemptAt)
+        }
+      },
+      { sort: { created_at: -1 } }
+    );
+    const exposedFilter = guardedUpdate.getFilter();
+    const exposedUpdate = guardedUpdate.getUpdate();
+    const exposedOptions = guardedUpdate.getOptions();
+
+    exposedFilter._id.$in[0].buffer.fill(0xff);
+    exposedUpdate.$set.tenantId.buffer.fill(0xee);
+    exposedUpdate.$set.lastAttemptAt.setUTCFullYear(1999);
+    exposedOptions.sort.created_at = 1;
+
+    await guardedUpdate.exec();
+  } finally {
+    NotificationDelivery.collection.updateOne = originalUpdateOne;
+  }
+
+  assert.equal(collectionCalls.length, 1);
+  assert.equal(collectionCalls[0].filter._id.$in[0].toHexString(), originalFilterId);
+  assert.equal(collectionCalls[0].update.$set.tenantId.toHexString(), originalTenantId);
+  assert.equal(collectionCalls[0].update.$set.lastAttemptAt.toISOString(), originalAttemptAt);
+  assert.deepEqual(collectionCalls[0].options.sort, { created_at: -1 });
+});
+
+test('notification write statics reject insertion and timestamp overrides while preserving retry timestamps', async () => {
+  // Mutation caught: upsert or timestamps:false can create incomplete rows or suppress update evidence.
+  const collectionCalls = [];
+  const originalUpdateOne = NotificationDelivery.collection.updateOne;
+  NotificationDelivery.collection.updateOne = async (filter, update, options) => {
+    collectionCalls.push({ filter, update, options });
+    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  };
+
+  try {
+    for (const unsafeOptions of [
+      { upsert: true },
+      { upsert: false },
+      { timestamps: true },
+      { timestamps: false },
+      { setDefaultsOnInsert: true },
+      { setDefaultsOnInsert: false }
+    ]) {
+      await assert.rejects(
+        async () => NotificationDelivery.updateOne(
+          { status: 'failed' },
+          { $set: { status: 'pending' }, $inc: { retryCount: 1 } },
+          unsafeOptions
+        ),
+        (error) => error.code === 'INVALID_NOTIFICATION_OPTIONS'
+      );
+    }
+
+    await NotificationDelivery.updateOne(
+      { status: 'failed', retryCount: { $lt: 3 } },
+      {
+        $set: { status: 'pending', lastAttemptAt: '2026-08-24T12:00:00.000Z' },
+        $inc: { retryCount: 1 }
+      },
+      { runValidators: false }
+    ).exec();
+  } finally {
+    NotificationDelivery.collection.updateOne = originalUpdateOne;
+  }
+
+  assert.equal(collectionCalls.length, 1);
+  assert.equal(collectionCalls[0].update.$set.status, 'pending');
+  assert.equal(collectionCalls[0].update.$inc.retryCount, 1);
+  assert.ok(collectionCalls[0].update.$set.updated_at instanceof Date);
+  assert.equal(collectionCalls[0].options.runValidators, true);
+  assert.equal(Object.hasOwn(collectionCalls[0].options, 'upsert'), false);
+  assert.equal(Object.hasOwn(collectionCalls[0].options, 'timestamps'), false);
 });
 
 test('guarded statics validate audit and notification filters projections and options before Mongoose', async () => {

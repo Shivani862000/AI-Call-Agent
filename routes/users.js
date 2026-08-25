@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('../src/models/User');
 const bcrypt = require('bcrypt');
+const { getGlobalRuntimeSettings } = require('../src/webmaster/settings-service');
 const {
   recordFilterFromRequest,
   createMongooseArchiveHandlers
@@ -45,6 +46,10 @@ router.post('/agents', async (req, res) => {
     if (!username || !email || !password) {
       return res.status(400).json({ error: 'Username, email, and password are required' });
     }
+    const settings = await getGlobalRuntimeSettings();
+    const minLength = Math.max(8, Number(settings.policies?.password?.minLength) || 12);
+    const maxLength = Math.max(minLength, Number(settings.policies?.password?.maxLength) || 128);
+    if (String(password).length < minLength || String(password).length > maxLength) return res.status(422).json({ error: `Password must be between ${minLength} and ${maxLength} characters` });
 
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);

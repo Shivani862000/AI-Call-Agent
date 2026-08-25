@@ -73,7 +73,7 @@ function createAuditService({ AuditEventModel }) {
     throw new TypeError('AuditEventModel with create() is required');
   }
 
-  async function record(input = {}) {
+  async function record(input = {}, options = {}) {
     const inputDescriptors = plainInputDescriptors(input);
     const actorDescriptors = plainInputDescriptors(field(inputDescriptors, 'actor'), { nullable: true });
     const targetDescriptors = plainInputDescriptors(field(inputDescriptors, 'target'), { nullable: true });
@@ -102,7 +102,9 @@ function createAuditService({ AuditEventModel }) {
       failureCode
     };
 
-    const event = await AuditEventModel.create(payload);
+    const event = options.session
+      ? (await AuditEventModel.create([payload], { session: options.session }))[0]
+      : await AuditEventModel.create(payload);
     return sanitizeForAudit(createdValue(event));
   }
 

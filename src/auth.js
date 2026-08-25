@@ -28,6 +28,7 @@ const VALID_ROLES = new Set(['WEBMASTER', 'SUPPORT_TEAM', 'CLIENT_ADMIN', 'CLIEN
 const AUTH_SOURCES = new Set(['database', 'environment']);
 const AUTH_COOKIE_NAME = 'feedback_admin_session';
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const AUTH_SESSION_MAX_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const AUTH_CLOCK_SKEW_MS = 60 * 1000;
 const CONFIGURED_AUTH_SIGNING_SECRET = String(process.env.AUTH_SIGNING_SECRET || '').trim();
 const AUTH_SIGNING_SECRET = CONFIGURED_AUTH_SIGNING_SECRET
@@ -112,7 +113,7 @@ function signAuthValue(value) {
   return crypto.createHmac('sha256', AUTH_SIGNING_SECRET).update(value).digest();
 }
 
-function createAuthToken(username, role, tenantId = null, authSource = 'database') {
+function createAuthToken(username, role, tenantId = null, authSource = 'database', options = {}) {
   const normalizedUsername = String(username || '').trim();
   const normalizedRole = normalizeRole(role);
   if (
@@ -125,6 +126,10 @@ function createAuthToken(username, role, tenantId = null, authSource = 'database
   }
 
   const issuedAt = Date.now();
+  const requestedTtl = Number(options.ttlMs);
+  const ttlMs = Number.isFinite(requestedTtl)
+    ? Math.min(AUTH_SESSION_MAX_TTL_MS, Math.max(5 * 60 * 1000, requestedTtl))
+    : AUTH_SESSION_TTL_MS;
   const payload = Buffer.from(JSON.stringify({
     version: 3,
     username: normalizedUsername,
@@ -132,7 +137,7 @@ function createAuthToken(username, role, tenantId = null, authSource = 'database
     tenantId: tenantId ? tenantId.toString() : null,
     authSource,
     issuedAt,
-    exp: issuedAt + AUTH_SESSION_TTL_MS,
+    exp: issuedAt + ttlMs,
     nonce: crypto.randomBytes(16).toString('base64url')
   })).toString('base64url');
   const signature = signAuthValue(payload).toString('base64url');
@@ -176,7 +181,7 @@ function readAuthSession(req) {
     const expiresAt = Number(session?.exp);
     const tenantId = session?.tenantId || null;
     const authSource = String(session?.authSource || '');
-    const validLifetime = expiresAt > issuedAt && expiresAt - issuedAt <= AUTH_SESSION_TTL_MS;
+    const validLifetime = expiresAt > issuedAt && expiresAt - issuedAt <= AUTH_SESSION_MAX_TTL_MS;
 
     if (
       !username
@@ -219,14 +224,18 @@ function shouldUseSecureCookie(req) {
   return forwardedProto === 'https';
 }
 
-function setAuthCookie(req, res, token) {
+function setAuthCookie(req, res, token, options = {}) {
   const isSecure = shouldUseSecureCookie(req);
+  const requestedTtl = Number(options.ttlMs);
+  const ttlMs = Number.isFinite(requestedTtl)
+    ? Math.min(AUTH_SESSION_MAX_TTL_MS, Math.max(5 * 60 * 1000, requestedTtl))
+    : AUTH_SESSION_TTL_MS;
   const cookieParts = [
     `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
     'SameSite=Lax',
-    `Max-Age=${Math.floor(AUTH_SESSION_TTL_MS / 1000)}`
+    `Max-Age=${Math.floor(ttlMs / 1000)}`
   ];
 
   if (isSecure) {

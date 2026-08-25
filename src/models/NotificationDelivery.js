@@ -67,10 +67,7 @@ const NOTIFICATION_WRITE_OPTION_FIELDS = new Set([
   'returnDocument',
   'returnOriginal',
   'runValidators',
-  'setDefaultsOnInsert',
-  'sort',
-  'timestamps',
-  'upsert'
+  'sort'
 ]);
 const STATUS_ERROR_MESSAGE = 'Notification status must be pending, delivered, or failed';
 const RETRY_COUNT_ERROR_MESSAGE = 'Notification retry count must be a non-negative integer';
@@ -785,7 +782,7 @@ function sealNotificationQuery(query) {
   return createSealedQueryFacade(query, () => retainedDataError(
     'UNSUPPORTED_NOTIFICATION_QUERY_MUTATION',
     'Notification query mutations must use guarded model methods'
-  ));
+  ), mongoose.Types.ObjectId);
 }
 
 const notificationFind = NotificationDelivery.find;
@@ -978,5 +975,18 @@ Object.defineProperty(NotificationDelivery, 'aggregate', {
   },
   writable: false
 });
+
+for (const method of ['$where', 'watch', 'mapReduce']) {
+  Object.defineProperty(NotificationDelivery, method, {
+    configurable: true,
+    value() {
+      throw retainedDataError(
+        'UNSUPPORTED_NOTIFICATION_RUNTIME_QUERY',
+        'Direct notification runtime queries are not supported'
+      );
+    },
+    writable: false
+  });
+}
 
 module.exports = NotificationDelivery;

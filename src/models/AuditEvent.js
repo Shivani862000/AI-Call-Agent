@@ -362,7 +362,7 @@ function throwAuditMutationBoundary() {
 function sealAuditReadQuery(query) {
   return createSealedQueryFacade(query, () => (
     valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable')
-  ));
+  ), mongoose.Types.ObjectId);
 }
 
 const auditFind = AuditEvent.find;
@@ -503,5 +503,18 @@ Object.defineProperty(AuditEvent, 'aggregate', {
   },
   writable: false
 });
+
+for (const method of ['$where', 'watch', 'mapReduce']) {
+  Object.defineProperty(AuditEvent, method, {
+    configurable: true,
+    value() {
+      throw valueSafeError(
+        'UNSUPPORTED_AUDIT_RUNTIME_QUERY',
+        'Direct audit runtime queries are not supported'
+      );
+    },
+    writable: false
+  });
+}
 
 module.exports = AuditEvent;

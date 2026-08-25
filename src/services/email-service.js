@@ -8,6 +8,18 @@ function createEmailService({
   getIntegrationRuntimeConfig = defaultRuntimeConfigResolver,
   logger = console
 } = {}) {
+  async function send({ to, subject, html, tenantId = null }) {
+    const runtime = await getIntegrationRuntimeConfig('smtp', tenantId);
+    const settings = runtime.settings || {};
+    const password = runtime.secrets?.password || '';
+    if (settings.enabled === false || !settings.user || !password) return { delivered: false, skipped: true };
+    const transporter = nodemailerImpl.createTransport({ host: settings.host, port: Number(settings.port), secure: Boolean(settings.secure), auth: { user: settings.user, pass: password } });
+    const fromName = settings.fromName || 'AI Call Agent';
+    const fromAddress = settings.fromAddress || settings.user;
+    const info = await transporter.sendMail({ from: `"${fromName}" <${fromAddress}>`, to, subject, html });
+    return { delivered: true, messageId: info.messageId };
+  }
+
   async function sendDailyReportToAdmin(email, tenantName, reportData, { tenantId = null } = {}) {
     const runtime = await getIntegrationRuntimeConfig('smtp', tenantId);
     const settings = runtime.settings || {};
@@ -45,12 +57,13 @@ function createEmailService({
     return { delivered: true, messageId: info.messageId };
   }
 
-  return { sendDailyReportToAdmin };
+  return { send, sendDailyReportToAdmin };
 }
 
 const defaultService = createEmailService();
 
 module.exports = {
   createEmailService,
+  send: defaultService.send,
   sendDailyReportToAdmin: defaultService.sendDailyReportToAdmin
 };

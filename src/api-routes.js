@@ -24,6 +24,8 @@ const testAiCallRouter = require('../routes/test-ai-call');
 const User = require('./models/User');
 const Tenant = require('./models/Tenant');
 const { createWebmasterAuthorization } = require('./webmaster/authorization');
+const { createWebmasterRouter } = require('../routes/webmaster');
+const { getGlobalRuntimeSettings } = require('./webmaster/settings-service');
 
 const {
   CALL_MODE,
@@ -201,6 +203,8 @@ function mountApiRoutes(app, {
     });
   });
 
+  app.use('/api/webmaster', createWebmasterRouter({ authorization: webmasterAuthorization }));
+
   app.get('/', (req, res) => {
     const session = readAuthSession(req);
     if (session) {
@@ -244,13 +248,16 @@ function mountApiRoutes(app, {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
+    const managedSettings = await getGlobalRuntimeSettings();
+    const ttlMs = (Number(managedSettings?.policies?.session?.maxAgeMinutes) || 480) * 60 * 1000;
     const token = createAuthToken(
       authResult.username,
       authResult.role,
       authResult.tenantId,
-      authResult.authSource
+      authResult.authSource,
+      { ttlMs }
     );
-    setAuthCookie(req, res, token);
+    setAuthCookie(req, res, token, { ttlMs });
     logger.info('USER_LOGIN', { user: authResult.username, role: authResult.role, tenantId: authResult.tenantId });
     return res.json({
       success: true,
