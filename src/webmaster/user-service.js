@@ -26,6 +26,7 @@ function validateIdentity(input) {
 function queryWithSession(query, session) { return session && typeof query?.session === 'function' ? query.session(session) : query; }
 async function lean(query, session) { return queryWithSession(query, session).lean(); }
 function safeSearch(value) { return String(value || '').trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function isSelf(user, actor) { return Boolean(user?.username && actor?.username && user.username === actor.username); }
 
 function createUserService({ UserModel, TenantModel, PlatformSettingsModel, auditService, startSession, passwordPolicy = async () => ({ minLength: 12, maxLength: 128 }) } = {}) {
   if (!UserModel) throw new TypeError('UserModel is required');
@@ -76,6 +77,9 @@ function createUserService({ UserModel, TenantModel, PlatformSettingsModel, audi
     return inOptionalTransaction(async session => {
       const current = await lean(UserModel.findOne({ _id: id, tenantId }), session);
       if (!current) throw problem(404, 'USER_NOT_FOUND', 'User not found');
+      if (isSelf(current, actor) && patch.role != null && patch.role !== current.role) {
+        throw problem(403, 'SELF_ROLE_CHANGE_FORBIDDEN', 'You cannot change your own tenant role');
+      }
       if (current.role === 'CLIENT_ADMIN' && current.status === 'active' && patch.role === 'CLIENT_AGENT') {
         if (session) await TenantModel.updateOne({ _id: tenantId }, { $inc: { lifecycleGuardVersion: 1 } }, { session });
         const countQuery = UserModel.countDocuments({ tenantId, role: 'CLIENT_ADMIN', status: 'active' }); const tenantQuery = TenantModel?.findById(tenantId);
@@ -88,6 +92,11 @@ function createUserService({ UserModel, TenantModel, PlatformSettingsModel, audi
   const updatePlatformUser = (id, patch, version, actor) => { requireOwner(actor); return updateIdentity({ _id: id, role: 'WEBMASTER' }, patch, version, actor, null, 'platform-user.update'); };
 
   async function replacePassword(id, password, expectedVersion, actor, tenantId = null) {
+    if (tenantId) {
+      const current = await lean(UserModel.findOne({ _id: id, tenantId }));
+      if (!current) throw problem(404, 'USER_NOT_FOUND', 'User not found');
+      if (isSelf(current, actor)) throw problem(403, 'SELF_PASSWORD_CHANGE_FORBIDDEN', 'You cannot reset your own password from user management');
+    }
     await validatePassword(password);
     const filter = { _id: id, __v: Number(expectedVersion), ...(tenantId ? { tenantId } : { role: 'WEBMASTER' }) };
     const user = await UserModel.findOneAndUpdate(filter, { $set: { password_hash: await bcrypt.hash(String(password), 10), password_changed_at: new Date() }, $inc: { __v: 1 } }, { new: true, runValidators: true }).lean();
@@ -112,6 +121,7 @@ function createUserService({ UserModel, TenantModel, PlatformSettingsModel, audi
     const status = TRANSITIONS[transitionName]; if (!status) throw problem(422, 'USER_TRANSITION_INVALID', 'Lifecycle transition is invalid');
     return inOptionalTransaction(async session => {
       const user = await lean(UserModel.findOne({ _id: id, tenantId }), session); if (!user) throw problem(404, 'USER_NOT_FOUND', 'User not found');
+      if (isSelf(user, actor) && status !== user.status) throw problem(403, 'SELF_STATUS_CHANGE_FORBIDDEN', 'You cannot change your own account status');
       if (user.role === 'CLIENT_ADMIN' && user.status === 'active' && status !== 'active') {
         if (session) await TenantModel.updateOne({ _id: tenantId }, { $inc: { lifecycleGuardVersion: 1 } }, { session });
         const countQuery = UserModel.countDocuments({ tenantId, role: 'CLIENT_ADMIN', status: 'active' }); const tenantQuery = TenantModel?.findById(tenantId);

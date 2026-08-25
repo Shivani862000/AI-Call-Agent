@@ -74,3 +74,71 @@ test('tenant user role and search filters are applied before pagination', async 
   assert.equal(filter.role, 'CLIENT_AGENT');
   assert.equal(filter.$or[0].username.$regex, 'agent\\.\\*');
 });
+
+test('tenant administrator cannot demote their own account', async () => {
+  let updates = 0;
+  const service = createUserService({
+    UserModel: {
+      findOne: () => query({ _id: 'self', username: 'admin', tenantId: 't1', role: 'CLIENT_ADMIN', status: 'active', __v: 1 }),
+      findOneAndUpdate() { updates += 1; return query(null); }
+    }
+  });
+
+  await assert.rejects(
+    service.updateTenantUser('t1', 'self', { username: 'admin', email: 'admin@example.test', role: 'CLIENT_AGENT' }, 1, { username: 'admin' }),
+    error => error.code === 'SELF_ROLE_CHANGE_FORBIDDEN' && error.status === 403
+  );
+  assert.equal(updates, 0);
+});
+
+test('tenant administrator cannot suspend or archive their own account', async () => {
+  let updates = 0;
+  const service = createUserService({
+    UserModel: {
+      findOne: () => query({ _id: 'self', username: 'admin', tenantId: 't1', role: 'CLIENT_ADMIN', status: 'active', __v: 1 }),
+      findOneAndUpdate() { updates += 1; return query(null); }
+    }
+  });
+
+  for (const transition of ['suspend', 'archive']) {
+    await assert.rejects(
+      service.transitionTenantUser('t1', 'self', transition, 1, { username: 'admin' }),
+      error => error.code === 'SELF_STATUS_CHANGE_FORBIDDEN' && error.status === 403
+    );
+  }
+  assert.equal(updates, 0);
+});
+
+test('tenant administrator cannot reset their own password through user management', async () => {
+  let updates = 0;
+  const service = createUserService({
+    UserModel: {
+      findOne: () => query({ _id: 'self', username: 'admin', tenantId: 't1', role: 'CLIENT_ADMIN', status: 'active', __v: 1 }),
+      findOneAndUpdate() { updates += 1; return query(null); }
+    },
+    passwordPolicy: async () => ({ minLength: 8, maxLength: 128 })
+  });
+
+  await assert.rejects(
+    service.replacePassword('self', 'long-enough-password', 1, { username: 'admin' }, 't1'),
+    error => error.code === 'SELF_PASSWORD_CHANGE_FORBIDDEN' && error.status === 403
+  );
+  assert.equal(updates, 0);
+});
+
+test('tenant password reset hides users from other tenants', async () => {
+  let updates = 0;
+  const service = createUserService({
+    UserModel: {
+      findOne: () => query(null),
+      findOneAndUpdate() { updates += 1; return query(null); }
+    },
+    passwordPolicy: async () => ({ minLength: 8, maxLength: 128 })
+  });
+
+  await assert.rejects(
+    service.replacePassword('foreign-user', 'long-enough-password', 1, { username: 'admin' }, 't1'),
+    error => error.code === 'USER_NOT_FOUND' && error.status === 404
+  );
+  assert.equal(updates, 0);
+});
