@@ -27,6 +27,11 @@ function queryWithSession(query, session) { return session && typeof query?.sess
 async function lean(query, session) { return queryWithSession(query, session).lean(); }
 function safeSearch(value) { return String(value || '').trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function isSelf(user, actor) { return Boolean(user?.username && actor?.username && user.username === actor.username); }
+function duplicateIdentityFieldErrors(error) {
+  if (error?.keyPattern?.username) return { username: 'This username is already in use' };
+  if (error?.keyPattern?.email) return { email: 'This email is already in use' };
+  return { identity: 'Username or email is already used' };
+}
 
 function createUserService({ UserModel, TenantModel, PlatformSettingsModel, auditService, startSession, passwordPolicy = async () => ({ minLength: 12, maxLength: 128 }) } = {}) {
   if (!UserModel) throw new TypeError('UserModel is required');
@@ -52,7 +57,7 @@ function createUserService({ UserModel, TenantModel, PlatformSettingsModel, audi
       const user = await UserModel.create({ username: String(input.username).trim(), email: String(input.email).trim().toLowerCase(), password_hash: await bcrypt.hash(String(input.password), 10), role: input.role, tenantId, status: 'active', password_changed_at: new Date() });
       await auditService?.record({ actor, action: 'user.create', target: { type: 'user', id: String(user._id) }, tenantId: String(tenantId), after: toSafeUser(user) });
       return toSafeUser(user);
-    } catch (error) { if (error?.code === 11000) throw problem(409, 'USER_IDENTITY_CONFLICT', 'Username or email is already used', { identity: 'Already used' }); throw error; }
+    } catch (error) { if (error?.code === 11000) throw problem(409, 'USER_IDENTITY_CONFLICT', 'Username or email is already used', duplicateIdentityFieldErrors(error)); throw error; }
   }
   async function createWebmasterAdmin(input, actor) {
     requireOwner(actor); validateIdentity(input); await validatePassword(input.password);
@@ -60,7 +65,7 @@ function createUserService({ UserModel, TenantModel, PlatformSettingsModel, audi
       const user = await UserModel.create({ username: String(input.username).trim(), email: String(input.email).trim().toLowerCase(), password_hash: await bcrypt.hash(String(input.password), 10), role: 'WEBMASTER', platformAccessLevel: 'ADMIN', tenantId: null, status: 'active', password_changed_at: new Date() });
       await auditService?.record({ actor, action: 'platform-user.create', target: { type: 'user', id: String(user._id) }, after: toSafeUser(user) });
       return toSafeUser(user);
-    } catch (error) { if (error?.code === 11000) throw problem(409, 'USER_IDENTITY_CONFLICT', 'Username or email is already used'); throw error; }
+    } catch (error) { if (error?.code === 11000) throw problem(409, 'USER_IDENTITY_CONFLICT', 'Username or email is already used', duplicateIdentityFieldErrors(error)); throw error; }
   }
   async function updateIdentity(filter, patch, expectedVersion, actor, tenantId, action, { allowTenantRole = false, session = null } = {}) {
     validateIdentity(patch);

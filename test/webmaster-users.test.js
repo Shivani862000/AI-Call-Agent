@@ -14,6 +14,32 @@ test('safe user DTO never contains credentials', () => {
   assert.equal(Object.keys(dto).some(key => key.includes('hash')), false);
 });
 
+test('tenant user creation identifies the duplicated MongoDB identity field', async () => {
+  const service = createUserService({
+    UserModel: {
+      async create() {
+        const error = new Error('duplicate key');
+        error.code = 11000;
+        error.keyPattern = { email: 1 };
+        throw error;
+      }
+    },
+    passwordPolicy: async () => ({ minLength: 8, maxLength: 128 })
+  });
+
+  await assert.rejects(
+    service.createTenantUser('tenant-1', {
+      username: 'new-agent',
+      email: 'existing@example.test',
+      password: 'long-enough-password',
+      role: 'CLIENT_AGENT'
+    }, { username: 'tenant-admin' }),
+    error => error.code === 'USER_IDENTITY_CONFLICT'
+      && error.fieldErrors.email === 'This email is already in use'
+      && !Object.hasOwn(error.fieldErrors, 'identity')
+  );
+});
+
 test('last active tenant administrator cannot be archived while tenant is active', async () => {
   const service = createUserService({ UserModel: { findOne: () => query({ _id: 'u1', tenantId: 't1', role: 'CLIENT_ADMIN', status: 'active', __v: 1 }), countDocuments: async () => 1 }, TenantModel: { findById: () => query({ status: 'active' }) } });
   await assert.rejects(service.transitionTenantUser('t1', 'u1', 'archive', 1, { username: 'owner' }), error => error.code === 'LAST_TENANT_ADMIN_REQUIRED');
