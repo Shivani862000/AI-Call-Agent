@@ -83,6 +83,30 @@ test('workspace leaves browser-native and external links to the browser', () => 
   assert.equal(workspace.shouldHandleFrameLink({ href: '/customers.html', target: '', hasAttribute: () => false }, { ...plainEvent, ctrlKey: true }), false);
 });
 
+test('workspace identifies a primary-sidebar route for capture-phase navigation', () => {
+  const workspace = loadWorkspaceController();
+  const event = {
+    button: 0,
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    target: {
+      closest(selector) {
+        assert.equal(selector, '[data-tenant-workspace-route]');
+        return {
+          href: '/users.html',
+          target: '',
+          getAttribute(name) { return name === 'href' ? '/users.html' : '/users.html'; },
+          hasAttribute(name) { return name === 'data-tenant-workspace-route'; }
+        };
+      }
+    }
+  };
+
+  assert.equal(workspace.shellNavigationTarget(event), '/users.html');
+});
+
 test('embedded legacy views have a dedicated presentation mode that suppresses duplicate chrome', () => {
   const shellSource = fs.readFileSync(path.join(projectRoot, 'public', 'app-shell.js'), 'utf8');
   const shellCss = fs.readFileSync(path.join(projectRoot, 'public', 'app-shell.css'), 'utf8');

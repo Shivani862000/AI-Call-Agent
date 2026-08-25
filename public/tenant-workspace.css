@@ -46,7 +46,9 @@ body {
 .tenant-workspace-nav a { padding: 12px 14px; border-radius: 14px; }
 .tenant-workspace-nav a:hover, .tenant-workspace-nav a:focus-visible { background: rgba(45, 109, 246, 0.09); color: #1747ba; }
 .tenant-workspace-nav a[aria-current="page"] { color: #fff; background: linear-gradient(135deg, #2d6df6, #1d57d7); }
-.tenant-workspace-logout { margin-top: auto; border: 1px solid var(--tenant-line); border-radius: 12px; padding: 10px 14px; color: var(--tenant-text); font: inherit; font-weight: 650; background: #fff; cursor: pointer; }
+.tenant-workspace-settings { margin-top: auto; padding-top: 22px; border-top: 1px solid var(--tenant-line); }
+.tenant-workspace-settings p { margin: 0 0 8px; padding: 0 14px; color: var(--tenant-muted); font-size: 11px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; }
+.tenant-workspace-logout { margin-top: 14px; border: 1px solid var(--tenant-line); border-radius: 12px; padding: 10px 14px; color: var(--tenant-text); font: inherit; font-weight: 650; background: #fff; cursor: pointer; }
 
 .tenant-workspace-main { position: relative; min-width: 0; min-height: 100vh; }
 .tenant-workspace-main iframe { display: block; width: 100%; height: 100vh; border: 0; background: var(--tenant-bg); }

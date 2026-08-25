@@ -6,8 +6,8 @@
     { path: '/customer-list.html', label: 'Customer List', roles: ['CLIENT_AGENT', 'CLIENT_ADMIN'] },
     { path: '/customers.html', label: 'Outbound Calls', roles: ['CLIENT_AGENT', 'CLIENT_ADMIN'] },
     { path: '/feedback.html', label: 'Feedback', roles: ['CLIENT_ADMIN'] },
-    { path: '/support-tickets.html', label: 'Support Tickets', roles: ['CLIENT_ADMIN'] },
-    { path: '/users.html', label: 'Users', roles: ['CLIENT_ADMIN'] }
+    { path: '/support-tickets.html', label: 'Support Tickets', roles: ['CLIENT_ADMIN'], group: 'settings' },
+    { path: '/users.html', label: 'Users', roles: ['CLIENT_ADMIN'], group: 'settings' }
   ];
   const TENANT_ROLES = new Set(['CLIENT_AGENT', 'CLIENT_ADMIN']);
   const ALL_ROUTE_PATHS = new Set(NAV_ITEMS.map(item => item.path));
@@ -15,6 +15,8 @@
   let session = null;
   let currentTarget = null;
   let desktopNav = null;
+  let desktopSettingsNav = null;
+  let desktopSettings = null;
   let mobileNav = null;
   let frame = null;
   let status = null;
@@ -67,20 +69,17 @@
     link.href = item.path;
     link.textContent = item.label;
     link.setAttribute('data-tenant-workspace-route', item.path);
-    link.addEventListener('click', (event) => {
-      if (!shouldHandleFrameLink(link, event)) return;
-      event.preventDefault();
-      navigate(link.href, { history: 'push' });
-    });
     return link;
   }
 
   function renderNavigation() {
     const items = NAV_ITEMS.filter(item => item.roles.includes(session.role));
-    [desktopNav, mobileNav].forEach((navigation) => {
-      if (!navigation) return;
-      navigation.replaceChildren(...items.map(createNavigationLink));
-    });
+    const primaryItems = items.filter(item => item.group !== 'settings');
+    const settingsItems = items.filter(item => item.group === 'settings');
+    if (desktopNav) desktopNav.replaceChildren(...primaryItems.map(createNavigationLink));
+    if (desktopSettingsNav) desktopSettingsNav.replaceChildren(...settingsItems.map(createNavigationLink));
+    if (desktopSettings) desktopSettings.hidden = settingsItems.length === 0;
+    if (mobileNav) mobileNav.replaceChildren(...items.map(createNavigationLink));
     if (mobileNav) mobileNav.style.setProperty('--nav-count', String(items.length));
     setActiveNavigation();
   }
@@ -93,6 +92,19 @@
     let url;
     try { url = new URL(href, window.location.origin); } catch (_error) { return false; }
     return url.origin === window.location.origin && ALL_ROUTE_PATHS.has(url.pathname);
+  }
+
+  function shellNavigationTarget(event) {
+    const link = event?.target?.closest?.('[data-tenant-workspace-route]');
+    if (!link || !link.hasAttribute('data-tenant-workspace-route')) return null;
+    return shouldHandleFrameLink(link, event) ? link.getAttribute('href') : null;
+  }
+
+  function handleShellNavigationClick(event) {
+    const target = shellNavigationTarget(event);
+    if (!target) return;
+    event.preventDefault();
+    navigate(target, { history: 'push' });
   }
 
   function prepareFrame() {
@@ -140,12 +152,15 @@
 
   async function boot() {
     desktopNav = document.getElementById('tenantWorkspaceDesktopNav');
+    desktopSettingsNav = document.getElementById('tenantWorkspaceSettingsNav');
+    desktopSettings = document.getElementById('tenantWorkspaceSettings');
     mobileNav = document.getElementById('tenantWorkspaceMobileNav');
     frame = document.getElementById('tenantContentFrame');
     status = document.getElementById('tenantWorkspaceStatus');
     errorPanel = document.getElementById('tenantWorkspaceError');
     document.getElementById('tenantWorkspaceLogout')?.addEventListener('click', logout);
     document.getElementById('tenantWorkspaceRetry')?.addEventListener('click', () => navigate(currentTarget || currentCleanTarget(), { history: 'replace' }));
+    document.addEventListener('click', handleShellNavigationClick, true);
     frame?.addEventListener('load', () => { try { prepareFrame(); } catch (_error) { showLoadFailure(); } });
     frame?.addEventListener('error', showLoadFailure);
 
@@ -161,7 +176,7 @@
     }
   }
 
-  window.TenantWorkspace = { allowedRoutesForRole, routeToEmbeddedUrl, navigate, boot, shouldHandleFrameLink };
+  window.TenantWorkspace = { allowedRoutesForRole, routeToEmbeddedUrl, navigate, boot, shouldHandleFrameLink, shellNavigationTarget };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
 })(window);
