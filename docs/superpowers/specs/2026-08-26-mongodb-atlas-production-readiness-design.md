@@ -8,7 +8,7 @@
 
 The application will remain one Node.js/Express deployable with the same dashboard, HTTP routes, call flows, reporting flows, and external integrations. MongoDB Atlas will become the only persistent application datastore. Route handlers and services will call purpose-built repositories and application-level data-access functions; they will not issue MongoDB queries directly, retain SQL strings, or use a generic SQL-to-Mongo compatibility layer.
 
-The Atlas database starts empty. Existing `feedback.db` contents are deliberately discarded. There is no export, backup, import, dual-write period, or data reconciliation. After the Mongo-backed deployment passes a webmaster login and one test-call acceptance check, the SQLite module, dependency, database file, and persistent volume are removed.
+The Atlas database starts empty. Existing `feedback.db` contents are deliberately discarded. There is no export, backup, import, dual-write period, or data reconciliation. After the Mongo-backed application passes its automated and isolated-Atlas acceptance checks, the SQLite module, dependency, and database-file configuration are removed before the separate DigitalOcean production-deployment phase. Any old server-side SQLite file or volume is deleted during the later production cutover without being read or copied.
 
 This design intentionally avoids a multi-service architecture, a broad platform rewrite, and an enterprise migration program.
 
@@ -133,12 +133,13 @@ All collections use collection-level JSON Schema validation for required identit
 
 Purpose: admin authentication and authorization.
 
-Core fields: `id`, `username`, `username_normalized`, `password_hash`, `roles` (initially `["webmaster"]`), `active`, `auth_version`, `created_at`, `updated_at`, and nullable `last_login_at`.
+Core fields: `id`, `username`, `username_normalized`, `password_hash`, `roles` (initially `["webmaster"]`), `active`, `auth_version`, `initial_webmaster`, `created_at`, `updated_at`, and nullable `last_login_at`.
 
 Indexes:
 
 - unique `{ username_normalized: 1 }`
 - unique `{ id: 1 }`
+- unique partial `{ initial_webmaster: 1 }` where `initial_webmaster` is `true`, preventing concurrent provisioning commands from creating two initial webmasters
 
 Passwords, reset tokens, cookie values, and plaintext credentials must never appear in logs or any other collection.
 
@@ -320,6 +321,17 @@ This is a wrapper and targeted call-site cleanup, not adoption of a full telemet
 - Keep generated reports and downloaded recordings ephemeral. The database stores report inputs and recording references, not generated files.
 - Configure graceful termination long enough to stop accepting new requests and close MongoDB cleanly; active external calls remain subject to the current provider callback recovery behavior.
 
+### 7.4 Approved delivery sequence
+
+The production host is an Ubuntu Droplet on DigitalOcean. Google Cloud will not remain in the target architecture. Delivery is intentionally split into two independently reviewed plans:
+
+1. application production-readiness: MongoDB Atlas persistence, authentication/provisioning, health, structured logging, tests, and SQLite removal;
+2. DigitalOcean production infrastructure and deployment pipeline.
+
+Only the first plan is in progress. The production Droplet and its pipeline follow after the Mongo-backed application passes its local/integration acceptance suite. A second UAT Droplet and UAT pipeline are deferred until production deployment is complete and stable.
+
+The application-readiness plan uses Node.js 24 LTS, an eight-hour fixed webmaster session with no sliding renewal, and a 2 MiB application limit for the complete call document. These conservative values can be changed later through explicit configuration/design work rather than left ambiguous in the first implementation.
+
 ## 8. Ordered Implementation Scope
 
 This is the implementation order, not a request to implement the migration in this document task.
@@ -332,10 +344,10 @@ This is the implementation order, not a request to implement the migration in th
 6. **Harden public provider entry points.** Keep Twilio-required endpoints public but validate provider signatures; retain the same callback URLs and call behavior.
 7. **Add production health and logs.** Make `/health` Mongo-aware, add structured request/domain logs, and remove sensitive/free-form console output.
 8. **Verify locally and in a non-production Atlas database.** Run unit, repository integration, route compatibility, provisioning, authentication, index, health, and reporting tests against an isolated empty database.
-9. **Perform direct production cutover.** Create the restricted Atlas user/network rule and deployment secrets, deploy the Mongo-backed app against an empty database, run the webmaster provisioning command once, log in, create one test customer, and complete one test call through transcript/feedback/report visibility.
-10. **Remove SQLite after acceptance.** In the immediate cleanup release, delete `db.js`, remove `sqlite3` and `DATABASE_URL`, remove SQLite migration code and files, and detach/delete the application’s SQLite persistent storage. Confirm a clean restart still passes health and login.
+9. **Remove SQLite after application acceptance.** Delete `db.js`, remove `sqlite3` and `DATABASE_URL`, and remove SQLite migration code and repository files so the deployment artifact has no fallback datastore.
+10. **Perform direct production cutover in the separate DigitalOcean plan.** Create the restricted Atlas user/network rule and deployment secrets, deploy the Mongo-only app against an empty database, run the webmaster provisioning command once, log in, create one test customer, and complete one test call through transcript/feedback/report visibility. Delete any old server-side SQLite file or volume without reading or copying it.
 
-If validation fails before step 10, stop the cutover and fix/redeploy the Mongo-backed application against the empty Atlas database. Do not restore SQLite, copy old data, or add dual-write as an improvised rollback.
+If validation fails, stop and fix the Mongo-backed application. Do not restore SQLite, copy old data, or add dual-write as an improvised rollback.
 
 ## 9. Testing and Acceptance Checklist
 
@@ -366,7 +378,7 @@ If validation fails before step 10, stop the cutover and fix/redeploy the Mongo-
 - [ ] The webmaster can log in and the existing dashboard loads customers, calls, feedback, and reports.
 - [ ] One new test customer can be created and called; the call status, recording reference, transcript/analysis, feedback, and report data appear through the existing workflow.
 - [ ] A restart preserves MongoDB data and authentication while recreating no users.
-- [ ] SQLite code, dependency, file, environment configuration, and persistent storage are absent after the cleanup release.
+- [ ] SQLite code, dependency, database-file configuration, and fallback paths are absent from the deployment artifact; the later DigitalOcean cutover deletes any old server-side SQLite file or volume without reading it.
 
 ## 10. Explicit Non-Goals
 
@@ -387,11 +399,6 @@ If validation fails before step 10, stop the cutover and fix/redeploy the Mongo-
 These are bounded deployment/implementation choices; none changes the approved architecture.
 
 1. **Atlas region/tier and deployment egress:** choose the Atlas region near the application and identify the fixed egress IP or private-network mechanism required for the allowlist. This is required before deployment configuration can be finalized.
-2. **Production host/platform:** identify where the current Node/WebSocket process will run and confirm it supports long-lived WebSockets, stable public HTTPS URLs, secret injection, health checks, and one-replica operation.
-3. **Canonical public URL behind proxies:** provide the exact externally visible HTTPS base URL and trusted-proxy behavior so Twilio signature validation uses the same URL Twilio signed.
-4. **Session lifetime:** select the fixed webmaster session duration. A conservative initial choice is eight hours with no sliding renewal.
-5. **Document size limit:** select an application limit for transcript plus analysis data. A conservative initial choice is 2 MiB per call document, well below MongoDB’s hard limit.
-6. **Empty future-domain collections:** clients, agents, campaign configurations, and support tickets have no current routes or UI. The approved lean behavior is to create their indexes/validators and leave them empty until separately approved features use them.
-7. **Single-replica constraint:** production must remain at one replica until scheduler claiming and live-session ownership are redesigned. If the chosen platform requires more than one replica, that work needs a separate decision before cutover.
+2. **Canonical public URL behind proxies:** provide the exact externally visible HTTPS base URL and trusted-proxy behavior during the later DigitalOcean plan so Twilio signature validation uses the same URL Twilio signed.
 
 No decision is needed about the old SQLite data: it is intentionally discarded.
