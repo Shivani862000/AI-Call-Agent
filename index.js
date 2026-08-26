@@ -19,6 +19,7 @@ const { currentClientId, runWithClient } = require('./auth/client-context');
 const { loadRuntimeConfig } = require('./config/runtime-config');
 const { createLogger } = require('./logging/logger');
 const { createRequestContext } = require('./middleware/request-context');
+const { validateTwilioHttp, validateTwilioUpgrade } = require('./middleware/twilio-validation');
 const { createHealthHandler, shutdownRuntime } = require('./runtime/lifecycle');
 const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
 const { processCompletedCallPipeline } = require('./services/post-call-pipeline');
@@ -100,6 +101,28 @@ const passwordAuthProxy = {
 const authMiddleware = createAuthMiddleware({ users: userRepositoryProxy, clients: clientRepositoryProxy });
 const webmasterOnly = requireRole('webmaster');
 const browserSameOrigin = sameOrigin({ publicBaseUrl: PUBLIC_BASE_URL });
+const twilioHttpValidation = validateTwilioHttp({
+  authToken: process.env.TWILIO_AUTH_TOKEN,
+  publicBaseUrl: PUBLIC_BASE_URL,
+  logger
+});
+const twilioUpgradeValidation = validateTwilioUpgrade({
+  authToken: process.env.TWILIO_AUTH_TOKEN,
+  publicBaseUrl: PUBLIC_BASE_URL,
+  logger
+});
+
+async function providerClientContext(req, res, next) {
+  try {
+    const clientId = Number(req.query.clientId);
+    if (!Number.isSafeInteger(clientId) || clientId <= 0) return res.status(400).json({ error: 'Invalid client context' });
+    const client = await getRepositories().clients.findById(clientId);
+    if (!client || client.status !== 'active') return res.status(404).json({ error: 'Client not found' });
+    runWithClient(clientId, next);
+  } catch (error) {
+    next(error);
+  }
+}
 
 async function initializeCustomerPersistence() {
   if (!process.env.SUPABASE_DB_URL) throw new Error('SUPABASE_DB_URL is required');
@@ -338,7 +361,7 @@ function getScriptedCopy(language, customerName = process.env.CUSTOMER_NAME, cli
   };
 }
 
-function buildScriptedTwiml(customerName, clientName) {
+function buildScriptedTwiml(customerName, clientName, clientId) {
   const twiml = new twilio.twiml.VoiceResponse();
   const encodedCustomerName = encodeURIComponent(customerName || process.env.CUSTOMER_NAME || 'Customer');
   const encodedClientName = encodeURIComponent(clientName || CLIENT_NAME);
@@ -349,7 +372,7 @@ function buildScriptedTwiml(customerName, clientName) {
     speechTimeout: 'auto',
     language: 'hi-IN',
     actionOnEmptyResult: true,
-    action: `/call/scripted/consent?lang=hi&customerName=${encodedCustomerName}&clientName=${encodedClientName}`,
+    action: `/call/scripted/consent?lang=hi&customerName=${encodedCustomerName}&clientName=${encodedClientName}&clientId=${encodeURIComponent(String(clientId))}`,
     method: 'POST'
   });
 
@@ -376,7 +399,7 @@ function buildScriptedLanguageResponse(req) {
     speechTimeout: 'auto',
     language: language === 'en' ? 'en-IN' : 'hi-IN',
     actionOnEmptyResult: true,
-    action: `/call/scripted/consent?lang=${language}&customerName=${encodedCustomerName}&clientName=${encodedClientName}`,
+    action: `/call/scripted/consent?lang=${language}&customerName=${encodedCustomerName}&clientName=${encodedClientName}&clientId=${encodeURIComponent(String(req.query.clientId))}`,
     method: 'POST'
   });
 
@@ -409,7 +432,7 @@ function buildScriptedConsentResponse(req) {
     speechTimeout: 'auto',
     language: 'hi-IN',
     actionOnEmptyResult: true,
-    action: `/call/scripted/rating?lang=${language}&customerName=${encodedCustomerName}&clientName=${encodedClientName}`,
+    action: `/call/scripted/rating?lang=${language}&customerName=${encodedCustomerName}&clientName=${encodedClientName}&clientId=${encodeURIComponent(String(req.query.clientId))}`,
     method: 'POST'
   });
 
@@ -526,10 +549,11 @@ async function placeRealtimeCall({ customerPhone, customerName, customerId, clie
   const safeCustomerName = encodeURIComponent(customerName || process.env.CUSTOMER_NAME || 'Customer');
   const safeClientName = encodeURIComponent(clientName || CLIENT_NAME);
   const safeCustomerId = customerId ? `&customerId=${encodeURIComponent(String(customerId))}` : '';
+  const safeClientId = encodeURIComponent(String(getActiveClientId()));
 
-  const twimlUrl = `${PUBLIC_BASE_URL}/call/twiml?customerName=${safeCustomerName}&clientName=${safeClientName}${safeCustomerId}`;
-  const statusUrl = `${PUBLIC_BASE_URL}/call/status${customerId ? `?customerId=${encodeURIComponent(String(customerId))}` : ''}`;
-  const recordingStatusUrl = `${PUBLIC_BASE_URL}/call/recording-status${customerId ? `?customerId=${encodeURIComponent(String(customerId))}` : ''}`;
+  const twimlUrl = `${PUBLIC_BASE_URL}/call/twiml?customerName=${safeCustomerName}&clientName=${safeClientName}${safeCustomerId}&clientId=${safeClientId}`;
+  const statusUrl = `${PUBLIC_BASE_URL}/call/status?clientId=${safeClientId}${safeCustomerId}`;
+  const recordingStatusUrl = `${PUBLIC_BASE_URL}/call/recording-status?clientId=${safeClientId}${safeCustomerId}`;
 
   return twilioClient.calls.create({
     to: customerPhone,
@@ -853,17 +877,17 @@ app.post('/call/start', authMiddleware.reload, webmasterOnly, browserSameOrigin,
   }
 });
 
-app.get('/call/twiml', (req, res) => {
+app.get('/call/twiml', twilioHttpValidation, providerClientContext, (req, res) => {
   const customerName = req.query.customerName || process.env.CUSTOMER_NAME;
   const clientName = req.query.clientName || CLIENT_NAME;
 
   if (CALL_MODE === 'scripted') {
     console.log('[TWIML] Serving scripted TwiML flow');
-    res.type('text/xml').send(buildScriptedTwiml(customerName, clientName));
+    res.type('text/xml').send(buildScriptedTwiml(customerName, clientName, getActiveClientId()));
     return;
   }
 
-  const streamUrl = toWssUrl(PUBLIC_BASE_URL, '/call/stream');
+  const streamUrl = `${toWssUrl(PUBLIC_BASE_URL, '/call/stream')}?clientId=${encodeURIComponent(String(getActiveClientId()))}`;
   console.log(`[TWIML] Serving TwiML with stream URL: ${streamUrl}`);
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -872,6 +896,7 @@ app.get('/call/twiml', (req, res) => {
       <Parameter name="customerName" value="${xmlEscape(customerName)}" />
       <Parameter name="clientName" value="${xmlEscape(clientName)}" />
       <Parameter name="customerId" value="${xmlEscape(req.query.customerId || '')}" />
+      <Parameter name="clientId" value="${xmlEscape(String(getActiveClientId()))}" />
     </Stream>
   </Connect>
 </Response>`;
@@ -879,21 +904,21 @@ app.get('/call/twiml', (req, res) => {
   res.type('text/xml').send(twiml);
 });
 
-app.post('/call/scripted/consent', (req, res) => {
+app.post('/call/scripted/consent', twilioHttpValidation, providerClientContext, (req, res) => {
   console.log(`[SCRIPTED] Consent lang=${req.query.lang || 'hi'} digits=${req.body.Digits || ''} speech=${req.body.SpeechResult || ''}`);
   res.type('text/xml').send(buildScriptedConsentResponse(req));
 });
 
-app.post('/call/scripted/language', (req, res) => {
+app.post('/call/scripted/language', twilioHttpValidation, providerClientContext, (req, res) => {
   console.log(`[SCRIPTED] Language digits=${req.body.Digits || ''} speech=${req.body.SpeechResult || ''}`);
   res.type('text/xml').send(buildScriptedLanguageResponse(req));
 });
 
-app.post('/call/scripted/rating', (req, res) => {
+app.post('/call/scripted/rating', twilioHttpValidation, providerClientContext, (req, res) => {
   res.type('text/xml').send(buildScriptedRatingResponse(req));
 });
 
-app.post('/call/status', async (req, res) => {
+app.post('/call/status', twilioHttpValidation, providerClientContext, async (req, res) => {
   try {
     console.log(`[CALL STATUS] ${req.body.CallStatus} | SID: ${req.body.CallSid}`);
 
@@ -936,7 +961,7 @@ app.post('/call/status', async (req, res) => {
   }
 });
 
-app.post('/call/recording-status', async (req, res) => {
+app.post('/call/recording-status', twilioHttpValidation, providerClientContext, async (req, res) => {
   try {
     const callSid = req.body.CallSid;
     const recordingSid = req.body.RecordingSid;
@@ -1272,7 +1297,27 @@ app.get('/api/calls/:callId/transcript', async (req, res) => {
 });
 
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server, path: '/call/stream' });
+const wss = new WebSocket.Server({ noServer: true });
+
+server.on('upgrade', (req, socket, head) => {
+  const requestUrl = new URL(req.url, PUBLIC_BASE_URL);
+  if (requestUrl.pathname !== '/call/stream' || !twilioUpgradeValidation(req)) {
+    socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  const clientId = Number(requestUrl.searchParams.get('clientId'));
+  getRepositories().clients.findById(clientId).then((client) => {
+    if (!Number.isSafeInteger(clientId) || !client || client.status !== 'active') {
+      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (websocket) => {
+      runWithClient(clientId, () => wss.emit('connection', websocket, req));
+    });
+  }).catch(() => socket.destroy());
+});
 
 wss.on('connection', (twilioWs, req) => {
   console.log('[STREAM] Twilio Media Stream connected');

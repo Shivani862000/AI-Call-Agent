@@ -482,15 +482,15 @@ git commit -m "feat: harden Supabase runtime readiness"
 - `validateTwilioHttp({ authToken, publicBaseUrl })` validates the externally signed URL/body.
 - `validateTwilioUpgrade({ authToken, publicBaseUrl })` rejects invalid media WebSocket upgrades.
 
-- [ ] **Step 1: Write signature tests**
+- [x] **Step 1: Write signature tests**
 
 Cover forms, query strings, reverse-proxy canonical URLs, invalid signatures, and WebSocket upgrades. Failures must log no token, signature, phone, or body.
 
-- [ ] **Step 2: Implement using Twilio’s SDK helper**
+- [x] **Step 2: Implement using Twilio’s SDK helper**
 
 Apply validation only to provider-controlled webhook/TwiML/status/media paths. Browser/operator routes continue using application sessions.
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit**
 
 ```bash
 npm test -- tests/twilio-validation.test.js tests/auth/auth-routes.test.js
