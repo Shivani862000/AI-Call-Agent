@@ -93,14 +93,14 @@
 - Produces: `makeTestConfig(overrides)` with inert provider configuration.
 - Establishes: `npm run db:start`, `db:stop`, `db:reset`, and `test` commands.
 
-- [ ] **Step 1: Capture current HTTP contracts before changing persistence**
+- [x] **Step 1: Capture current HTTP contracts before changing persistence**
 
 Create `startTestApp()` that launches the current server as a child process on an ephemeral port with a temporary SQLite test path and inert provider settings, waits for `/health`, and terminates the child in cleanup. In `tests/application-contracts.test.js`, capture customer create/list/get/update/delete, duplicate-phone error shape, manual feedback validation/list shape, health shape, numeric IDs, and snake_case fields. Do not copy any existing `feedback.db`; the fixture creates and deletes its own temporary database.
 
 Run: `npm test -- tests/application-contracts.test.js`
 Expected: PASS against the current SQLite application. Preserve this test and make it pass against Postgres in later tasks.
 
-- [ ] **Step 2: Install dependencies and scripts**
+- [x] **Step 2: Install dependencies and scripts**
 
 Run:
 
@@ -111,22 +111,22 @@ npm install --save-dev supertest supabase
 
 Set `engines.node` to `>=24 <25` and add scripts for `node --test --test-concurrency=1`, `supabase start`, `supabase stop`, `supabase db reset`, and `node scripts/provision-webmaster.js`.
 
-- [ ] **Step 3: Configure the isolated local Supabase project**
+- [x] **Step 3: Configure the isolated local Supabase project**
 
 Run `npx supabase init`. Keep Auth and Postgres enabled and never put production project IDs or keys in `supabase/config.toml`.
 
 Create `withTestDatabase(run)` so it requires a dedicated test database, resets migrations before the suite, passes `{ connectionString }`, and truncates application tables between tests. It must refuse a host/database combination matching production configuration.
 
-- [ ] **Step 4: Write failing lifecycle and schema tests**
+- [x] **Step 4: Write failing lifecycle and schema tests**
 
 Assert imports for `createPostgres`, `pingPostgres`, `closePostgres`, and `withTransaction` fail initially. The completed test must prove `SELECT 1`, rollback behavior, all required tables, identity-generated numeric IDs, foreign keys, indexes, revoked `anon`/`authenticated` grants, and enabled RLS.
 
-- [ ] **Step 5: Verify the expected failure**
+- [x] **Step 5: Verify the expected failure**
 
 Run: `npm test -- tests/persistence/postgres.test.js`
 Expected: FAIL because `persistence/postgres.js` and the schema migration do not exist.
 
-- [ ] **Step 6: Commit the harness**
+- [x] **Step 6: Commit the harness**
 
 ```bash
 git add package.json package-lock.json supabase tests/helpers tests/application-contracts.test.js tests/persistence/postgres.test.js
