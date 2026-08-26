@@ -1,100 +1,67 @@
-# Conversational Voice Agent POC
-ngrok http 3000
-A simple Node.js + Express proof of concept for outbound AI phone calls using:
+# AI Call Agent
 
-- Twilio Programmable Voice
-- Twilio Media Streams
-- OpenAI Realtime API over WebSocket
-- ngrok for local webhook exposure
+Node.js/Express application for tenant-scoped outbound feedback calls, live AI voice conversations, feedback analysis, supervisor events, and PDF reporting.
 
-The flow is intentionally minimal: trigger one outbound call, let the AI agent run a multi-turn conversation, and print the final transcript to the console.
+Persistent application data lives only in hosted Supabase Postgres. Supabase Auth verifies webmaster passwords; the application retains authorization and active-client selection in signed HTTP-only sessions. Twilio HTTP callbacks and media WebSocket upgrades require valid provider signatures.
 
-## Endpoints
+## Requirements
 
-- `POST /call/start` places an outbound call to `CUSTOMER_PHONE`
-- `GET /call/twiml` returns TwiML that opens a Twilio Media Stream
-- `POST /call/status` logs Twilio call status changes
-- `WS /call/stream` bridges Twilio audio to OpenAI Realtime and streams AI audio back
-- `GET /health` returns a basic health payload
+- Node.js 24
+- A hosted Supabase project
+- Twilio Programmable Voice credentials and a public HTTPS callback URL
+- The configured OpenAI or Gemini provider credentials
 
-## Setup
+Copy `.env.example` to `.env` and supply secrets through the deployment environment. `SUPABASE_SECRET_KEY` is provisioning-only and should not be present during normal server startup.
 
-1. Install dependencies:
+## Database setup
 
-```bash
-npm install
-```
+Schema changes are source-controlled under `supabase/migrations/`. This project deliberately starts Supabase empty: legacy local database contents are discarded and must not be copied, backed up, or imported.
 
-2. Copy the env template and fill in real values:
-
-```bash
-cp .env.example .env
-```
-
-Required fields:
+For an isolated hosted test project, keep these values only in ignored `.env.test.local` or CI secrets:
 
 ```env
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_PHONE_NUMBER=+14155550100
-OPENAI_API_KEY=
-OPENAI_REALTIME_MODEL=gpt-realtime
-NGROK_URL=https://abc123.ngrok-free.app
-CUSTOMER_PHONE=+14155550123
-CUSTOMER_NAME=Ramesh
-CLIENT_NAME=My Diagnostic Center
-PORT=3000
+SUPABASE_TEST_DB_URL=
+SUPABASE_TEST_PROJECT_REF=
+SUPABASE_TEST_ALLOW_RESET=true
 ```
 
-Notes:
+Never point destructive tests at production. The test guard verifies the project reference, explicit reset consent, and separation from `SUPABASE_DB_URL`.
 
-- `TWILIO_PHONE_NUMBER` must be a Twilio-owned voice-capable number.
-- If your Twilio account is still on trial, `CUSTOMER_PHONE` must be verified in Twilio.
-- `NGROK_URL` should not have a trailing slash.
-
-## Run
-
-Start the server:
+Preview and apply migrations to the isolated hosted test project:
 
 ```bash
-node index.js
+npm run db:push:test -- --dry-run
+npm run db:push:test
+npm run test:db
 ```
 
-Start ngrok in another terminal:
+## Webmaster provisioning
+
+Create each webmaster once during deployment. Password input is hidden when interactive or may be piped through standard input; password flags and password environment variables are rejected.
 
 ```bash
-ngrok http 3000
+npm run provision:webmaster -- --username webmaster-name --email webmaster@example.com
 ```
 
-Copy the HTTPS forwarding URL from ngrok into `.env` as `NGROK_URL`, then restart the server.
+The command creates a new Supabase Auth identity and matching Postgres profile/role. It never updates an existing account, and normal startup never creates or resets users. Run the command repeatedly with distinct usernames/emails to provision multiple webmasters.
 
-Trigger the outbound call:
+## Run and verify
 
 ```bash
-curl -X POST http://localhost:3000/call/start
+npm ci
+npm test
+npm start
+curl -i http://127.0.0.1:3000/health
 ```
 
-## Expected console flow
+`GET /health` returns `200` only when Postgres is reachable; otherwise it returns `503`. Runtime logs are one-line redacted JSON with request IDs. `SIGTERM` stops scheduling, drains HTTP, and closes the Postgres pool.
 
-```text
-[SERVER] Running on http://localhost:3000
-[CALL STARTED] SID: CA...
-[STREAM] Twilio Media Stream connected
-[OPENAI] Realtime session opened
-[AGENT]: Hello, am I speaking with Ramesh? My name is Priya...
-[CUSTOMER]: Yes, this is Ramesh.
-...
-════════════════════════════════════
-         CALL TRANSCRIPT
-════════════════════════════════════
-[AGENT] (2026-04-29T16:30:01.000Z)
-  Hello, am I speaking with Ramesh?...
-```
+After login, a webmaster can select either active client from the existing dashboard. Repository queries, joins, reports, callbacks, and scheduled jobs retain that tenant boundary. The current deployment model is one application replica because the scheduler and live-call state remain process-local.
 
-## Troubleshooting
+## Production notes
 
-- No TwiML request from Twilio: confirm `NGROK_URL` is reachable and the server was restarted after editing `.env`.
-- Twilio `11200`: webhook or stream URL is not reachable.
-- No audio both ways: confirm the stream URL resolves to `wss://.../call/stream`.
-- OpenAI auth errors: verify the API key has access to Realtime.
-- Twilio trial failure: verify the destination number in Twilio or upgrade the account.
+- Use a direct/pooler Postgres connection appropriate for the runtime and provide the Supabase CA certificate.
+- Keep the public callback URL canonical and stable; Twilio signature checks use it for HTTPS and WSS validation.
+- Keep runtime database credentials, cookie secret, Twilio credentials, and AI keys in deployment-secret management.
+- Keep the provisioning secret out of the normal runtime environment.
+- The DigitalOcean production pipeline is a separate implementation phase after this application-readiness cutover.

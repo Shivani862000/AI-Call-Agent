@@ -5,7 +5,6 @@ const http = require('http');
 const path = require('path');
 const WebSocket = require('ws');
 const twilio = require('twilio');
-const { initializeDatabase } = require('./db');
 const { createCustomersRouter } = require('./routes/customers');
 const { createPostgres } = require('./persistence/postgres');
 const { createRepositories } = require('./repositories');
@@ -1858,7 +1857,6 @@ process.once('SIGINT', () => handleShutdown('SIGINT').then(() => { process.exitC
 (async () => {
   try {
     validateConfig();
-    await initializeDatabase();
     await initializeCustomerPersistence();
 
     schedulerTimer = setInterval(() => {

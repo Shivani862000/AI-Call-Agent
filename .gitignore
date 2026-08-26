@@ -1,7 +1,6 @@
 node_modules/
 .env
 .env.test.local
-*.db
 /tmp/
 *.pdf
 .DS_Store

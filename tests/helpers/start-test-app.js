@@ -1,7 +1,5 @@
 const { spawn } = require('node:child_process');
-const { mkdtemp, rm } = require('node:fs/promises');
 const net = require('node:net');
-const os = require('node:os');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { Pool } = require('pg');
@@ -58,7 +56,6 @@ async function stopChild(child) {
 }
 
 async function startTestApp() {
-  const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'ai-call-agent-contract-'));
   const port = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const output = [];
@@ -98,7 +95,6 @@ async function startTestApp() {
     env: {
       ...process.env,
       PORT: String(port),
-      DATABASE_URL: path.join(tempDirectory, 'contract-test.db'),
       NODE_ENV: 'test',
       COOKIE_SECRET: 'contract-test-cookie-secret-at-least-32-bytes',
       SUPABASE_DB_URL: connectionString,
@@ -134,7 +130,6 @@ async function startTestApp() {
     await pool.query('delete from auth.users where id = $1', [authUserId]);
     await truncateApplicationTables(pool);
     await pool.end();
-    await rm(tempDirectory, { recursive: true, force: true });
     throw error;
   }
 
@@ -148,7 +143,6 @@ async function startTestApp() {
     await pool.query('delete from auth.users where id = $1', [authUserId]);
     await truncateApplicationTables(pool);
     await pool.end();
-    await rm(tempDirectory, { recursive: true, force: true });
     throw new Error(`Contract-test login failed (${loginResponse.status})`);
   }
   const setCookies = typeof loginResponse.headers.getSetCookie === 'function'
@@ -170,7 +164,6 @@ async function startTestApp() {
       await pool.query('delete from auth.users where id = $1', [authUserId]);
       await truncateApplicationTables(pool);
       await pool.end();
-      await rm(tempDirectory, { recursive: true, force: true });
     }
   };
 }

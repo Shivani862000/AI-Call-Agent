@@ -515,24 +515,24 @@ git commit -m "feat: validate public Twilio callbacks"
 **Interfaces:**
 - Produces an architecture guard proving Supabase/Postgres is the only persistence implementation.
 
-- [ ] **Step 1: Write the guard before deletion**
+- [x] **Step 1: Write the guard before deletion**
 
 Scan runtime source and dependencies. Fail on `sqlite3`, `feedback.db`, `DATABASE_URL`, `MONGODB_URI`, the MongoDB driver, generic SQLite helpers, or old provider-specific configuration. Exclude historical Git data and the guard’s literal list.
 
-- [ ] **Step 2: Verify the guard fails**
+- [x] **Step 2: Verify the guard fails**
 
 Run: `npm test -- tests/sqlite-removal.test.js`
 Expected: FAIL against current SQLite references.
 
-- [ ] **Step 3: Remove old persistence**
+- [x] **Step 3: Remove old persistence**
 
 Remove `sqlite3`, delete `db.js`, and remove database-file configuration. Delete unmounted duplicate routes only after `rg` and route tests prove they are unused. Do not read, copy, or convert `feedback.db`.
 
-- [ ] **Step 4: Update documentation**
+- [x] **Step 4: Update documentation**
 
 Document hosted test-project setup, runtime configuration names, explicit migration push, repeatable webmaster provisioning, shared two-client design, health behavior, and intentional SQLite-data abandonment. Remove local-Docker and MongoDB instructions.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 ```bash
 npm test

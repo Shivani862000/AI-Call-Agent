@@ -41,7 +41,8 @@
          ▼                        ▼                    ▼
     ┌─────────┐          ┌──────────────┐        ┌──────────┐
     │ Database │          │ AI Services   │        │ External │
-    │(SQLite)  │          │(OpenAI GPT-4o)│        │Services  │
+    │(Supabase │          │(OpenAI GPT-4o)│        │Services  │
+    │Postgres) │          │               │        │          │
     │          │          │               │        │          │
     │tables:   │          │-Call scripts  │        │-Twilio   │
     │·customers│          │-Categorize    │        │-SendGrid │
@@ -417,7 +418,11 @@ INSERT INTO feedback VALUES (1, 1, 1, 'Excellent service!', 'good', 5, '2024-01-
 | `OWNER_EMAIL` | Yes | `owner@example.com` | Email for reports |
 | `GOOGLE_REVIEW_LINK` | Yes | `https://g.page/r/...` | Google Business review URL |
 | `CLIENT_NAME` | Yes | `My Business` | Used in scripts & reports |
-| `DATABASE_URL` | Yes | `./feedback.db` | SQLite path or PostgreSQL URI |
+| `SUPABASE_DB_URL` | Yes | `postgresql://...` | Hosted Supabase Postgres runtime connection |
+| `SUPABASE_DB_CA_CERT` | Yes | `-----BEGIN CERTIFICATE-----...` | Provider CA used for strict TLS verification |
+| `SUPABASE_URL` | Yes | `https://project.supabase.co` | Supabase Auth project URL |
+| `SUPABASE_PUBLISHABLE_KEY` | Yes | `publishable-key` | Supabase Auth browser-safe project key used server-side |
+| `COOKIE_SECRET` | Yes | `32-or-more-random-characters` | Signs application sessions |
 | `PORT` | No | `3000` | Server port (default: 3000) |
 | `NODE_ENV` | No | `development` | Environment (development/production) |
 | `WEBHOOK_URL` | No | `https://abc123.ngrok.io` | External webhook URL (for Twilio) |
@@ -444,12 +449,12 @@ All error responses include an `error` field:
 
 ## Performance & Scaling
 
-**Current (SQLite + Single Server):**
+**Current (Supabase Postgres + Single Application Replica):**
 - ~100-1000 customers
 - ~10-100 calls/day
 - Real-time admin dashboard
 
-**For Production (PostgreSQL + Cloud):**
+**Future scale-out:**
 - ~10,000+ customers
 - ~1000+ calls/day
 - Use connection pooling (pg-pool)
