@@ -27,7 +27,7 @@ One production Supabase project supports the two initial client/tenant records. 
 - Application roles, activation state, username, and session invalidation version live in application tables, not user-editable Auth metadata.
 - A secure provisioning command may be run repeatedly to create multiple webmaster accounts. It never overwrites an existing identity or profile.
 - Normal server startup never creates, resets, or recreates any webmaster account.
-- Supabase database credentials, the service-role key, and the cookie-signing secret are deployment secrets.
+- Supabase database credentials, the server-only secret key, and the cookie-signing secret are deployment secrets.
 - Keep the production baseline lean: least-privilege database access, private server-side data access, source-controlled migrations, database-aware health, structured logs, and protected operator routes.
 - DigitalOcean Droplet creation and deployment automation remain a separate follow-on plan. Google Cloud is not used.
 
@@ -96,7 +96,7 @@ There is no generic `query(sql, params)` interface exposed outside persistence, 
 - SQL migrations live in `supabase/migrations/` and run explicitly against a dedicated hosted test project or during production deployment. Application startup never runs DDL.
 - SIGTERM/SIGINT stop scheduling, stop accepting traffic, drain the pool, and close the HTTP server.
 - Repositories receive a database facade; they do not construct pools.
-- The browser never receives a database URL, service-role key, or direct access to tenant tables.
+- The browser never receives a database URL, secret key, or direct access to tenant tables.
 
 ### 4.3 Data types and stable contracts
 
@@ -213,7 +213,7 @@ Password: <hidden TTY prompt or newline-terminated stdin>
 
 Each invocation may create another webmaster. The command:
 
-1. requires `SUPABASE_URL` and a server-only `SUPABASE_SERVICE_ROLE_KEY`;
+1. requires `SUPABASE_URL` and a server-only `SUPABASE_SECRET_KEY`;
 2. normalizes and validates username and email;
 3. accepts password only from a hidden prompt or stdin, never a CLI flag or environment variable;
 4. enforces the configured minimum password length;
@@ -235,8 +235,9 @@ No webmaster-management UI, invitations, or password-reset workflow is included 
 | --- | --- | --- |
 | `SUPABASE_DB_URL` | Yes | Least-privilege pooled Postgres connection |
 | `SUPABASE_URL` | No | Supabase Auth endpoint |
-| `SUPABASE_ANON_KEY` | No | Server-side password verification client |
-| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase Auth portion of provisioning only; not normal app runtime |
+| `SUPABASE_PUBLISHABLE_KEY` | No | Server-side password verification client |
+| `SUPABASE_SECRET_KEY` | Yes | Supabase Auth portion of provisioning only; not normal app runtime |
+| `SUPABASE_DB_CA_CERT` | No | Supabase database CA certificate for strict server verification |
 | `COOKIE_SECRET` | Yes | Signed application session, at least 32 random bytes |
 
 `DATABASE_URL`, `MONGODB_URI`, and `MONGODB_DB_NAME` are removed. Webmaster usernames and passwords are not startup configuration.
@@ -247,8 +248,8 @@ Hosted integration tests use a separate, non-production Supabase project. Its co
 
 - Runtime database credentials use a deployment-created LOGIN role that belongs to the source-controlled `ai_call_agent_runtime` group role, has only required table/function/sequence permissions, and has no schema-owner or `BYPASSRLS` privileges.
 - Tenant tables are unavailable through the public Data API roles.
-- The service-role key is supplied only to the provisioning job and migration/deployment context, never to browser code or routine request handlers.
-- TLS is required for database and Auth connections.
+- The secret key is supplied only to the provisioning job and migration/deployment context, never to browser code or routine request handlers.
+- TLS is required for database and Auth connections. Production database connections use CA and hostname verification; the dedicated test harness may use encrypted `require` mode without CA verification until its non-production certificate is configured.
 - Secrets remain in deployment-secret management, not source, images, logs, tables, or `.env.example` values.
 - Logs redact credentials, cookies, authorization headers, full phone numbers, recordings, passwords, transcripts, and feedback text.
 - Choose a Supabase region near the DigitalOcean production region before provisioning.

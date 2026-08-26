@@ -91,7 +91,11 @@ async function truncateApplicationTables(pool) {
 
 async function withTestDatabase(run, env = process.env) {
   const connectionString = getTestConnectionString(env);
-  const pool = new Pool({ connectionString, max: 2 });
+  const pool = new Pool({
+    connectionString,
+    max: 2,
+    ssl: { rejectUnauthorized: false }
+  });
 
   try {
     await truncateApplicationTables(pool);

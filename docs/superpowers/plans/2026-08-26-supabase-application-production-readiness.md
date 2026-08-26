@@ -21,7 +21,8 @@
 - Provisioning accepts passwords only through a hidden prompt or stdin and rejects `--password` and password environment variables.
 - Preserve existing business routes, status behavior, dashboard workflows, numeric IDs, and snake_case response fields.
 - Do not expose raw SQL or database/Supabase clients to routes and services.
-- Do not expose the Supabase service-role key to browser code or normal runtime request handling.
+- Do not expose the Supabase secret key to browser code or normal runtime request handling.
+- Production Postgres connections require strict CA verification through `SUPABASE_DB_CA_CERT`; only the dedicated hosted test harness may explicitly use encrypted `require` mode without CA verification.
 - Keep one application replica because scheduler and live-call ownership remain process-local.
 - Google Cloud, DigitalOcean infrastructure/pipeline work, and UAT are outside this plan.
 - Pin Node.js to `>=24 <25`; use TDD and one focused commit per task.
@@ -32,6 +33,7 @@
 
 - `supabase/config.toml` — Supabase CLI metadata used to push source-controlled migrations to hosted projects; it is not a local runtime dependency.
 - `supabase/migrations/20260826000100_application_schema.sql` — extensions, tables, keys, checks, indexes, grants, and RLS posture.
+- `supabase/migrations/20260826000200_preserve_tenant_on_nullable_foreign_keys.sql` — preserves required tenant IDs when nullable cross-table references are deleted.
 - `scripts/push-test-migrations.js` — validates the hosted test-project guard before invoking the Supabase CLI migration push.
 - `persistence/postgres.js` — creates, verifies, and closes one `pg.Pool`; exposes transaction helpers.
 - `persistence/mappers.js` — converts Postgres values to current API shapes.
@@ -146,6 +148,7 @@ git commit -m "test: add Supabase integration harness"
 
 **Files:**
 - Create: `supabase/migrations/20260826000100_application_schema.sql`
+- Create: `supabase/migrations/20260826000200_preserve_tenant_on_nullable_foreign_keys.sql`
 - Create: `persistence/postgres.js`
 - Create: `persistence/mappers.js`
 - Modify: `tests/persistence/postgres.test.js`
@@ -153,11 +156,11 @@ git commit -m "test: add Supabase integration harness"
 - Create: `tests/persistence/mappers.test.js`
 
 **Interfaces:**
-- Produces: `createPostgres({ connectionString, max, statementTimeoutMs, logger }) -> { pool, query, transaction, ping, close }`.
+- Produces: `createPostgres({ connectionString, max, statementTimeoutMs, ssl, logger }) -> { pool, query, transaction, ping, close }` with strict remote certificate verification by default.
 - Produces: `withTransaction(pool, work) -> Promise<T>` with rollback on error.
 - Produces: `toApiCustomer`, `toApiCall`, `toApiFeedback`, and `toApiSupervisorEvent`.
 
-- [ ] **Step 1: Write the exact schema migration**
+- [x] **Step 1: Write the exact schema migration**
 
 Define `clients`, `app_users`, `app_user_roles`, `customers`, `calls`, `feedback`, `call_supervisor_events`, `application_state`, `agents`, `campaign_configurations`, and `support_tickets`.
 
@@ -198,19 +201,19 @@ create table public.app_user_roles (
 
 Use `bigint` identity IDs, `timestamptz`, booleans, and `jsonb`. Add required `client_id` and tenant-safe foreign keys to tenant tables. Declare cascades only for current ownership behavior. Add per-client phone uniqueness, unique non-null Twilio SID, unique non-null feedback `call_id`, scheduler/report indexes, and `UNIQUE NULLS NOT DISTINCT (client_id, key)` for application state.
 
-- [ ] **Step 2: Lock down the Data API**
+- [x] **Step 2: Lock down the Data API**
 
 Create `ai_call_agent_runtime` as a NOLOGIN group role. For every application table, enable RLS, revoke grants from `anon` and `authenticated`, grant only required CRUD privileges to the runtime group, and create explicit policies limited to `ai_call_agent_runtime`. Grant only required sequence usage/select. Do not create browser policies or grant application tables to `service_role`. The production LOGIN role and its password are deployment operations and do not appear in source.
 
-- [ ] **Step 3: Implement the bounded pool**
+- [x] **Step 3: Implement the bounded pool**
 
-Use `pg.Pool` with explicit pool size, connection timeout, statement timeout, TLS driven by configuration, `SELECT 1` ping, `BEGIN/COMMIT/ROLLBACK`, and idempotent close. Never log the connection string.
+Use `pg.Pool` with explicit pool size, connection timeout, statement timeout, TLS driven by configuration, strict remote certificate verification by default, `SELECT 1` ping, `BEGIN/COMMIT/ROLLBACK`, and idempotent close. Never log the connection string. The hosted test harness explicitly uses encrypted non-verifying mode until its test CA is configured; production supplies `SUPABASE_DB_CA_CERT`.
 
-- [ ] **Step 4: Implement explicit mappers**
+- [x] **Step 4: Implement explicit mappers**
 
 Convert `bigint` strings to safe numeric IDs, reject unsafe values, serialize timestamps, and emit legacy integer-flag/JSON-string compatibility only where current callers require it.
 
-- [ ] **Step 5: Push to the hosted test project and verify**
+- [x] **Step 5: Push to the hosted test project and verify**
 
 ```bash
 npm run db:push:test -- --dry-run
@@ -220,7 +223,7 @@ npm run test:db -- tests/persistence/postgres.test.js tests/persistence/schema.t
 
 Expected: the dry run lists only the source-controlled migration, the push succeeds against the guarded test URL, and all persistence tests pass. No Docker daemon is used.
 
-- [ ] **Step 6: Commit schema and persistence**
+- [x] **Step 6: Commit schema and persistence**
 
 ```bash
 git add supabase/migrations persistence tests/persistence/postgres.test.js
@@ -414,7 +417,7 @@ Assert either webmaster can log in independently; wrong credentials return gener
 
 - [ ] **Step 3: Implement safe provisioning**
 
-Require `SUPABASE_DB_URL`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`, plus `--username` and `--email`; read password without echo or from stdin; reject password flags/environment values. Preflight normalized username/email, call Supabase Admin `createUser`, insert profile plus role in one Postgres transaction, and delete the new Auth identity if the transaction fails. Never cap webmaster count or update existing accounts.
+Require `SUPABASE_DB_URL`, `SUPABASE_URL`, and `SUPABASE_SECRET_KEY`, plus `--username` and `--email`; read password without echo or from stdin; reject password flags/environment values. Preflight normalized username/email, call Supabase Admin `createUser`, insert profile plus role in one Postgres transaction, and delete the new Auth identity if the transaction fails. Never cap webmaster count or update existing accounts.
 
 - [ ] **Step 4: Implement login and sessions**
 
@@ -448,7 +451,7 @@ git commit -m "feat: add multiple Supabase webmaster accounts"
 
 - [ ] **Step 1: Write hardening tests**
 
-Assert missing `SUPABASE_DB_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, or `COOKIE_SECRET` fails before listen; service-role key is not required by normal runtime; cookie secret is at least 32 bytes; health follows connectivity; shutdown closes the pool; and logs redact credentials, cookies, phone numbers, transcripts, and feedback.
+Assert missing `SUPABASE_DB_URL`, `SUPABASE_DB_CA_CERT`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, or `COOKIE_SECRET` fails before listen; the secret key is not required by normal runtime; cookie secret is at least 32 bytes; health follows connectivity; shutdown closes the pool; and logs redact credentials, cookies, phone numbers, transcripts, and feedback.
 
 - [ ] **Step 2: Implement configuration and logging**
 
