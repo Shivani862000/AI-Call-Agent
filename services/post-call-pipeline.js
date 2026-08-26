@@ -71,73 +71,44 @@ function buildTranscriptTextFromAudioTranscript(audioTranscript) {
     .join('\n');
 }
 
-async function upsertFeedbackFromAnalysis({ dbGet, dbRun, callRecord, reviewText, stars }) {
+async function upsertFeedbackFromAnalysis({ repositories, clientId, callRecord, reviewText, stars }) {
   const effectiveReviewText = reviewText || 'Customer shared feedback on the call.';
   const effectiveStars = Number.isInteger(stars) ? stars : 3;
   const categorization = await categorizeFeedback(effectiveReviewText, effectiveStars);
-  const existingFeedback = await dbGet('SELECT id FROM feedback WHERE call_id = ?', [callRecord.id]);
-
-  if (existingFeedback) {
-    await dbRun(
-      `UPDATE feedback
-          SET review_text = ?,
-              category = ?,
-              stars = ?,
-              submitted_at = ?,
-              source = ?
-        WHERE id = ?`,
-      [
-        effectiveReviewText,
-        categorization.category,
-        effectiveStars,
-        new Date().toISOString(),
-        'call',
-        existingFeedback.id
-      ]
-    );
-
-    return { feedbackId: existingFeedback.id, category: categorization.category, updated: true };
-  }
-
-  const result = await dbRun(
-    `INSERT INTO feedback (customer_id, call_id, review_text, category, stars, submitted_at, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      callRecord.customer_id,
-      callRecord.id,
-      effectiveReviewText,
-      categorization.category,
-      effectiveStars,
-      new Date().toISOString(),
-      'call'
-    ]
-  );
-
-  return { feedbackId: result.lastID, category: categorization.category, updated: false };
+  const existingFeedback = await repositories.feedback.findByCallId(clientId, callRecord.id);
+  const saved = await repositories.feedback.upsertForCall(clientId, {
+    customer_id: callRecord.customer_id,
+    call_id: callRecord.id,
+    review_text: effectiveReviewText,
+    category: categorization.category,
+    stars: effectiveStars,
+    submitted_at: new Date().toISOString(),
+    source: 'call'
+  });
+  return { feedbackId: saved.id, category: categorization.category, updated: Boolean(existingFeedback) };
 }
 
-async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
-  const callRecord = await dbGet(
-    `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone
-     FROM calls
-     LEFT JOIN customers ON customers.id = calls.customer_id
-     WHERE calls.twilio_sid = ?`,
-    [callSid]
-  );
+async function processCompletedCallPipeline({ repositories, clientId, callSid }) {
+  const callRecord = await repositories.calls.findByTwilioSidWithCustomer(clientId, callSid);
 
   if (!callRecord) {
     return { ok: false, reason: 'call_not_found' };
   }
 
-  await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['processing', 'processing', callRecord.id]);
+  await repositories.calls.update(clientId, callRecord.id, {
+    transcript_status: 'processing',
+    analysis_status: 'processing'
+  });
 
   let recordingLocalPath = callRecord.recording_local_path || null;
   if (!recordingLocalPath && callRecord.recording_url) {
     try {
       recordingLocalPath = await downloadRecording(callRecord.recording_url, callRecord.twilio_sid);
-      await dbRun('UPDATE calls SET recording_local_path = ? WHERE id = ?', [recordingLocalPath, callRecord.id]);
     } catch (error) {
-      await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['download_failed', 'blocked', callRecord.id]);
+      await repositories.calls.update(clientId, callRecord.id, {
+        transcript_status: 'download_failed',
+        analysis_status: 'blocked'
+      });
       throw error;
     }
   }
@@ -157,7 +128,10 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
   }
 
   if (!transcriptText) {
-    await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['missing', 'blocked', callRecord.id]);
+    await repositories.calls.update(clientId, callRecord.id, {
+      transcript_status: 'missing',
+      analysis_status: 'blocked'
+    });
     return { ok: false, reason: 'no_transcript_available' };
   }
 
@@ -188,76 +162,51 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
   const mergedRating = Number.isInteger(analysis.rating) ? analysis.rating : heuristicExtraction.stars;
   const mergedReviewText = analysis.review_text || heuristicExtraction.reviewText || '';
 
-  await dbRun(
-    `UPDATE calls
-        SET transcript_text = ?,
-            transcript_status = ?,
-            transcript_source = ?,
-            analysis_status = ?,
-            analysis_summary = ?,
-            analysis_json = ?,
-            key_points_json = ?,
-            report_excerpt = ?,
-            extracted_rating = ?,
-            extracted_review_text = ?,
-            outcome_detail = ?,
-            sentiment_label = ?,
-            sentiment_score = ?,
-            competitor_mentions_json = ?,
-            objections_json = ?,
-            callback_requested = ?,
-            interest_detected = ?,
-            recording_consent_captured = ?,
-            language = COALESCE(?, language),
-            consent_detected = ?,
-            analysis_completed_at = ?
-      WHERE id = ?`,
-    [
-      transcriptText,
-      'completed',
-      transcriptSource,
-      'completed',
-      analysis.summary || null,
-      JSON.stringify(analysis),
-      JSON.stringify(analysis.key_points || []),
-      analysis.report_excerpt || null,
-      mergedRating,
-      mergedReviewText || null,
-      outcome,
-      sentimentLabel,
-      sentimentScore,
-      JSON.stringify(competitors),
-      JSON.stringify(objections),
-      outcome === 'callback' ? 1 : 0,
-      outcome === 'interested' ? 1 : 0,
-      analysis.consent === false ? 0 : 1,
-      analysis.language || heuristicExtraction.language,
-      analysis.consent === null ? (heuristicExtraction.consentDetected ? 1 : 0) : (analysis.consent ? 1 : 0),
-      new Date().toISOString(),
-      callRecord.id
-    ]
-  );
+  await repositories.calls.update(clientId, callRecord.id, {
+    transcript_text: transcriptText,
+    transcript_status: 'completed',
+    transcript_source: transcriptSource,
+    analysis_status: 'completed',
+    analysis_summary: analysis.summary || null,
+    analysis,
+    key_points: analysis.key_points || [],
+    report_excerpt: analysis.report_excerpt || null,
+    extracted_rating: mergedRating,
+    extracted_review_text: mergedReviewText || null,
+    outcome_detail: outcome,
+    sentiment_label: sentimentLabel,
+    sentiment_score: sentimentScore,
+    competitor_mentions: competitors,
+    objections,
+    callback_requested: outcome === 'callback',
+    interest_detected: outcome === 'interested',
+    recording_consent_captured: analysis.consent !== false,
+    language: analysis.language || heuristicExtraction.language || callRecord.language,
+    consent_detected: analysis.consent === null
+      ? heuristicExtraction.consentDetected
+      : Boolean(analysis.consent),
+    analysis_completed_at: new Date().toISOString()
+  });
 
   const feedbackResult = await upsertFeedbackFromAnalysis({
-    dbGet,
-    dbRun,
+    repositories,
+    clientId,
     callRecord,
     reviewText: mergedReviewText,
     stars: mergedRating
   });
 
-  await dbRun('UPDATE calls SET feedback_saved_at = ?, outcome = COALESCE(outcome, ?) WHERE id = ?', [
-    new Date().toISOString(),
-    'completed',
-    callRecord.id
-  ]);
+  await repositories.calls.update(clientId, callRecord.id, {
+    feedback_saved_at: new Date().toISOString(),
+    outcome: callRecord.outcome || 'completed'
+  });
 
-  const refreshedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [callRecord.id]);
-  const refreshedCustomer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+  const refreshedCall = await repositories.calls.findById(clientId, callRecord.id);
+  const refreshedCustomer = await repositories.customers.findById(clientId, callRecord.customer_id);
 
   const workflowResult = await applyCallOutcomeWorkflow({
-    dbGet,
-    dbRun,
+    repositories,
+    clientId,
     callRecord: refreshedCall,
     customer: refreshedCustomer,
     providerStatus: refreshedCall.outcome,
@@ -266,7 +215,8 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
 
   if (sentimentLabel === 'negative' || objections.length > 0) {
     await createSupervisorEvent({
-      dbRun,
+      repositories,
+      clientId,
       callId: refreshedCall.id,
       eventType: 'negative_signal_detected',
       severity: sentimentLabel === 'negative' ? 'high' : 'medium',
@@ -278,35 +228,28 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
     });
   }
 
-  const updatedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [callRecord.id]);
-  const updatedCustomer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+  const updatedCall = await repositories.calls.findById(clientId, callRecord.id);
+  const updatedCustomer = await repositories.customers.findById(clientId, callRecord.customer_id);
 
-  await dbRun(
-    `UPDATE customers
-        SET last_sentiment_label = ?,
-            last_sentiment_score = ?,
-            pending_follow_ups = COALESCE(?, pending_follow_ups),
-            last_competitor_mention = ?,
-            revenue_stage = ?,
-            revenue_estimate = CASE
-              WHEN ? > COALESCE(revenue_estimate, 0) THEN ?
-              ELSE revenue_estimate
-            END
-      WHERE id = ?`,
-    [
-      sentimentLabel,
-      sentimentScore,
-      workflowResult.followUpTask || null,
-      competitors[0] || null,
-      outcome === 'interested' ? 'qualified' : outcome === 'callback' ? 'follow_up' : updatedCustomer.revenue_stage || 'unassigned',
-      outcome === 'interested' ? Math.max(Number(updatedCall.hot_lead_score) || 0, Number(updatedCustomer.revenue_estimate) || 0) : Number(updatedCustomer.revenue_estimate) || 0,
-      outcome === 'interested' ? Math.max(Number(updatedCall.hot_lead_score) || 0, Number(updatedCustomer.revenue_estimate) || 0) : Number(updatedCustomer.revenue_estimate) || 0,
-      callRecord.customer_id
-    ]
-  );
+  const currentRevenue = Number(updatedCustomer.revenue_estimate) || 0;
+  const attributedRevenue = outcome === 'interested'
+    ? Math.max(Number(updatedCall.hot_lead_score) || 0, currentRevenue)
+    : currentRevenue;
+  await repositories.customers.update(clientId, callRecord.customer_id, {
+    last_sentiment_label: sentimentLabel,
+    last_sentiment_score: sentimentScore,
+    pending_follow_ups: workflowResult.followUpTask || updatedCustomer.pending_follow_ups,
+    last_competitor_mention: competitors[0] || null,
+    revenue_stage: outcome === 'interested'
+      ? 'qualified'
+      : outcome === 'callback'
+        ? 'follow_up'
+        : updatedCustomer.revenue_stage || 'unassigned',
+    revenue_estimate: attributedRevenue
+  });
 
   try {
-    await syncCallToCrm({ dbGet, dbRun, callId: updatedCall.id });
+    await syncCallToCrm({ repositories, clientId, callId: updatedCall.id });
   } catch (error) {
     console.error('[CRM SYNC ERROR]', error.message);
   }
@@ -325,17 +268,21 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid }) {
       callSummary: analysis.report_excerpt || analysis.summary
     });
     if (sent) {
-      await dbRun('UPDATE calls SET whatsapp_summary_sent = ?, whatsapp_sent = ? WHERE id = ?', [1, 1, updatedCall.id]);
+      await repositories.calls.update(clientId, updatedCall.id, {
+        whatsapp_summary_sent: true,
+        whatsapp_sent: true
+      });
     }
   } catch (error) {
     console.error('[WHATSAPP SUMMARY ERROR]', error.message);
   }
 
   if (String(updatedCall.outcome || '').toLowerCase() === 'interested') {
-    await dbRun(
-      'UPDATE calls SET proposal_triggered = ?, invoice_triggered = ?, revenue_attribution_status = ? WHERE id = ?',
-      [1, 1, 'qualified_pipeline', updatedCall.id]
-    );
+    await repositories.calls.update(clientId, updatedCall.id, {
+      proposal_triggered: true,
+      invoice_triggered: true,
+      revenue_attribution_status: 'qualified_pipeline'
+    });
   }
 
   return {

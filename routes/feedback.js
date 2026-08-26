@@ -1,85 +1,84 @@
 const express = require('express');
-const router = express.Router();
-const { dbRun, dbGet, dbAll } = require('../db');
-const { categorizeFeedback } = require('../services/openai');
+function defaultCategorizeFeedback(...args) {
+  return require('../services/openai').categorizeFeedback(...args);
+}
 
-// Manual feedback entry
-router.post('/manual', async (req, res) => {
-  try {
-    const customer_id = Number(req.body.customer_id);
-    const review_text = String(req.body.review_text || '').trim();
-    const stars = Number(req.body.stars || 0);
-    const fieldErrors = {};
-
-    if (!customer_id) {
-      fieldErrors.customer_id = 'Please select a customer';
-    }
-
-    if (!review_text) {
-      fieldErrors.review_text = 'Review text is required';
-    } else if (review_text.length < 5) {
-      fieldErrors.review_text = 'Review text should be at least 5 characters';
-    } else if (review_text.length > 1000) {
-      fieldErrors.review_text = 'Review text must be 1000 characters or fewer';
-    }
-
-    if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
-      fieldErrors.stars = 'Rating must be between 1 and 5';
-    }
-
-    if (Object.keys(fieldErrors).length > 0) {
-      return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
-    }
-
-    const customer = await dbGet('SELECT id FROM customers WHERE id = ?', [customer_id]);
-    if (!customer) {
-      return res.status(404).json({ error: 'Customer not found', fieldErrors: { customer_id: 'Selected customer no longer exists' } });
-    }
-
-    // Categorize using OpenAI
-    const categorization = await categorizeFeedback(review_text, stars);
-
-    // Save to feedback table
-    const result = await dbRun(
-      'INSERT INTO feedback (customer_id, review_text, category, stars, submitted_at, source) VALUES (?, ?, ?, ?, ?, ?)',
-      [customer_id, review_text, categorization.category, stars, new Date().toISOString(), 'manual']
-    );
-
-    res.json({
-      id: result.lastID,
-      category: categorization.category,
-      reason: categorization.reason
-    });
-  } catch (error) {
-    console.error('Error saving feedback:', error);
-    res.status(500).json({ error: error.message });
+function createFeedbackRouter({
+  customers,
+  feedback,
+  getClientId,
+  categorize = defaultCategorizeFeedback
+}) {
+  if (!customers || !feedback || typeof getClientId !== 'function') {
+    throw new TypeError('Feedback router requires customers, feedback, and getClientId dependencies');
   }
-});
 
-// List all feedback with customer names
-router.get('/', async (req, res) => {
-  try {
-    const feedback = await dbAll(`
-      SELECT 
-        f.id,
-        f.customer_id,
-        f.call_id,
-        c.name as customer_name,
-        f.review_text,
-        f.category,
-        f.stars,
-        f.source,
-        f.submitted_at
-      FROM feedback f
-      JOIN customers c ON f.customer_id = c.id
-      ORDER BY f.submitted_at DESC
-    `);
+  const router = express.Router();
 
-    res.json(feedback);
-  } catch (error) {
-    console.error('Error fetching feedback:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+  router.post('/manual', async (req, res) => {
+    try {
+      const clientId = await Promise.resolve(getClientId(req));
+      const customerId = Number(req.body.customer_id);
+      const reviewText = String(req.body.review_text || '').trim();
+      const stars = Number(req.body.stars || 0);
+      const fieldErrors = {};
 
-module.exports = router;
+      if (!Number.isSafeInteger(customerId) || customerId <= 0) {
+        fieldErrors.customer_id = 'Please select a customer';
+      }
+      if (!reviewText) {
+        fieldErrors.review_text = 'Review text is required';
+      } else if (reviewText.length < 5) {
+        fieldErrors.review_text = 'Review text should be at least 5 characters';
+      } else if (reviewText.length > 1000) {
+        fieldErrors.review_text = 'Review text must be 1000 characters or fewer';
+      }
+      if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+        fieldErrors.stars = 'Rating must be between 1 and 5';
+      }
+      if (Object.keys(fieldErrors).length > 0) {
+        return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
+      }
+
+      const customer = await customers.findById(clientId, customerId);
+      if (!customer) {
+        return res.status(404).json({
+          error: 'Customer not found',
+          fieldErrors: { customer_id: 'Selected customer no longer exists' }
+        });
+      }
+
+      const categorization = await categorize(reviewText, stars);
+      const saved = await feedback.create(clientId, {
+        customer_id: customerId,
+        review_text: reviewText,
+        category: categorization.category,
+        stars,
+        submitted_at: new Date().toISOString(),
+        source: 'manual'
+      });
+      return res.json({
+        id: saved.id,
+        category: categorization.category,
+        reason: categorization.reason
+      });
+    } catch (error) {
+      console.error('Error saving feedback:', error);
+      return res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.get('/', async (req, res) => {
+    try {
+      const clientId = await Promise.resolve(getClientId(req));
+      return res.json(await feedback.list(clientId));
+    } catch (error) {
+      console.error('Error fetching feedback:', error);
+      return res.status(500).json({ error: error.message });
+    }
+  });
+
+  return router;
+}
+
+module.exports = { createFeedbackRouter };

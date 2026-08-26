@@ -1,4 +1,6 @@
-const { categorizeFeedback } = require('./openai');
+function defaultCategorizeFeedback(...args) {
+  return require('./openai').categorizeFeedback(...args);
+}
 
 const NUMBER_WORDS = new Map([
   ['one', 1],
@@ -371,12 +373,20 @@ function extractCallFeedback(transcript = []) {
   };
 }
 
-async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, customerId, transcript, overwriteExisting = false }) {
+async function saveCallFeedbackFromTranscript({
+  repositories,
+  clientId,
+  callSid,
+  customerId,
+  transcript,
+  overwriteExisting = false,
+  categorize = defaultCategorizeFeedback
+}) {
   if (!callSid || !Array.isArray(transcript) || transcript.length === 0) {
     return { saved: false, reason: 'missing_call_or_transcript' };
   }
 
-  const callRecord = await dbGet('SELECT * FROM calls WHERE twilio_sid = ?', [callSid]);
+  const callRecord = await repositories.calls.findByTwilioSid(clientId, callSid);
   const resolvedCustomerId = customerId || callRecord?.customer_id;
 
   if (!callRecord || !resolvedCustomerId) {
@@ -386,29 +396,19 @@ async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, customerI
   const extraction = extractCallFeedback(transcript);
   const transcriptText = transcript.map((turn) => `${turn.role}: ${turn.text}`).join('\n');
 
-  await dbRun(
-    `UPDATE calls
-        SET transcript_text = ?,
-            consent_detected = ?,
-            language = ?,
-            extracted_rating = ?,
-            extracted_review_text = ?
-      WHERE id = ?`,
-    [
-      transcriptText,
-      extraction.consentDetected ? 1 : 0,
-      extraction.language,
-      extraction.stars,
-      extraction.reviewText || null,
-      callRecord.id
-    ]
-  );
+  await repositories.calls.update(clientId, callRecord.id, {
+    transcript_text: transcriptText,
+    consent_detected: extraction.consentDetected,
+    language: extraction.language,
+    extracted_rating: extraction.stars,
+    extracted_review_text: extraction.reviewText || null
+  });
 
   if (!extraction.hasFeedback) {
     return { saved: false, reason: 'no_feedback_detected', extraction };
   }
 
-  const existingFeedback = await dbGet('SELECT id FROM feedback WHERE call_id = ?', [callRecord.id]);
+  const existingFeedback = await repositories.feedback.findByCallId(clientId, callRecord.id);
   if (existingFeedback) {
     if (!overwriteExisting) {
       return { saved: false, reason: 'already_saved', extraction };
@@ -416,34 +416,25 @@ async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, customerI
 
     const reviewText = extraction.reviewText || 'Customer shared a rating on the call.';
     const stars = Number.isInteger(extraction.stars) ? extraction.stars : 3;
-    const categorization = await categorizeFeedback(reviewText, stars);
+    const categorization = await categorize(reviewText, stars);
+    const saved = await repositories.feedback.upsertForCall(clientId, {
+      customer_id: resolvedCustomerId,
+      call_id: callRecord.id,
+      review_text: reviewText,
+      category: categorization.category,
+      stars,
+      submitted_at: new Date().toISOString(),
+      source: 'call'
+    });
 
-    await dbRun(
-      `UPDATE feedback
-          SET review_text = ?,
-              category = ?,
-              stars = ?,
-              submitted_at = ?,
-              source = ?
-        WHERE id = ?`,
-      [
-        reviewText,
-        categorization.category,
-        stars,
-        new Date().toISOString(),
-        'call',
-        existingFeedback.id
-      ]
-    );
-
-    await dbRun(
-      'UPDATE calls SET feedback_saved_at = ?, outcome = COALESCE(outcome, ?) WHERE id = ?',
-      [new Date().toISOString(), 'completed', callRecord.id]
-    );
+    await repositories.calls.update(clientId, callRecord.id, {
+      feedback_saved_at: new Date().toISOString(),
+      outcome: callRecord.outcome || 'completed'
+    });
 
     return {
       saved: true,
-      feedbackId: existingFeedback.id,
+      feedbackId: saved.id,
       extraction,
       category: categorization.category,
       updated: true
@@ -452,30 +443,25 @@ async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, customerI
 
   const reviewText = extraction.reviewText || 'Customer shared a rating on the call.';
   const stars = Number.isInteger(extraction.stars) ? extraction.stars : 3;
-  const categorization = await categorizeFeedback(reviewText, stars);
+  const categorization = await categorize(reviewText, stars);
+  const saved = await repositories.feedback.upsertForCall(clientId, {
+    customer_id: resolvedCustomerId,
+    call_id: callRecord.id,
+    review_text: reviewText,
+    category: categorization.category,
+    stars,
+    submitted_at: new Date().toISOString(),
+    source: 'call'
+  });
 
-  const result = await dbRun(
-    `INSERT INTO feedback (customer_id, call_id, review_text, category, stars, submitted_at, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      resolvedCustomerId,
-      callRecord.id,
-      reviewText,
-      categorization.category,
-      stars,
-      new Date().toISOString(),
-      'call'
-    ]
-  );
-
-  await dbRun(
-    'UPDATE calls SET feedback_saved_at = ?, outcome = COALESCE(outcome, ?) WHERE id = ?',
-    [new Date().toISOString(), 'completed', callRecord.id]
-  );
+  await repositories.calls.update(clientId, callRecord.id, {
+    feedback_saved_at: new Date().toISOString(),
+    outcome: callRecord.outcome || 'completed'
+  });
 
   return {
     saved: true,
-    feedbackId: result.lastID,
+    feedbackId: saved.id,
     extraction,
     category: categorization.category
   };

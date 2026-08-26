@@ -257,15 +257,18 @@ async function sendCustomerWhatsAppSummary({ customer, callSummary }) {
   return true;
 }
 
-async function createSupervisorEvent({ dbRun, callId, eventType, severity = 'info', payload = {} }) {
+async function createSupervisorEvent({ repositories, clientId, callId, eventType, severity = 'info', payload = {} }) {
   if (!callId) return;
-  await dbRun(
-    'INSERT INTO call_supervisor_events (call_id, event_type, severity, payload_json, created_at) VALUES (?, ?, ?, ?, ?)',
-    [callId, eventType, severity, JSON.stringify(payload || {}), new Date().toISOString()]
-  );
+  return repositories.supervisorEvents.append(clientId, {
+    call_id: callId,
+    event_type: eventType,
+    severity,
+    payload,
+    created_at: new Date().toISOString()
+  });
 }
 
-async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, providerStatus, inferredOutcome }) {
+async function applyCallOutcomeWorkflow({ repositories, clientId, callRecord, customer, providerStatus, inferredOutcome }) {
   const nowIso = new Date().toISOString();
   const currentOutcome = inferredOutcome || providerStatus;
   const normalized = String(currentOutcome || '').toLowerCase();
@@ -334,56 +337,14 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
     }
   }
 
-  await dbRun(
-    `UPDATE customers
-        SET status = ?,
-            last_contact_outcome = ?,
-            last_called_at = ?,
-            next_retry_at = ?,
-            retry_count = ?,
-            wrong_number_flag = ?,
-            admin_review_required = ?,
-            callback_requested_at = ?,
-            consent_status = ?,
-            priority_score = ?,
-            ai_score = ?
-      WHERE id = ?`,
-    [
-      customerUpdates.status,
-      customerUpdates.last_contact_outcome,
-      customerUpdates.last_called_at,
-      customerUpdates.next_retry_at,
-      customerUpdates.retry_count,
-      customerUpdates.wrong_number_flag,
-      customerUpdates.admin_review_required,
-      customerUpdates.callback_requested_at,
-      customerUpdates.consent_status,
-      priorityScore,
-      priorityScore,
-      customer.id
-    ]
-  );
+  await repositories.customers.update(clientId, customer.id, {
+    ...customerUpdates,
+    priority_score: priorityScore,
+    ai_score: priorityScore
+  });
 
   if (callRecord?.id) {
-    await dbRun(
-      `UPDATE calls
-          SET outcome = ?,
-              outcome_detail = ?,
-              fallback_triggered = ?,
-              next_action_at = ?,
-              follow_up_task = ?,
-              hot_lead_score = ?
-        WHERE id = ?`,
-      [
-        callUpdates.outcome,
-        callUpdates.outcome_detail,
-        callUpdates.fallback_triggered,
-        callUpdates.next_action_at,
-        callUpdates.follow_up_task,
-        callUpdates.hot_lead_score,
-        callRecord.id
-      ]
-    );
+    await repositories.calls.update(clientId, callRecord.id, callUpdates);
   }
 
   return {

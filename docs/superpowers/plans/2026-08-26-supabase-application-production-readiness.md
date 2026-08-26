@@ -294,19 +294,19 @@ git commit -m "feat: move customers to Supabase Postgres"
 - Call lookup/update/list methods require `clientId`, including Twilio SID lookups.
 - Feedback create/upsert/list methods and supervisor-event append/list methods require `clientId`.
 
-- [ ] **Step 1: Write transaction and idempotency tests**
+- [x] **Step 1: Write transaction and idempotency tests**
 
 Test two-client isolation, numeric IDs, transaction rollback, unique Twilio SID behavior, repeated callback updates, 2 MiB call-payload rejection, native `jsonb`, feedback upsert concurrency, newest-first events, and customer cascade deletion.
 
-- [ ] **Step 2: Implement the repositories**
+- [x] **Step 2: Implement the repositories**
 
 Use `INSERT ... RETURNING`, `UPDATE ... RETURNING`, explicit patch whitelists, conflict-safe feedback upsert, and joined projections matching current HTTP fields. Every join includes compatible `client_id`; never locate tenant-owned data by public ID alone.
 
-- [ ] **Step 3: Rewire active workflows**
+- [x] **Step 3: Rewire active workflows**
 
 Pass `{ repositories, clientId }` through call-feedback, orchestration, post-call, and CRM operations. Keep provider calls outside database transactions and retain existing Twilio/OpenAI behavior.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 npm test -- tests/repositories/calls-feedback.test.js tests/routes/customers-feedback.test.js

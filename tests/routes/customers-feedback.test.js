@@ -23,7 +23,8 @@ databaseTest('customer routes preserve contracts while resolving tenant context 
   await withTestDatabase(async ({ pool }) => {
     const { createRepositories } = require('../../repositories');
     const { createCustomersRouter } = require('../../routes/customers');
-    const { clients, customers } = createRepositories(databaseFacade(pool));
+    const { createFeedbackRouter } = require('../../routes/feedback');
+    const { clients, customers, feedback } = createRepositories(databaseFacade(pool));
     const client = await clients.create({ slug: 'route-clinic', name: 'Route Clinic' });
     const observedRequests = [];
     const app = express();
@@ -34,6 +35,15 @@ databaseTest('customer routes preserve contracts while resolving tenant context 
         observedRequests.push(req.method);
         return client.id;
       }
+    }));
+    app.use('/api/feedback', createFeedbackRouter({
+      customers,
+      feedback,
+      getClientId: () => client.id,
+      categorize: async (_reviewText, stars) => ({
+        category: stars >= 4 ? 'good' : 'average',
+        reason: 'Test categorization'
+      })
     }));
 
     const malformed = await request(app).get('/api/customers/not-a-number');
@@ -104,6 +114,23 @@ databaseTest('customer routes preserve contracts while resolving tenant context 
     assert.equal(found.body.do_not_call, 1);
     assert.equal(found.body.retry_count, 1);
     assert.equal(found.body.revenue_estimate, 2500);
+
+    const feedbackCreated = await request(app)
+      .post('/api/feedback/manual')
+      .send({
+        customer_id: created.body.id,
+        review_text: 'Excellent and helpful service',
+        stars: 5
+      });
+    assert.equal(feedbackCreated.status, 200);
+    assert.equal(typeof feedbackCreated.body.id, 'number');
+    assert.equal(feedbackCreated.body.category, 'good');
+    assert.equal(feedbackCreated.body.reason, 'Test categorization');
+
+    const feedbackListed = await request(app).get('/api/feedback');
+    assert.equal(feedbackListed.status, 200);
+    assert.equal(feedbackListed.body.length, 1);
+    assert.equal(feedbackListed.body[0].customer_name, 'Asha Sharma');
 
     const deleted = await request(app).delete(`/api/customers/${created.body.id}`);
     assert.deepEqual(deleted.body, { message: 'Customer deleted successfully' });

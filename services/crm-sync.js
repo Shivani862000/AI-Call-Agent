@@ -53,25 +53,25 @@ function buildCrmPayload({ customer, call, feedback }) {
   };
 }
 
-async function syncCallToCrm({ dbGet, dbRun, callId }) {
+async function syncCallToCrm({ repositories, clientId, callId }) {
   if (!process.env.CRM_WEBHOOK_URL) {
     return { skipped: true, reason: 'missing_crm_webhook_url' };
   }
 
-  const call = await dbGet('SELECT * FROM calls WHERE id = ?', [callId]);
+  const call = await repositories.calls.findById(clientId, callId);
   if (!call) {
     return { skipped: true, reason: 'call_not_found' };
   }
 
-  const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [call.customer_id]);
-  const feedback = await dbGet('SELECT * FROM feedback WHERE call_id = ?', [call.id]);
+  const customer = await repositories.customers.findById(clientId, call.customer_id);
+  const feedback = await repositories.feedback.findByCallId(clientId, call.id);
 
   try {
     await postJson(process.env.CRM_WEBHOOK_URL, buildCrmPayload({ customer, call, feedback }));
-    await dbRun('UPDATE calls SET crm_sync_status = ? WHERE id = ?', ['completed', call.id]);
+    await repositories.calls.update(clientId, call.id, { crm_sync_status: 'completed' });
     return { ok: true };
   } catch (error) {
-    await dbRun('UPDATE calls SET crm_sync_status = ? WHERE id = ?', ['failed', call.id]);
+    await repositories.calls.update(clientId, call.id, { crm_sync_status: 'failed' });
     throw error;
   }
 }

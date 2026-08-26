@@ -3,6 +3,11 @@ const { mkdtemp, rm } = require('node:fs/promises');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const { Pool } = require('pg');
+const {
+  getTestConnectionString,
+  truncateApplicationTables
+} = require('./postgres-test-context');
 
 async function reservePort() {
   return new Promise((resolve, reject) => {
@@ -56,12 +61,30 @@ async function startTestApp() {
   const port = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const output = [];
+  const connectionString = getTestConnectionString();
+  const pool = new Pool({
+    connectionString,
+    max: 2,
+    ssl: { rejectUnauthorized: false }
+  });
+  await truncateApplicationTables(pool);
+  const clientResult = await pool.query(
+    `insert into clients (name, slug, status)
+     values ($1, $2, $3)
+     returning id`,
+    ['Contract Test Clinic', 'contract-test-clinic', 'active']
+  );
+  const clientId = clientResult.rows[0].id;
   const child = spawn(process.execPath, ['index.js'], {
     cwd: path.resolve(__dirname, '../..'),
     env: {
       ...process.env,
       PORT: String(port),
       DATABASE_URL: path.join(tempDirectory, 'contract-test.db'),
+      NODE_ENV: 'test',
+      SUPABASE_DB_URL: connectionString,
+      SUPABASE_DB_TLS_INSECURE_TEST_ONLY: 'true',
+      DEFAULT_CLIENT_ID: String(clientId),
       CALL_MODE: 'scripted',
       OPENAI_API_KEY: '',
       GEMINI_API_KEY: '',
@@ -83,6 +106,8 @@ async function startTestApp() {
     await waitForHealth(baseUrl, child, output);
   } catch (error) {
     await stopChild(child);
+    await truncateApplicationTables(pool);
+    await pool.end();
     await rm(tempDirectory, { recursive: true, force: true });
     throw error;
   }
@@ -92,6 +117,8 @@ async function startTestApp() {
     output,
     async stop() {
       await stopChild(child);
+      await truncateApplicationTables(pool);
+      await pool.end();
       await rm(tempDirectory, { recursive: true, force: true });
     }
   };
