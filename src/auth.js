@@ -362,13 +362,6 @@ async function resolveActiveSession(session) {
     return null;
   }
 
-  const envAdmin = String(process.env.ADMIN_USERNAME || '').trim();
-  if (envAdmin && session.username === envAdmin) {
-    if (session.role === 'WEBMASTER' && session.authSource === 'environment') {
-      return { ...session, platformAccessLevel: 'OWNER' };
-    }
-    return null;
-  }
   if (session.authSource !== 'database') {
     return null;
   }
@@ -435,27 +428,7 @@ async function verifyCredentials(username, password) {
     return { success: false };
   }
 
-  // Fallback to .env admin for Webmaster access
-  const envAdmin = String(process.env.ADMIN_USERNAME || '').trim();
-  const envHash = String(process.env.ADMIN_PASSWORD_HASH || '').trim();
-  
-  if (envAdmin && normalizedUsername === envAdmin) {
-    try {
-      if (envHash && await bcrypt.compare(String(password), envHash)) {
-        return {
-          success: true,
-          username: envAdmin,
-          role: 'WEBMASTER',
-          tenantId: null,
-          platformAccessLevel: 'OWNER',
-          authSource: 'environment'
-        };
-      }
-    } catch (error) {
-      return { success: false };
-    }
-    return { success: false };
-  }
+
 
   try {
     const normalizedEmail = normalizedUsername.toLowerCase();

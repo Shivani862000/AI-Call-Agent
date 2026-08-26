@@ -30,19 +30,7 @@ function createWebmasterAuthorization({ UserModel, TenantModel, env = process.en
     }
 
     const username = String(session.username || '').trim();
-    const environmentUsername = String(env.ADMIN_USERNAME || '').trim();
     if (!username) {
-      throw forbidden('WEBMASTER_FORBIDDEN');
-    }
-    if (environmentUsername && username === environmentUsername) {
-      if (session.authSource === 'environment') {
-        return {
-          username,
-          role: 'WEBMASTER',
-          platformAccessLevel: 'OWNER',
-          source: 'environment'
-        };
-      }
       throw forbidden('WEBMASTER_FORBIDDEN');
     }
     if (session.authSource === 'environment') {
