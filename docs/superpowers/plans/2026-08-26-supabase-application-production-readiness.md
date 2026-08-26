@@ -451,19 +451,19 @@ git commit -m "feat: add multiple Supabase webmaster accounts"
 - Logger methods emit one-line redacted JSON.
 - `createHealthHandler({ ping, clock })` returns database-aware `200` or `503`.
 
-- [ ] **Step 1: Write hardening tests**
+- [x] **Step 1: Write hardening tests**
 
 Assert missing `SUPABASE_DB_URL`, `SUPABASE_DB_CA_CERT`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, or `COOKIE_SECRET` fails before listen; the secret key is not required by normal runtime; cookie secret is at least 32 bytes; health follows connectivity; shutdown closes the pool; and logs redact credentials, cookies, phone numbers, transcripts, and feedback.
 
-- [ ] **Step 2: Implement configuration and logging**
+- [x] **Step 2: Implement configuration and logging**
 
 Whitelist fields, emit stable error codes, and replace sensitive logs in touched paths. `.env.example` contains safe placeholders and descriptions only.
 
-- [ ] **Step 3: Make startup and health database-aware**
+- [x] **Step 3: Make startup and health database-aware**
 
 Use this order: validate config, create pool, ping, construct repositories/routes, start scheduler, listen. Shutdown stops scheduling, stops new traffic, drains HTTP, and closes the pool.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 ```bash
 npm test -- tests/health-and-logging.test.js

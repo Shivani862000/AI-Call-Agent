@@ -16,6 +16,10 @@ const { createSupabaseAuth } = require('./auth/supabase-auth');
 const { createSessionMiddleware } = require('./auth/session');
 const { createAuthMiddleware, requireRole, sameOrigin } = require('./auth/middleware');
 const { currentClientId, runWithClient } = require('./auth/client-context');
+const { loadRuntimeConfig } = require('./config/runtime-config');
+const { createLogger } = require('./logging/logger');
+const { createRequestContext } = require('./middleware/request-context');
+const { createHealthHandler, shutdownRuntime } = require('./runtime/lifecycle');
 const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
 const { processCompletedCallPipeline } = require('./services/post-call-pipeline');
 const {
@@ -26,16 +30,28 @@ const {
   createSupervisorEvent
 } = require('./services/call-orchestration');
 
+const runtimeConfig = loadRuntimeConfig(process.env);
+const originalConsole = {
+  log: console.log.bind(console),
+  error: console.error.bind(console)
+};
+const logger = createLogger({ sink: originalConsole });
+console.log = (...args) => logger.info('application_log', { message: args.map((value) => value instanceof Error ? value.message : String(value)).join(' ') });
+console.warn = (...args) => logger.warn('application_log', { message: args.map(String).join(' ') });
+console.error = (...args) => logger.error('application_log', { message: args.map((value) => value instanceof Error ? value.message : String(value)).join(' ') });
+
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.set('trust proxy', 1);
 app.use(createSessionMiddleware({
-  secret: process.env.COOKIE_SECRET,
-  secure: process.env.NODE_ENV === 'production'
+  secret: runtimeConfig.cookieSecret,
+  secure: runtimeConfig.nodeEnv === 'production',
+  maxAgeMs: runtimeConfig.sessionMaxAgeMs
 }));
+app.use(createRequestContext({ logger }));
 
-const PORT = Number(process.env.PORT || 3000);
+const PORT = runtimeConfig.port;
 const CALL_MODE = process.env.CALL_MODE || (process.env.OPENAI_API_KEY ? 'openai' : 'scripted');
 const AI_PROVIDER = CALL_MODE === 'gemini' ? 'gemini' : 'openai';
 const OPENAI_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime';
@@ -43,7 +59,7 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || 'models/gemini-3.1-flash-live-p
 const GEMINI_VOICE = process.env.GEMINI_VOICE || 'Kore';
 const REALTIME_MODEL = AI_PROVIDER === 'gemini' ? GEMINI_MODEL : OPENAI_REALTIME_MODEL;
 const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical collection center';
-const PUBLIC_BASE_URL = (process.env.NGROK_URL || process.env.WEBHOOK_URL || '').replace(/\/$/, '');
+const PUBLIC_BASE_URL = runtimeConfig.publicBaseUrl;
 const GEMINI_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const liveCallState = new Map();
 
@@ -88,16 +104,10 @@ const browserSameOrigin = sameOrigin({ publicBaseUrl: PUBLIC_BASE_URL });
 async function initializeCustomerPersistence() {
   if (!process.env.SUPABASE_DB_URL) throw new Error('SUPABASE_DB_URL is required');
 
-  const ca = process.env.SUPABASE_DB_CA_CERT;
-  const allowTestTls = process.env.NODE_ENV === 'test'
-    && process.env.SUPABASE_DB_TLS_INSECURE_TEST_ONLY === 'true';
   postgres = createPostgres({
-    connectionString: process.env.SUPABASE_DB_URL,
-    ssl: allowTestTls
-      ? { rejectUnauthorized: false }
-      : ca
-        ? { ca: ca.replaceAll('\\n', '\n'), rejectUnauthorized: true }
-        : undefined
+    connectionString: runtimeConfig.supabaseDbUrl,
+    ssl: runtimeConfig.databaseSsl,
+    logger
   });
   await postgres.ping();
 
@@ -111,8 +121,8 @@ async function initializeCustomerPersistence() {
     };
   } else {
     passwordAuth = createSupabaseAuth({
-      url: process.env.SUPABASE_URL,
-      anonKey: process.env.SUPABASE_PUBLISHABLE_KEY
+      url: runtimeConfig.supabaseUrl,
+      anonKey: runtimeConfig.supabasePublishableKey
     });
   }
   const [client] = await repositories.clients.listActive();
@@ -756,15 +766,12 @@ function pushTranscriptTurn(transcript, role, text) {
   });
 }
 
-app.get('/health', (req, res) => {
-  res.json({
-    ok: true,
-    mode: CALL_MODE,
-    model: REALTIME_MODEL,
-    publicBaseUrl: PUBLIC_BASE_URL,
-    timestamp: new Date().toISOString()
-  });
-});
+app.get('/health', createHealthHandler({
+  ping: async () => {
+    if (!postgres) throw new Error('Database is not initialized');
+    return postgres.ping();
+  }
+}));
 
 app.get('/', (req, res) => {
   res.redirect('/login.html');
@@ -1785,13 +1792,31 @@ wss.on('connection', (twilioWs, req) => {
   });
 });
 
+let schedulerTimer;
+let shutdownPromise;
+
+async function stopScheduler() {
+  if (schedulerTimer) clearInterval(schedulerTimer);
+  schedulerTimer = undefined;
+}
+
+async function handleShutdown(signal) {
+  if (shutdownPromise) return shutdownPromise;
+  logger.info('runtime_signal_received', { signal });
+  shutdownPromise = shutdownRuntime({ stopScheduler, server, postgres, logger });
+  return shutdownPromise;
+}
+
+process.once('SIGTERM', () => handleShutdown('SIGTERM').then(() => { process.exitCode = 0; }).catch(() => { process.exitCode = 1; }));
+process.once('SIGINT', () => handleShutdown('SIGINT').then(() => { process.exitCode = 0; }).catch(() => { process.exitCode = 1; }));
+
 (async () => {
   try {
     validateConfig();
     await initializeDatabase();
     await initializeCustomerPersistence();
 
-    setInterval(() => {
+    schedulerTimer = setInterval(() => {
       runSchedulerTick().catch((error) => {
         console.error('[SCHEDULER ERROR]', error.message);
       });
