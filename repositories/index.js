@@ -8,6 +8,7 @@ const { createAgentsRepository } = require('./agents');
 const { createCampaignConfigurationsRepository } = require('./campaign-configurations');
 const { createSupportTicketsRepository } = require('./support-tickets');
 const { createApplicationStateRepository } = require('./application-state');
+const { createUsersRepository } = require('./users');
 
 function createRepositories(database) {
   return {
@@ -20,7 +21,8 @@ function createRepositories(database) {
     agents: createAgentsRepository(database),
     campaignConfigurations: createCampaignConfigurationsRepository(database),
     supportTickets: createSupportTicketsRepository(database),
-    applicationState: createApplicationStateRepository(database)
+    applicationState: createApplicationStateRepository(database),
+    users: createUsersRepository(database)
   };
 }
 

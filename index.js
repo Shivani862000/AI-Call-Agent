@@ -11,6 +11,11 @@ const { createPostgres } = require('./persistence/postgres');
 const { createRepositories } = require('./repositories');
 const { createFeedbackRouter } = require('./routes/feedback');
 const { createReportsRouter } = require('./routes/reports');
+const { createAuthRouter } = require('./routes/auth');
+const { createSupabaseAuth } = require('./auth/supabase-auth');
+const { createSessionMiddleware } = require('./auth/session');
+const { createAuthMiddleware, requireRole, sameOrigin } = require('./auth/middleware');
+const { currentClientId, runWithClient } = require('./auth/client-context');
 const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
 const { processCompletedCallPipeline } = require('./services/post-call-pipeline');
 const {
@@ -24,7 +29,11 @@ const {
 const app = express();
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.set('trust proxy', 1);
+app.use(createSessionMiddleware({
+  secret: process.env.COOKIE_SECRET,
+  secure: process.env.NODE_ENV === 'production'
+}));
 
 const PORT = Number(process.env.PORT || 3000);
 const CALL_MODE = process.env.CALL_MODE || (process.env.OPENAI_API_KEY ? 'openai' : 'scripted');
@@ -41,6 +50,7 @@ const liveCallState = new Map();
 let postgres;
 let repositories;
 let activeClientId;
+let passwordAuth;
 
 function getRepositories() {
   if (!repositories) throw new Error('Repositories are not initialized');
@@ -48,8 +58,9 @@ function getRepositories() {
 }
 
 function getActiveClientId() {
-  if (!activeClientId) throw new Error('Active client context is not initialized');
-  return activeClientId;
+  const selectedClientId = currentClientId() || activeClientId;
+  if (!selectedClientId) throw new Error('Active client context is not initialized');
+  return selectedClientId;
 }
 
 function repositoryProxy(name) {
@@ -62,14 +73,20 @@ function repositoryProxy(name) {
 
 const customerRepositoryProxy = repositoryProxy('customers');
 const feedbackRepositoryProxy = repositoryProxy('feedback');
+const userRepositoryProxy = repositoryProxy('users');
+const clientRepositoryProxy = repositoryProxy('clients');
+const passwordAuthProxy = {
+  verifyPassword(...args) {
+    if (!passwordAuth) throw new Error('Supabase Auth is not initialized');
+    return passwordAuth.verifyPassword(...args);
+  }
+};
+const authMiddleware = createAuthMiddleware({ users: userRepositoryProxy, clients: clientRepositoryProxy });
+const webmasterOnly = requireRole('webmaster');
+const browserSameOrigin = sameOrigin({ publicBaseUrl: PUBLIC_BASE_URL });
 
 async function initializeCustomerPersistence() {
   if (!process.env.SUPABASE_DB_URL) throw new Error('SUPABASE_DB_URL is required');
-
-  const configuredClientId = Number(process.env.DEFAULT_CLIENT_ID);
-  if (!Number.isSafeInteger(configuredClientId) || configuredClientId <= 0) {
-    throw new Error('DEFAULT_CLIENT_ID must be a positive integer when SUPABASE_DB_URL is configured');
-  }
 
   const ca = process.env.SUPABASE_DB_CA_CERT;
   const allowTestTls = process.env.NODE_ENV === 'test'
@@ -85,11 +102,24 @@ async function initializeCustomerPersistence() {
   await postgres.ping();
 
   repositories = createRepositories(postgres);
-  const client = await repositories.clients.findById(configuredClientId);
-  if (!client || client.status !== 'active') {
+  if (process.env.NODE_ENV === 'test' && process.env.SUPABASE_TEST_AUTH_BYPASS === 'true') {
+    passwordAuth = {
+      async verifyPassword(email, password) {
+        if (email !== process.env.SUPABASE_TEST_AUTH_EMAIL || password !== process.env.SUPABASE_TEST_AUTH_PASSWORD) return null;
+        return { id: process.env.SUPABASE_TEST_AUTH_USER_ID };
+      }
+    };
+  } else {
+    passwordAuth = createSupabaseAuth({
+      url: process.env.SUPABASE_URL,
+      anonKey: process.env.SUPABASE_PUBLISHABLE_KEY
+    });
+  }
+  const [client] = await repositories.clients.listActive();
+  if (!client) {
     await postgres.close();
     postgres = undefined;
-    throw new Error('DEFAULT_CLIENT_ID must identify an active Supabase client');
+    throw new Error('At least one active Supabase client is required');
   }
 
   activeClientId = client.id;
@@ -664,7 +694,10 @@ async function runSchedulerTick() {
 
   schedulerRunning = true;
   try {
-    await triggerScheduledCalls();
+    const activeClients = await getRepositories().clients.listActive();
+    for (const client of activeClients) {
+      await runWithClient(client.id, () => triggerScheduledCalls());
+    }
   } finally {
     schedulerRunning = false;
   }
@@ -734,8 +767,23 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.redirect('/admin.html');
+  res.redirect('/login.html');
 });
+
+app.get('/login.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+app.use('/auth', createAuthRouter({
+  supabaseAuth: passwordAuthProxy,
+  users: userRepositoryProxy,
+  clients: clientRepositoryProxy,
+  auth: authMiddleware,
+  publicBaseUrl: PUBLIC_BASE_URL
+}));
+app.get('/admin.html', authMiddleware.reload, webmasterOnly, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
+app.use('/api', authMiddleware.reload, webmasterOnly, browserSameOrigin);
 
 app.use('/api/customers', createCustomersRouter({
   customers: customerRepositoryProxy,
@@ -752,7 +800,7 @@ app.use('/api/reports', createReportsRouter({
   publicBaseUrl: PUBLIC_BASE_URL
 }));
 
-app.post('/call/start', async (req, res) => {
+app.post('/call/start', authMiddleware.reload, webmasterOnly, browserSameOrigin, async (req, res) => {
   try {
     const customerPhone = req.body.customerPhone || process.env.CUSTOMER_PHONE;
     const customerName = req.body.customerName || process.env.CUSTOMER_NAME;

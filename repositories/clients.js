@@ -42,6 +42,13 @@ function createClientsRepository(database) {
         [slug]
       );
       return toApiClient(result.rows[0] || null);
+    },
+
+    async listActive() {
+      const result = await database.query(
+        "select * from clients where status = 'active' order by id asc"
+      );
+      return result.rows.map(toApiClient);
     }
   };
 }

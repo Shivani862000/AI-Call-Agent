@@ -6,7 +6,7 @@ let application;
 let customerId;
 
 async function request(path, options = {}) {
-  const response = await fetch(`${application.baseUrl}${path}`, {
+  const response = await application.fetch(path, {
     ...options,
     headers: {
       ...(options.body ? { 'content-type': 'application/json' } : {}),

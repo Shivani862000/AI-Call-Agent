@@ -1109,10 +1109,13 @@
         <div class="admin-row">
           <div class="admin-avatar">A</div>
           <div class="admin-meta">
-            <strong>Admin User</strong>
-            <span>admin@example.com</span>
+            <strong id="currentWebmaster">Webmaster</strong>
+            <span>Authenticated session</span>
           </div>
         </div>
+        <label class="field-label" for="activeClientSelect" style="display:block;margin-top:14px;">Active client</label>
+        <select id="activeClientSelect" style="margin-top:8px;padding:10px 12px;"></select>
+        <button id="logoutButton" class="btn secondary" type="button" style="width:100%;margin-top:10px;">Log out</button>
       </div>
     </aside>
 
@@ -1551,6 +1554,33 @@
   <script>
     const API_BASE = `${window.location.origin}/api`;
     let customerCache = [];
+    let activeClientId = null;
+
+    async function loadSessionContext() {
+      const response = await fetch('/auth/session');
+      if (!response.ok) {
+        window.location.replace('/login.html');
+        return false;
+      }
+      const session = await response.json();
+      activeClientId = session.activeClientId;
+      document.getElementById('currentWebmaster').textContent = session.user.username;
+      const selector = document.getElementById('activeClientSelect');
+      selector.innerHTML = session.clients.map((client) => `<option value="${client.id}">${client.name}</option>`).join('');
+      selector.value = String(activeClientId);
+      return true;
+    }
+
+    async function selectActiveClient(clientId) {
+      const response = await fetch('/auth/select-client', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ clientId: Number(clientId) })
+      });
+      if (!response.ok) throw new Error('Unable to select client');
+      activeClientId = Number(clientId);
+      await Promise.all([loadCustomers(), loadFeedback(), loadRecentCalls(), loadLiveCalls(), loadStats()]);
+    }
     let feedbackCache = [];
     let recentCallsCache = [];
 
@@ -2322,7 +2352,7 @@
       window.location.href = `${API_BASE}/reports/weekly-download?t=${Date.now()}`;
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('analysisModal').addEventListener('click', (event) => {
         if (event.target.id === 'analysisModal') {
           closeAnalysisModal();
@@ -2338,6 +2368,15 @@
         statusFilter.value = '';
         statusFilter.selectedIndex = 0;
       }
+
+      if (!await loadSessionContext()) return;
+      document.getElementById('activeClientSelect').addEventListener('change', (event) => {
+        selectActiveClient(event.target.value).catch((error) => showAlert(error.message, 'error'));
+      });
+      document.getElementById('logoutButton').addEventListener('click', async () => {
+        await fetch('/auth/logout', { method: 'POST' });
+        window.location.replace('/login.html');
+      });
 
       resetCustomerForm();
       loadCustomers();

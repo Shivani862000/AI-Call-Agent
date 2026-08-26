@@ -3,6 +3,7 @@ const { mkdtemp, rm } = require('node:fs/promises');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { Pool } = require('pg');
 const {
   getTestConnectionString,
@@ -75,6 +76,23 @@ async function startTestApp() {
     ['Contract Test Clinic', 'contract-test-clinic', 'active']
   );
   const clientId = clientResult.rows[0].id;
+  const authUserId = randomUUID();
+  const authEmail = `contract-${authUserId}@example.test`;
+  const authPassword = 'contract-test-password';
+  await pool.query(
+    `insert into auth.users (id, aud, role, email, email_confirmed_at, created_at, updated_at)
+     values ($1, 'authenticated', 'authenticated', $2, now(), now(), now())`,
+    [authUserId, authEmail]
+  );
+  await pool.query(
+    `insert into app_users (id, username, username_normalized, email, email_normalized)
+     values ($1, 'contract-webmaster', 'contract-webmaster', $2, $2)`,
+    [authUserId, authEmail]
+  );
+  await pool.query(
+    `insert into app_user_roles (user_id, role) values ($1, 'webmaster')`,
+    [authUserId]
+  );
   const child = spawn(process.execPath, ['index.js'], {
     cwd: path.resolve(__dirname, '../..'),
     env: {
@@ -82,9 +100,16 @@ async function startTestApp() {
       PORT: String(port),
       DATABASE_URL: path.join(tempDirectory, 'contract-test.db'),
       NODE_ENV: 'test',
+      COOKIE_SECRET: 'contract-test-cookie-secret-at-least-32-bytes',
       SUPABASE_DB_URL: connectionString,
       SUPABASE_DB_TLS_INSECURE_TEST_ONLY: 'true',
       DEFAULT_CLIENT_ID: String(clientId),
+      SUPABASE_URL: 'https://contract-test.supabase.co',
+      SUPABASE_PUBLISHABLE_KEY: 'contract-test-publishable-key',
+      SUPABASE_TEST_AUTH_BYPASS: 'true',
+      SUPABASE_TEST_AUTH_USER_ID: authUserId,
+      SUPABASE_TEST_AUTH_EMAIL: authEmail,
+      SUPABASE_TEST_AUTH_PASSWORD: authPassword,
       CALL_MODE: 'scripted',
       OPENAI_API_KEY: '',
       GEMINI_API_KEY: '',
@@ -106,17 +131,43 @@ async function startTestApp() {
     await waitForHealth(baseUrl, child, output);
   } catch (error) {
     await stopChild(child);
+    await pool.query('delete from auth.users where id = $1', [authUserId]);
     await truncateApplicationTables(pool);
     await pool.end();
     await rm(tempDirectory, { recursive: true, force: true });
     throw error;
   }
 
+  const loginResponse = await fetch(`${baseUrl}/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'contract-webmaster', password: authPassword })
+  });
+  if (!loginResponse.ok) {
+    await stopChild(child);
+    await pool.query('delete from auth.users where id = $1', [authUserId]);
+    await truncateApplicationTables(pool);
+    await pool.end();
+    await rm(tempDirectory, { recursive: true, force: true });
+    throw new Error(`Contract-test login failed (${loginResponse.status})`);
+  }
+  const setCookies = typeof loginResponse.headers.getSetCookie === 'function'
+    ? loginResponse.headers.getSetCookie()
+    : [loginResponse.headers.get('set-cookie')];
+  const sessionCookie = setCookies.filter(Boolean).map((value) => value.split(';', 1)[0]).join('; ');
+
   return {
     baseUrl,
     output,
+    fetch(pathname, options = {}) {
+      return fetch(`${baseUrl}${pathname}`, {
+        ...options,
+        headers: { ...options.headers, cookie: sessionCookie }
+      });
+    },
     async stop() {
       await stopChild(child);
+      await pool.query('delete from auth.users where id = $1', [authUserId]);
       await truncateApplicationTables(pool);
       await pool.end();
       await rm(tempDirectory, { recursive: true, force: true });

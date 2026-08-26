@@ -400,7 +400,7 @@ git commit -m "feat: add tenant-scoped catalog repositories"
 - User repository methods load normalized usernames, active authorization, roles, login time, and auth version.
 - Middleware reloads current authority, validates the signed `activeClientId`, exposes it to repositories, and enforces `requireRole('webmaster')`.
 
-- [ ] **Step 1: Write provisioning tests**
+- [x] **Step 1: Write provisioning tests**
 
 Use a fake Supabase Admin adapter plus test Postgres. Assert username/email normalization, minimum 12-character password, no password/hash columns, one role row, duplicate rejection, Auth-user compensation on profile failure, rejection of `--password`, and safe output.
 
@@ -413,19 +413,19 @@ assert.notEqual(first.id, second.id);
 assert.equal(await countActiveWebmasters(database), 2);
 ```
 
-- [ ] **Step 2: Write HTTP auth tests**
+- [x] **Step 2: Write HTTP auth tests**
 
 Assert either webmaster can log in independently; wrong credentials return generic `401`; cookie attributes are correct; session reloads roles and active clients; `POST /auth/select-client` accepts either active client and rejects absent/inactive IDs; logout clears; inactive/auth-version-changed users fail; non-webmasters receive `403`; and no Supabase token reaches JSON or browser storage.
 
-- [ ] **Step 3: Implement safe provisioning**
+- [x] **Step 3: Implement safe provisioning**
 
 Require `SUPABASE_DB_URL`, `SUPABASE_URL`, and `SUPABASE_SECRET_KEY`, plus `--username` and `--email`; read password without echo or from stdin; reject password flags/environment values. Preflight normalized username/email, call Supabase Admin `createUser`, insert profile plus role in one Postgres transaction, and delete the new Auth identity if the transaction fails. Never cap webmaster count or update existing accounts.
 
-- [ ] **Step 4: Implement login and sessions**
+- [x] **Step 4: Implement login and sessions**
 
 Resolve normalized username to private email, verify through Supabase Auth, discard returned tokens, and create a signed cookie containing only user ID, auth version, active client ID, and issue time. Default to the lowest-ID active client only when the session has no selection. Add `POST /auth/select-client` to validate and replace that selection. Use a fixed eight-hour lifetime, login throttling, database-backed authorization and client validation on every protected request, and same-origin checks for browser mutations.
 
-- [ ] **Step 5: Protect and verify**
+- [x] **Step 5: Protect and verify**
 
 Keep login assets, auth entry endpoints, `/health`, and validated Twilio endpoints public. Protect client selection, admin HTML, `/api/**`, reports, recordings/transcripts, and operator call endpoints without renaming them. Add a compact selector to `public/admin.html`; selection refreshes existing dashboard data rather than introducing client-specific business URLs.
 
