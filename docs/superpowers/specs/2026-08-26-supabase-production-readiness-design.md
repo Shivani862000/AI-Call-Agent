@@ -11,7 +11,7 @@ The application remains one Node.js/Express deployable with the same dashboard, 
 
 The Supabase database starts empty. Existing `feedback.db` contents are deliberately discarded. There is no export, backup, import, reconciliation, dual-write period, or SQLite fallback. Source-controlled PostgreSQL migrations create the new schema. After the Supabase-backed application passes acceptance checks, SQLite code, dependencies, configuration, files, and persistent storage are removed.
 
-The same Supabase project supports the two initial client/tenant records. Tenant-owned rows carry `client_id`. Webmaster accounts are platform administrators with access to both clients. The system supports multiple active webmaster accounts; there is no singleton-webmaster constraint.
+One production Supabase project supports the two initial client/tenant records. Tenant-owned rows carry `client_id`. Webmaster accounts are platform administrators with access to both clients. The system supports multiple active webmaster accounts; there is no singleton-webmaster constraint. Development and integration verification use a separate hosted Supabase test project; the project does not run Supabase or PostgreSQL through local Docker containers.
 
 ## 2. Approved Constraints
 
@@ -21,6 +21,7 @@ The same Supabase project supports the two initial client/tenant records. Tenant
 - Existing HTTP paths, response behavior, admin UI, numeric public IDs, and business workflows remain compatible.
 - PostgreSQL access is isolated behind named repositories and transaction-level application operations.
 - Use one Supabase project and one Postgres database for the two initial clients; do not create a project per tenant.
+- Use hosted Supabase for development integration tests and production. Do not require Docker or a local Supabase stack.
 - Every tenant-owned row has a required `client_id`; webmaster accounts are platform-wide administrators in this phase.
 - Supabase Auth owns password hashing and password verification. No plaintext password is stored by the application.
 - Application roles, activation state, username, and session invalidation version live in application tables, not user-editable Auth metadata.
@@ -92,7 +93,7 @@ There is no generic `query(sql, params)` interface exposed outside persistence, 
 
 - `SUPABASE_DB_URL` is a secret pooled Postgres connection string for a least-privilege runtime role.
 - One bounded `pg.Pool` is created during startup. Startup performs `SELECT 1` before listening and exits non-zero on failure.
-- SQL migrations live in `supabase/migrations/` and run explicitly during deployment or local database reset. Application startup never runs DDL.
+- SQL migrations live in `supabase/migrations/` and run explicitly against a dedicated hosted test project or during production deployment. Application startup never runs DDL.
 - SIGTERM/SIGINT stop scheduling, stop accepting traffic, drain the pool, and close the HTTP server.
 - Repositories receive a database facade; they do not construct pools.
 - The browser never receives a database URL, service-role key, or direct access to tenant tables.
@@ -240,6 +241,8 @@ No webmaster-management UI, invitations, or password-reset workflow is included 
 
 `DATABASE_URL`, `MONGODB_URI`, and `MONGODB_DB_NAME` are removed. Webmaster usernames and passwords are not startup configuration.
 
+Hosted integration tests use a separate, non-production Supabase project. Its connection string is supplied as `SUPABASE_TEST_DB_URL`, its project reference as `SUPABASE_TEST_PROJECT_REF`, and destructive table cleanup is enabled only when `SUPABASE_TEST_ALLOW_RESET=true`. These values live in an ignored `.env.test.local` file or CI secret store and must never equal production runtime configuration.
+
 ### 7.2 Security baseline
 
 - Runtime database credentials use a deployment-created LOGIN role that belongs to the source-controlled `ai_call_agent_runtime` group role, has only required table/function/sequence permissions, and has no schema-owner or `BYPASSRLS` privileges.
@@ -259,14 +262,14 @@ A small logger emits one-line JSON with timestamp, level, event, request ID, and
 ## 8. Ordered Implementation Scope
 
 1. Characterize existing HTTP and workflow contracts with focused tests.
-2. Add the local Supabase/Postgres test environment, source-controlled migrations, and runtime connection pool.
+2. Configure a dedicated hosted Supabase test project, source-controlled migrations, and the runtime connection pool without local Docker services.
 3. Create the relational schema, constraints, indexes, tenant columns, deny-by-default Data API posture, and seed/provisioning interfaces.
 4. Implement focused repositories for customers, calls, feedback, supervisor events, reporting, clients, agents, campaign configurations, support tickets, and application state.
 5. Replace active SQLite callers with repository and transaction operations while preserving routes and response shapes.
 6. Add Supabase Auth login, signed application sessions, multiple-webmaster provisioning, and role enforcement.
 7. Validate Twilio-controlled public entry points.
 8. Add database-aware health, structured logs, configuration validation, and graceful shutdown.
-9. Verify against a clean local Supabase stack and an empty non-production Supabase project.
+9. Verify migrations and the complete suite against the dedicated non-production hosted Supabase project.
 10. Remove SQLite and every MongoDB-specific plan/configuration reference after acceptance.
 11. Hand the verified Supabase-only application to the separate DigitalOcean production pipeline plan.
 
@@ -274,7 +277,7 @@ A small logger emits one-line JSON with timestamp, level, event, request ID, and
 
 ### Automated acceptance
 
-- [ ] A clean Supabase reset creates all tables, foreign keys, constraints, indexes, roles/grants, and RLS configuration.
+- [ ] Applying migrations to the dedicated hosted test project creates all tables, foreign keys, constraints, indexes, roles/grants, and RLS configuration.
 - [ ] Starting without required runtime configuration fails before listening and prints no secret values.
 - [ ] An unreachable database prevents startup; a running app returns `503` during database loss and recovers to `200`.
 - [ ] Startup never inserts, resets, or updates Auth users or `app_users`.
@@ -314,12 +317,14 @@ A small logger emits one-line JSON with timestamp, level, event, request ID, and
 - Microservices, a job queue/cache, multiple app replicas, or distributed scheduler coordination.
 - Storing audio, generated PDFs, or temporary recording files in Postgres or Supabase Storage.
 - Point-in-time recovery, read replicas, multi-region failover, or an enterprise observability rollout.
+- Docker Desktop, local Supabase containers, or a locally hosted PostgreSQL test database.
 - DigitalOcean provisioning, CI/CD, Nginx/TLS, firewall automation, or UAT infrastructure in this plan.
 
 ## 11. Remaining Deployment Decisions
 
-1. Select the Supabase region nearest the eventual DigitalOcean production Droplet.
-2. Supply the two production client names, slugs, and timezones before cutover provisioning.
-3. Provide the canonical public HTTPS URL during the DigitalOcean phase so Twilio signature validation uses the URL Twilio signed.
+1. Create a dedicated hosted Supabase test project and supply its database connection through ignored local/CI secrets.
+2. Select the production Supabase region nearest the eventual DigitalOcean production Droplet.
+3. Supply the two production client names, slugs, and timezones before cutover provisioning.
+4. Provide the canonical public HTTPS URL during the DigitalOcean phase so Twilio signature validation uses the URL Twilio signed.
 
 No decision is needed about old SQLite data, MongoDB, or webmaster cardinality: SQLite data is discarded, MongoDB is not used, and multiple webmasters are explicitly supported.

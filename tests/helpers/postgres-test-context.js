@@ -1,6 +1,9 @@
 const { Pool } = require('pg');
+const path = require('node:path');
+const dotenv = require('dotenv');
 
-const LOCAL_SUPABASE_PORT = '54322';
+dotenv.config({ path: path.resolve(process.cwd(), '.env.test.local') });
+
 const APPLICATION_TABLES = [
   'call_supervisor_events',
   'feedback',
@@ -15,17 +18,37 @@ const APPLICATION_TABLES = [
   'clients'
 ];
 
-function getTestConnectionString(env = process.env) {
-  const connectionString = env.SUPABASE_TEST_DB_URL
-    || 'postgresql://postgres:postgres@127.0.0.1:54322/postgres';
-  const parsed = new URL(connectionString);
-  const isLocalSupabase = ['127.0.0.1', 'localhost'].includes(parsed.hostname)
-    && parsed.port === LOCAL_SUPABASE_PORT
-    && parsed.pathname === '/postgres';
-  const isNamedTestDatabase = parsed.pathname.slice(1).endsWith('_test');
+function requiredHostedTestSettings(env = process.env) {
+  const missing = [
+    'SUPABASE_TEST_DB_URL',
+    'SUPABASE_TEST_PROJECT_REF',
+    'SUPABASE_TEST_ALLOW_RESET'
+  ].filter((name) => !env[name]);
 
-  if (!isLocalSupabase && !isNamedTestDatabase) {
-    throw new Error('SUPABASE_TEST_DB_URL must target local Supabase or a database ending in _test');
+  if (missing.length > 0) {
+    throw new Error(`Hosted database tests require ${missing.join(', ')}`);
+  }
+
+  if (env.SUPABASE_TEST_ALLOW_RESET !== 'true') {
+    throw new Error('SUPABASE_TEST_ALLOW_RESET must be exactly true for destructive hosted tests');
+  }
+
+  return {
+    connectionString: env.SUPABASE_TEST_DB_URL,
+    projectRef: env.SUPABASE_TEST_PROJECT_REF
+  };
+}
+
+function getTestConnectionString(env = process.env) {
+  const { connectionString, projectRef } = requiredHostedTestSettings(env);
+  const parsed = new URL(connectionString);
+  const username = decodeURIComponent(parsed.username);
+  const isDirectProjectHost = parsed.hostname === `db.${projectRef}.supabase.co`;
+  const isPoolerHost = parsed.hostname.endsWith('.pooler.supabase.com')
+    && username.endsWith(`.${projectRef}`);
+
+  if (!isDirectProjectHost && !isPoolerHost) {
+    throw new Error('SUPABASE_TEST_DB_URL must match SUPABASE_TEST_PROJECT_REF on a hosted Supabase connection');
   }
 
   if (env.SUPABASE_DB_URL && connectionString === env.SUPABASE_DB_URL) {
@@ -33,6 +56,20 @@ function getTestConnectionString(env = process.env) {
   }
 
   return connectionString;
+}
+
+function hasHostedTestDatabase(env = process.env) {
+  const configured = Boolean(
+    env.SUPABASE_TEST_DB_URL
+    && env.SUPABASE_TEST_PROJECT_REF
+    && env.SUPABASE_TEST_ALLOW_RESET === 'true'
+  );
+
+  if (!configured && env.REQUIRE_SUPABASE_TEST_DB === '1') {
+    requiredHostedTestSettings(env);
+  }
+
+  return configured;
 }
 
 async function truncateApplicationTables(pool) {
@@ -67,6 +104,7 @@ async function withTestDatabase(run, env = process.env) {
 
 module.exports = {
   getTestConnectionString,
+  hasHostedTestDatabase,
   truncateApplicationTables,
   withTestDatabase
 };

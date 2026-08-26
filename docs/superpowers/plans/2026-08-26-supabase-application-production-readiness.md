@@ -6,7 +6,7 @@
 
 **Architecture:** Keep the current single-process Express application, routes, dashboard, and call workflows. Place parameterized PostgreSQL behind focused repositories using one `pg.Pool`; use Supabase Auth for password verification and application tables for usernames, activation, roles, and session invalidation. Store both clients in one Supabase project, require `client_id` in every tenant-owned repository operation, and keep webmasters platform-wide for this phase.
 
-**Tech Stack:** Node.js 24 LTS, Express, PostgreSQL/Supabase, `pg`, `@supabase/supabase-js`, Supabase CLI local stack, `cookie-session`, `express-rate-limit`, Node’s built-in test runner, and Supertest.
+**Tech Stack:** Node.js 24 LTS, Express, hosted Supabase Postgres/Auth, `pg`, `@supabase/supabase-js`, Supabase CLI hosted migration commands, `cookie-session`, `express-rate-limit`, Node’s built-in test runner, and Supertest.
 
 **Spec:** `docs/superpowers/specs/2026-08-26-supabase-production-readiness-design.md`
 
@@ -14,6 +14,7 @@
 
 - Start Supabase empty and deliberately discard existing SQLite data; do not export, back up, import, dual-write, or reconcile it.
 - Supabase Postgres is the only persistent application datastore. MongoDB and SQLite are not runtime or fallback options.
+- Do not require Docker or a local Supabase/Postgres stack. Database integration tests use one dedicated hosted non-production Supabase project.
 - Use one Supabase project for both initial clients. Tenant-owned rows and repository calls require `client_id`.
 - Webmaster accounts are platform-wide and unlimited in count. Normal startup must never create, reset, or overwrite one.
 - Supabase Auth owns password hashing; the application stores no password or password hash.
@@ -29,8 +30,9 @@
 
 ### Database and persistence
 
-- `supabase/config.toml` — local Supabase project configuration.
+- `supabase/config.toml` — Supabase CLI metadata used to push source-controlled migrations to hosted projects; it is not a local runtime dependency.
 - `supabase/migrations/20260826000100_application_schema.sql` — extensions, tables, keys, checks, indexes, grants, and RLS posture.
+- `scripts/push-test-migrations.js` — validates the hosted test-project guard before invoking the Supabase CLI migration push.
 - `persistence/postgres.js` — creates, verifies, and closes one `pg.Pool`; exposes transaction helpers.
 - `persistence/mappers.js` — converts Postgres values to current API shapes.
 - `repositories/index.js` — constructs all repositories from the database facade.
@@ -58,7 +60,9 @@
 
 ### Tests
 
+- `.env.test.example` — secret-free template for the dedicated hosted Supabase test project.
 - `tests/helpers/postgres-test-context.js`
+- `tests/helpers/postgres-test-context.test.js`
 - `tests/helpers/start-test-app.js`
 - `tests/helpers/test-config.js`
 - `tests/persistence/postgres.test.js`
@@ -81,17 +85,22 @@
 **Files:**
 - Modify: `package.json`
 - Modify: `package-lock.json`
+- Modify: `.gitignore`
+- Create: `.env.test.example`
+- Create: `scripts/push-test-migrations.js`
 - Create: `supabase/config.toml`
 - Create: `tests/helpers/postgres-test-context.js`
+- Create: `tests/helpers/postgres-test-context.test.js`
+- Create: `tests/scripts/push-test-migrations.test.js`
 - Create: `tests/helpers/start-test-app.js`
 - Create: `tests/helpers/test-config.js`
 - Create: `tests/application-contracts.test.js`
 - Create: `tests/persistence/postgres.test.js`
 
 **Interfaces:**
-- Produces: `withTestDatabase(run) -> Promise<void>` using `SUPABASE_TEST_DB_URL` or the local Supabase database.
+- Produces: `withTestDatabase(run) -> Promise<void>` using only a guarded `SUPABASE_TEST_DB_URL` for a dedicated hosted project.
 - Produces: `makeTestConfig(overrides)` with inert provider configuration.
-- Establishes: `npm run db:start`, `db:stop`, `db:reset`, and `test` commands.
+- Establishes: `npm test`, guarded `npm run test:db`, and hosted-only `npm run db:push:test` commands.
 
 - [x] **Step 1: Capture current HTTP contracts before changing persistence**
 
@@ -109,21 +118,21 @@ npm install pg @supabase/supabase-js cookie-session express-rate-limit
 npm install --save-dev supertest supabase
 ```
 
-Set `engines.node` to `>=24 <25` and add scripts for `node --test --test-concurrency=1`, `supabase start`, `supabase stop`, `supabase db reset`, and `node scripts/provision-webmaster.js`.
+Set `engines.node` to `>=24 <25` and add scripts for `node --test --test-concurrency=1`, guarded hosted database tests, `supabase db push --db-url`, and `node scripts/provision-webmaster.js`. Do not add `supabase start`, `supabase stop`, or local reset commands.
 
-- [x] **Step 3: Configure the isolated local Supabase project**
+- [x] **Step 3: Configure the isolated hosted Supabase test project boundary**
 
-Run `npx supabase init`. Keep Auth and Postgres enabled and never put production project IDs or keys in `supabase/config.toml`.
+Keep source-controlled Supabase CLI metadata and migrations, but run no local services. Add `.env.test.local` to `.gitignore`; operators supply `SUPABASE_TEST_DB_URL`, `SUPABASE_TEST_PROJECT_REF`, and `SUPABASE_TEST_ALLOW_RESET=true` there or through CI secrets.
 
-Create `withTestDatabase(run)` so it requires a dedicated test database, resets migrations before the suite, passes `{ connectionString }`, and truncates application tables between tests. It must refuse a host/database combination matching production configuration.
+Create `withTestDatabase(run)` so it requires the dedicated hosted test project, validates that the connection hostname or pooler username matches `SUPABASE_TEST_PROJECT_REF`, refuses a URL matching `SUPABASE_DB_URL`, passes `{ connectionString, pool }`, and truncates only application tables between tests. Hosted database tests are skipped during ordinary offline unit runs and fail fast when `npm run test:db` is explicitly requested without all three guard variables.
 
 - [x] **Step 4: Write failing lifecycle and schema tests**
 
 Assert imports for `createPostgres`, `pingPostgres`, `closePostgres`, and `withTransaction` fail initially. The completed test must prove `SELECT 1`, rollback behavior, all required tables, identity-generated numeric IDs, foreign keys, indexes, revoked `anon`/`authenticated` grants, and enabled RLS.
 
-- [x] **Step 5: Verify the expected failure**
+- [x] **Step 5: Verify the expected failure without starting Docker**
 
-Run: `npm test -- tests/persistence/postgres.test.js`
+Run: `npm run test:db -- tests/persistence/postgres.test.js`
 Expected: FAIL because `persistence/postgres.js` and the schema migration do not exist.
 
 - [x] **Step 6: Commit the harness**
@@ -140,6 +149,8 @@ git commit -m "test: add Supabase integration harness"
 - Create: `persistence/postgres.js`
 - Create: `persistence/mappers.js`
 - Modify: `tests/persistence/postgres.test.js`
+- Create: `tests/persistence/schema.test.js`
+- Create: `tests/persistence/mappers.test.js`
 
 **Interfaces:**
 - Produces: `createPostgres({ connectionString, max, statementTimeoutMs, logger }) -> { pool, query, transaction, ping, close }`.
@@ -199,14 +210,15 @@ Use `pg.Pool` with explicit pool size, connection timeout, statement timeout, TL
 
 Convert `bigint` strings to safe numeric IDs, reject unsafe values, serialize timestamps, and emit legacy integer-flag/JSON-string compatibility only where current callers require it.
 
-- [ ] **Step 5: Reset and verify**
+- [ ] **Step 5: Push to the hosted test project and verify**
 
 ```bash
-npm run db:reset
-npm test -- tests/persistence/postgres.test.js
+npm run db:push:test -- --dry-run
+npm run db:push:test
+npm run test:db -- tests/persistence/postgres.test.js tests/persistence/schema.test.js tests/persistence/mappers.test.js
 ```
 
-Expected: PASS.
+Expected: the dry run lists only the source-controlled migration, the push succeeds against the guarded test URL, and all persistence tests pass. No Docker daemon is used.
 
 - [ ] **Step 6: Commit schema and persistence**
 
@@ -513,14 +525,14 @@ Remove `sqlite3`, delete `db.js`, and remove database-file configuration. Delete
 
 - [ ] **Step 4: Update documentation**
 
-Document local Supabase reset, runtime configuration names, explicit migrations, repeatable webmaster provisioning, shared two-client design, health behavior, and intentional SQLite-data abandonment. Remove MongoDB instructions.
+Document hosted test-project setup, runtime configuration names, explicit migration push, repeatable webmaster provisioning, shared two-client design, health behavior, and intentional SQLite-data abandonment. Remove local-Docker and MongoDB instructions.
 
 - [ ] **Step 5: Verify and commit**
 
 ```bash
 npm test
-npm run db:reset
-npm test
+npm run db:push:test -- --dry-run
+npm run test:db
 npm ls sqlite3 mongodb
 rg -n "sqlite3|feedback\\.db|DATABASE_URL|MONGODB_|mongodb" --glob '!node_modules/**' .
 git add -A
@@ -529,7 +541,7 @@ git commit -m "refactor: remove SQLite and MongoDB persistence"
 
 Expected: tests pass; neither obsolete dependency is installed; provider references remain only in historical explanation where intentional.
 
-### Task 11: Verify an empty hosted Supabase project and prepare handoff
+### Task 11: Complete hosted Supabase acceptance and prepare handoff
 
 **Files:**
 - Create: `docs/deployment/supabase-production-handoff.md`
@@ -538,13 +550,13 @@ Expected: tests pass; neither obsolete dependency is installed; provider referen
 **Interfaces:**
 - Produces a secret-free handoff checklist for the separate DigitalOcean pipeline plan.
 
-- [ ] **Step 1: Create an isolated hosted verification project**
+- [ ] **Step 1: Confirm the isolated hosted test project guard**
 
-Choose the approved nearby Supabase region. Use an empty non-production project, never the future production project. Inject credentials without writing them to repository files or shell history.
+Use the dedicated non-production hosted project created for integration tests, never the future production project. Confirm that its reference matches `SUPABASE_TEST_PROJECT_REF`, that `SUPABASE_TEST_DB_URL` differs from `SUPABASE_DB_URL`, and that all credentials come from `.env.test.local` or CI secret injection rather than repository files or shell history.
 
 - [ ] **Step 2: Apply migrations and run integration tests**
 
-Run source-controlled migrations and the complete suite with a hosted-test guard that prevents destructive cleanup outside the verification project.
+Dry-run and then apply source-controlled migrations with `npm run db:push:test`; run `npm run test:db` and the complete suite with the hosted-test guard that prevents destructive cleanup outside the verification project.
 
 - [ ] **Step 3: Prove multiple webmasters**
 
@@ -562,10 +574,10 @@ Record, without values: required variables, migration command, runtime/provision
 
 ```bash
 npm ci
-npm run db:start
-npm run db:reset
+npm run db:push:test -- --dry-run
+npm run db:push:test
 npm test
-npm run db:stop
+npm run test:db
 git diff --check
 git status --short
 git add docs/deployment/supabase-production-handoff.md
@@ -581,7 +593,7 @@ Application production-readiness is complete only when:
 - at least two webmaster accounts can be provisioned and authenticate independently;
 - startup creates or resets no users;
 - health, logs, protected routes, and Twilio validation pass automated tests;
-- a clean local reset and empty hosted verification project pass acceptance; and
+- the dedicated hosted test project passes migration and application acceptance without Docker; and
 - the secret-free handoff is ready for the separate DigitalOcean production pipeline work.
 
 Do not begin the DigitalOcean pipeline or UAT work inside this plan.

@@ -10,9 +10,8 @@
     "start": "node index.js",
     "dev": "node index.js",
     "test": "node --test --test-concurrency=1",
-    "db:start": "supabase start",
-    "db:stop": "supabase stop",
-    "db:reset": "supabase db reset",
+    "test:db": "REQUIRE_SUPABASE_TEST_DB=1 node --test --test-concurrency=1 tests/persistence/*.test.js",
+    "db:push:test": "node scripts/push-test-migrations.js",
     "provision:webmaster": "node scripts/provision-webmaster.js"
   },
   "dependencies": {
