@@ -361,15 +361,15 @@ git commit -m "feat: move reporting to PostgreSQL"
 - Each tenant repository provides `create(clientId, input)`, `findById(clientId, id)`, and `list(clientId, options)`.
 - Application state provides `get(clientIdOrNull, key)` and `set(clientIdOrNull, key, value, expectedVersion?)`.
 
-- [ ] **Step 1: Write failing contract tests**
+- [x] **Step 1: Write failing contract tests**
 
 Assert client isolation, identity IDs, field mappings, foreign-key rejection, application-state version checks, and absence of provider-secret columns.
 
-- [ ] **Step 2: Implement only tested methods**
+- [x] **Step 2: Implement only tested methods**
 
 Use explicit field lists and tenant predicates. Do not add management routes, UI, scheduling behavior, or ticket workflows.
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit**
 
 ```bash
 npm test -- tests/repositories/catalogs.test.js
