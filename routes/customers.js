@@ -1,6 +1,4 @@
 const express = require('express');
-const router = express.Router();
-const { dbRun, dbGet, dbAll } = require('../db');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 
@@ -74,8 +72,8 @@ function validateCustomerPayload(payload) {
   return errors;
 }
 
-function handleSqliteError(error, res) {
-  if (error.message && error.message.includes('UNIQUE constraint failed: customers.phone')) {
+function handleCustomerError(error, res) {
+  if (error?.code === 'CUSTOMER_PHONE_EXISTS') {
     return res.status(409).json({
       error: 'A customer with this phone number already exists',
       fieldErrors: { phone: 'Phone number already exists' }
@@ -86,260 +84,173 @@ function handleSqliteError(error, res) {
   return res.status(500).json({ error: error.message });
 }
 
-async function saveCustomer(payload) {
-  return dbRun(
-    `INSERT INTO customers (
-      name, phone, preferred_slot, status, customer_value, urgency_level,
-      preferred_language, preferred_dialect, do_not_call, consent_status,
-      outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      payload.name,
-      payload.phone,
-      payload.preferred_slot,
-      'pending',
-      payload.customer_value,
-      payload.urgency_level,
-      payload.preferred_language,
-      payload.preferred_dialect || null,
-      payload.do_not_call,
-      payload.consent_status,
-      payload.outstanding_issues || null,
-      payload.pending_follow_ups || null,
-      payload.revenue_stage,
-      payload.revenue_estimate
-    ]
-  );
-}
-
-// Add single customer
-router.post('/', async (req, res) => {
-  try {
-    const payload = normalizeCustomerPayload(req.body);
-    const fieldErrors = validateCustomerPayload(payload);
-
-    if (Object.keys(fieldErrors).length > 0) {
-      return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
-    }
-
-    const result = await saveCustomer(payload);
-    res.json({ id: result.lastID, message: 'Customer added successfully' });
-  } catch (error) {
-    return handleSqliteError(error, res);
+function createCustomersRouter({ customers, getClientId }) {
+  if (!customers || typeof getClientId !== 'function') {
+    throw new TypeError('Customer router requires customers and getClientId dependencies');
   }
-});
 
-// Bulk upload CSV
-router.post('/csv', upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+  const router = express.Router();
+  const resolveClientId = (req) => Promise.resolve(getClientId(req));
 
-    const csvContent = req.file.buffer.toString('utf-8');
-    const records = parse(csvContent, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true
-    });
-
-    let successCount = 0;
-    let errorCount = 0;
-    const errors = [];
-
-    for (const [index, record] of records.entries()) {
-      const payload = normalizeCustomerPayload(record);
+  router.post('/', async (req, res) => {
+    try {
+      const payload = normalizeCustomerPayload(req.body);
       const fieldErrors = validateCustomerPayload(payload);
 
       if (Object.keys(fieldErrors).length > 0) {
-        errorCount += 1;
-        errors.push({ row: index + 2, fieldErrors });
-        continue;
+        return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
       }
 
-      try {
-        await saveCustomer(payload);
-        successCount += 1;
-      } catch (err) {
-        errorCount += 1;
-        errors.push({ row: index + 2, error: err.message });
+      const customer = await customers.create(await resolveClientId(req), {
+        ...payload,
+        status: 'pending'
+      });
+      return res.json({ id: customer.id, message: 'Customer added successfully' });
+    } catch (error) {
+      return handleCustomerError(error, res);
+    }
+  });
+
+  router.post('/csv', upload.single('file'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
       }
+
+      const clientId = await resolveClientId(req);
+      const records = parse(req.file.buffer.toString('utf-8'), {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true
+      });
+      let successCount = 0;
+      let errorCount = 0;
+      const errors = [];
+
+      for (const [index, record] of records.entries()) {
+        const payload = normalizeCustomerPayload(record);
+        const fieldErrors = validateCustomerPayload(payload);
+        if (Object.keys(fieldErrors).length > 0) {
+          errorCount += 1;
+          errors.push({ row: index + 2, fieldErrors });
+          continue;
+        }
+
+        try {
+          await customers.create(clientId, { ...payload, status: 'pending' });
+          successCount += 1;
+        } catch (error) {
+          errorCount += 1;
+          errors.push({ row: index + 2, error: error.message });
+        }
+      }
+
+      return res.json({
+        message: 'CSV import completed',
+        successCount,
+        errorCount,
+        totalRows: records.length,
+        errors: errors.slice(0, 10)
+      });
+    } catch (error) {
+      console.error('Error processing CSV:', error);
+      return res.status(500).json({ error: error.message });
     }
+  });
 
-    res.json({
-      message: 'CSV import completed',
-      successCount,
-      errorCount,
-      totalRows: records.length,
-      errors: errors.slice(0, 10)
-    });
-  } catch (error) {
-    console.error('Error processing CSV:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// List all customers
-router.get('/', async (req, res) => {
-  try {
-    const customers = await dbAll('SELECT * FROM customers ORDER BY COALESCE(priority_score, 0) DESC, created_at DESC');
-    res.json(customers);
-  } catch (error) {
-    console.error('Error fetching customers:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get one customer
-router.get('/:id', async (req, res) => {
-  try {
-    const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
-    if (!customer) {
-      return res.status(404).json({ error: 'Customer not found' });
+  router.get('/', async (req, res) => {
+    try {
+      return res.json(await customers.list(await resolveClientId(req)));
+    } catch (error) {
+      console.error('Error fetching customers:', error);
+      return res.status(500).json({ error: error.message });
     }
+  });
 
-    res.json(customer);
-  } catch (error) {
-    console.error('Error fetching customer:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update customer
-router.put('/:id', async (req, res) => {
-  try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
-    if (!existing) {
-      return res.status(404).json({ error: 'Customer not found' });
+  router.get('/:id', async (req, res) => {
+    try {
+      const customer = await customers.findById(await resolveClientId(req), req.params.id);
+      if (!customer) return res.status(404).json({ error: 'Customer not found' });
+      return res.json(customer);
+    } catch (error) {
+      console.error('Error fetching customer:', error);
+      return res.status(500).json({ error: error.message });
     }
+  });
 
-    const payload = normalizeCustomerPayload(req.body);
-    const fieldErrors = validateCustomerPayload(payload);
+  router.put('/:id', async (req, res) => {
+    try {
+      const clientId = await resolveClientId(req);
+      const existing = await customers.findById(clientId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Customer not found' });
 
-    if (Object.keys(fieldErrors).length > 0) {
-      return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
+      const payload = normalizeCustomerPayload(req.body);
+      const fieldErrors = validateCustomerPayload(payload);
+      if (Object.keys(fieldErrors).length > 0) {
+        return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
+      }
+
+      await customers.update(clientId, req.params.id, payload);
+      return res.json({ message: 'Customer updated successfully' });
+    } catch (error) {
+      return handleCustomerError(error, res);
     }
+  });
 
-    await dbRun(
-      `UPDATE customers
-          SET name = ?,
-              phone = ?,
-              preferred_slot = ?,
-              customer_value = ?,
-              urgency_level = ?,
-              preferred_language = ?,
-              preferred_dialect = ?,
-              do_not_call = ?,
-              consent_status = ?,
-              outstanding_issues = ?,
-              pending_follow_ups = ?,
-              revenue_stage = ?,
-              revenue_estimate = ?
-        WHERE id = ?`,
-      [
-        payload.name,
-        payload.phone,
-        payload.preferred_slot,
-        payload.customer_value,
-        payload.urgency_level,
-        payload.preferred_language,
-        payload.preferred_dialect || null,
-        payload.do_not_call,
-        payload.consent_status,
-        payload.outstanding_issues || null,
-        payload.pending_follow_ups || null,
-        payload.revenue_stage,
-        payload.revenue_estimate,
-        req.params.id
-      ]
-    );
+  router.patch('/:id/workflow', async (req, res) => {
+    try {
+      const clientId = await resolveClientId(req);
+      const existing = await customers.findById(clientId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Customer not found' });
 
-    res.json({ message: 'Customer updated successfully' });
-  } catch (error) {
-    return handleSqliteError(error, res);
-  }
-});
-
-router.patch('/:id/workflow', async (req, res) => {
-  try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
-    if (!existing) {
-      return res.status(404).json({ error: 'Customer not found' });
+      await customers.update(clientId, req.params.id, {
+        do_not_call: req.body.do_not_call === undefined ? existing.do_not_call : toBooleanFlag(req.body.do_not_call),
+        wrong_number_flag: req.body.wrong_number_flag === undefined ? existing.wrong_number_flag : toBooleanFlag(req.body.wrong_number_flag),
+        admin_review_required: req.body.admin_review_required === undefined ? existing.admin_review_required : toBooleanFlag(req.body.admin_review_required),
+        consent_status: req.body.consent_status ? String(req.body.consent_status).trim().toLowerCase() : existing.consent_status,
+        next_retry_at: req.body.next_retry_at === undefined ? existing.next_retry_at : req.body.next_retry_at,
+        pending_follow_ups: req.body.pending_follow_ups === undefined
+          ? existing.pending_follow_ups
+          : String(req.body.pending_follow_ups || '').trim() || null
+      });
+      return res.json({ message: 'Workflow updated successfully' });
+    } catch (error) {
+      console.error('Error updating customer workflow:', error);
+      return res.status(500).json({ error: error.message });
     }
+  });
 
-    const patch = {
-      do_not_call: req.body.do_not_call === undefined ? existing.do_not_call : toBooleanFlag(req.body.do_not_call),
-      wrong_number_flag: req.body.wrong_number_flag === undefined ? existing.wrong_number_flag : toBooleanFlag(req.body.wrong_number_flag),
-      admin_review_required: req.body.admin_review_required === undefined ? existing.admin_review_required : toBooleanFlag(req.body.admin_review_required),
-      consent_status: req.body.consent_status ? String(req.body.consent_status).trim().toLowerCase() : existing.consent_status,
-      next_retry_at: req.body.next_retry_at === undefined ? existing.next_retry_at : req.body.next_retry_at,
-      pending_follow_ups: req.body.pending_follow_ups === undefined ? existing.pending_follow_ups : String(req.body.pending_follow_ups || '').trim()
-    };
+  router.post('/:id/retry', async (req, res) => {
+    try {
+      const clientId = await resolveClientId(req);
+      const existing = await customers.findById(clientId, req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Customer not found' });
 
-    await dbRun(
-      `UPDATE customers
-          SET do_not_call = ?,
-              wrong_number_flag = ?,
-              admin_review_required = ?,
-              consent_status = ?,
-              next_retry_at = ?,
-              pending_follow_ups = ?
-        WHERE id = ?`,
-      [
-        patch.do_not_call,
-        patch.wrong_number_flag,
-        patch.admin_review_required,
-        patch.consent_status,
-        patch.next_retry_at,
-        patch.pending_follow_ups || null,
-        req.params.id
-      ]
-    );
-
-    res.json({ message: 'Workflow updated successfully' });
-  } catch (error) {
-    console.error('Error updating customer workflow:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-router.post('/:id/retry', async (req, res) => {
-  try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
-    if (!existing) {
-      return res.status(404).json({ error: 'Customer not found' });
+      const retryAt = req.body.retry_at || new Date(Date.now() + (60 * 60 * 1000)).toISOString();
+      await customers.scheduleRetry(clientId, req.params.id, retryAt);
+      return res.json({ message: 'Retry scheduled successfully', retry_at: retryAt });
+    } catch (error) {
+      console.error('Error scheduling retry:', error);
+      return res.status(500).json({ error: error.message });
     }
+  });
 
-    const retryAt = req.body.retry_at || new Date(Date.now() + (60 * 60 * 1000)).toISOString();
-    await dbRun(
-      'UPDATE customers SET status = ?, next_retry_at = ?, retry_count = COALESCE(retry_count, 0) + 1 WHERE id = ?',
-      ['retry_scheduled', retryAt, req.params.id]
-    );
-
-    res.json({ message: 'Retry scheduled successfully', retry_at: retryAt });
-  } catch (error) {
-    console.error('Error scheduling retry:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Delete customer
-router.delete('/:id', async (req, res) => {
-  try {
-    const existing = await dbGet('SELECT id FROM customers WHERE id = ?', [req.params.id]);
-    if (!existing) {
-      return res.status(404).json({ error: 'Customer not found' });
+  router.delete('/:id', async (req, res) => {
+    try {
+      const deleted = await customers.deleteWithRelations(await resolveClientId(req), req.params.id);
+      if (!deleted) return res.status(404).json({ error: 'Customer not found' });
+      return res.json({ message: 'Customer deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting customer:', error);
+      return res.status(500).json({ error: error.message });
     }
+  });
 
-    await dbRun('DELETE FROM feedback WHERE customer_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM calls WHERE customer_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM customers WHERE id = ?', [req.params.id]);
+  return router;
+}
 
-    res.json({ message: 'Customer deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting customer:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-module.exports = router;
+module.exports = {
+  createCustomersRouter,
+  normalizeCustomerPayload,
+  validateCustomerPayload
+};

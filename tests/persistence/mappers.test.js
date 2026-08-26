@@ -16,7 +16,8 @@ test('customer mapper preserves snake_case and converts database-native values',
     do_not_call: true,
     wrong_number_flag: false,
     admin_review_required: true,
-    created_at: createdAt
+    created_at: createdAt,
+    data_retention_until: new Date('2027-08-26T00:00:00.000Z')
   };
 
   const mapped = toApiCustomer(row);
@@ -28,7 +29,8 @@ test('customer mapper preserves snake_case and converts database-native values',
     do_not_call: 1,
     wrong_number_flag: 0,
     admin_review_required: 1,
-    created_at: createdAt
+    created_at: '2026-08-26T00:00:00.000Z',
+    data_retention_until: '2027-08-26T00:00:00.000Z'
   });
   assert.equal(row.id, '41');
   assert.equal(row.do_not_call, true);

@@ -6,7 +6,10 @@ const path = require('path');
 const WebSocket = require('ws');
 const twilio = require('twilio');
 const { initializeDatabase, dbRun, dbGet, dbAll } = require('./db');
-const customersRouter = require('./routes/customers');
+const { createCustomersRouter } = require('./routes/customers');
+const { createPostgres } = require('./persistence/postgres');
+const { createRepositories } = require('./repositories');
+const { createSqliteCustomersRepository } = require('./repositories/sqlite-customers');
 const feedbackRouter = require('./routes/feedback');
 const reportsRouter = require('./routes/reports');
 const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
@@ -35,6 +38,57 @@ const CLIENT_NAME = process.env.CLIENT_NAME || 'your diagnostic and medical coll
 const PUBLIC_BASE_URL = (process.env.NGROK_URL || process.env.WEBHOOK_URL || '').replace(/\/$/, '');
 const GEMINI_WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 const liveCallState = new Map();
+
+let postgres;
+let customersRepository;
+let activeClientId;
+
+function getCustomersRepository() {
+  if (!customersRepository) throw new Error('Customer repository is not initialized');
+  return customersRepository;
+}
+
+function getActiveClientId() {
+  if (!activeClientId) throw new Error('Active client context is not initialized');
+  return activeClientId;
+}
+
+const customerRepositoryProxy = new Proxy({}, {
+  get(_target, property) {
+    return (...args) => getCustomersRepository()[property](...args);
+  }
+});
+
+async function initializeCustomerPersistence() {
+  if (!process.env.SUPABASE_DB_URL) {
+    customersRepository = createSqliteCustomersRepository({ dbRun, dbGet, dbAll });
+    activeClientId = 1;
+    return;
+  }
+
+  const configuredClientId = Number(process.env.DEFAULT_CLIENT_ID);
+  if (!Number.isSafeInteger(configuredClientId) || configuredClientId <= 0) {
+    throw new Error('DEFAULT_CLIENT_ID must be a positive integer when SUPABASE_DB_URL is configured');
+  }
+
+  const ca = process.env.SUPABASE_DB_CA_CERT;
+  postgres = createPostgres({
+    connectionString: process.env.SUPABASE_DB_URL,
+    ssl: ca ? { ca: ca.replaceAll('\\n', '\n'), rejectUnauthorized: true } : undefined
+  });
+  await postgres.ping();
+
+  const repositories = createRepositories(postgres);
+  const client = await repositories.clients.findById(configuredClientId);
+  if (!client || client.status !== 'active') {
+    await postgres.close();
+    postgres = undefined;
+    throw new Error('DEFAULT_CLIENT_ID must identify an active Supabase client');
+  }
+
+  customersRepository = repositories.customers;
+  activeClientId = client.id;
+}
 
 const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
@@ -447,30 +501,26 @@ async function placeRealtimeCall({ customerPhone, customerName, customerId, clie
 }
 
 async function ensureCustomerForCall({ customerId, customerName, customerPhone }) {
+  const clientId = getActiveClientId();
+  const customers = getCustomersRepository();
   if (customerId) {
-    const existingById = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
+    const existingById = await customers.findById(clientId, customerId);
     if (existingById) {
       return existingById;
     }
   }
 
-  const existingByPhone = await dbGet('SELECT * FROM customers WHERE phone = ?', [customerPhone]);
+  const existingByPhone = await customers.findByPhone(clientId, customerPhone);
   if (existingByPhone) {
     return existingByPhone;
   }
 
-  const result = await dbRun(
-    'INSERT INTO customers (name, phone, preferred_slot, status, created_at) VALUES (?, ?, ?, ?, ?)',
-    [
-      customerName || 'Customer',
-      customerPhone,
-      '10:00',
-      'pending',
-      new Date().toISOString()
-    ]
-  );
-
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  return customers.create(clientId, {
+    name: customerName || 'Customer',
+    phone: customerPhone,
+    preferred_slot: '10:00',
+    status: 'pending'
+  });
 }
 
 async function getCustomerCallHistory(customerId, limit = 20) {
@@ -489,29 +539,16 @@ async function hydratePreCallIntelligence(customer) {
   const history = await getCustomerCallHistory(customer.id);
   const intelligence = buildPreCallIntelligence(customer, history);
 
-  await dbRun(
-    `UPDATE customers
-        SET priority_score = ?,
-            ai_score = ?,
-            best_call_slot = ?,
-            preferred_dialect = ?,
-            outstanding_issues = ?,
-            last_sentiment_label = ?,
-            pickup_rate_score = ?,
-            dnd_checked_at = ?
-      WHERE id = ?`,
-    [
-      intelligence.priorityScore,
-      intelligence.priorityScore,
-      intelligence.bestCallSlot,
-      intelligence.preferredDialect,
-      intelligence.outstandingIssues.join('\n') || null,
-      intelligence.lastSentimentLabel || null,
-      intelligence.pickupRateScore,
-      new Date().toISOString(),
-      customer.id
-    ]
-  );
+  await getCustomersRepository().update(getActiveClientId(), customer.id, {
+    priority_score: intelligence.priorityScore,
+    ai_score: intelligence.priorityScore,
+    best_call_slot: intelligence.bestCallSlot,
+    preferred_dialect: intelligence.preferredDialect,
+    outstanding_issues: intelligence.outstandingIssues.join('\n') || null,
+    last_sentiment_label: intelligence.lastSentimentLabel || null,
+    pickup_rate_score: intelligence.pickupRateScore,
+    dnd_checked_at: new Date().toISOString()
+  });
 
   return {
     ...customer,
@@ -562,22 +599,9 @@ async function triggerScheduledCalls() {
   const now = new Date();
   const currentSlot = getCurrentSlotLabel(now);
 
-  const dueCustomers = await dbAll(
-    `SELECT c.*
-     FROM customers c
-     LEFT JOIN calls recent_call
-       ON recent_call.customer_id = c.id
-      AND DATETIME(recent_call.called_at) >= DATETIME('now', '-45 minutes')
-     WHERE COALESCE(c.do_not_call, 0) = 0
-       AND COALESCE(c.wrong_number_flag, 0) = 0
-       AND COALESCE(c.admin_review_required, 0) = 0
-       AND COALESCE(c.consent_status, 'unknown') != 'denied'
-       AND (
-         (c.status = 'pending' AND COALESCE(c.best_call_slot, c.preferred_slot) = ?)
-         OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND c.next_retry_at IS NOT NULL AND DATETIME(c.next_retry_at) <= DATETIME('now'))
-       )
-       AND recent_call.id IS NULL`,
-    [currentSlot]
+  const dueCustomers = await getCustomersRepository().findEligibleForScheduler(
+    getActiveClientId(),
+    { currentSlot, now, recentCallMinutes: 45, limit: 100 }
   );
 
   if (!dueCustomers.length) {
@@ -614,7 +638,7 @@ async function triggerScheduledCalls() {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [customer.id, 'scheduled_initiated', call.sid, new Date().toISOString(), customer.priority_score || computePriorityScore(customer), 1, 'hindi-feedback-v1', 'normal']
       );
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      await getCustomersRepository().update(getActiveClientId(), customer.id, { status: 'called' });
       console.log(`[SCHEDULER] Scheduled call started for ${customer.name} (${call.sid})`);
     } catch (error) {
       console.error(`[SCHEDULER] Failed to call ${customer.name}:`, error.message);
@@ -623,7 +647,7 @@ async function triggerScheduledCalls() {
           'INSERT INTO calls (customer_id, outcome, called_at) VALUES (?, ?, ?)',
           [customer.id, 'twilio_unverified', new Date().toISOString()]
         );
-        await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['twilio_trial_blocked', customer.id]);
+        await getCustomersRepository().update(getActiveClientId(), customer.id, { status: 'twilio_trial_blocked' });
       }
     }
   }
@@ -711,7 +735,10 @@ app.get('/', (req, res) => {
   res.redirect('/admin.html');
 });
 
-app.use('/api/customers', customersRouter);
+app.use('/api/customers', createCustomersRouter({
+  customers: customerRepositoryProxy,
+  getClientId: getActiveClientId
+}));
 app.use('/api/feedback', feedbackRouter);
 app.use('/api/reports', reportsRouter);
 
@@ -748,7 +775,7 @@ app.post('/call/start', async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [customer.id, 'initiated', call.sid, new Date().toISOString(), customer.priority_score || computePriorityScore(customer), 1, 'hindi-feedback-v1', 'normal']
     );
-    await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+    await getCustomersRepository().update(getActiveClientId(), customer.id, { status: 'called' });
 
     console.log(`[CALL STARTED] SID: ${call.sid}`);
     res.json({ success: true, sid: call.sid, callId: result.lastID, customerId: customer.id });
@@ -817,7 +844,7 @@ app.post('/call/status', async (req, res) => {
       }
 
       if (customerId) {
-        const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
+        const customer = await getCustomersRepository().findById(getActiveClientId(), customerId);
         if (customer && mappedOutcome) {
           await applyCallOutcomeWorkflow({
             dbGet,
@@ -882,7 +909,7 @@ app.post('/call/recording-status', async (req, res) => {
 
 app.post('/api/calls/initiate/:customerId', async (req, res) => {
   try {
-    let customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.customerId]);
+    let customer = await getCustomersRepository().findById(getActiveClientId(), req.params.customerId);
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -908,7 +935,7 @@ app.post('/api/calls/initiate/:customerId', async (req, res) => {
       [customer.id, 'initiated', call.sid, new Date().toISOString(), customer.priority_score || computePriorityScore(customer), 1, 'hindi-feedback-v1', 'normal']
     );
 
-    await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+    await getCustomersRepository().update(getActiveClientId(), customer.id, { status: 'called' });
     res.json({ message: 'Call initiated', callId: result.lastID, sid: call.sid });
   } catch (error) {
     console.error('[API CALL INITIATE ERROR]', error.message);
@@ -1755,6 +1782,7 @@ wss.on('connection', (twilioWs, req) => {
   try {
     validateConfig();
     await initializeDatabase();
+    await initializeCustomerPersistence();
 
     setInterval(() => {
       runSchedulerTick().catch((error) => {

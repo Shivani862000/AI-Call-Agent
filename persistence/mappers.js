@@ -43,6 +43,20 @@ function mapBooleans(row, fields) {
   }
 }
 
+function mapTimestamps(row) {
+  for (const [field, value] of Object.entries(row)) {
+    if (value instanceof Date) {
+      row[field] = value.toISOString();
+    }
+  }
+}
+
+function mapNumbers(row, fields) {
+  for (const field of fields) {
+    if (row[field] !== null && row[field] !== undefined) row[field] = Number(row[field]);
+  }
+}
+
 function moveJson(row, source, target) {
   if (!Object.hasOwn(row, source)) return;
   row[target] = row[source] === null ? null : JSON.stringify(row[source]);
@@ -58,6 +72,16 @@ function toApiCustomer(input) {
   if (row === null || row === undefined) return row;
   mapIds(row, ['id', 'client_id']);
   mapBooleans(row, CUSTOMER_BOOLEAN_FIELDS);
+  mapNumbers(row, ['revenue_estimate']);
+  mapTimestamps(row);
+  return row;
+}
+
+function toApiClient(input) {
+  const row = clone(input);
+  if (row === null || row === undefined) return row;
+  mapIds(row, ['id']);
+  mapTimestamps(row);
   return row;
 }
 
@@ -70,6 +94,7 @@ function toApiCall(input) {
   moveJson(row, 'key_points', 'key_points_json');
   moveJson(row, 'objections', 'objections_json');
   moveJson(row, 'competitor_mentions', 'competitor_mentions_json');
+  mapTimestamps(row);
   return row;
 }
 
@@ -77,6 +102,7 @@ function toApiFeedback(input) {
   const row = clone(input);
   if (row === null || row === undefined) return row;
   mapIds(row, ['id', 'client_id', 'customer_id', 'call_id']);
+  mapTimestamps(row);
   return row;
 }
 
@@ -85,11 +111,13 @@ function toApiSupervisorEvent(input) {
   if (row === null || row === undefined) return row;
   mapIds(row, ['id', 'client_id', 'call_id']);
   moveJson(row, 'payload', 'payload_json');
+  mapTimestamps(row);
   return row;
 }
 
 module.exports = {
   toApiCall,
+  toApiClient,
   toApiCustomer,
   toApiFeedback,
   toApiSupervisorEvent

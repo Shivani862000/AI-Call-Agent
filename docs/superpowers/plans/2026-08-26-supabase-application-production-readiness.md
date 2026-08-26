@@ -246,24 +246,26 @@ git commit -m "feat: add Supabase Postgres schema"
 - Produces: `clients.create`, `clients.findById`, and `clients.findBySlug`.
 - Produces tenant-required customer methods: `create(clientId, input)`, `findById(clientId, id)`, `list(clientId)`, `update(clientId, id, patch)`, `deleteWithRelations(clientId, id)`, and `findEligibleForScheduler(clientId, options)`.
 
-- [ ] **Step 1: Write failing repository tests**
+- [x] **Step 1: Write failing repository tests**
 
 Cover identity IDs, per-client duplicate phone behavior, CRUD, explicit field whitelisting, retry increments, scheduling eligibility, and cascade deletion. Seed two clients with the same phone and assert each can own it. Assert every method rejects a missing `clientId` before issuing SQL.
 
-- [ ] **Step 2: Verify failure**
+- [x] **Step 2: Verify failure**
 
 Run: `npm test -- tests/repositories/customers.test.js`
 Expected: FAIL because the repositories are missing.
 
-- [ ] **Step 3: Implement parameterized repositories**
+- [x] **Step 3: Implement parameterized repositories**
 
 Use named methods and parameterized SQL only. `findEligibleForScheduler` filters workflow flags, due times, slot fields, and recent-call suppression in one bounded query ordered by priority and creation time. Interpret unique violations by constraint name to retain the current duplicate-phone response.
 
-- [ ] **Step 4: Rewire customer flows**
+- [x] **Step 4: Rewire customer flows**
 
 Change `routes/customers.js` to `createCustomersRouter({ customers, getClientId })`. Move scheduler and pre-call customer persistence in `index.js` to repository calls. The initial `getClientId` resolves a validated platform client context; tests set it explicitly.
 
-- [ ] **Step 5: Verify and commit**
+During this staged checkpoint, a configured `SUPABASE_DB_URL` requires `DEFAULT_CLIENT_ID` and validates that it identifies an active client before serving traffic. The later authentication task replaces this temporary default with the signed session's revalidated `activeClientId`. A focused SQLite customer adapter preserves the existing whole-application contract only while calls and feedback remain on their later migration tasks; the final SQLite-removal task deletes that adapter and fallback.
+
+- [x] **Step 5: Verify and commit**
 
 ```bash
 npm test -- tests/repositories/customers.test.js tests/routes/customers-feedback.test.js
