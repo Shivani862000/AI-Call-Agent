@@ -166,3 +166,26 @@ test('customer deletion removes the customer and its feedback', async () => {
   assert.equal(feedback.response.status, 200);
   assert.deepEqual(feedback.body, []);
 });
+
+test('active-client selection isolates identical customer data across two tenants', async () => {
+  const [firstClientId, secondClientId] = application.clientIds;
+  const select = (clientId) => request('/auth/select-client', {
+    method: 'POST',
+    body: JSON.stringify({ clientId })
+  });
+  const create = (name) => request('/api/customers', {
+    method: 'POST',
+    body: JSON.stringify({ name, phone: '+919999000111', preferred_slot: '10:00' })
+  });
+
+  assert.equal((await select(firstClientId)).response.status, 200);
+  assert.equal((await create('Tenant One Customer')).response.status, 200);
+  assert.equal((await select(secondClientId)).response.status, 200);
+  assert.equal((await create('Tenant Two Customer')).response.status, 200);
+  const secondList = await request('/api/customers');
+  assert.deepEqual(secondList.body.map((customer) => customer.name), ['Tenant Two Customer']);
+
+  assert.equal((await select(firstClientId)).response.status, 200);
+  const firstList = await request('/api/customers');
+  assert.deepEqual(firstList.body.map((customer) => customer.name), ['Tenant One Customer']);
+});

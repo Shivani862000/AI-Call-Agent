@@ -73,6 +73,13 @@ async function startTestApp() {
     ['Contract Test Clinic', 'contract-test-clinic', 'active']
   );
   const clientId = clientResult.rows[0].id;
+  const secondClientResult = await pool.query(
+    `insert into clients (name, slug, status)
+     values ($1, $2, $3)
+     returning id`,
+    ['Contract Test Clinic Two', 'contract-test-clinic-two', 'active']
+  );
+  const secondClientId = secondClientResult.rows[0].id;
   const authUserId = randomUUID();
   const authEmail = `contract-${authUserId}@example.test`;
   const authPassword = 'contract-test-password';
@@ -148,16 +155,31 @@ async function startTestApp() {
   const setCookies = typeof loginResponse.headers.getSetCookie === 'function'
     ? loginResponse.headers.getSetCookie()
     : [loginResponse.headers.get('set-cookie')];
-  const sessionCookie = setCookies.filter(Boolean).map((value) => value.split(';', 1)[0]).join('; ');
+  const cookieJar = new Map();
+  function storeCookies(headers) {
+    const values = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : [headers.get('set-cookie')];
+    for (const value of values.filter(Boolean)) {
+      const pair = value.split(';', 1)[0];
+      const divider = pair.indexOf('=');
+      cookieJar.set(pair.slice(0, divider), pair.slice(divider + 1));
+    }
+  }
+  storeCookies(loginResponse.headers);
 
   return {
     baseUrl,
+    clientIds: [clientId, secondClientId],
     output,
-    fetch(pathname, options = {}) {
-      return fetch(`${baseUrl}${pathname}`, {
+    async fetch(pathname, options = {}) {
+      const response = await fetch(`${baseUrl}${pathname}`, {
         ...options,
-        headers: { ...options.headers, cookie: sessionCookie }
+        headers: {
+          ...options.headers,
+          cookie: [...cookieJar.entries()].map(([name, value]) => `${name}=${value}`).join('; ')
+        }
       });
+      storeCookies(response.headers);
+      return response;
     },
     async stop() {
       await stopChild(child);

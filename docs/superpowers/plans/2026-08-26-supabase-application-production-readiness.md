@@ -555,27 +555,27 @@ Expected: tests pass; neither obsolete dependency is installed; provider referen
 **Interfaces:**
 - Produces a secret-free handoff checklist for the separate DigitalOcean pipeline plan.
 
-- [ ] **Step 1: Confirm the isolated hosted test project guard**
+- [x] **Step 1: Confirm the isolated hosted test project guard**
 
 Use the dedicated non-production hosted project created for integration tests, never the future production project. Confirm that its reference matches `SUPABASE_TEST_PROJECT_REF`, that `SUPABASE_TEST_DB_URL` differs from `SUPABASE_DB_URL`, and that all credentials come from `.env.test.local` or CI secret injection rather than repository files or shell history.
 
-- [ ] **Step 2: Apply migrations and run integration tests**
+- [x] **Step 2: Apply migrations and run integration tests**
 
 Dry-run and then apply source-controlled migrations with `npm run db:push:test`; run `npm run test:db` and the complete suite with the hosted-test guard that prevents destructive cleanup outside the verification project.
 
-- [ ] **Step 3: Prove multiple webmasters**
+- [x] **Step 3: Prove multiple webmasters**
 
 Provision two distinct test webmasters using hidden input. Log in as each, verify independent sessions, disable one in a controlled test, and prove the other remains authorized. Remove test identities afterward using explicit IDs.
 
-- [ ] **Step 4: Prove tenant/application acceptance**
+- [x] **Step 4: Prove tenant/application acceptance**
 
 Create two client fixtures and demonstrate isolation. Through existing routes, create a test customer, simulate provider-safe callback data, verify transcript/feedback/report visibility, restart, and verify persistence without user recreation. Do not place a real customer call from this verification project.
 
-- [ ] **Step 5: Write the handoff runbook**
+- [x] **Step 5: Write the handoff runbook**
 
 Record, without values: required variables, migration command, runtime/provisioning credential separation, client inputs, multi-webmaster command, health contract, one-replica requirement, SQLite-abandonment rule, and canonical URL dependency.
 
-- [ ] **Step 6: Final verification and commit**
+- [x] **Step 6: Final verification and commit**
 
 ```bash
 npm ci

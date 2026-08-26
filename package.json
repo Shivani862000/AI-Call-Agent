@@ -15,21 +15,19 @@
     "provision:webmaster": "node scripts/provision-webmaster.js"
   },
   "dependencies": {
-    "@sendgrid/mail": "^7.7.0",
+    "@sendgrid/mail": "^8.1.6",
     "@supabase/supabase-js": "^2.112.4",
-    "body-parser": "^1.20.2",
     "cookie-session": "^2.1.1",
     "csv-parse": "^5.5.0",
     "dotenv": "^16.3.1",
-    "express": "^4.18.2",
+    "express": "^4.22.2",
     "express-rate-limit": "^8.6.2",
-    "multer": "^1.4.5-lts.1",
-    "node-cron": "^3.0.2",
+    "multer": "^2.2.0",
     "openai": "^4.26.0",
     "pdfkit": "^0.13.0",
     "pg": "^8.23.0",
-    "twilio": "^4.19.0",
-    "ws": "^8.18.0"
+    "twilio": "^6.1.0",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "supabase": "^2.115.0",
