@@ -1,5 +1,3 @@
-const { dbAll, dbGet } = require('../db');
-
 function getDateRangeForDays(days, endDate = new Date()) {
   const end = new Date(endDate);
   end.setHours(23, 59, 59, 999);
@@ -28,126 +26,17 @@ function getCurrentWeekDateRange() {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-async function buildReportData({ start, end, label = 'today' } = {}) {
+async function buildReportData({ repositories, clientId, publicBaseUrl = '', start, end, label = 'today' } = {}) {
+  if (!repositories?.reporting) throw new Error('Reporting repository is required');
   const range = start && end ? { start, end } : getTodayDateRange();
-  const publicBaseUrl = process.env.NGROK_URL || process.env.PUBLIC_BASE_URL || '';
-
-  const callStats = await dbGet(`
-    SELECT 
-      COUNT(*) as total_calls,
-      SUM(CASE WHEN outcome IN ('answered', 'completed', 'consent_given', 'interested', 'callback', 'not_interested', 'hot_lead') THEN 1 ELSE 0 END) as answered,
-      SUM(CASE WHEN outcome = 'no_answer' THEN 1 ELSE 0 END) as no_answer,
-      SUM(CASE WHEN outcome = 'declined' THEN 1 ELSE 0 END) as declined,
-      SUM(CASE WHEN outcome = 'consent_given' THEN 1 ELSE 0 END) as consent_given,
-      SUM(CASE WHEN whatsapp_sent = 1 THEN 1 ELSE 0 END) as whatsapp_sent,
-      SUM(CASE WHEN fallback_triggered = 1 THEN 1 ELSE 0 END) as fallbacks_triggered,
-      SUM(CASE WHEN outcome IN ('interested', 'hot_lead') THEN 1 ELSE 0 END) as hot_leads
-    FROM calls
-    WHERE called_at >= ? AND called_at <= ?
-  `, [range.start, range.end]);
-
-  const feedbackStats = await dbGet(`
-    SELECT 
-      COUNT(*) as feedback_count,
-      ROUND(AVG(CASE WHEN stars IS NOT NULL THEN stars END), 1) as average_rating,
-      SUM(CASE WHEN category = 'good' THEN 1 ELSE 0 END) as good_count,
-      SUM(CASE WHEN category = 'average' THEN 1 ELSE 0 END) as average_count,
-      SUM(CASE WHEN category = 'bad' THEN 1 ELSE 0 END) as bad_count
-    FROM feedback
-    WHERE submitted_at >= ? AND submitted_at <= ?
-  `, [range.start, range.end]);
-
-  const feedbackList = await dbAll(`
-    SELECT 
-      f.id,
-      c.name as customer_name,
-      f.category,
-      f.stars,
-      SUBSTR(f.review_text, 1, 180) as review_excerpt,
-      f.submitted_at
-    FROM feedback f
-    JOIN customers c ON f.customer_id = c.id
-    WHERE f.submitted_at >= ? AND f.submitted_at <= ?
-    ORDER BY f.submitted_at DESC
-    LIMIT 20
-  `, [range.start, range.end]);
-
-  const analyzedCalls = await dbAll(`
-    SELECT
-      calls.id,
-      c.name AS customer_name,
-      c.phone AS customer_phone,
-      calls.called_at,
-      calls.outcome,
-      calls.outcome_detail,
-      calls.recording_status,
-      calls.recording_url,
-      calls.transcript_status,
-      calls.transcript_text,
-      calls.analysis_status,
-      calls.analysis_summary,
-      calls.report_excerpt,
-      calls.extracted_rating,
-      calls.follow_up_task,
-      calls.next_action_at,
-      calls.hot_lead_score,
-      calls.sentiment_label,
-      calls.crm_sync_status,
-      calls.whatsapp_summary_sent,
-      calls.objections_json,
-      calls.competitor_mentions_json,
-      calls.live_red_flag,
-      calls.supervisor_alert_level
-    FROM calls
-    JOIN customers c ON c.id = calls.customer_id
-    WHERE calls.called_at >= ? AND calls.called_at <= ?
-    ORDER BY calls.called_at DESC
-    LIMIT 25
-  `, [range.start, range.end]);
-
-  const pendingItems = await dbAll(`
-    SELECT
-      calls.id,
-      c.name AS customer_name,
-      calls.called_at,
-      calls.outcome,
-      calls.recording_status,
-      calls.transcript_status,
-      calls.analysis_status,
-      calls.follow_up_task
-    FROM calls
-    JOIN customers c ON c.id = calls.customer_id
-    WHERE calls.called_at >= ? AND calls.called_at <= ?
-      AND (
-        COALESCE(calls.recording_status, 'pending') != 'completed'
-        OR COALESCE(calls.transcript_status, 'pending') != 'completed'
-        OR COALESCE(calls.analysis_status, 'pending') != 'completed'
-        OR calls.outcome IN ('initiated', 'scheduled_initiated', 'no_answer', 'busy', 'callback')
-      )
-    ORDER BY calls.called_at DESC
-    LIMIT 12
-  `, [range.start, range.end]);
-
-  const peakSlots = await dbAll(`
-    SELECT SUBSTR(called_at, 12, 5) AS slot, COUNT(*) AS total_calls
-    FROM calls
-    WHERE called_at >= ? AND called_at <= ?
-    GROUP BY SUBSTR(called_at, 12, 5)
-    ORDER BY total_calls DESC, slot ASC
-    LIMIT 5
-  `, [range.start, range.end]);
-
-  const scriptPerformance = await dbAll(`
-    SELECT
-      COALESCE(call_script_version, 'default') AS script_version,
-      COUNT(*) AS total_calls,
-      AVG(CASE WHEN extracted_rating IS NOT NULL THEN extracted_rating END) AS avg_rating
-    FROM calls
-    WHERE called_at >= ? AND called_at <= ?
-    GROUP BY COALESCE(call_script_version, 'default')
-    ORDER BY avg_rating DESC, total_calls DESC
-    LIMIT 5
-  `, [range.start, range.end]);
+  const rangeData = await repositories.reporting.buildRangeData(clientId, range);
+  const callStats = rangeData.call_stats;
+  const feedbackStats = rangeData.feedback_stats;
+  const feedbackList = rangeData.feedback;
+  const analyzedCalls = rangeData.analyzed_calls;
+  const pendingItems = rangeData.pending_items;
+  const peakSlots = rangeData.peak_slots;
+  const scriptPerformance = rangeData.script_performance;
 
   const safeTotalCalls = Number(callStats?.total_calls) || 0;
   const safeAnswered = Number(callStats?.answered) || 0;
@@ -168,8 +57,12 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const competitorCounts = new Map();
 
   analyzedCalls.forEach((call) => {
-    const objections = JSON.parse(call.objections_json || '[]');
-    const competitors = JSON.parse(call.competitor_mentions_json || '[]');
+    const objections = Array.isArray(call.objections_json)
+      ? call.objections_json
+      : JSON.parse(call.objections_json || '[]');
+    const competitors = Array.isArray(call.competitor_mentions_json)
+      ? call.competitor_mentions_json
+      : JSON.parse(call.competitor_mentions_json || '[]');
 
     objections.forEach((item) => objectionCounts.set(item, (objectionCounts.get(item) || 0) + 1));
     competitors.forEach((item) => competitorCounts.set(item, (competitorCounts.get(item) || 0) + 1));
@@ -231,9 +124,9 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   };
 }
 
-async function buildWeeklySummary() {
+async function buildWeeklySummary({ repositories, clientId, publicBaseUrl = '' } = {}) {
   const range = getCurrentWeekDateRange();
-  const report = await buildReportData({ ...range, label: 'this week' });
+  const report = await buildReportData({ repositories, clientId, publicBaseUrl, ...range, label: 'this week' });
   const topInsights = (report.analyzed_calls || [])
     .map((call) => call.analysis_summary || call.report_excerpt)
     .filter(Boolean)

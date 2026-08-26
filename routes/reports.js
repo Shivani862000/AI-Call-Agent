@@ -1,5 +1,4 @@
 const express = require('express');
-const router = express.Router();
 const { generateReportPDF } = require('../services/pdf');
 const { sendEmailWithAttachment, sendSimpleEmail } = require('../services/email');
 const { buildReportData, buildWeeklySummary, getCurrentWeekDateRange } = require('../services/reporting');
@@ -8,15 +7,16 @@ function weeklyTimestampFilename(prefix = 'Weekly-Report') {
   return `${prefix}-${new Date().toISOString().replace(/[:.]/g, '-')}.pdf`;
 }
 
-async function buildDailyPreview() {
-  return buildReportData({ label: 'today' });
-}
+function createReportsRouter({ repositories, getClientId, publicBaseUrl = '' }) {
+  if (!repositories?.reporting || typeof getClientId !== 'function') {
+    throw new TypeError('Reports router requires reporting repositories and getClientId');
+  }
+  const router = express.Router();
+  const dependencies = () => ({ repositories, clientId: getClientId(), publicBaseUrl });
+  const buildDailyPreview = () => buildReportData({ ...dependencies(), label: 'today' });
+  const buildWeeklyPreview = () => buildWeeklySummary(dependencies());
 
-async function buildWeeklyPreview() {
-  return buildWeeklySummary();
-}
-
-router.get('/preview', async (req, res) => {
+  router.get('/preview', async (req, res) => {
   try {
     const report = await buildDailyPreview();
     res.json(report);
@@ -24,9 +24,9 @@ router.get('/preview', async (req, res) => {
     console.error('Error generating daily preview:', error);
     res.status(500).json({ error: error.message });
   }
-});
+  });
 
-router.get('/weekly-preview', async (req, res) => {
+  router.get('/weekly-preview', async (req, res) => {
   try {
     const report = await buildWeeklyPreview();
     res.json(report);
@@ -34,9 +34,9 @@ router.get('/weekly-preview', async (req, res) => {
     console.error('Error generating weekly preview:', error);
     res.status(500).json({ error: error.message });
   }
-});
+  });
 
-router.post('/generate', async (req, res) => {
+  router.post('/generate', async (req, res) => {
   try {
     const reportData = await buildDailyPreview();
     const pdfPath = await generateReportPDF(reportData);
@@ -57,9 +57,9 @@ router.post('/generate', async (req, res) => {
     console.error('Error generating report:', error);
     res.status(500).json({ error: error.message });
   }
-});
+  });
 
-router.get('/download', async (req, res) => {
+  router.get('/download', async (req, res) => {
   try {
     const reportData = await buildDailyPreview();
     const pdfPath = await generateReportPDF(reportData);
@@ -77,9 +77,9 @@ router.get('/download', async (req, res) => {
     console.error('Error downloading report:', error);
     res.status(500).json({ error: error.message });
   }
-});
+  });
 
-router.post('/weekly-generate', async (req, res) => {
+  router.post('/weekly-generate', async (req, res) => {
   try {
     const reportData = await buildWeeklyPreview();
     const pdfPath = await generateReportPDF(reportData);
@@ -93,9 +93,9 @@ router.post('/weekly-generate', async (req, res) => {
     console.error('Error generating weekly report:', error);
     res.status(500).json({ error: error.message });
   }
-});
+  });
 
-router.get('/weekly-download', async (req, res) => {
+  router.get('/weekly-download', async (req, res) => {
   try {
     const reportData = await buildWeeklyPreview();
     const pdfPath = await generateReportPDF(reportData);
@@ -112,11 +112,11 @@ router.get('/weekly-download', async (req, res) => {
     console.error('Error downloading weekly report:', error);
     res.status(500).json({ error: error.message });
   }
-});
+  });
 
-router.post('/weekly-email', async (req, res) => {
+  router.post('/weekly-email', async (req, res) => {
   try {
-    const summary = await buildWeeklySummary();
+    const summary = await buildWeeklySummary(dependencies());
     const pdfPath = await generateReportPDF(summary);
     const plainText = [
       summary.summary_text,
@@ -144,6 +144,9 @@ router.post('/weekly-email', async (req, res) => {
     console.error('Error emailing weekly summary:', error);
     res.status(500).json({ error: error.message });
   }
-});
+  });
 
-module.exports = router;
+  return router;
+}
+
+module.exports = { createReportsRouter, weeklyTimestampFilename };

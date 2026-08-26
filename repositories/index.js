@@ -3,6 +3,7 @@ const { createCustomersRepository } = require('./customers');
 const { createCallsRepository } = require('./calls');
 const { createFeedbackRepository } = require('./feedback');
 const { createSupervisorEventsRepository } = require('./supervisor-events');
+const { createReportingRepository } = require('./reporting');
 
 function createRepositories(database) {
   return {
@@ -10,7 +11,8 @@ function createRepositories(database) {
     customers: createCustomersRepository(database),
     calls: createCallsRepository(database),
     feedback: createFeedbackRepository(database),
-    supervisorEvents: createSupervisorEventsRepository(database)
+    supervisorEvents: createSupervisorEventsRepository(database),
+    reporting: createReportingRepository(database)
   };
 }
 

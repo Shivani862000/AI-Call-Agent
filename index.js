@@ -5,12 +5,12 @@ const http = require('http');
 const path = require('path');
 const WebSocket = require('ws');
 const twilio = require('twilio');
-const { initializeDatabase, dbRun, dbGet, dbAll } = require('./db');
+const { initializeDatabase } = require('./db');
 const { createCustomersRouter } = require('./routes/customers');
 const { createPostgres } = require('./persistence/postgres');
 const { createRepositories } = require('./repositories');
 const { createFeedbackRouter } = require('./routes/feedback');
-const reportsRouter = require('./routes/reports');
+const { createReportsRouter } = require('./routes/reports');
 const { saveCallFeedbackFromTranscript } = require('./services/call-feedback');
 const { processCompletedCallPipeline } = require('./services/post-call-pipeline');
 const {
@@ -746,7 +746,11 @@ app.use('/api/feedback', createFeedbackRouter({
   feedback: feedbackRepositoryProxy,
   getClientId: getActiveClientId
 }));
-app.use('/api/reports', reportsRouter);
+app.use('/api/reports', createReportsRouter({
+  repositories: repositoryProxy('reporting'),
+  getClientId: getActiveClientId,
+  publicBaseUrl: PUBLIC_BASE_URL
+}));
 
 app.post('/call/start', async (req, res) => {
   try {

@@ -330,15 +330,15 @@ git commit -m "feat: move call workflows to Supabase Postgres"
 - Produces: `reporting.buildRangeData(clientId, { start, end })` with current report input fields.
 - Retains PDF formatting and presentation calculations in `services/reporting.js`.
 
-- [ ] **Step 1: Write fixed-fixture tests**
+- [x] **Step 1: Write fixed-fixture tests**
 
 Seed both clients and assert exact per-client totals, average rating, outcomes, slot labels, script averages, pending items, joined customer names, objections, and competitor mentions. Use overlapping-looking fixtures to detect missing tenant predicates.
 
-- [ ] **Step 2: Implement PostgreSQL reporting**
+- [x] **Step 2: Implement PostgreSQL reporting**
 
 Use parameterized CTEs/queries with indexed date predicates and `client_id` in every branch. Use PostgreSQL aggregates and `jsonb` operators while keeping presentation in application code.
 
-- [ ] **Step 3: Verify and commit**
+- [x] **Step 3: Verify and commit**
 
 ```bash
 npm test -- tests/repositories/reporting.test.js
