@@ -1,8 +1,7 @@
 'use strict';
 
 const express = require('express');
-const Client = require('../src/models/Client');
-const { activeRecordFilter, recordFilterFromRequest, createMongooseArchiveHandlers } = require('../src/webmaster/lifecycle');
+const { supabase } = require('../src/supabase');
 
 const PHONE_PATTERN = /^\+\d{10,15}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -62,34 +61,45 @@ function reminderFields(payload, existing = null) {
 }
 
 function serialize(record) {
-  const value = record?.toObject ? record.toObject() : { ...record };
-  if (value._id !== undefined) value.id = String(value._id);
-  delete value._id;
-  delete value.archived_by;
+  const value = { ...record };
   return value;
 }
 
 function duplicateResponse(error, res) {
-  if (error.code !== 11000) return res.status(500).json({ error: error.message });
+  if (error.code !== '23505') return res.status(500).json({ error: error.message });
   return res.status(409).json({ error: 'A client with this phone number already exists', fieldErrors: { phone: 'Phone number already exists' } });
 }
 
-function createClientsRouter({ Model = Client } = {}) {
+function createClientsRouter() {
   const router = express.Router();
-  const archiveHandlers = createMongooseArchiveHandlers({ Model, resourceName: 'Client' });
 
   router.get('/', async (req, res) => {
     try {
-      const rows = await Model.find(recordFilterFromRequest(req, { tenantId: req.tenantId })).sort({ status: 1, next_annual_reminder_date: 1, created_at: -1 }).lean();
-      res.json(rows.map(serialize));
+      let query = supabase.from('clients').select('*').eq('tenant_id', req.tenantId).order('status', { ascending: true }).order('next_annual_reminder_date', { ascending: true }).order('created_at', { ascending: false });
+      if (req.query.status) {
+        query = query.eq('status', req.query.status);
+      } else {
+        query = query.neq('status', 'archived');
+      }
+      
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json((data || []).map(serialize));
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
   router.get('/:id', async (req, res) => {
     try {
-      const row = await Model.findOne(recordFilterFromRequest(req, { _id: req.params.id, tenantId: req.tenantId })).lean();
-      if (!row) return res.status(404).json({ error: 'Client not found' });
-      res.json(serialize(row));
+      const { data, error } = await supabase.from('clients').select('*').eq('id', req.params.id).eq('tenant_id', req.tenantId).maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Client not found' });
+      
+      // If client requests exclude archived:
+      if (!req.query.status && data.status === 'archived') {
+         return res.status(404).json({ error: 'Client not found' });
+      }
+
+      res.json(serialize(data));
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
@@ -98,26 +108,77 @@ function createClientsRouter({ Model = Client } = {}) {
       const payload = normalizePayload(req.body);
       const fieldErrors = validate(payload);
       if (Object.keys(fieldErrors).length) return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
-      const record = await Model.create({ ...payload, ...reminderFields(payload), tenantId: req.tenantId });
-      res.json({ id: String(record._id), message: 'Client added successfully' });
+      
+      const insertData = { ...payload, ...reminderFields(payload), tenant_id: req.tenantId };
+      const { data, error } = await supabase.from('clients').insert([insertData]).select().single();
+      if (error) throw error;
+      
+      res.json({ id: String(data.id), message: 'Client added successfully' });
     } catch (error) { duplicateResponse(error, res); }
   });
 
   router.put('/:id', async (req, res) => {
     try {
-      const existing = await Model.findOne(activeRecordFilter({ _id: req.params.id, tenantId: req.tenantId })).lean();
+      const { data: existing, error: findError } = await supabase.from('clients').select('*').eq('id', req.params.id).eq('tenant_id', req.tenantId).neq('status', 'archived').maybeSingle();
+      if (findError) throw findError;
       if (!existing) return res.status(404).json({ error: 'Client not found' });
+      
       const payload = normalizePayload(req.body);
       const fieldErrors = validate(payload);
       if (Object.keys(fieldErrors).length) return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
-      await Model.findOneAndUpdate(activeRecordFilter({ _id: req.params.id, tenantId: req.tenantId }), { $set: { ...payload, ...reminderFields(payload, existing) } }, { runValidators: true });
+      
+      const updateData = { ...payload, ...reminderFields(payload, existing) };
+      const { error: updateError } = await supabase.from('clients').update(updateData).eq('id', req.params.id).eq('tenant_id', req.tenantId);
+      if (updateError) throw updateError;
+      
       res.json({ message: 'Client updated successfully' });
     } catch (error) { duplicateResponse(error, res); }
   });
 
-  router.post('/:id/archive', archiveHandlers.archive);
-  router.post('/:id/restore', archiveHandlers.restore);
-  router.delete('/:id', archiveHandlers.archive);
+  // Archive Handlers
+  const archiveHandler = async (req, res) => {
+    try {
+      const username = req.adminSession?.username || req.user?.username || 'system';
+      const updatePayload = {
+        status: 'archived',
+        archived_at: new Date().toISOString(),
+        archived_by: username,
+        archive_reason: (req.body?.reason || '').substring(0, 500) || null
+      };
+
+      const { data, error } = await supabase.from('clients').update(updatePayload).eq('id', req.params.id).eq('tenant_id', req.tenantId).neq('status', 'archived').select().maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Client not found or already archived' });
+      
+      res.json({ message: 'Client archived successfully', id: data.id });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  const restoreHandler = async (req, res) => {
+    try {
+      const updatePayload = {
+        status: 'active',
+        archived_at: null,
+        archived_by: null,
+        archive_reason: null
+      };
+
+      const { data, error } = await supabase.from('clients').update(updatePayload).eq('id', req.params.id).eq('tenant_id', req.tenantId).eq('status', 'archived').select().maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Archived Client not found' });
+      
+      res.json({ message: 'Client restored successfully', id: data.id });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  router.post('/:id/archive', archiveHandler);
+  router.post('/:id/restore', restoreHandler);
+  router.delete('/:id', archiveHandler);
+  
   return router;
 }
 

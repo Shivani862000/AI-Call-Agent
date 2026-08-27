@@ -72,7 +72,7 @@ async function upsertFeedbackFromAnalysis({ dbGet, dbRun, callRecord, reviewText
   const effectiveReviewText = hasReviewText ? reviewText : '';
   const effectiveStars = hasStars ? stars : 3;
   const categorization = await categorizeFeedback(effectiveReviewText, effectiveStars);
-  const existingFeedback = await dbGet('SELECT id FROM feedback WHERE call_id = ?', [callRecord.id]);
+  const existingFeedback = (await supabase.from('feedback').select('id').eq('call_id', callRecord.id).maybeSingle()).data;
 
   if (existingFeedback) {
     await dbRun(
@@ -161,9 +161,9 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   if (!recordingLocalPath && callRecord.recording_url) {
     try {
       recordingLocalPath = await downloadRecording(callRecord.recording_url, callRecord.provider_call_id);
-      await dbRun('UPDATE calls SET recording_local_path = ? WHERE id = ?', [recordingLocalPath, callRecord.id]);
+      (await supabase.from('calls').update({ recording_local_path: recordingLocalPath }).eq('id', callRecord.id));
     } catch (error) {
-      await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['download_failed', 'blocked', callRecord.id]);
+      (await supabase.from('calls').update({ transcript_status: 'download_failed', analysis_status: 'blocked' }).eq('id', callRecord.id));
       throw error;
     }
   }
@@ -184,7 +184,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   }
 
   if (!transcriptText) {
-    await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['missing', 'blocked', callRecord.id]);
+    (await supabase.from('calls').update({ transcript_status: 'missing', analysis_status: 'blocked' }).eq('id', callRecord.id));
     logger.warn('FEEDBACK_PENDING', {
       callId: callRecord.id,
       customerId: callRecord.customer_id,
@@ -339,8 +339,8 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   logger.info('FEEDBACK_ANALYSIS_COMPLETED', feedbackDetails);
   logger.info(feedbackEvent, feedbackDetails);
 
-  const refreshedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [callRecord.id]);
-  const refreshedCustomer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+  const refreshedCall = (await supabase.from('calls').select('*').eq('id', callRecord.id).maybeSingle()).data;
+  const refreshedCustomer = (await supabase.from('customers').select('*').eq('id', callRecord.customer_id).maybeSingle()).data;
 
   const workflowResult = await applyCallOutcomeWorkflow({
     dbGet,
@@ -365,8 +365,8 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     });
   }
 
-  const updatedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [callRecord.id]);
-  const updatedCustomer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+  const updatedCall = (await supabase.from('calls').select('*').eq('id', callRecord.id).maybeSingle()).data;
+  const updatedCustomer = (await supabase.from('customers').select('*').eq('id', callRecord.customer_id).maybeSingle()).data;
 
   await dbRun(
     `UPDATE customers

@@ -19,10 +19,7 @@ function sendError(res, error) {
   return res.status(safeError.status).json(safeError.toResponse());
 }
 
-function createWebmasterAuthorization({ UserModel, TenantModel, env = process.env }) {
-  if (!UserModel) {
-    throw new Error('UserModel is required to authorize Webmaster access');
-  }
+function createWebmasterAuthorization({ env = process.env } = {}) {
 
   async function resolveActor(session) {
     if (session?.role !== 'WEBMASTER') {

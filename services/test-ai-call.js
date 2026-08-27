@@ -1,4 +1,5 @@
-const { dbRun, dbGet } = require('../db');
+const {  dbRun ,  dbGet  } = require('../db');
+const { supabase } = require('../src/supabase');
 const { extractCallFeedback } = require('./call-feedback');
 const { categorizeFeedback, generateGeminiReply } = require('./gemini');
 const { buildAgentSystemPrompt, buildOpeningPrompt } = require('../src/prompt-builder');

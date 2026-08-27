@@ -1,0 +1,1986 @@
+const mongoose = require('mongoose');
+
+const agentSchema = new mongoose.Schema({
+  tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
+  name: { type: String, required: true },
+  slug: { type: String, required: true },
+  description: { type: String, default: null },
+  client_name: { type: String, default: null },
+  language: { type: String, default: 'hi' },
+  voice_pipeline: { type: String, default: 'legacy' },
+  stt_provider: { type: String, default: 'deepgram' },
+  llm_provider: { type: String, default: 'gemini' },
+  llm_model: { type: String, default: null },
+  tts_provider: { type: String, default: 'native' },
+  tts_voice: { type: String, default: null },
+  system_prompt: { type: String, default: null },
+  opening_prompt: { type: String, default: null },
+  status: { type: String, enum: ['active', 'archived'], default: 'active' },
+  archived_at: { type: Date, default: null },
+  archived_by: { type: String, default: null },
+  archive_reason: { type: String, default: null },
+  pre_archive_status: { type: String, default: null },
+  is_active: { type: Boolean, default: true },
+  is_default: { type: Boolean, default: false }
+}, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
+
+agentSchema.index({ tenantId: 1, name: 1 }, { unique: true });
+agentSchema.index({ tenantId: 1, slug: 1 }, { unique: true });
+
+module.exports = mongoose.model('Agent', agentSchema);
+'use strict';
+
+const mongoose = require('mongoose');
+const { types: utilTypes } = require('node:util');
+const {
+  isSafeCorrelationId,
+  isSafeMachineCode,
+  sanitizeForAudit
+} = require('../webmaster/redaction');
+const {
+  INVALID_RETAINED_VALUE,
+  canonicalizeHydratedInsertOptions,
+  createSealedQueryFacade,
+  dataArrayValues,
+  dataEntries,
+  isInvalidRetainedValue,
+  normalizeBoundedString,
+  normalizeEnum,
+  normalizeNullableBoundedString,
+  normalizeNullableDate,
+  normalizeNullableObjectId,
+  ownDataDescriptors,
+  valueSafeError
+} = require('../webmaster/value-safe-validation');
+
+const ACTOR_ACCESS_LEVELS = new Set(['OWNER', 'ADMIN', 'SYSTEM']);
+const AUDIT_OUTCOMES = new Set(['success', 'failure']);
+const MACHINE_IDENTIFIER = /^[a-z0-9._:-]+$/i;
+const AUDIT_FILTER_FIELDS = new Set([
+  '_id',
+  'actor',
+  'actorAccessLevel',
+  'action',
+  'targetType',
+  'targetId',
+  'tenantId',
+  'requestId',
+  'outcome',
+  'failureCode',
+  'created_at'
+]);
+const AUDIT_PROJECTION_FIELDS = new Set([
+  ...AUDIT_FILTER_FIELDS,
+  'before',
+  'after'
+]);
+const AUDIT_READ_OPTION_FIELDS = new Set(['lean', 'limit', 'maxTimeMS', 'projection', 'skip', 'sort']);
+const immutableMixed = (options = {}) => ({
+  type: mongoose.Schema.Types.Mixed,
+  immutable: true,
+  ...options
+});
+
+function normalizeRequiredIdentifier(value) {
+  return normalizeBoundedString(value, { maxLength: 128, pattern: MACHINE_IDENTIFIER });
+}
+
+function normalizeOptionalIdentifier(value) {
+  return normalizeNullableBoundedString(value, { maxLength: 128, pattern: MACHINE_IDENTIFIER });
+}
+
+function normalizeRequestId(value) {
+  if (value == null) return null;
+  return isSafeCorrelationId(value) ? value : INVALID_RETAINED_VALUE;
+}
+
+function normalizeFailureCode(value) {
+  if (value == null) return null;
+  return isSafeMachineCode(value) ? value : INVALID_RETAINED_VALUE;
+}
+
+function defineAuditValue(target, key, value) {
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true
+  });
+}
+
+function invalidAuditFilter() {
+  return valueSafeError('INVALID_AUDIT_FILTER', 'Audit filters must use allowed plain data fields');
+}
+
+function invalidAuditProjection() {
+  return valueSafeError('INVALID_AUDIT_PROJECTION', 'Audit projections must use allowed plain data fields');
+}
+
+function invalidAuditOptions() {
+  return valueSafeError('INVALID_AUDIT_OPTIONS', 'Audit query options must use allowed plain data fields');
+}
+
+function normalizeAuditFilterScalar(path, value) {
+  let normalized;
+  if (path === '_id') normalized = normalizeNullableObjectId(value, mongoose.Types.ObjectId);
+  else if (path === 'created_at') normalized = normalizeNullableDate(value);
+  else if (path === 'actorAccessLevel') normalized = normalizeEnum(value, ACTOR_ACCESS_LEVELS, { nullable: true });
+  else if (path === 'outcome') normalized = normalizeEnum(value, AUDIT_OUTCOMES, { nullable: true });
+  else if (path === 'requestId') normalized = normalizeRequestId(value);
+  else if (path === 'failureCode') normalized = normalizeFailureCode(value);
+  else normalized = normalizeNullableBoundedString(value, { maxLength: 128, pattern: MACHINE_IDENTIFIER });
+  if (isInvalidRetainedValue(normalized)) throw invalidAuditFilter();
+  return normalized;
+}
+
+function normalizeAuditFilterValue(path, value) {
+  try {
+    return normalizeAuditFilterScalar(path, value);
+  } catch (_error) {
+    const operatorEntries = dataEntries(value);
+    if (!operatorEntries || operatorEntries.length === 0) throw invalidAuditFilter();
+    const allowedOperators = path === 'created_at'
+      ? new Set(['$eq', '$gt', '$gte', '$in', '$lt', '$lte'])
+      : new Set(['$eq', '$in']);
+    const normalized = {};
+    for (const [operator, operand] of operatorEntries) {
+      if (!allowedOperators.has(operator)) throw invalidAuditFilter();
+      if (operator === '$in') {
+        const values = dataArrayValues(operand);
+        if (!values) throw invalidAuditFilter();
+        defineAuditValue(normalized, operator, values.map((entry) => normalizeAuditFilterScalar(path, entry)));
+      } else {
+        defineAuditValue(normalized, operator, normalizeAuditFilterScalar(path, operand));
+      }
+    }
+    return normalized;
+  }
+}
+
+function normalizeAuditFilter(filter, seen = new WeakSet(), { root = true } = {}) {
+  if (root && filter == null) return {};
+  const entries = dataEntries(filter);
+  if (!entries || seen.has(filter)) throw invalidAuditFilter();
+  seen.add(filter);
+  const normalized = {};
+  for (const [path, value] of entries) {
+    if (path === '$and' || path === '$or' || path === '$nor') {
+      const clauses = dataArrayValues(value);
+      if (!clauses) throw invalidAuditFilter();
+      defineAuditValue(
+        normalized,
+        path,
+        clauses.map((clause) => normalizeAuditFilter(clause, seen, { root: false }))
+      );
+      continue;
+    }
+    if (!AUDIT_FILTER_FIELDS.has(path)) throw invalidAuditFilter();
+    defineAuditValue(normalized, path, normalizeAuditFilterValue(path, value));
+  }
+  seen.delete(filter);
+  return normalized;
+}
+
+function normalizeAuditProjection(projection) {
+  if (projection == null) return projection;
+  const entries = dataEntries(projection);
+  if (!entries) throw invalidAuditProjection();
+  const normalized = {};
+  for (const [path, inclusion] of entries) {
+    if (!AUDIT_PROJECTION_FIELDS.has(path)
+      || ![0, 1, false, true].includes(inclusion)) throw invalidAuditProjection();
+    defineAuditValue(normalized, path, inclusion);
+  }
+  return normalized;
+}
+
+function normalizeAuditSort(sort) {
+  const entries = dataEntries(sort);
+  if (!entries) throw invalidAuditOptions();
+  const normalized = {};
+  for (const [path, direction] of entries) {
+    if (path !== 'created_at' || (direction !== 1 && direction !== -1)) throw invalidAuditOptions();
+    defineAuditValue(normalized, path, direction);
+  }
+  return normalized;
+}
+
+function normalizeAuditReadOptions(options) {
+  if (options == null) return undefined;
+  const entries = dataEntries(options);
+  if (!entries) throw invalidAuditOptions();
+  const normalized = {};
+  for (const [key, value] of entries) {
+    if (!AUDIT_READ_OPTION_FIELDS.has(key)) throw invalidAuditOptions();
+    if (key === 'projection') defineAuditValue(normalized, key, normalizeAuditProjection(value));
+    else if (key === 'sort') defineAuditValue(normalized, key, normalizeAuditSort(value));
+    else if (key === 'lean') {
+      if (typeof value !== 'boolean') throw invalidAuditOptions();
+      defineAuditValue(normalized, key, value);
+    } else {
+      if (!Number.isInteger(value) || value < 0 || (key === 'maxTimeMS' && value === 0)) {
+        throw invalidAuditOptions();
+      }
+      defineAuditValue(normalized, key, value);
+    }
+  }
+  return normalized;
+}
+
+function assertAuditField(document, field, code, message, { required = false } = {}) {
+  const value = document[field];
+  if (isInvalidRetainedValue(value) || (required && value == null)) {
+    throw valueSafeError(code, message);
+  }
+}
+
+function assertValidAuditEvent(document) {
+  assertAuditField(document, 'actor', 'INVALID_AUDIT_ACTOR', 'Audit actor must be a bounded identifier', { required: true });
+  assertAuditField(
+    document,
+    'actorAccessLevel',
+    'INVALID_AUDIT_ACTOR_ACCESS_LEVEL',
+    'Audit actor access level must be OWNER, ADMIN, or SYSTEM',
+    { required: true }
+  );
+  assertAuditField(document, 'action', 'INVALID_AUDIT_ACTION', 'Audit action must be a bounded identifier', { required: true });
+  assertAuditField(
+    document,
+    'targetType',
+    'INVALID_AUDIT_TARGET_TYPE',
+    'Audit target type must be a bounded identifier',
+    { required: true }
+  );
+  assertAuditField(document, 'targetId', 'INVALID_AUDIT_TARGET_ID', 'Audit target ID must be a bounded identifier');
+  assertAuditField(document, 'tenantId', 'INVALID_AUDIT_TENANT_ID', 'Audit tenant ID must be a bounded identifier');
+  assertAuditField(
+    document,
+    'requestId',
+    'INVALID_AUDIT_REQUEST_ID',
+    'Request ID must be a bounded correlation identifier'
+  );
+  assertAuditField(
+    document,
+    'outcome',
+    'INVALID_AUDIT_OUTCOME',
+    'Audit outcome must be success or failure',
+    { required: true }
+  );
+  assertAuditField(
+    document,
+    'failureCode',
+    'INVALID_AUDIT_FAILURE_CODE',
+    'Audit failure code must use safe machine-code vocabulary'
+  );
+}
+
+const auditEventSchema = new mongoose.Schema({
+  actor: immutableMixed({ set: normalizeRequiredIdentifier }),
+  actorAccessLevel: immutableMixed({ set: (value) => normalizeEnum(value, ACTOR_ACCESS_LEVELS) }),
+  action: immutableMixed({ set: normalizeRequiredIdentifier }),
+  targetType: immutableMixed({ set: normalizeRequiredIdentifier }),
+  targetId: immutableMixed({ default: null, set: normalizeOptionalIdentifier }),
+  tenantId: immutableMixed({ default: null, set: normalizeOptionalIdentifier }),
+  before: immutableMixed({ default: null, set: sanitizeForAudit }),
+  after: immutableMixed({ default: null, set: sanitizeForAudit }),
+  requestId: immutableMixed({ default: null, set: normalizeRequestId }),
+  outcome: immutableMixed({ set: (value) => normalizeEnum(value, AUDIT_OUTCOMES) }),
+  failureCode: immutableMixed({ default: null, set: normalizeFailureCode })
+}, {
+  strict: true,
+  minimize: false,
+  timestamps: { createdAt: 'created_at', updatedAt: false }
+});
+
+auditEventSchema.pre('validate', function validateAndSanitizeRetainedAuditMetadata() {
+  this.before = sanitizeForAudit(this.before);
+  this.after = sanitizeForAudit(this.after);
+  assertValidAuditEvent(this);
+});
+
+auditEventSchema.pre('save', function validateRetainedAuditSave() {
+  if (!this.isNew) {
+    throw valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable');
+  }
+  this.before = sanitizeForAudit(this.before);
+  this.after = sanitizeForAudit(this.after);
+  assertValidAuditEvent(this);
+});
+
+function rejectAuditDocumentMutation() {
+  return Promise.reject(valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable'));
+}
+
+auditEventSchema.method('updateOne', rejectAuditDocumentMutation, { suppressWarning: true });
+auditEventSchema.method('deleteOne', rejectAuditDocumentMutation, { suppressWarning: true });
+
+auditEventSchema.pre('insertMany', function rejectUnsafeAuditInsertMany(next, documents, options) {
+  try {
+    canonicalizeHydratedInsertOptions(options, {
+      unsafeCode: 'UNSAFE_AUDIT_INSERT_MANY_OPTIONS',
+      unsafeMessage: 'Audit insert options must be plain data',
+      leanCode: 'UNSUPPORTED_AUDIT_LEAN_INSERT_MANY',
+      leanMessage: 'Lean audit inserts are not supported'
+    });
+    const documentList = Array.isArray(documents) ? dataArrayValues(documents) : [documents];
+    if (!documentList) throw valueSafeError('INVALID_AUDIT_INPUT', 'Audit input must be plain data');
+    for (const document of documentList) {
+      if (utilTypes.isProxy(document)) {
+        throw valueSafeError('INVALID_AUDIT_INPUT', 'Audit input must be plain data');
+      }
+      if (document instanceof mongoose.Document) continue;
+      if (!ownDataDescriptors(document)) {
+        throw valueSafeError('INVALID_AUDIT_INPUT', 'Audit input must be plain data');
+      }
+    }
+  } catch (error) {
+    return next(error);
+  }
+  return next();
+});
+
+auditEventSchema.pre([
+  'updateOne',
+  'updateMany',
+  'findOneAndUpdate',
+  'findOneAndReplace',
+  'replaceOne',
+  'deleteOne',
+  'deleteMany',
+  'findOneAndDelete'
+], function rejectAuditMutation() {
+  throw valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable');
+});
+
+auditEventSchema.pre('bulkWrite', function rejectAuditBulkWrite() {
+  throw valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable');
+});
+
+auditEventSchema.index({ created_at: -1 });
+auditEventSchema.index({ tenantId: 1, created_at: -1 });
+
+const AuditEvent = mongoose.model('AuditEvent', auditEventSchema);
+
+const saveNewAuditEvent = AuditEvent.prototype.save;
+
+function guardAuditDocumentSave(...args) {
+  if (!this.isNew) {
+    return Promise.reject(valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable'));
+  }
+  return saveNewAuditEvent.apply(this, args);
+}
+
+Object.defineProperty(AuditEvent.prototype, 'save', {
+  configurable: true,
+  value: guardAuditDocumentSave,
+  writable: false
+});
+Object.defineProperty(AuditEvent.prototype, '$save', {
+  configurable: true,
+  value: guardAuditDocumentSave,
+  writable: false
+});
+
+function rejectAuditMutationBoundary() {
+  return Promise.reject(valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable'));
+}
+
+function throwAuditMutationBoundary() {
+  throw valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable');
+}
+
+function sealAuditReadQuery(query) {
+  return createSealedQueryFacade(query, () => (
+    valueSafeError('IMMUTABLE_AUDIT_EVENT', 'Audit events are immutable')
+  ), mongoose.Types.ObjectId);
+}
+
+const auditFind = AuditEvent.find;
+const auditFindOne = AuditEvent.findOne;
+const auditCountDocuments = AuditEvent.countDocuments;
+const auditEstimatedDocumentCount = AuditEvent.estimatedDocumentCount;
+
+for (const [method, read] of [['find', auditFind], ['findOne', auditFindOne]]) {
+  Object.defineProperty(AuditEvent, method, {
+    configurable: true,
+    value(filter, projection, options, ...extraArguments) {
+      try {
+        if (extraArguments.length !== 0) throw invalidAuditOptions();
+        return sealAuditReadQuery(read.call(
+          this,
+          normalizeAuditFilter(filter),
+          normalizeAuditProjection(projection),
+          normalizeAuditReadOptions(options)
+        ));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+    writable: false
+  });
+}
+
+Object.defineProperty(AuditEvent, 'findById', {
+  configurable: true,
+  value(id, projection, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidAuditOptions();
+      const filter = normalizeAuditFilter({ _id: id });
+      return sealAuditReadQuery(auditFindOne.call(
+        this,
+        filter,
+        normalizeAuditProjection(projection),
+        normalizeAuditReadOptions(options)
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(AuditEvent, 'countDocuments', {
+  configurable: true,
+  value(filter, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidAuditOptions();
+      return sealAuditReadQuery(auditCountDocuments.call(
+        this,
+        normalizeAuditFilter(filter),
+        normalizeAuditReadOptions(options)
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(AuditEvent, 'estimatedDocumentCount', {
+  configurable: true,
+  value(options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidAuditOptions();
+      return sealAuditReadQuery(auditEstimatedDocumentCount.call(this, normalizeAuditReadOptions(options)));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(AuditEvent, 'exists', {
+  configurable: true,
+  value(filter, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidAuditOptions();
+      const normalizedOptions = normalizeAuditReadOptions(options) || {};
+      defineAuditValue(normalizedOptions, 'lean', true);
+      return sealAuditReadQuery(auditFindOne.call(
+        this,
+        normalizeAuditFilter(filter),
+        { _id: 1 },
+        normalizedOptions
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(AuditEvent, 'distinct', {
+  configurable: true,
+  value() {
+    throw valueSafeError('UNSUPPORTED_AUDIT_DISTINCT', 'Direct audit distinct queries are not supported');
+  },
+  writable: false
+});
+
+for (const method of [
+  'updateOne',
+  'updateMany',
+  'replaceOne',
+  'findOneAndUpdate',
+  'findOneAndReplace',
+  'findByIdAndUpdate',
+  'deleteOne',
+  'deleteMany',
+  'findOneAndDelete',
+  'findByIdAndDelete',
+  'findOneAndRemove',
+  'findByIdAndRemove',
+  'bulkWrite',
+  'bulkSave'
+]) {
+  Object.defineProperty(AuditEvent, method, {
+    configurable: true,
+    value: rejectAuditMutationBoundary,
+    writable: false
+  });
+}
+
+Object.defineProperty(AuditEvent, 'where', {
+  configurable: true,
+  value: throwAuditMutationBoundary,
+  writable: false
+});
+
+Object.defineProperty(AuditEvent, 'aggregate', {
+  configurable: true,
+  value() {
+    throw valueSafeError('UNSUPPORTED_AUDIT_AGGREGATION', 'Direct audit aggregation is not supported');
+  },
+  writable: false
+});
+
+for (const method of ['$where', 'watch', 'mapReduce']) {
+  Object.defineProperty(AuditEvent, method, {
+    configurable: true,
+    value() {
+      throw valueSafeError(
+        'UNSUPPORTED_AUDIT_RUNTIME_QUERY',
+        'Direct audit runtime queries are not supported'
+      );
+    },
+    writable: false
+  });
+}
+
+module.exports = AuditEvent;
+const mongoose = require('mongoose');
+
+const callSchema = new mongoose.Schema({
+  tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
+  customerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Customer',
+    default: null,
+    required() { return !this.legacy_customer_ref_hash; }
+  },
+  legacy_customer_ref_hash: {
+    type: String,
+    default: null,
+    select: false,
+    match: /^[a-f0-9]{64}$/,
+    required() { return !this.customerId; }
+  },
+  customer_phone_ref_hash: {
+    type: String,
+    default: null,
+    select: false,
+    match: /^[a-f0-9]{64}$/
+  },
+  agentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Agent', default: null },
+  call_type: { type: String, required: true },
+  status: { type: String, required: true },
+  archived_at: { type: Date, default: null },
+  archived_by: { type: String, default: null },
+  archive_reason: { type: String, default: null },
+  pre_archive_status: { type: String, default: null },
+  outcome: { type: String }, // e.g., initiated, scheduled_initiated, answered, no_answer
+  provider_call_id: { type: String, default: null },
+  context_state: {
+    type: String,
+    enum: [
+      'prepared',
+      'provider_acceptance_pending',
+      'provider_failure_pending',
+      'provider_accepted',
+      'provider_failed'
+    ],
+    default: null
+  },
+  call_direction: { type: String, default: 'outbound' },
+  call_source: { type: String, default: null },
+  client_name: { type: String, default: null },
+  provider_payload_json: { type: mongoose.Schema.Types.Mixed, default: null },
+  recording_url: { type: String, default: null },
+  transcript: { type: String, default: null }, // previously transcript_text
+  transcript_status: { type: String },
+  duration_seconds: { type: Number, default: 0 },
+  started_at: { type: Date, default: Date.now }, // previously called_at
+  completed_at: { type: Date, default: null }, // previously ended_at
+  
+  // Analysis Fields
+  extracted_review_text: { type: String },
+  extracted_rating: { type: Number },
+  sentiment_label: { type: String },
+  sentiment: { type: String },
+  analysis_summary: { type: String },
+  analysis_status: { type: String },
+  analysis_json: { type: mongoose.Schema.Types.Mixed }, // Store JSON directly instead of string
+  analysis_completed_at: { type: Date }
+});
+
+callSchema.index({ tenantId: 1, customer_phone_ref_hash: 1, started_at: -1 });
+
+module.exports = mongoose.model('Call', callSchema);
+'use strict';
+
+const mongoose = require('mongoose');
+
+const campaignSchema = new mongoose.Schema({
+  tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
+  name: { type: String, required: true, trim: true },
+  service_name: { type: String, default: null },
+  monthly_spend_inr: { type: Number, default: 0 },
+  status: { type: String, enum: ['active', 'paused', 'archived'], default: 'active' },
+  archived_at: { type: Date, default: null },
+  archived_by: { type: String, default: null },
+  archive_reason: { type: String, default: null },
+  pre_archive_status: { type: String, default: null }
+}, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
+
+campaignSchema.index({ tenantId: 1, name: 1 }, { unique: true });
+
+module.exports = mongoose.model('Campaign', campaignSchema);
+'use strict';
+
+const mongoose = require('mongoose');
+
+const clientSchema = new mongoose.Schema({
+  tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
+  name: { type: String, required: true, trim: true },
+  phone: { type: String, required: true, trim: true },
+  date_of_birth: { type: String, default: null },
+  last_visit_date: { type: String, required: true },
+  treatment_type: { type: String, required: true },
+  annual_reminder_enabled: { type: Number, default: 1 },
+  annual_reminder_slot: { type: String, default: '10:00' },
+  next_annual_reminder_date: { type: String, default: null },
+  last_annual_reminder_at: { type: Date, default: null },
+  last_annual_reminder_year: { type: Number, default: null },
+  notes: { type: String, default: null },
+  status: { type: String, enum: ['active', 'paused', 'archived'], default: 'active' },
+  archived_at: { type: Date, default: null },
+  archived_by: { type: String, default: null },
+  archive_reason: { type: String, default: null },
+  pre_archive_status: { type: String, default: null }
+}, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
+
+clientSchema.index({ tenantId: 1, phone: 1 }, { unique: true });
+
+module.exports = mongoose.model('Client', clientSchema);
+const mongoose = require('mongoose');
+
+const customerSchema = new mongoose.Schema({
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tenant',
+    required: true
+  },
+  name: { type: String, required: true },
+  phone: { type: String, required: true },
+  preferred_slot: { type: String, default: '10:00' },
+  status: { type: String, default: 'pending' },
+  archived_at: { type: Date, default: null },
+  archived_by: { type: String, default: null },
+  archive_reason: { type: String, default: null },
+  pre_archive_status: { type: String, default: null },
+  customer_value: { type: String, default: 'standard' },
+  urgency_level: { type: String, default: 'normal' },
+  priority_score: { type: Number, default: 50 },
+  ai_score: { type: Number, default: 50 },
+  preferred_language: { type: String, default: 'hi' },
+  preferred_dialect: { type: String },
+  do_not_call: { type: Number, default: 0 },
+  consent_status: { type: String, default: 'unknown' },
+  last_contact_outcome: { type: String },
+  scheduled_datetime: { type: Date },
+  next_retry_at: { type: Date },
+  retry_count: { type: Number, default: 0 },
+  wrong_number_flag: { type: Number, default: 0 },
+  admin_review_required: { type: Number, default: 0 },
+  callback_requested_at: { type: Date },
+  last_called_at: { type: Date },
+  best_call_slot: { type: String },
+  last_pickup_slot: { type: String },
+  pickup_rate_score: { type: Number, default: 0 },
+  outstanding_issues: { type: String },
+  pending_follow_ups: { type: String },
+  last_sentiment_score: { type: Number },
+  last_sentiment_label: { type: String },
+  revenue_stage: { type: String, default: 'unassigned' },
+  revenue_estimate: { type: Number, default: 0 },
+  campaign_name: { type: String },
+  service_interest: { type: String },
+  call_type: { type: String, default: 'REVIEW_CALL' },
+  last_competitor_mention: { type: String },
+  data_retention_until: { type: Date },
+  dnd_checked_at: { type: Date },
+  default_agent_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Agent' },
+  video_sent: { type: Number, default: 0 },
+  attempt_count: { type: Number, default: 0 },
+  last_attempt_at: { type: Date },
+  next_attempt_at: { type: Date },
+  failed_reason: { type: String },
+  scheduled_at: { type: Date },
+  phone_number: { type: String },
+  normalized_phone: { type: String },
+  auto_retry_enabled: { type: Number, default: 0 },
+  locked_at: { type: Date },
+  provider_request_id: { type: String },
+  is_manual: { type: Number, default: 0 },
+  last_visit_date: { type: Date }
+}, {
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
+});
+
+module.exports = mongoose.model('Customer', customerSchema);
+const mongoose = require('mongoose');
+
+const feedbackSchema = new mongoose.Schema({
+  tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true },
+  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
+  callId: { type: mongoose.Schema.Types.ObjectId, ref: 'Call' },
+  rating: { type: Number, min: 1, max: 5 }, // equivalent to stars
+  review_text: { type: String }, // equivalent to comments
+  category: { type: String },
+  source: { type: String, default: 'manual' },
+  status: { type: String, enum: ['active', 'archived'], default: 'active' },
+  archived_at: { type: Date, default: null },
+  archived_by: { type: String, default: null },
+  archive_reason: { type: String, default: null },
+  pre_archive_status: { type: String, default: null },
+  created_at: { type: Date, default: Date.now } // equivalent to submitted_at
+});
+
+module.exports = mongoose.model('Feedback', feedbackSchema);
+'use strict';
+
+const mongoose = require('mongoose');
+
+function validBase64Length(value, byteLength) {
+  if (typeof value !== 'string' || !value) return false;
+  const decoded = Buffer.from(value, 'base64');
+  return decoded.length === byteLength && decoded.toString('base64') === value;
+}
+
+function validCiphertext(value) {
+  if (typeof value !== 'string' || !value) return false;
+  const decoded = Buffer.from(value, 'base64');
+  return decoded.length > 0 && decoded.toString('base64') === value;
+}
+
+const integrationSecretSchema = new mongoose.Schema({
+  integration: { type: String, required: true, trim: true, maxlength: 128 },
+  key: { type: String, required: true, trim: true, maxlength: 128 },
+  ciphertext: {
+    type: String,
+    required: true,
+    select: false,
+    validate: { validator: validCiphertext, message: 'Invalid encrypted secret ciphertext' }
+  },
+  iv: {
+    type: String,
+    required: true,
+    select: false,
+    validate: { validator: (value) => validBase64Length(value, 12), message: 'Invalid encrypted secret IV' }
+  },
+  authTag: {
+    type: String,
+    required: true,
+    select: false,
+    validate: { validator: (value) => validBase64Length(value, 16), message: 'Invalid encrypted secret authentication tag' }
+  },
+  encryptionVersion: { type: Number, enum: [1], default: 1, required: true },
+  updatedBy: { type: String, required: true, maxlength: 128 },
+  updatedByAccessLevel: { type: String, enum: ['OWNER', 'ADMIN', 'SYSTEM'], required: true }
+}, {
+  strict: true,
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
+});
+
+integrationSecretSchema.index({ integration: 1, key: 1 }, { unique: true });
+
+module.exports = mongoose.model('IntegrationSecret', integrationSecretSchema);
+'use strict';
+
+const mongoose = require('mongoose');
+const { types: utilTypes } = require('node:util');
+const { isSafeMachineCode, sanitizeForAudit } = require('../webmaster/redaction');
+const {
+  INVALID_RETAINED_VALUE,
+  canonicalizeHydratedInsertOptions,
+  createSealedQueryFacade,
+  dataArrayValues,
+  dataEntries,
+  isInvalidRetainedValue,
+  normalizeBoundedString,
+  normalizeEnum,
+  normalizeNonNegativeInteger,
+  normalizeNullableDate,
+  normalizeNullableObjectId,
+  ownDataDescriptors,
+  valueSafeError
+} = require('../webmaster/value-safe-validation');
+
+const REDACTED = '[redacted]';
+const DELIVERY_STATUSES = new Set(['pending', 'delivered', 'failed']);
+const RECIPIENT_CATEGORIES = new Set(['tenant_admin', 'account', 'owner', 'support']);
+const MACHINE_IDENTIFIER = /^[a-z0-9._:-]+$/i;
+const NOTIFICATION_FILTER_FIELDS = new Set([
+  '_id',
+  'tenantId',
+  'accountId',
+  'recipientCategory',
+  'template',
+  'event',
+  'status',
+  'retryCount',
+  'failureCode'
+]);
+const NOTIFICATION_UPDATE_FIELDS = new Set([
+  'tenantId',
+  'accountId',
+  'recipientCategory',
+  'template',
+  'event',
+  'metadata',
+  'status',
+  'retryCount',
+  'failureCode',
+  'failureReason',
+  'lastAttemptAt',
+  'sentAt'
+]);
+const NOTIFICATION_UPDATE_OPERATORS = new Set(['$set', '$setOnInsert', '$inc', '$unset', '$rename']);
+const NOTIFICATION_PROJECTION_FIELDS = new Set([
+  ...NOTIFICATION_FILTER_FIELDS,
+  'metadata',
+  'failureReason',
+  'lastAttemptAt',
+  'sentAt',
+  'created_at',
+  'updated_at'
+]);
+const NOTIFICATION_READ_OPTION_FIELDS = new Set(['lean', 'limit', 'maxTimeMS', 'projection', 'skip', 'sort']);
+const NOTIFICATION_WRITE_OPTION_FIELDS = new Set([
+  'includeResultMetadata',
+  'lean',
+  'new',
+  'projection',
+  'returnDocument',
+  'returnOriginal',
+  'runValidators',
+  'sort'
+]);
+const STATUS_ERROR_MESSAGE = 'Notification status must be pending, delivered, or failed';
+const RETRY_COUNT_ERROR_MESSAGE = 'Notification retry count must be a non-negative integer';
+const FAILURE_CODE_ERROR_MESSAGE = 'Notification failure code is not in the operational allowlist';
+
+function retainedDataError(code, message) {
+  return valueSafeError(code, message);
+}
+
+function assertSafeInsertManyOptions(options) {
+  canonicalizeHydratedInsertOptions(options, {
+    unsafeCode: 'UNSAFE_NOTIFICATION_INSERT_MANY_OPTIONS',
+    unsafeMessage: 'Notification insert options must be plain data',
+    leanCode: 'UNSUPPORTED_NOTIFICATION_LEAN_INSERT_MANY',
+    leanMessage: 'Lean notification inserts are not supported'
+  });
+}
+
+function sanitizeFailureReason(value) {
+  return value == null ? null : REDACTED;
+}
+
+function sanitizeMetadataAssignment(value) {
+  // Query writes are sanitized path-by-path in query middleware. Applying the
+  // root fail-closed setter to a dotted operational value would redact it twice.
+  if (this && typeof this.getUpdate === 'function') return value;
+  return sanitizeForAudit(value);
+}
+
+function preserveStatusInput(value) {
+  return normalizeEnum(value, DELIVERY_STATUSES);
+}
+
+function preserveRetryCountInput(value) {
+  return normalizeNonNegativeInteger(value);
+}
+
+function preserveFailureCodeInput(value) {
+  if (value == null) return null;
+  return isSafeMachineCode(value) ? value : INVALID_RETAINED_VALUE;
+}
+
+function preserveObjectIdInput(value) {
+  return normalizeNullableObjectId(value, mongoose.Types.ObjectId);
+}
+
+function preserveRecipientCategoryInput(value) {
+  return normalizeEnum(value, RECIPIENT_CATEGORIES);
+}
+
+function preserveMachineIdentifierInput(value) {
+  return normalizeBoundedString(value, { maxLength: 128, pattern: MACHINE_IDENTIFIER });
+}
+
+const notificationDeliverySchema = new mongoose.Schema({
+  tenantId: { type: mongoose.Schema.Types.Mixed, ref: 'Tenant', default: null, set: preserveObjectIdInput },
+  accountId: { type: mongoose.Schema.Types.Mixed, ref: 'User', default: null, set: preserveObjectIdInput },
+  recipientCategory: {
+    type: mongoose.Schema.Types.Mixed,
+    set: preserveRecipientCategoryInput
+  },
+  template: { type: mongoose.Schema.Types.Mixed, set: preserveMachineIdentifierInput },
+  event: { type: mongoose.Schema.Types.Mixed, set: preserveMachineIdentifierInput },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {}, set: sanitizeMetadataAssignment },
+  status: {
+    type: mongoose.Schema.Types.Mixed,
+    default: 'pending',
+    set: preserveStatusInput
+  },
+  retryCount: {
+    type: mongoose.Schema.Types.Mixed,
+    default: 0,
+    set: preserveRetryCountInput
+  },
+  failureCode: {
+    type: mongoose.Schema.Types.Mixed,
+    default: null,
+    set: preserveFailureCodeInput
+  },
+  failureReason: {
+    type: String,
+    default: null,
+    set: sanitizeFailureReason
+  },
+  lastAttemptAt: { type: mongoose.Schema.Types.Mixed, default: null, set: normalizeNullableDate },
+  sentAt: { type: mongoose.Schema.Types.Mixed, default: null, set: normalizeNullableDate }
+}, {
+  strict: true,
+  minimize: false,
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
+});
+
+notificationDeliverySchema.pre('validate', function validateAndSanitizeRetainedNotificationMetadata() {
+  this.metadata = sanitizeForAudit(this.metadata);
+  assertValidNotificationDocument(this);
+});
+
+function invalidNotificationUpdate() {
+  return retainedDataError('INVALID_NOTIFICATION_UPDATE', 'Notification updates must use allowed fields and operators');
+}
+
+function hasUnsafeRecordDescriptors(value) {
+  if (!value || typeof value !== 'object' || utilTypes.isProxy(value)) return utilTypes.isProxy(value);
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    return Reflect.ownKeys(descriptors).some((key) => (
+      typeof key !== 'string' || !Object.hasOwn(descriptors[key], 'value')
+    ));
+  } catch (_error) {
+    return true;
+  }
+}
+
+function isSafeInternalUpdateValue(path, value) {
+  if (path === '__v') return isNonNegativeInteger(value);
+  if (path !== 'created_at' && path !== 'updated_at') return false;
+  const normalized = normalizeNullableDate(value);
+  return normalized instanceof Date;
+}
+
+function isAllowedNotificationUpdatePath(path) {
+  if (NOTIFICATION_UPDATE_FIELDS.has(path)) return true;
+  if (!path.startsWith('metadata.')) return false;
+  const segments = path.slice('metadata.'.length).split('.');
+  return segments.every((segment) => (
+    segment
+    && !segment.startsWith('$')
+    && !['__proto__', 'constructor', 'prototype'].includes(segment)
+  ));
+}
+
+function normalizeNotificationReplacement(entries, { allowInternalTimestamps }) {
+  const replacement = {};
+  for (const [path, value] of entries) {
+    if (allowInternalTimestamps && isSafeInternalUpdateValue(path, value)) {
+      defineFilterValue(replacement, path, value);
+      continue;
+    }
+    if (!NOTIFICATION_UPDATE_FIELDS.has(path)) throw invalidNotificationUpdate();
+    defineFilterValue(replacement, path, normalizeNotificationUpdateValue(path, value));
+  }
+  for (const requiredPath of ['recipientCategory', 'template', 'event']) {
+    if (!Object.hasOwn(replacement, requiredPath)) {
+      const { code, message } = notificationFieldError(requiredPath);
+      throw retainedDataError(code, message);
+    }
+  }
+  return replacement;
+}
+
+function normalizeNotificationOperator(operator, entries, { allowInternalTimestamps }) {
+  if (!NOTIFICATION_UPDATE_OPERATORS.has(operator)) throw invalidNotificationUpdate();
+  if (operator === '$rename') {
+    throw retainedDataError(
+      'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE',
+      'Notification retained and state field renames are not supported'
+    );
+  }
+
+  const normalizedOperand = {};
+  for (const [path, value] of entries) {
+    if (allowInternalTimestamps && isSafeInternalUpdateValue(path, value)) {
+      defineFilterValue(normalizedOperand, path, value);
+      continue;
+    }
+    if (!isAllowedNotificationUpdatePath(path)) throw invalidNotificationUpdate();
+
+    if (operator === '$inc') {
+      if (path !== 'retryCount') {
+        throw retainedDataError(
+          'INVALID_NOTIFICATION_STATE_MUTATION',
+          'Notification state mutation operator is not supported'
+        );
+      }
+      defineFilterValue(normalizedOperand, path, validateNotificationFieldMutation(operator, path, value));
+      continue;
+    }
+
+    if (operator === '$unset') {
+      if (['recipientCategory', 'template', 'event', 'status', 'retryCount'].includes(path)) {
+        throw retainedDataError(
+          'INVALID_NOTIFICATION_STATE_MUTATION',
+          'Notification state mutation operator is not supported'
+        );
+      }
+      if (value !== 1 && value !== true && value !== '') {
+        throw retainedDataError(
+          'UNSUPPORTED_NOTIFICATION_STRUCTURAL_UPDATE',
+          'Notification retained-field removal uses an unsupported marker'
+        );
+      }
+      defineFilterValue(normalizedOperand, path, value);
+      continue;
+    }
+
+    const normalized = isRetainedPath(path)
+      ? sanitizeRetainedUpdateValue(path, value)
+      : normalizeNotificationUpdateValue(path, value);
+    defineFilterValue(normalizedOperand, path, normalized);
+  }
+  return normalizedOperand;
+}
+
+function sanitizeMetadataUpdate(update, { allowInternalTimestamps = false } = {}) {
+  if (update == null) throw invalidNotificationUpdate();
+  if (Array.isArray(update)) {
+    throw retainedDataError(
+      'UNSUPPORTED_NOTIFICATION_UPDATE_PIPELINE',
+      'Notification update pipelines are not supported'
+    );
+  }
+  const updateEntries = dataEntries(update);
+  if (!updateEntries) {
+    throw retainedDataError(
+      'UNSAFE_NOTIFICATION_UPDATE',
+      'Notification updates must be plain data'
+    );
+  }
+
+  const hasOperators = updateEntries.some(([key]) => key.startsWith('$'));
+  if (!hasOperators) return normalizeNotificationReplacement(updateEntries, { allowInternalTimestamps });
+  if (updateEntries.some(([key]) => !key.startsWith('$'))) throw invalidNotificationUpdate();
+
+  const normalizedUpdate = {};
+  for (const [operator, values] of updateEntries) {
+    const valueEntries = dataEntries(values);
+    if (!valueEntries) {
+      if (hasUnsafeRecordDescriptors(values)) {
+        throw retainedDataError('UNSAFE_NOTIFICATION_UPDATE', 'Notification updates must be plain data');
+      }
+      throw retainedDataError(
+        'UNSUPPORTED_NOTIFICATION_OPERATOR_OPERAND',
+        'Notification update operator operands must be plain records'
+      );
+    }
+    defineFilterValue(
+      normalizedUpdate,
+      operator,
+      normalizeNotificationOperator(operator, valueEntries, { allowInternalTimestamps })
+    );
+  }
+  return normalizedUpdate;
+}
+
+function notificationFieldError(path) {
+  const errors = {
+    tenantId: ['INVALID_NOTIFICATION_TENANT_ID', 'Notification tenant ID must be a 24-character hexadecimal identifier'],
+    accountId: ['INVALID_NOTIFICATION_ACCOUNT_ID', 'Notification account ID must be a 24-character hexadecimal identifier'],
+    recipientCategory: ['INVALID_NOTIFICATION_RECIPIENT_CATEGORY', 'Notification recipient category is not supported'],
+    template: ['INVALID_NOTIFICATION_TEMPLATE', 'Notification template must be a bounded identifier'],
+    event: ['INVALID_NOTIFICATION_EVENT', 'Notification event must be a bounded identifier'],
+    status: ['INVALID_NOTIFICATION_STATUS', STATUS_ERROR_MESSAGE],
+    retryCount: ['INVALID_NOTIFICATION_RETRY_COUNT', RETRY_COUNT_ERROR_MESSAGE],
+    failureCode: ['INVALID_NOTIFICATION_FAILURE_CODE', FAILURE_CODE_ERROR_MESSAGE],
+    lastAttemptAt: ['INVALID_NOTIFICATION_LAST_ATTEMPT_AT', 'Notification last attempt timestamp must be a valid UTC date'],
+    sentAt: ['INVALID_NOTIFICATION_SENT_AT', 'Notification sent timestamp must be a valid UTC date']
+  };
+  const [code, message] = errors[path];
+  return { code, message };
+}
+
+function normalizeNotificationFieldValue(path, value) {
+  if (path === 'tenantId' || path === 'accountId') return preserveObjectIdInput(value);
+  if (path === 'recipientCategory') return preserveRecipientCategoryInput(value);
+  if (path === 'template' || path === 'event') return preserveMachineIdentifierInput(value);
+  if (path === 'status') return preserveStatusInput(value);
+  if (path === 'retryCount') return preserveRetryCountInput(value);
+  if (path === 'failureCode') return preserveFailureCodeInput(value);
+  if (path === 'lastAttemptAt' || path === 'sentAt') return normalizeNullableDate(value);
+  return value;
+}
+
+function normalizeNotificationUpdateValue(path, value) {
+  if (path === 'metadata') return sanitizeForAudit(value);
+  if (path === 'failureReason') return sanitizeFailureReason(value);
+  if (!isNotificationValidatedPath(path)) return value;
+  const normalized = normalizeNotificationFieldValue(path, value);
+  if (isInvalidRetainedValue(normalized)) {
+    const { code, message } = notificationFieldError(path);
+    throw retainedDataError(code, message);
+  }
+  return normalized;
+}
+
+function isNotificationValidatedPath(path) {
+  return [
+    'tenantId',
+    'accountId',
+    'recipientCategory',
+    'template',
+    'event',
+    'status',
+    'retryCount',
+    'failureCode',
+    'lastAttemptAt',
+    'sentAt'
+  ].includes(path);
+}
+
+function validateNotificationFieldMutation(operator, path, value) {
+  if (operator === '$set' || operator === '$setOnInsert') {
+    return normalizeNotificationUpdateValue(path, value);
+  }
+  if (operator === '$inc' && path === 'retryCount') {
+    if (isNonNegativeInteger(value)) return value;
+    throw retainedDataError(
+      'INVALID_NOTIFICATION_RETRY_INCREMENT',
+      'Notification retry increments must be non-negative integers'
+    );
+  }
+  if (operator === '$unset' && !['recipientCategory', 'template', 'event', 'status', 'retryCount'].includes(path)) {
+    if (value === 1 || value === true || value === '') return value;
+  }
+  throw retainedDataError(
+    'INVALID_NOTIFICATION_STATE_MUTATION',
+    'Notification state mutation operator is not supported'
+  );
+}
+
+function normalizeNotificationFilterId(value) {
+  const normalized = preserveObjectIdInput(value);
+  return normalized == null || !isInvalidRetainedValue(normalized)
+    ? normalized
+    : INVALID_RETAINED_VALUE;
+}
+
+function defineFilterValue(filter, path, value) {
+  Object.defineProperty(filter, path, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true
+  });
+}
+
+function invalidNotificationFilter() {
+  return retainedDataError('INVALID_NOTIFICATION_FILTER', 'Notification filters must be plain data');
+}
+
+function normalizeNotificationFilterScalar(path, value) {
+  const normalized = path === '_id'
+    ? normalizeNotificationFilterId(value)
+    : normalizeNotificationFieldValue(path, value);
+  if (!isInvalidRetainedValue(normalized)) return normalized;
+
+  if (path === '_id' || path === 'tenantId' || path === 'accountId') {
+    throw retainedDataError(
+      'INVALID_NOTIFICATION_FILTER_ID',
+      'Notification filter IDs must be 24-character hexadecimal identifiers'
+    );
+  }
+  const { code, message } = notificationFieldError(path);
+  throw retainedDataError(code, message);
+}
+
+function normalizeNotificationFilterValue(path, value) {
+  const direct = path === '_id'
+    ? normalizeNotificationFilterId(value)
+    : normalizeNotificationFieldValue(path, value);
+  if (!isInvalidRetainedValue(direct)) return direct;
+
+  const operatorEntries = dataEntries(value);
+  if (!operatorEntries
+    || operatorEntries.length === 0
+    || operatorEntries.some(([operator]) => !operator.startsWith('$'))) {
+    return normalizeNotificationFilterScalar(path, value);
+  }
+
+  const allowedOperators = path === 'retryCount'
+    ? new Set(['$eq', '$lt', '$lte', '$gt', '$gte', '$in'])
+    : new Set(['$eq', '$in']);
+  const normalizedOperators = {};
+  for (const [operator, operand] of operatorEntries) {
+    if (!allowedOperators.has(operator)) throw invalidNotificationFilter();
+    if (operator === '$in') {
+      const values = dataArrayValues(operand);
+      if (!values) throw invalidNotificationFilter();
+      defineFilterValue(
+        normalizedOperators,
+        operator,
+        values.map((item) => normalizeNotificationFilterScalar(path, item))
+      );
+      continue;
+    }
+    defineFilterValue(normalizedOperators, operator, normalizeNotificationFilterScalar(path, operand));
+  }
+  return normalizedOperators;
+}
+
+function normalizeNotificationFilter(filter, seen = new WeakSet(), { root = true } = {}) {
+  if (root && filter == null) return {};
+  const filterEntries = dataEntries(filter);
+  if (!filterEntries || seen.has(filter)) throw invalidNotificationFilter();
+
+  seen.add(filter);
+  const normalizedFilter = {};
+  for (const [path, value] of filterEntries) {
+    if (path === '$and' || path === '$or' || path === '$nor') {
+      const clauses = dataArrayValues(value);
+      if (!clauses) throw invalidNotificationFilter();
+      defineFilterValue(
+        normalizedFilter,
+        path,
+        clauses.map((clause) => normalizeNotificationFilter(clause, seen, { root: false }))
+      );
+      continue;
+    }
+    if (path.startsWith('$')) throw invalidNotificationFilter();
+    if (!NOTIFICATION_FILTER_FIELDS.has(path)) throw invalidNotificationFilter();
+    defineFilterValue(normalizedFilter, path, normalizeNotificationFilterValue(path, value));
+  }
+  seen.delete(filter);
+  return normalizedFilter;
+}
+
+function assertSafeNotificationFilter(filter) {
+  return normalizeNotificationFilter(filter);
+}
+
+function invalidNotificationProjection() {
+  return retainedDataError(
+    'INVALID_NOTIFICATION_PROJECTION',
+    'Notification projections must use allowed plain data fields'
+  );
+}
+
+function invalidNotificationOptions() {
+  return retainedDataError(
+    'INVALID_NOTIFICATION_OPTIONS',
+    'Notification query options must use allowed plain data fields'
+  );
+}
+
+function normalizeNotificationProjection(projection) {
+  if (projection == null) return projection;
+  const entries = dataEntries(projection);
+  if (!entries) throw invalidNotificationProjection();
+  const normalized = {};
+  for (const [path, inclusion] of entries) {
+    if (!NOTIFICATION_PROJECTION_FIELDS.has(path)
+      || ![0, 1, false, true].includes(inclusion)) throw invalidNotificationProjection();
+    defineFilterValue(normalized, path, inclusion);
+  }
+  return normalized;
+}
+
+function normalizeNotificationSort(sort) {
+  const entries = dataEntries(sort);
+  if (!entries) throw invalidNotificationOptions();
+  const normalized = {};
+  const allowedFields = new Set(['created_at', 'lastAttemptAt', 'retryCount', 'sentAt', 'status', 'updated_at']);
+  for (const [path, direction] of entries) {
+    if (!allowedFields.has(path) || (direction !== 1 && direction !== -1)) {
+      throw invalidNotificationOptions();
+    }
+    defineFilterValue(normalized, path, direction);
+  }
+  return normalized;
+}
+
+function normalizeNotificationReadOptions(options) {
+  if (options == null) return undefined;
+  const entries = dataEntries(options);
+  if (!entries) throw invalidNotificationOptions();
+  const normalized = {};
+  for (const [key, value] of entries) {
+    if (!NOTIFICATION_READ_OPTION_FIELDS.has(key)) throw invalidNotificationOptions();
+    if (key === 'projection') {
+      defineFilterValue(normalized, key, normalizeNotificationProjection(value));
+    } else if (key === 'sort') {
+      defineFilterValue(normalized, key, normalizeNotificationSort(value));
+    } else if (key === 'lean') {
+      if (typeof value !== 'boolean') throw invalidNotificationOptions();
+      defineFilterValue(normalized, key, value);
+    } else {
+      if (!Number.isInteger(value) || value < 0 || (key === 'maxTimeMS' && value === 0)) {
+        throw invalidNotificationOptions();
+      }
+      defineFilterValue(normalized, key, value);
+    }
+  }
+  return normalized;
+}
+
+function normalizeNotificationWriteOptions(options) {
+  const entries = options == null ? [] : dataEntries(options);
+  if (!entries) throw invalidNotificationOptions();
+  const normalized = {};
+  for (const [key, value] of entries) {
+    if (!NOTIFICATION_WRITE_OPTION_FIELDS.has(key)) throw invalidNotificationOptions();
+    if (key === 'projection') {
+      defineFilterValue(normalized, key, normalizeNotificationProjection(value));
+    } else if (key === 'sort') {
+      defineFilterValue(normalized, key, normalizeNotificationSort(value));
+    } else if (key === 'returnDocument') {
+      if (value !== 'before' && value !== 'after') throw invalidNotificationOptions();
+      defineFilterValue(normalized, key, value);
+    } else {
+      if (typeof value !== 'boolean') throw invalidNotificationOptions();
+      defineFilterValue(normalized, key, key === 'runValidators' ? true : value);
+    }
+  }
+  if (!Object.hasOwn(normalized, 'runValidators')) defineFilterValue(normalized, 'runValidators', true);
+  return normalized;
+}
+
+function isNonNegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0;
+}
+
+function assertNotificationField(document, field, code, message, { required = false } = {}) {
+  const value = document[field];
+  if (isInvalidRetainedValue(value) || (required && value == null)) {
+    throw retainedDataError(code, message);
+  }
+}
+
+function assertValidNotificationDocument(document) {
+  assertNotificationField(
+    document,
+    'tenantId',
+    'INVALID_NOTIFICATION_TENANT_ID',
+    'Notification tenant ID must be a 24-character hexadecimal identifier'
+  );
+  assertNotificationField(
+    document,
+    'accountId',
+    'INVALID_NOTIFICATION_ACCOUNT_ID',
+    'Notification account ID must be a 24-character hexadecimal identifier'
+  );
+  assertNotificationField(
+    document,
+    'recipientCategory',
+    'INVALID_NOTIFICATION_RECIPIENT_CATEGORY',
+    'Notification recipient category is not supported',
+    { required: true }
+  );
+  assertNotificationField(
+    document,
+    'template',
+    'INVALID_NOTIFICATION_TEMPLATE',
+    'Notification template must be a bounded identifier',
+    { required: true }
+  );
+  assertNotificationField(
+    document,
+    'event',
+    'INVALID_NOTIFICATION_EVENT',
+    'Notification event must be a bounded identifier',
+    { required: true }
+  );
+  assertNotificationField(document, 'status', 'INVALID_NOTIFICATION_STATUS', STATUS_ERROR_MESSAGE, { required: true });
+  assertNotificationField(
+    document,
+    'retryCount',
+    'INVALID_NOTIFICATION_RETRY_COUNT',
+    RETRY_COUNT_ERROR_MESSAGE,
+    { required: true }
+  );
+  assertNotificationField(
+    document,
+    'failureCode',
+    'INVALID_NOTIFICATION_FAILURE_CODE',
+    FAILURE_CODE_ERROR_MESSAGE
+  );
+  assertNotificationField(
+    document,
+    'lastAttemptAt',
+    'INVALID_NOTIFICATION_LAST_ATTEMPT_AT',
+    'Notification last attempt timestamp must be a valid UTC date'
+  );
+  assertNotificationField(
+    document,
+    'sentAt',
+    'INVALID_NOTIFICATION_SENT_AT',
+    'Notification sent timestamp must be a valid UTC date'
+  );
+}
+
+function isRetainedPath(path) {
+  return path === 'metadata'
+    || path.startsWith('metadata.')
+    || path === 'failureCode'
+    || path === 'failureReason';
+}
+
+function assertSafeFailureCode(value) {
+  if (value == null || isSafeMachineCode(value)) return;
+  throw retainedDataError(
+    'INVALID_NOTIFICATION_FAILURE_CODE',
+    FAILURE_CODE_ERROR_MESSAGE
+  );
+}
+
+function sanitizeRetainedUpdateValue(path, value) {
+  if (path === 'failureReason') return sanitizeFailureReason(value);
+  if (path === 'failureCode') {
+    assertSafeFailureCode(value);
+    return value;
+  }
+  if (path === 'metadata') return sanitizeForAudit(value);
+
+  const relativePath = path.slice('metadata.'.length);
+  return sanitizeForAudit({ [relativePath]: value })[relativePath];
+}
+
+notificationDeliverySchema.pre([
+  'updateOne',
+  'updateMany',
+  'findOneAndUpdate',
+  'findOneAndReplace',
+  'replaceOne'
+], function sanitizeRetainedNotificationUpdate() {
+  this.setOptions({ runValidators: true });
+  this.setQuery(assertSafeNotificationFilter(this.getFilter()));
+  this.setUpdate(sanitizeMetadataUpdate(this.getUpdate(), { allowInternalTimestamps: true }));
+});
+
+notificationDeliverySchema.pre('save', function sanitizeRetainedNotificationSave() {
+  this.metadata = sanitizeForAudit(this.metadata);
+  this.failureReason = sanitizeFailureReason(this.failureReason);
+  assertValidNotificationDocument(this);
+});
+
+notificationDeliverySchema.method('updateOne', function guardedNotificationDocumentUpdate(update, options) {
+  return this.constructor.updateOne({ _id: this._id }, update, options);
+}, { suppressWarning: true });
+
+notificationDeliverySchema.method('deleteOne', function rejectNotificationDocumentDelete() {
+  return Promise.reject(retainedDataError(
+    'IMMUTABLE_NOTIFICATION_DELIVERY',
+    'Notification delivery records cannot be deleted'
+  ));
+}, { suppressWarning: true });
+
+notificationDeliverySchema.pre('bulkWrite', function rejectRetainedNotificationBulkWrites() {
+  throw retainedDataError(
+    'UNSUPPORTED_NOTIFICATION_BULK_WRITE',
+    'Notification bulk writes are not supported'
+  );
+});
+
+notificationDeliverySchema.pre([
+  'deleteOne',
+  'deleteMany',
+  'findOneAndDelete'
+], function rejectNotificationDelete() {
+  throw retainedDataError(
+    'IMMUTABLE_NOTIFICATION_DELIVERY',
+    'Notification delivery records cannot be deleted'
+  );
+});
+
+notificationDeliverySchema.pre('insertMany', function guardNotificationInsertMany(next, documents, options) {
+  try {
+    assertSafeInsertManyOptions(options);
+    const documentList = Array.isArray(documents) ? dataArrayValues(documents) : [documents];
+    if (!documentList) {
+      throw retainedDataError('INVALID_NOTIFICATION_INPUT', 'Notification input must be plain data');
+    }
+    for (const document of documentList) {
+      if (utilTypes.isProxy(document)) {
+        throw retainedDataError('INVALID_NOTIFICATION_INPUT', 'Notification input must be plain data');
+      }
+      if (document instanceof mongoose.Document) continue;
+      if (!ownDataDescriptors(document)) {
+        throw retainedDataError('INVALID_NOTIFICATION_INPUT', 'Notification input must be plain data');
+      }
+    }
+  } catch (error) {
+    return next(error);
+  }
+  return next();
+});
+
+notificationDeliverySchema.index({ tenantId: 1, status: 1, created_at: -1 });
+notificationDeliverySchema.index({ status: 1, created_at: -1 });
+
+const NotificationDelivery = mongoose.model('NotificationDelivery', notificationDeliverySchema);
+
+function rejectNotificationQueryMutation() {
+  return Promise.reject(retainedDataError(
+    'UNSUPPORTED_NOTIFICATION_QUERY_MUTATION',
+    'Notification query mutations must use guarded model methods'
+  ));
+}
+
+function throwNotificationQueryMutation() {
+  throw retainedDataError(
+    'UNSUPPORTED_NOTIFICATION_QUERY_MUTATION',
+    'Notification query mutations must use guarded model methods'
+  );
+}
+
+function rejectNotificationDeleteBoundary() {
+  return Promise.reject(retainedDataError(
+    'IMMUTABLE_NOTIFICATION_DELIVERY',
+    'Notification delivery records cannot be deleted'
+  ));
+}
+
+function rejectNotificationBulkBoundary() {
+  return Promise.reject(retainedDataError(
+    'UNSUPPORTED_NOTIFICATION_BULK_WRITE',
+    'Notification bulk writes are not supported'
+  ));
+}
+
+function sealNotificationQuery(query) {
+  return createSealedQueryFacade(query, () => retainedDataError(
+    'UNSUPPORTED_NOTIFICATION_QUERY_MUTATION',
+    'Notification query mutations must use guarded model methods'
+  ), mongoose.Types.ObjectId);
+}
+
+const notificationFind = NotificationDelivery.find;
+const notificationFindOne = NotificationDelivery.findOne;
+const notificationCountDocuments = NotificationDelivery.countDocuments;
+const notificationEstimatedDocumentCount = NotificationDelivery.estimatedDocumentCount;
+const notificationDistinct = NotificationDelivery.distinct;
+
+for (const [method, read] of [['find', notificationFind], ['findOne', notificationFindOne]]) {
+  Object.defineProperty(NotificationDelivery, method, {
+    configurable: true,
+    value(filter, projection, options, ...extraArguments) {
+      try {
+        if (extraArguments.length !== 0) throw invalidNotificationOptions();
+        return sealNotificationQuery(read.call(
+          this,
+          assertSafeNotificationFilter(filter),
+          normalizeNotificationProjection(projection),
+          normalizeNotificationReadOptions(options)
+        ));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+    writable: false
+  });
+}
+
+Object.defineProperty(NotificationDelivery, 'findById', {
+  configurable: true,
+  value(id, projection, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidNotificationOptions();
+      const filter = assertSafeNotificationFilter({ _id: id });
+      return sealNotificationQuery(notificationFindOne.call(
+        this,
+        filter,
+        normalizeNotificationProjection(projection),
+        normalizeNotificationReadOptions(options)
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(NotificationDelivery, 'countDocuments', {
+  configurable: true,
+  value(filter, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidNotificationOptions();
+      return sealNotificationQuery(notificationCountDocuments.call(
+        this,
+        assertSafeNotificationFilter(filter),
+        normalizeNotificationReadOptions(options)
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(NotificationDelivery, 'estimatedDocumentCount', {
+  configurable: true,
+  value(options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidNotificationOptions();
+      return sealNotificationQuery(notificationEstimatedDocumentCount.call(
+        this,
+        normalizeNotificationReadOptions(options)
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(NotificationDelivery, 'exists', {
+  configurable: true,
+  value(filter, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidNotificationOptions();
+      const normalizedOptions = normalizeNotificationReadOptions(options) || {};
+      defineFilterValue(normalizedOptions, 'lean', true);
+      return sealNotificationQuery(notificationFindOne.call(
+        this,
+        assertSafeNotificationFilter(filter),
+        { _id: 1 },
+        normalizedOptions
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+Object.defineProperty(NotificationDelivery, 'distinct', {
+  configurable: true,
+  value(field, filter, options, ...extraArguments) {
+    try {
+      if (extraArguments.length !== 0) throw invalidNotificationOptions();
+      if (typeof field !== 'string' || !NOTIFICATION_FILTER_FIELDS.has(field)) {
+        throw invalidNotificationFilter();
+      }
+      return sealNotificationQuery(notificationDistinct.call(
+        this,
+        field,
+        assertSafeNotificationFilter(filter),
+        normalizeNotificationReadOptions(options)
+      ));
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  },
+  writable: false
+});
+
+function installGuardedUpdate(method, write) {
+  Object.defineProperty(NotificationDelivery, method, {
+    configurable: true,
+    value(filter, update, options, ...extraArguments) {
+      try {
+        if (extraArguments.length !== 0) throw invalidNotificationOptions();
+        const normalizedFilter = assertSafeNotificationFilter(filter);
+        const normalizedUpdate = sanitizeMetadataUpdate(update);
+        const normalizedOptions = normalizeNotificationWriteOptions(options);
+        return sealNotificationQuery(write.call(this, normalizedFilter, normalizedUpdate, normalizedOptions));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+    writable: false
+  });
+}
+
+for (const method of ['updateOne', 'updateMany', 'findOneAndUpdate', 'findOneAndReplace', 'replaceOne']) {
+  installGuardedUpdate(method, NotificationDelivery[method]);
+}
+
+const guardedFindOneAndUpdate = NotificationDelivery.findOneAndUpdate;
+Object.defineProperty(NotificationDelivery, 'findByIdAndUpdate', {
+  configurable: true,
+  value(id, update, options, ...extraArguments) {
+    if (extraArguments.length !== 0) return Promise.reject(invalidNotificationOptions());
+    return guardedFindOneAndUpdate.call(this, { _id: id }, update, options);
+  },
+  writable: false
+});
+
+for (const method of [
+  'deleteOne',
+  'deleteMany',
+  'findOneAndDelete',
+  'findByIdAndDelete',
+  'findOneAndRemove',
+  'findByIdAndRemove'
+]) {
+  Object.defineProperty(NotificationDelivery, method, {
+    configurable: true,
+    value: rejectNotificationDeleteBoundary,
+    writable: false
+  });
+}
+
+for (const method of ['bulkWrite', 'bulkSave']) {
+  Object.defineProperty(NotificationDelivery, method, {
+    configurable: true,
+    value: rejectNotificationBulkBoundary,
+    writable: false
+  });
+}
+
+Object.defineProperty(NotificationDelivery, 'where', {
+  configurable: true,
+  value: throwNotificationQueryMutation,
+  writable: false
+});
+
+Object.defineProperty(NotificationDelivery, 'aggregate', {
+  configurable: true,
+  value() {
+    throw retainedDataError(
+      'UNSUPPORTED_NOTIFICATION_AGGREGATION',
+      'Direct notification aggregation is not supported'
+    );
+  },
+  writable: false
+});
+
+for (const method of ['$where', 'watch', 'mapReduce']) {
+  Object.defineProperty(NotificationDelivery, method, {
+    configurable: true,
+    value() {
+      throw retainedDataError(
+        'UNSUPPORTED_NOTIFICATION_RUNTIME_QUERY',
+        'Direct notification runtime queries are not supported'
+      );
+    },
+    writable: false
+  });
+}
+
+module.exports = NotificationDelivery;
+'use strict';
+
+const mongoose = require('mongoose');
+
+const platformSettingsSchema = new mongoose.Schema({
+  singletonKey: {
+    type: String,
+    enum: ['platform'],
+    default: 'platform',
+    required: true,
+    unique: true,
+    immutable: true
+  },
+  schemaVersion: {
+    type: Number,
+    min: 1,
+    default: 1,
+    required: true,
+    validate: { validator: Number.isInteger, message: 'Schema version must be an integer' }
+  },
+  application: { type: mongoose.Schema.Types.Mixed, default: {} },
+  defaults: { type: mongoose.Schema.Types.Mixed, default: {} },
+  featureFlags: { type: mongoose.Schema.Types.Mixed, default: {} },
+  policies: { type: mongoose.Schema.Types.Mixed, default: {} },
+  providers: { type: mongoose.Schema.Types.Mixed, default: {} },
+  notificationTemplates: { type: mongoose.Schema.Types.Mixed, default: {} },
+  retention: { type: mongoose.Schema.Types.Mixed, default: {} },
+  maintenance: { type: mongoose.Schema.Types.Mixed, default: {} },
+  ownershipGuardVersion: { type: Number, min: 0, default: 0, select: false }
+}, {
+  strict: true,
+  minimize: false,
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
+});
+
+module.exports = mongoose.model('PlatformSettings', platformSettingsSchema);
+'use strict';
+
+const mongoose = require('mongoose');
+
+const supportTicketSchema = new mongoose.Schema({
+  ticket_id: { type: String, required: true, unique: true, index: true },
+  sequence: { type: Number, required: true, unique: true },
+  tenant_id: { type: String, default: null, index: true },
+  type: { type: String, required: true, enum: ['BUG', 'IDEA', 'QUESTION'] },
+  description: { type: String, required: true, maxlength: 4000 },
+  status: { type: String, required: true, enum: ['NEW', 'IN_PROGRESS', 'RESOLVED'], default: 'NEW' },
+  reporter_username: { type: String, required: true },
+  reporter_role: { type: String, required: true },
+  page_url: { type: String, required: true },
+  page_title: { type: String, required: true },
+  context_json: { type: mongoose.Schema.Types.Mixed, required: true },
+  assignee_username: { type: String, default: null },
+  internal_update: { type: String, default: null },
+  resolution_note: { type: String, default: null },
+  created_at: { type: Date, default: Date.now },
+  updated_at: { type: Date, default: Date.now }
+}, { versionKey: false });
+
+supportTicketSchema.index({ updated_at: -1 });
+
+module.exports = mongoose.model('SupportTicket', supportTicketSchema);
+'use strict';
+
+const mongoose = require('mongoose');
+
+const supportTicketCounterSchema = new mongoose.Schema({
+  _id: { type: String, required: true },
+  sequence: { type: Number, required: true, default: 0 }
+}, { versionKey: false });
+
+module.exports = mongoose.model('SupportTicketCounter', supportTicketCounterSchema);
+const mongoose = require('mongoose');
+
+const tenantSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+    trim: true,
+    unique: true
+  },
+  primaryContact: {
+    name: { type: String, trim: true, maxlength: 120 },
+    email: { type: String, trim: true, lowercase: true, maxlength: 254 },
+    phone: { type: String, trim: true, maxlength: 32 }
+  },
+  address: { type: String, trim: true, maxlength: 500, default: '' },
+  timezone: { type: String, trim: true, maxlength: 80, default: 'Asia/Kolkata' },
+  branding: {
+    displayName: { type: String, trim: true, maxlength: 120, default: '' },
+    primaryColor: { type: String, trim: true, match: /^#[0-9a-f]{6}$/i, default: '#155eef' }
+  },
+  plan: { type: String, trim: true, maxlength: 64, default: 'standard' },
+  limits: {
+    users: { type: Number, min: 0, default: 25 },
+    monthlyCalls: { type: Number, min: 0, default: 10000 }
+  },
+  billingContact: { type: String, trim: true, maxlength: 254, default: '' },
+  internalNotes: { type: String, maxlength: 2000, default: '' },
+  tags: [{ type: String, trim: true, maxlength: 40 }],
+  settingsOverrides: { type: Map, of: mongoose.Schema.Types.Mixed, default: {} },
+  dailyReportTime: {
+    type: String,
+    default: '19:00', // Default 7:00 PM
+    match: /^([01]\d|2[0-3]):([0-5]\d)$/
+  },
+  status: {
+    type: String,
+    enum: ['active', 'suspended', 'archived'],
+    default: 'active'
+  },
+  archived_at: { type: Date, default: null },
+  archived_by: { type: String, default: null },
+  archive_reason: { type: String, default: null },
+  pre_archive_status: { type: String, default: null },
+  lifecycleGuardVersion: { type: Number, min: 0, default: 0, select: false }
+}, {
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
+});
+
+module.exports = mongoose.model('Tenant', tenantSchema);
+const mongoose = require('mongoose');
+
+const PLATFORM_ACCESS_LEVELS = ['OWNER', 'ADMIN'];
+
+const userSchema = new mongoose.Schema({
+  username: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true
+  },
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true,
+    lowercase: true
+  },
+  password_hash: {
+    type: String,
+    required: true
+  },
+  role: {
+    type: String,
+    enum: ['WEBMASTER', 'SUPPORT_TEAM', 'CLIENT_ADMIN', 'CLIENT_AGENT'],
+    required: true
+  },
+  platformAccessLevel: {
+    type: String,
+    enum: PLATFORM_ACCESS_LEVELS,
+    default: null,
+    validate: {
+      validator(value) {
+        return this.role === 'WEBMASTER' ? Boolean(value) : value == null;
+      },
+      message: 'Platform access level is valid only for Webmaster accounts'
+    }
+  },
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tenant',
+    required: function() {
+      // WEBMASTER and SUPPORT_TEAM can be system-level (null tenantId)
+      return this.role === 'CLIENT_ADMIN' || this.role === 'CLIENT_AGENT';
+    }
+  },
+  status: {
+    type: String,
+    enum: ['active', 'suspended', 'archived'],
+    default: 'active'
+  },
+  archived_at: {
+    type: Date,
+    default: null
+  },
+  archived_by: {
+    type: String,
+    default: null
+  },
+  archive_reason: {
+    type: String,
+    default: null
+  },
+  pre_archive_status: {
+    type: String,
+    default: null
+  },
+  password_changed_at: {
+    type: Date,
+    default: null
+  }
+}, {
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
+});
+
+module.exports = mongoose.model('User', userSchema);
