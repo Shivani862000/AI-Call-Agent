@@ -1,16 +1,7 @@
 'use strict';
 
 const express = require('express');
-const mongoose = require('mongoose');
-const Tenant = require('../../src/models/Tenant');
-const User = require('../../src/models/User');
-const Customer = require('../../src/models/Customer');
-const Call = require('../../src/models/Call');
-const Feedback = require('../../src/models/Feedback');
-const PlatformSettings = require('../../src/models/PlatformSettings');
-const IntegrationSecret = require('../../src/models/IntegrationSecret');
-const AuditEvent = require('../../src/models/AuditEvent');
-const NotificationDelivery = require('../../src/models/NotificationDelivery');
+const { supabase } = require('../../src/supabase');
 const { WebmasterError } = require('../../src/webmaster/errors');
 const { createTenantService } = require('../../src/webmaster/tenant-service');
 const { createUserService } = require('../../src/webmaster/user-service');
@@ -26,15 +17,15 @@ function pageInput(query = {}) { return { page: Math.max(1, Number(query.page) |
 function createWebmasterRouter({ authorization, services = {} } = {}) {
   if (!authorization) throw new TypeError('Webmaster authorization is required');
   const router = express.Router();
-  const auditService = services.auditService || createAuditService({ AuditEventModel: AuditEvent });
-  const secretService = services.secretService || createSecretService({ IntegrationSecretModel: IntegrationSecret, environmentKeyFor: (integration, key) => environmentKeyForSecret(integration, key, process.env) });
-  const settingsService = services.settingsService || createSettingsService({ PlatformSettingsModel: PlatformSettings, TenantModel: Tenant, auditService, secretService });
+  const auditService = services.auditService || createAuditService();
+  const secretService = services.secretService || createSecretService({ environmentKeyFor: (integration, key) => environmentKeyForSecret(integration, key, process.env) });
+  const settingsService = services.settingsService || createSettingsService({ auditService, secretService });
   const passwordPolicy = async () => (await settingsService.getGlobal()).global?.policies?.password || {};
-  const startSession = () => mongoose.startSession();
-  const tenantService = services.tenantService || createTenantService({ TenantModel: Tenant, UserModel: User, CustomerModel: Customer, CallModel: Call, FeedbackModel: Feedback, NotificationModel: NotificationDelivery, auditService, startSession, passwordPolicy, integrationStatus: async tenantId => integrationMetadata(secretService, settingsService, tenantId) });
-  const userService = services.userService || createUserService({ UserModel: User, TenantModel: Tenant, PlatformSettingsModel: PlatformSettings, auditService, startSession, passwordPolicy });
-  const notificationService = services.notificationService || createNotificationService({ mailer: emailService, DeliveryModel: NotificationDelivery, UserModel: User, TenantModel: Tenant, auditService, templateProvider: async ({ event, scope, tenantId }) => lifecycleTemplate(settingsService, event, scope, tenantId) });
-  const dashboardService = services.dashboardService || createDashboardService({ TenantModel: Tenant, UserModel: User, CallModel: Call, NotificationModel: NotificationDelivery, integrationStatus: async () => integrationMetadata(secretService, settingsService), recentAudit: limit => readAudit({ page: 1, pageSize: limit }).then(result => result.items) });
+  const startSession = () => null;
+  const tenantService = services.tenantService || createTenantService({ auditService, startSession, passwordPolicy, integrationStatus: async tenantId => integrationMetadata(secretService, settingsService, tenantId) });
+  const userService = services.userService || createUserService({ auditService, startSession, passwordPolicy });
+  const notificationService = services.notificationService || createNotificationService({ mailer: emailService, auditService, templateProvider: async ({ event, scope, tenantId }) => lifecycleTemplate(settingsService, event, scope, tenantId) });
+  const dashboardService = services.dashboardService || createDashboardService({ integrationStatus: async () => integrationMetadata(secretService, settingsService), recentAudit: limit => readAudit({ page: 1, pageSize: limit }).then(result => result.items) });
 
   router.use(authorization.requireWebmaster);
   router.get('/dashboard', asyncRoute(async (_req, res) => res.json(await dashboardService.get())));
@@ -44,7 +35,7 @@ function createWebmasterRouter({ authorization, services = {} } = {}) {
   router.patch('/tenants/:tenantId', asyncRoute(async (req, res) => res.json(await tenantService.update(req.params.tenantId, req.body.patch || req.body, req.body.expectedVersion, req.webmasterActor))));
   router.post('/tenants/:tenantId/lifecycle', asyncRoute(async (req, res) => {
     const tenant = await tenantService.transition(req.params.tenantId, req.body.transition, req.body.expectedVersion, req.webmasterActor, req.body.reason);
-    const notification = await notifySafely(async () => { const users = await User.find({ tenantId: req.params.tenantId, role: 'CLIENT_ADMIN', status: 'active' }).lean(); return notificationService.sendLifecycle({ tenant, users, event: lifecycleEvent(req.body.transition), actor: req.webmasterActor }); });
+    const notification = await notifySafely(async () => { const { data: users } = await supabase.from('users').select('*').eq('tenant_id', req.params.tenantId).eq('role', 'CLIENT_ADMIN').eq('status', 'active'); return notificationService.sendLifecycle({ tenant, users: users || [], event: lifecycleEvent(req.body.transition), actor: req.webmasterActor }); });
     res.json({ ...tenant, ...notification });
   }));
   router.get('/tenants/:tenantId/operations', asyncRoute(async (req, res) => res.json(await tenantService.getOperationalSnapshot(req.params.tenantId))));

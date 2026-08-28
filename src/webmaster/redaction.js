@@ -1,6 +1,5 @@
 'use strict';
 
-const mongoose = require('mongoose');
 const { types: utilTypes } = require('node:util');
 const {
   isInvalidRetainedValue,

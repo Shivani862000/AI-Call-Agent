@@ -5,7 +5,8 @@
 
 'use strict';
 
-const { dbGet, dbRun, dbAll } = require('../db');
+const { dbGet ,  dbRun ,  dbAll  } = require('../db');
+const { supabase } = require('../src/supabase');
 const crypto = require('crypto');
 const { initiateCall } = require('../services/icallmate');
 const {
@@ -153,10 +154,7 @@ async function ensureCustomerForClientReminder(client) {
         customer.id
       ]
     );
-    await dbRun(
-      'UPDATE clients SET linked_customer_id = ?, updated_at = ? WHERE id = ?',
-      [customer.id, new Date().toISOString(), client.id]
-    );
+    (await supabase.from('clients').update({ linked_customer_id: customer.id, updated_at: new Date().toISOString() }).eq('id', client.id));
     return dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [customer.id]);
   }
 
@@ -174,10 +172,7 @@ async function ensureCustomerForClientReminder(client) {
     ]
   );
 
-  await dbRun(
-    'UPDATE clients SET linked_customer_id = ?, updated_at = ? WHERE id = ?',
-    [result.lastID, new Date().toISOString(), client.id]
-  );
+  (await supabase.from('clients').update({ linked_customer_id: result.lastID, updated_at: new Date().toISOString() }).eq('id', client.id));
 
   return dbGet("SELECT * FROM customers WHERE id = ? AND status <> 'archived'", [result.lastID]);
 }
@@ -431,7 +426,7 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
 
   try {
     const customer = await ensureIncomingCustomerForCall(row.phone, row.caller_name);
-    const existingCall = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [row.stream_id]);
+    const existingCall = (await supabase.from('calls').select('*').eq('provider_call_id', row.stream_id).maybeSingle()).data;
     const outcome = row.status === 'active' ? 'active' : row.status;
     const providerPayload = JSON.stringify({
       event: eventName,

@@ -13,10 +13,6 @@ const helmet = require('helmet');
 // Import modular components
 const { PORT } = require('./src/config');
 const { PROTECTED_HTML_PATHS, requireAdminAuth, requireRole, basicAuth } = require('./src/auth');
-const User = require('./src/models/User');
-const Tenant = require('./src/models/Tenant');
-const PlatformSettings = require('./src/models/PlatformSettings');
-const IntegrationSecret = require('./src/models/IntegrationSecret');
 const { createWebmasterAuthorization } = require('./src/webmaster/authorization');
 const { createSettingsService } = require('./src/webmaster/settings-service');
 const { createSecretService } = require('./src/webmaster/secret-service');
@@ -31,9 +27,9 @@ require('./src/cron/daily-reports');
 require('./src/cron/retention-archival').scheduleRetentionArchival();
 
 const app = express();
-const webmasterAuthorization = createWebmasterAuthorization({ UserModel: User, TenantModel: Tenant });
-const platformSecretService = createSecretService({ IntegrationSecretModel: IntegrationSecret, environmentKeyFor: (integration, key) => environmentKeyForSecret(integration, key, process.env) });
-const platformSettingsService = createSettingsService({ PlatformSettingsModel: PlatformSettings, TenantModel: Tenant, secretService: platformSecretService });
+const webmasterAuthorization = createWebmasterAuthorization();
+const platformSecretService = createSecretService({ environmentKeyFor: (integration, key) => environmentKeyForSecret(integration, key, process.env) });
+const platformSettingsService = createSettingsService({ secretService: platformSecretService });
 const managedSettingsProvider = async () => (await platformSettingsService.getGlobal()).global;
 app.set('trust proxy', 1);
 

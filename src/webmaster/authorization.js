@@ -1,15 +1,22 @@
 'use strict';
 
+const { supabase: defaultSupabase } = require('../supabase');
 const { WebmasterError, forbidden } = require('./errors');
 
 const WEBMASTER_ACCESS_LEVELS = new Set(['OWNER', 'ADMIN']);
 
-async function loadUser(UserModel, username) {
-  const query = UserModel.findOne({ username });
-  if (query && typeof query.lean === 'function') {
-    return query.lean();
+async function loadUser(supabaseClient, username) {
+  const { data, error } = await supabaseClient
+    .from('users')
+    .select('*')
+    .eq('username', username)
+    .maybeSingle();
+
+  if (error) {
+    throw forbidden('WEBMASTER_FORBIDDEN');
   }
-  return query;
+
+  return data;
 }
 
 function sendError(res, error) {
@@ -19,10 +26,7 @@ function sendError(res, error) {
   return res.status(safeError.status).json(safeError.toResponse());
 }
 
-function createWebmasterAuthorization({ UserModel, TenantModel, env = process.env }) {
-  if (!UserModel) {
-    throw new Error('UserModel is required to authorize Webmaster access');
-  }
+function createWebmasterAuthorization({ supabaseClient = defaultSupabase } = {}) {
 
   async function resolveActor(session) {
     if (session?.role !== 'WEBMASTER') {
@@ -37,22 +41,22 @@ function createWebmasterAuthorization({ UserModel, TenantModel, env = process.en
       throw forbidden('WEBMASTER_FORBIDDEN');
     }
 
-    const user = await loadUser(UserModel, username);
+    const user = await loadUser(supabaseClient, username);
     if (!user || user.role !== 'WEBMASTER') {
       throw forbidden('WEBMASTER_FORBIDDEN');
     }
     if (user.status !== 'active') {
       throw forbidden('ACCOUNT_INACTIVE');
     }
-    if (!WEBMASTER_ACCESS_LEVELS.has(user.platformAccessLevel)) {
+    if (!WEBMASTER_ACCESS_LEVELS.has(user.platform_access_level)) {
       throw forbidden('WEBMASTER_ACCESS_UNASSIGNED');
     }
 
     return {
-      id: user._id ? String(user._id) : undefined,
+      id: user.id ? String(user.id) : undefined,
       username: user.username,
       role: 'WEBMASTER',
-      platformAccessLevel: user.platformAccessLevel,
+      platformAccessLevel: user.platform_access_level,
       source: 'database'
     };
   }

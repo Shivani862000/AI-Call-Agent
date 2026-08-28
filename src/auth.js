@@ -7,8 +7,7 @@
 
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
-const User = require('./models/User');
-const Tenant = require('./models/Tenant');
+const { supabase } = require('./supabase'); // Supabase client
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -342,18 +341,11 @@ function isTenantRole(role) {
   return role === 'CLIENT_ADMIN' || role === 'CLIENT_AGENT';
 }
 
-async function queryToDocument(query) {
-  if (query && typeof query.lean === 'function') {
-    return query.lean();
-  }
-  return query;
-}
-
 async function loadActiveTenant(tenantId) {
   if (!tenantId) {
     return null;
   }
-  const tenant = await queryToDocument(Tenant.findById(tenantId));
+  const { data: tenant } = await supabase.from('tenants').select('*').eq('id', tenantId).single();
   return tenant?.status === 'active' ? tenant : null;
 }
 
@@ -366,19 +358,19 @@ async function resolveActiveSession(session) {
     return null;
   }
 
-  const user = await queryToDocument(User.findOne({ username: session.username }));
+  const { data: user } = await supabase.from('users').select('*').eq('username', session.username).single();
   const role = normalizeRole(user?.role);
   if (!user || user.status !== 'active' || role !== session.role) {
     return null;
   }
-  if (isTenantRole(role) && !(await loadActiveTenant(user.tenantId))) {
+  if (isTenantRole(role) && !(await loadActiveTenant(user.tenant_id))) {
     return null;
   }
 
   return {
     ...session,
-    tenantId: user.tenantId ? String(user.tenantId) : null,
-    ...(role === 'WEBMASTER' ? { platformAccessLevel: user.platformAccessLevel || null } : {})
+    tenantId: user.tenant_id ? String(user.tenant_id) : null,
+    ...(role === 'WEBMASTER' ? { platformAccessLevel: user.platform_access_level || null } : {})
   };
 }
 
@@ -428,13 +420,12 @@ async function verifyCredentials(username, password) {
     return { success: false };
   }
 
-
-
   try {
     const normalizedEmail = normalizedUsername.toLowerCase();
-    const user = await User.findOne({
-      $or: [{ username: normalizedUsername }, { email: normalizedEmail }]
-    });
+    
+    // Check by username or email
+    let { data: user } = await supabase.from('users').select('*').or(`username.eq.${normalizedUsername},email.eq.${normalizedEmail}`).maybeSingle();
+    
     const role = normalizeRole(user?.role);
     if (
       user?.status === 'active'
@@ -442,19 +433,19 @@ async function verifyCredentials(username, password) {
       && role
       && await bcrypt.compare(String(password), user.password_hash)
     ) {
-      if (isTenantRole(role) && !(await loadActiveTenant(user.tenantId))) {
+      if (isTenantRole(role) && !(await loadActiveTenant(user.tenant_id))) {
         return { success: false };
       }
-      if (role === 'WEBMASTER' && !['OWNER', 'ADMIN'].includes(user.platformAccessLevel)) {
+      if (role === 'WEBMASTER' && !['OWNER', 'ADMIN'].includes(user.platform_access_level)) {
         return { success: false };
       }
       return {
         success: true,
         username: user.username,
         role,
-        tenantId: user.tenantId || null,
+        tenantId: user.tenant_id || null,
         authSource: 'database',
-        ...(role === 'WEBMASTER' ? { platformAccessLevel: user.platformAccessLevel } : {})
+        ...(role === 'WEBMASTER' ? { platformAccessLevel: user.platform_access_level } : {})
       };
     }
     return { success: false };

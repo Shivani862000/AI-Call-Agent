@@ -42,7 +42,8 @@ const {
   buildOpeningPrompt
 } = require('./prompt-builder');
 
-const { dbGet, dbRun } = require('../db');
+const { dbGet ,  dbRun  } = require('../db');
+const { supabase } = require('../src/supabase');
 const { saveCallFeedbackFromTranscript } = require('../services/call-feedback');
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
 const { generateGeminiReply } = require('../services/gemini');
@@ -464,10 +465,7 @@ function setupWebSocketBridge(server, { getIntegrationRuntimeConfig = defaultRun
 
         // Update customer status so UI badge changes from "Calling..." to "Completed"
         if (session.customerId) {
-          await dbRun(
-            'UPDATE customers SET status = ?, last_called_at = ? WHERE id = ?',
-            ['completed', nowIso, session.customerId]
-          );
+          (await supabase.from('customers').update({ status: 'completed', last_called_at: nowIso }).eq('id', session.customerId));
           logger.info('CALL_COMPLETED', {
             callId: session.callId,
             customerId: session.customerId,
@@ -1515,8 +1513,7 @@ function setupWebSocketBridge(server, { getIntegrationRuntimeConfig = defaultRun
           // Update customer status
           if (session.customerId) {
             try {
-              await dbRun('UPDATE customers SET status = ?, last_called_at = ? WHERE id = ?',
-                ['completed', new Date().toISOString(), session.customerId]);
+              (await supabase.from('customers').update({ status: 'completed', last_called_at: new Date().toISOString() }).eq('id', session.customerId));
               console.log(`[CALL STATUS] Calling -> Completed (hangup-call, customerId=${session.customerId})`);
             } catch (e) { console.error('[CALL STATUS UPDATE ERROR]', e.message); }
           }

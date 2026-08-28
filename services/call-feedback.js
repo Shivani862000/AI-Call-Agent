@@ -432,7 +432,7 @@ async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, callId, c
     return { saved: false, reason: 'no_feedback_detected', extraction };
   }
 
-  const existingFeedback = await dbGet('SELECT id FROM feedback WHERE call_id = ?', [callRecord.id]);
+  const existingFeedback = (await supabase.from('feedback').select('id').eq('call_id', callRecord.id).maybeSingle()).data;
   if (existingFeedback) {
     if (!overwriteExisting) {
       return { saved: false, reason: 'already_saved', extraction };

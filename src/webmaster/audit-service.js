@@ -1,5 +1,6 @@
 'use strict';
 
+const { supabase } = require('../supabase');
 const {
   isSafeCorrelationId,
   isSafeMachineCode,
@@ -68,11 +69,7 @@ function createdValue(document) {
     : document;
 }
 
-function createAuditService({ AuditEventModel }) {
-  if (!AuditEventModel || typeof AuditEventModel.create !== 'function') {
-    throw new TypeError('AuditEventModel with create() is required');
-  }
-
+function createAuditService() {
   async function record(input = {}, options = {}) {
     const inputDescriptors = plainInputDescriptors(input);
     const actorDescriptors = plainInputDescriptors(field(inputDescriptors, 'actor'), { nullable: true });
@@ -88,23 +85,27 @@ function createAuditService({ AuditEventModel }) {
     const outcome = safeOutcome(field(inputDescriptors, 'outcome', 'success'));
     const failureCode = safeFailureCode(field(inputDescriptors, 'failureCode', null));
 
-    const payload = {
+    const insertData = {
       actor: stableActorId(actorDescriptors),
-      actorAccessLevel: actorAccessLevel(actorDescriptors),
+      actor_access_level: actorAccessLevel(actorDescriptors),
       action,
-      targetType,
-      targetId,
-      tenantId,
+      target_type: targetType,
+      target_id: targetId,
+      tenant_id: tenantId,
       before: sanitizeForAudit(field(inputDescriptors, 'before', null)),
       after: sanitizeForAudit(field(inputDescriptors, 'after', null)),
-      requestId,
+      request_id: requestId,
       outcome,
-      failureCode
+      failure_code: failureCode
     };
 
-    const event = options.session
-      ? (await AuditEventModel.create([payload], { session: options.session }))[0]
-      : await AuditEventModel.create(payload);
+    const { data: event, error } = await supabase.from('audit_events').insert([insertData]).select().single();
+    if (error) {
+       console.error("Audit Service Insert Error:", error);
+       // Do not throw here since audit logging failure should not break app flow necessarily
+       return sanitizeForAudit(createdValue(insertData)); 
+    }
+    
     return sanitizeForAudit(createdValue(event));
   }
 

@@ -1,10 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const Customer = require('../src/models/Customer');
-const Feedback = require('../src/models/Feedback');
-const Call = require('../src/models/Call');
+const { supabase } = require('../src/supabase');
 const { categorizeFeedback } = require('../services/gemini');
-const { activeRecordFilter } = require('../src/webmaster/lifecycle');
 
 // Manual feedback entry
 router.post('/manual', async (req, res) => {
@@ -34,8 +31,15 @@ router.post('/manual', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
-    const customer = await Customer.findOne(activeRecordFilter({ _id: customer_id, tenantId: req.tenantId }));
-    if (!customer) {
+    const { data: customer, error: customerError } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('id', customer_id)
+      .eq('tenant_id', req.tenantId)
+      .neq('status', 'archived')
+      .maybeSingle();
+
+    if (customerError || !customer) {
       return res.status(404).json({ error: 'Customer not found', fieldErrors: { customer_id: 'Selected customer no longer exists' } });
     }
 
@@ -43,17 +47,19 @@ router.post('/manual', async (req, res) => {
     const categorization = await categorizeFeedback(review_text, stars);
 
     // Save to feedback table
-    const feedback = await Feedback.create({
-      tenantId: req.tenantId,
-      customerId: customer_id,
+    const { data: feedback, error: insertError } = await supabase.from('feedback').insert([{
+      tenant_id: req.tenantId,
+      customer_id: customer_id,
       review_text,
       category: categorization.category,
       rating: stars,
       source: 'manual'
-    });
+    }]).select().single();
+
+    if (insertError) throw insertError;
 
     res.json({
-      id: feedback._id,
+      id: feedback.id,
       category: categorization.category,
       reason: categorization.reason
     });
@@ -105,41 +111,49 @@ function getFollowUpAnswers(analysisJson) {
 }
 
 async function listUnifiedFeedback(tenantId) {
-  const manualFeedbacks = await Feedback.find(activeRecordFilter({ tenantId }))
-    .populate('customerId', 'name phone')
-    .populate('callId')
-    .sort({ created_at: -1 })
-    .limit(500)
-    .lean();
+  // We use Supabase queries to mimic the old mongoose populate
+  const { data: manualFeedbacks, error: fbError } = await supabase
+    .from('feedback')
+    .select('*, customer:customers(id, name, phone), call:calls(*)')
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: false })
+    .limit(500);
 
-  const linkedCallIds = new Set(manualFeedbacks.map(f => f.callId?._id?.toString()).filter(Boolean));
+  if (fbError) throw fbError;
 
-  const analyzedCalls = await Call.find(activeRecordFilter({
-    tenantId,
-    $or: [
-      { extracted_rating: { $ne: null } },
-      { sentiment: { $ne: null } },
-      { analysis_summary: { $ne: null } }
-    ]
-  }))
-    .populate('customerId', 'name phone')
-    .sort({ analysis_completed_at: -1, started_at: -1 })
-    .limit(500)
-    .lean();
+  const linkedCallIds = new Set(manualFeedbacks.map(f => f.call_id).filter(Boolean));
 
-  const storedFeedback = manualFeedbacks.map((row) => {
-    const callData = row.callId || {};
+  const { data: analyzedCalls, error: callError } = await supabase
+    .from('calls')
+    .select('*, customer:customers(id, name, phone)')
+    .eq('tenant_id', tenantId)
+    .or('extracted_rating.not.is.null,sentiment.not.is.null,analysis_summary.not.is.null')
+    .order('analysis_completed_at', { ascending: false, nullsFirst: false })
+    .limit(500);
+
+  if (callError) throw callError;
+  
+  // Also order by started_at if analysis_completed_at is null
+  analyzedCalls.sort((a, b) => {
+    const timeA = new Date(a.analysis_completed_at || a.started_at || 0).getTime();
+    const timeB = new Date(b.analysis_completed_at || b.started_at || 0).getTime();
+    return timeB - timeA;
+  });
+
+  const storedFeedback = (manualFeedbacks || []).map((row) => {
+    const callData = row.call || {};
     const stars = normalizeRating(row.rating || callData.extracted_rating);
     const sentiment = normalizeSentiment(callData.sentiment_label || callData.sentiment || row.category);
     const followUpAnswers = getFollowUpAnswers(parseAnalysisJson(callData.analysis_json));
+    const customerData = row.customer || {};
     
     return {
-      id: row._id,
-      feedback_id: row._id,
-      customer_id: row.customerId?._id,
-      call_id: callData._id,
-      customer_name: row.customerId?.name,
-      customer_phone: row.customerId?.phone,
+      id: row.id,
+      feedback_id: row.id,
+      customer_id: customerData.id,
+      call_id: callData.id,
+      customer_name: customerData.name,
+      customer_phone: customerData.phone,
       review_text: row.review_text || callData.extracted_review_text || callData.analysis_summary || '',
       category: categoryFromAnalysis({ stars, sentiment }),
       stars,
@@ -149,25 +163,26 @@ async function listUnifiedFeedback(tenantId) {
       analysis_status: callData.analysis_status,
       transcript_status: callData.transcript_status,
       transcript_available: Boolean(callData.transcript),
-      source: row.source || (callData._id ? 'call_analysis' : 'manual'),
+      source: row.source || (callData.id ? 'call_analysis' : 'manual'),
       submitted_at: row.created_at || callData.started_at,
       ...followUpAnswers
     };
   });
 
-  const analysisFeedback = analyzedCalls
-    .filter((row) => !linkedCallIds.has(row._id.toString()))
+  const analysisFeedback = (analyzedCalls || [])
+    .filter((row) => !linkedCallIds.has(row.id))
     .map((row) => {
+      const customerData = row.customer || {};
       const stars = normalizeRating(row.extracted_rating);
       const sentiment = normalizeSentiment(row.sentiment_label || row.sentiment);
       const followUpAnswers = getFollowUpAnswers(parseAnalysisJson(row.analysis_json));
       return {
-        id: `analysis-${row._id}`,
+        id: `analysis-${row.id}`,
         feedback_id: null,
-        customer_id: row.customerId?._id,
-        call_id: row._id,
-        customer_name: row.customerId?.name,
-        customer_phone: row.customerId?.phone,
+        customer_id: customerData.id,
+        call_id: row.id,
+        customer_name: customerData.name,
+        customer_phone: customerData.phone,
         review_text: row.extracted_review_text || row.analysis_summary || '',
         category: categoryFromAnalysis({ stars, sentiment }),
         stars,

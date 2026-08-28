@@ -1,8 +1,6 @@
 'use strict';
 
 const crypto = require('crypto');
-const mongoose = require('mongoose');
-const Call = require('./models/Call');
 const { activeRecordFilter } = require('./webmaster/lifecycle');
 const { normalizePhoneLookupValue, normalizeOutboundCallType } = require('./helpers');
 
@@ -236,7 +234,7 @@ async function leanOne(query) {
   return normalizeRecord(result);
 }
 
-function createOutboundCallContextRepository({ CallModel = Call, now = () => new Date() } = {}) {
+function createOutboundCallContextRepository({ CallModel = null, now = () => new Date() } = {}) {
   async function prepareInitiatedCall({
     tenantId,
     customerId,

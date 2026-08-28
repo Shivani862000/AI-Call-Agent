@@ -1,4 +1,5 @@
-const { dbRun, dbGet } = require('../db');
+const {  dbRun ,  dbGet  } = require('../db');
+const { supabase } = require('../src/supabase');
 const { extractCallFeedback } = require('./call-feedback');
 const { categorizeFeedback, generateGeminiReply } = require('./gemini');
 
@@ -142,7 +143,7 @@ function scriptedReply(session) {
 
 async function createCustomerForTestCall(name, phone) {
   const normalizedPhone = normalizeText(phone) || `test-${Date.now()}`;
-  const existing = await dbGet('SELECT id FROM customers WHERE phone = ?', [normalizedPhone]);
+  const existing = (await supabase.from('customers').select('id').eq('phone', normalizedPhone).maybeSingle()).data;
   if (existing) {
     return existing.id;
   }
@@ -316,7 +317,7 @@ async function saveTestFeedback(session) {
   const reviewText = extraction.reviewText || 'Patient completed a test feedback call.';
   const stars = Number.isInteger(extraction.stars) ? extraction.stars : 3;
   const categorization = await categorizeFeedback(reviewText, stars);
-  const existingFeedback = await dbGet('SELECT id FROM feedback WHERE call_id = ?', [session.callId]);
+  const existingFeedback = (await supabase.from('feedback').select('id').eq('call_id', session.callId).maybeSingle()).data;
 
   await dbRun(
     `UPDATE calls

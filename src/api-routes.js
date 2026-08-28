@@ -13,9 +13,6 @@ const clientsRouter = require('../routes/clients');
 const campaignsRouter = require('../routes/campaigns');
 const feedbackRouter = require('../routes/feedback');
 const callArchiveRouter = require('../routes/call-archival');
-const Call = require('./models/Call');
-const SupportTicket = require('./models/SupportTicket');
-const SupportTicketCounter = require('./models/SupportTicketCounter');
 const createSupportTicketsRouter = require('../routes/support-tickets');
 const { createSlackSupportNotifier } = require('../services/slack-support');
 const reportsRouter = require('../routes/reports');
@@ -23,8 +20,6 @@ const agentsRouter = require('../routes/agents');
 const { mountTenantScopedRoutes } = require('./tenant-route-mounts');
 const testCallRouter = require('../routes/test-call');
 const testAiCallRouter = require('../routes/test-ai-call');
-const User = require('./models/User');
-const Tenant = require('./models/Tenant');
 const { createWebmasterAuthorization } = require('./webmaster/authorization');
 const { createWebmasterRouter } = require('../routes/webmaster');
 const { getGlobalRuntimeSettings } = require('./webmaster/settings-service');
@@ -89,7 +84,8 @@ const {
   buildScriptedRatingResponse
 } = require('./scripted-ivr');
 
-const { dbGet, dbRun, dbAll } = require('../db');
+const { dbGet ,  dbRun ,  dbAll  } = require('../db');
+const { supabase } = require('../src/supabase');
 const { computePriorityScore, applyCallOutcomeWorkflow, createSupervisorEvent } = require('../services/call-orchestration');
 const { getAgentConfigById, getDefaultAgentConfig, normalizeRequestedAgentId } = require('./prompt-builder');
 const { buildCallAnalysis, storeCallAnalysis } = require('../services/call-analysis');
@@ -108,7 +104,7 @@ const {
 } = require('./icallmate-webhook');
 const { getIntegrationRuntimeConfig: defaultRuntimeConfigResolver } = require('./webmaster/settings-service');
 const logger = require('../services/system-logger');
-const webmasterAuthorization = createWebmasterAuthorization({ UserModel: User, TenantModel: Tenant });
+const webmasterAuthorization = createWebmasterAuthorization({});
 const { recordFilterFromRequest } = require('./webmaster/lifecycle');
 const { createLegacyCallScope, tenantVisibleRows } = require('./legacy-call-scope');
 const { outboundCallContextCoordinator } = require('./outbound-call-context');
@@ -334,8 +330,8 @@ function mountApiRoutes(app, {
     callArchiveRouter
   });
   app.use('/api/support-tickets', createSupportTicketsRouter({
-    SupportTicket,
-    TicketCounter: SupportTicketCounter,
+    
+    TicketCounter: null,
     notifyNewTicket: createSlackSupportNotifier({ getIntegrationRuntimeConfig })
   }));
   app.use('/api/reports', reportsRouter);
@@ -443,7 +439,7 @@ function mountApiRoutes(app, {
       const call = placement.providerCall;
       const result = placement.context;
       const ancillary = await runOutboundAncillaryWork(async () => {
-        await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+        (await supabase.from('customers').update({ status: 'called' }).eq('id', customer.id));
         const callsTodayRow = await dbGet(
           `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
           [customer.id]
@@ -535,9 +531,9 @@ function mountApiRoutes(app, {
         });
       }
 
-      const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [providerCallSid]);
+      const callRecord = (await supabase.from('calls').select('*').eq('provider_call_id', providerCallSid).maybeSingle()).data;
       const customerId = req.query.customerId || callRecord?.customer_id;
-      const customer = customerId ? await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]) : null;
+      const customer = customerId ? (await supabase.from('customers').select('*').eq('id', customerId).maybeSingle()).data : null;
 
       if (callRecord) {
         let mappedOutcome = null;
@@ -573,7 +569,7 @@ function mountApiRoutes(app, {
         }
 
         if (mappedOutcome) {
-          await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ? WHERE id = ?', [mappedOutcome, providerStatus, callRecord.id]);
+          (await supabase.from('calls').update({ outcome: mappedOutcome, outcome_detail: providerStatus }).eq('id', callRecord.id));
           const eventName = mappedOutcome === 'completed'
             ? 'CALL_COMPLETED'
             : (mappedOutcome === 'failed' || mappedOutcome === 'busy' || mappedOutcome === 'no_answer' ? 'CALL_FAILED' : 'CALL_PENDING');
@@ -638,7 +634,7 @@ function mountApiRoutes(app, {
 
       const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ? ORDER BY id DESC LIMIT 1', [callSid]);
       if (callRecord) {
-        const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+        const customer = (await supabase.from('customers').select('*').eq('id', callRecord.customer_id).maybeSingle()).data;
         await dbRun(
           `UPDATE calls
             SET recording_sid = ?,
@@ -732,7 +728,7 @@ function mountApiRoutes(app, {
       const result = placement.context;
 
       const ancillary = await runOutboundAncillaryWork(async () => {
-        await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+        (await supabase.from('customers').update({ status: 'called' }).eq('id', customer.id));
         const callsTodayRow = await dbGet(
           `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
           [customer.id]
@@ -1003,7 +999,7 @@ function mountApiRoutes(app, {
               }, 1500);
             }
 
-            const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+            const customer = (await supabase.from('customers').select('*').eq('id', callRecord.customer_id).maybeSingle()).data;
             if (customer) {
               await applyCallOutcomeWorkflow({
                 dbGet,
@@ -1230,7 +1226,7 @@ function mountApiRoutes(app, {
       const result = placement.context;
 
       const ancillary = await runOutboundAncillaryWork(async () => {
-        await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+        (await supabase.from('customers').update({ status: 'called' }).eq('id', customer.id));
         logger.info('CALL_STARTED', {
           callId: result.id,
           customerId: customer.id,

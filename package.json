@@ -18,9 +18,9 @@
     "helmet": "^8.0.0",
     "multer": "^2.2.0",
     "pdfkit": "^0.13.0",
-    "mongoose": "^8.0.0",
     "ws": "^8.21.3",
     "node-cron": "^3.0.3",
-    "nodemailer": "^6.9.14"
+    "nodemailer": "^6.9.14",
+    "@supabase/supabase-js": "^2.39.0"
   }
 }

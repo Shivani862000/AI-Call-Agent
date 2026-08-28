@@ -1,8 +1,7 @@
 'use strict';
 
 const express = require('express');
-const Agent = require('../src/models/Agent');
-const { activeRecordFilter, recordFilterFromRequest, createMongooseArchiveHandlers } = require('../src/webmaster/lifecycle');
+const { supabase } = require('../src/supabase'); // Supabase client
 
 function slugify(value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120);
@@ -48,48 +47,67 @@ function validate(payload) {
 }
 
 function serialize(record) {
-  const value = record?.toObject ? record.toObject() : { ...record };
-  if (value._id !== undefined) value.id = String(value._id);
-  delete value._id;
-  delete value.archived_by;
+  const value = { ...record };
+  // Clean up any internal fields if necessary, Supabase returns what we ask
   return value;
 }
 
-async function clearDefault(Model, tenantId, currentId) {
-  const filter = activeRecordFilter({ tenantId });
-  if (currentId) filter._id = { $ne: currentId };
-  await Model.updateMany(filter, { $set: { is_default: false } });
+async function clearDefault(tenantId, currentId) {
+  let query = supabase.from('agents').update({ is_default: false }).eq('tenant_id', tenantId).neq('status', 'archived');
+  if (currentId) query = query.neq('id', currentId);
+  await query;
 }
 
 function errorResponse(error, res) {
-  if (error.code === 11000) return res.status(409).json({ error: 'An agent with this name or slug already exists' });
+  if (error.code === '23505') return res.status(409).json({ error: 'An agent with this name or slug already exists' });
   return res.status(500).json({ error: error.message });
 }
 
-function createAgentsRouter({ Model = Agent } = {}) {
+function activeRecordFilter(query) {
+  // We apply this inline using Supabase query builders.
+  // Instead of passing a filter object, we chain .eq() and .neq()
+}
+
+function createAgentsRouter() {
   const router = express.Router();
-  const archiveHandlers = createMongooseArchiveHandlers({ Model, resourceName: 'Agent' });
 
   router.get('/', async (req, res) => {
     try {
-      const rows = await Model.find(recordFilterFromRequest(req, { tenantId: req.tenantId })).sort({ is_default: -1, is_active: -1, name: 1 }).lean();
-      res.json(rows.map(serialize));
+      let query = supabase.from('agents').select('*').eq('tenant_id', req.tenantId).order('is_default', { ascending: false }).order('is_active', { ascending: false }).order('name', { ascending: true });
+      
+      if (req.query.status) {
+        query = query.eq('status', req.query.status);
+      } else {
+        query = query.neq('status', 'archived');
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json((data || []).map(serialize));
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
   router.get('/default', async (req, res) => {
     try {
-      const row = await Model.findOne(activeRecordFilter({ tenantId: req.tenantId, is_default: true })).sort({ _id: 1 }).lean();
-      if (!row) return res.status(404).json({ error: 'Default agent not found' });
-      res.json(serialize(row));
+      const { data, error } = await supabase.from('agents').select('*').eq('tenant_id', req.tenantId).eq('is_default', true).neq('status', 'archived').order('id', { ascending: true }).limit(1).maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Default agent not found' });
+      res.json(serialize(data));
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
   router.get('/:id', async (req, res) => {
     try {
-      const row = await Model.findOne(recordFilterFromRequest(req, { _id: req.params.id, tenantId: req.tenantId })).lean();
-      if (!row) return res.status(404).json({ error: 'Agent not found' });
-      res.json(serialize(row));
+      const { data, error } = await supabase.from('agents').select('*').eq('id', req.params.id).eq('tenant_id', req.tenantId).maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Agent not found' });
+      
+      // If client requests exclude archived:
+      if (!req.query.status && data.status === 'archived') {
+         return res.status(404).json({ error: 'Agent not found' });
+      }
+
+      res.json(serialize(data));
     } catch (error) { res.status(500).json({ error: error.message }); }
   });
 
@@ -98,9 +116,14 @@ function createAgentsRouter({ Model = Agent } = {}) {
       const payload = normalizePayload(req.body);
       const fieldErrors = validate(payload);
       if (Object.keys(fieldErrors).length) return res.status(400).json({ error: 'Please fix the highlighted agent fields', fieldErrors });
-      if (payload.is_default) await clearDefault(Model, req.tenantId);
-      const record = await Model.create({ ...payload, tenantId: req.tenantId, status: 'active' });
-      res.json({ id: String(record._id), message: 'Agent created successfully' });
+      
+      if (payload.is_default) await clearDefault(req.tenantId);
+      
+      const insertPayload = { ...payload, tenant_id: req.tenantId, status: 'active' };
+      const { data, error } = await supabase.from('agents').insert([insertPayload]).select().single();
+      
+      if (error) throw error;
+      res.json({ id: String(data.id), message: 'Agent created successfully' });
     } catch (error) { errorResponse(error, res); }
   });
 
@@ -109,19 +132,65 @@ function createAgentsRouter({ Model = Agent } = {}) {
       const payload = normalizePayload(req.body);
       const fieldErrors = validate(payload);
       if (Object.keys(fieldErrors).length) return res.status(400).json({ error: 'Please fix the highlighted agent fields', fieldErrors });
-      const targetFilter = activeRecordFilter({ _id: req.params.id, tenantId: req.tenantId });
-      const existing = await Model.findOne(targetFilter).lean();
+      
+      const { data: existing, error: findError } = await supabase.from('agents').select('id').eq('id', req.params.id).eq('tenant_id', req.tenantId).neq('status', 'archived').maybeSingle();
+      if (findError) throw findError;
       if (!existing) return res.status(404).json({ error: 'Agent not found' });
-      const record = await Model.findOneAndUpdate(targetFilter, { $set: payload }, { new: true, runValidators: true });
-      if (!record) return res.status(404).json({ error: 'Agent not found' });
-      if (payload.is_default) await clearDefault(Model, req.tenantId, req.params.id);
+
+      const { data, error } = await supabase.from('agents').update(payload).eq('id', req.params.id).eq('tenant_id', req.tenantId).neq('status', 'archived').select().single();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Agent not found' });
+      
+      if (payload.is_default) await clearDefault(req.tenantId, req.params.id);
       res.json({ message: 'Agent updated successfully' });
     } catch (error) { errorResponse(error, res); }
   });
 
-  router.post('/:id/archive', archiveHandlers.archive);
-  router.post('/:id/restore', archiveHandlers.restore);
-  router.delete('/:id', archiveHandlers.archive);
+  // Archive Handler
+  const archiveHandler = async (req, res) => {
+    try {
+      const username = req.adminSession?.username || req.user?.username || 'system';
+      const updatePayload = {
+        status: 'archived',
+        archived_at: new Date().toISOString(),
+        archived_by: username,
+        archive_reason: (req.body?.reason || '').substring(0, 500) || null
+      };
+
+      const { data, error } = await supabase.from('agents').update(updatePayload).eq('id', req.params.id).eq('tenant_id', req.tenantId).neq('status', 'archived').select().maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Agent not found or already archived' });
+      
+      res.json({ message: 'Agent archived successfully', id: data.id });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  // Restore Handler
+  const restoreHandler = async (req, res) => {
+    try {
+      const updatePayload = {
+        status: 'active',
+        archived_at: null,
+        archived_by: null,
+        archive_reason: null
+      };
+
+      const { data, error } = await supabase.from('agents').update(updatePayload).eq('id', req.params.id).eq('tenant_id', req.tenantId).eq('status', 'archived').select().maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Archived Agent not found' });
+      
+      res.json({ message: 'Agent restored successfully', id: data.id });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  router.post('/:id/archive', archiveHandler);
+  router.post('/:id/restore', restoreHandler);
+  router.delete('/:id', archiveHandler);
+  
   return router;
 }
 

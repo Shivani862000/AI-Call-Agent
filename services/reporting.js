@@ -1,4 +1,5 @@
-const { dbAll, dbGet } = require('../db');
+const {  dbAll ,  dbGet  } = require('../db');
+const { supabase } = require('../src/supabase');
 
 function getDateRangeForDays(days, endDate = new Date()) {
   const end = new Date(endDate);

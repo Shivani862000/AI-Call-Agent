@@ -84,7 +84,7 @@ async function syncCallToCrm({
   getIntegrationRuntimeConfig = defaultRuntimeConfigResolver,
   fetchImpl = global.fetch
 }) {
-  const call = await dbGet('SELECT * FROM calls WHERE id = ?', [callId]);
+  const call = (await supabase.from('calls').select('*').eq('id', callId).maybeSingle()).data;
   if (!call) {
     return { skipped: true, reason: 'call_not_found' };
   }
@@ -95,8 +95,8 @@ async function syncCallToCrm({
     return { skipped: true, reason: 'webhook_disabled_or_unconfigured' };
   }
 
-  const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [call.customer_id]);
-  const feedback = await dbGet('SELECT * FROM feedback WHERE call_id = ?', [call.id]);
+  const customer = (await supabase.from('customers').select('*').eq('id', call.customer_id).maybeSingle()).data;
+  const feedback = (await supabase.from('feedback').select('*').eq('call_id', call.id).maybeSingle()).data;
 
   try {
     await postJson(endpoint, buildCrmPayload({ customer, call, feedback }), {
@@ -104,10 +104,10 @@ async function syncCallToCrm({
       timeoutMs: runtime.settings?.timeoutMs ?? 5000,
       signingSecret: runtime.secrets?.signingSecret ?? ''
     });
-    await dbRun('UPDATE calls SET crm_sync_status = ? WHERE id = ?', ['completed', call.id]);
+    (await supabase.from('calls').update({ crm_sync_status: 'completed' }).eq('id', call.id));
     return { ok: true };
   } catch (error) {
-    await dbRun('UPDATE calls SET crm_sync_status = ? WHERE id = ?', ['failed', call.id]);
+    (await supabase.from('calls').update({ crm_sync_status: 'failed' }).eq('id', call.id));
     throw error;
   }
 }

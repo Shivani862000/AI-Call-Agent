@@ -1,9 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
-
-const METADATA_PROJECTION = Object.freeze({ _id: 0, updated_at: 1, updatedBy: 1 });
-const ENVELOPE_SELECTION = '+ciphertext +iv +authTag +encryptionVersion';
+const { supabase } = require('../supabase');
 
 function secretError(code, message) {
   const error = new Error(message);
@@ -53,23 +51,12 @@ function actorAccessLevel(actor) {
   return level === 'OWNER' || level === 'ADMIN' ? level : 'SYSTEM';
 }
 
-async function executeLean(query) {
-  if (query && typeof query.lean === 'function') return query.lean();
-  return query;
-}
-
-async function findSelected(Model, filter, selection) {
-  let query = Model.findOne(filter);
-  if (query && typeof query.select === 'function') query = query.select(selection);
-  return executeLean(query);
-}
-
 function metadataForDatabase(record) {
   return {
     configured: true,
     source: 'database',
     updatedAt: record?.updated_at || null,
-    updatedBy: record?.updatedBy || null
+    updatedBy: record?.updated_by || null
   };
 }
 
@@ -83,16 +70,10 @@ function metadataForEnvironment(configured) {
 }
 
 function createSecretService({
-  IntegrationSecretModel,
   env = process.env,
   randomBytes = crypto.randomBytes,
   environmentKeyFor = defaultEnvironmentKeyFor
-}) {
-  if (!IntegrationSecretModel
-    || typeof IntegrationSecretModel.findOne !== 'function'
-    || typeof IntegrationSecretModel.findOneAndUpdate !== 'function') {
-    throw new TypeError('IntegrationSecretModel with findOne() and findOneAndUpdate() is required');
-  }
+} = {}) {
   if (typeof randomBytes !== 'function' || typeof environmentKeyFor !== 'function') {
     throw new TypeError('randomBytes and environmentKeyFor must be functions');
   }
@@ -113,8 +94,13 @@ function createSecretService({
 
   async function getMetadata(integration, key) {
     const filter = lookup(integration, key);
-    const record = await findSelected(IntegrationSecretModel, filter, METADATA_PROJECTION);
-    if (record) return metadataForDatabase(record);
+    const { data: record, error } = await supabase.from('integration_secrets')
+      .select('updated_at, updated_by')
+      .eq('integration', filter.integration)
+      .eq('key', filter.key)
+      .maybeSingle();
+
+    if (record && !error) return metadataForDatabase(record);
     return metadataForEnvironment(environmentValue(filter.integration, filter.key) !== null);
   }
 
@@ -136,33 +122,55 @@ function createSecretService({
     const authTag = cipher.getAuthTag();
     const updatedBy = stableActorId(actor);
     const updatedByAccessLevel = actorAccessLevel(actor);
-    const record = await IntegrationSecretModel.findOneAndUpdate(
-      filter,
-      {
-        $set: {
-          ciphertext: ciphertext.toString('base64'),
-          iv: iv.toString('base64'),
-          authTag: authTag.toString('base64'),
-          encryptionVersion: 1,
-          updatedBy,
-          updatedByAccessLevel
-        }
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
-    );
+    
+    // Check if exists
+    const { data: existing } = await supabase.from('integration_secrets').select('id').eq('integration', filter.integration).eq('key', filter.key).maybeSingle();
+
+    let record;
+    if (existing) {
+       const { data, error } = await supabase.from('integration_secrets').update({
+         ciphertext: ciphertext.toString('base64'),
+         iv: iv.toString('base64'),
+         auth_tag: authTag.toString('base64'),
+         encryption_version: 1,
+         updated_by: updatedBy,
+         updated_by_access_level: updatedByAccessLevel
+       }).eq('id', existing.id).select('updated_at, updated_by').single();
+       if (error) throw error;
+       record = data;
+    } else {
+       const { data, error } = await supabase.from('integration_secrets').insert([{
+         integration: filter.integration,
+         key: filter.key,
+         ciphertext: ciphertext.toString('base64'),
+         iv: iv.toString('base64'),
+         auth_tag: authTag.toString('base64'),
+         encryption_version: 1,
+         updated_by: updatedBy,
+         updated_by_access_level: updatedByAccessLevel
+       }]).select('updated_at, updated_by').single();
+       if (error) throw error;
+       record = data;
+    }
+
     return metadataForDatabase(record);
   }
 
   async function resolveSecret(integration, key) {
     const filter = lookup(integration, key);
-    const record = await findSelected(IntegrationSecretModel, filter, ENVELOPE_SELECTION);
-    if (!record) return environmentValue(filter.integration, filter.key);
+    const { data: record, error } = await supabase.from('integration_secrets')
+      .select('ciphertext, iv, auth_tag, encryption_version')
+      .eq('integration', filter.integration)
+      .eq('key', filter.key)
+      .maybeSingle();
+
+    if (!record || error) return environmentValue(filter.integration, filter.key);
 
     try {
-      if (record.encryptionVersion !== 1) throw new Error('Unsupported envelope version');
+      if (record.encryption_version !== 1) throw new Error('Unsupported envelope version');
       const encryptionKey = decodeEncryptionKey(env.WEBMASTER_SECRETS_KEY);
       const iv = Buffer.from(String(record.iv || ''), 'base64');
-      const authTag = Buffer.from(String(record.authTag || ''), 'base64');
+      const authTag = Buffer.from(String(record.auth_tag || ''), 'base64');
       const ciphertext = Buffer.from(String(record.ciphertext || ''), 'base64');
       if (iv.length !== 12 || authTag.length !== 16 || ciphertext.length === 0) {
         throw new Error('Invalid envelope');

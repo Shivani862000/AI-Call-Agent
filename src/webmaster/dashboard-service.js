@@ -1,7 +1,7 @@
 'use strict';
 
-function createDashboardService({ TenantModel, UserModel, CallModel, NotificationModel, integrationStatus = async () => [], recentAudit = async () => [] } = {}) {
-  if (!TenantModel || !UserModel) throw new TypeError('TenantModel and UserModel are required');
+function createDashboardService({ integrationStatus = async () => [], recentAudit = async () => [] } = {}) {
+  
   async function lifecycleCounts(Model, base = {}) { const [active, suspended, archived] = await Promise.all(['active', 'suspended', 'archived'].map(status => Model.countDocuments({ ...base, status }))); return { active, suspended, archived }; }
   async function get() {
     const [tenants, users, calls, failedCalls, failedDeliveries, integrations, audit] = await Promise.all([

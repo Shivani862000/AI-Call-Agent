@@ -5,8 +5,6 @@
 
 'use strict';
 
-const Agent = require('./models/Agent');
-const mongoose = require('mongoose');
 
 const { getGreeting } = require('../utils/greeting');
 const { buildReviewCallingPrompt, buildReviewCallingOpeningPrompt } = require('../prompts/review-calling.ts');
@@ -77,7 +75,7 @@ function normalizeAgentRecord(record) {
   return { ...record, id: String(record._id) };
 }
 
-function createAgentConfigLookup({ AgentModel = Agent } = {}) {
+function createAgentConfigLookup({ AgentModel = null } = {}) {
   async function getAgentConfigById(agentId, tenantId) {
     requireTenantId(tenantId);
     const normalizedId = normalizeRequestedAgentId(agentId);

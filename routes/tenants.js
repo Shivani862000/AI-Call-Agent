@@ -1,27 +1,30 @@
 const express = require('express');
 const router = express.Router();
-const Tenant = require('../src/models/Tenant');
-const User = require('../src/models/User');
 const bcrypt = require('bcrypt');
+const { supabase } = require('../src/supabase');
 const {
   activeRecordFilter,
   recordFilterFromRequest,
-  createMongooseArchiveHandlers
 } = require('../src/webmaster/lifecycle');
 
-const tenantArchiveHandlers = createMongooseArchiveHandlers({
-  Model: Tenant,
-  resourceName: 'Tenant',
-  scopeFromRequest(_req, extra = {}) {
-    return extra;
+function handleSupabaseError(error, res) {
+  if (error.code === '23505') {
+    return res.status(409).json({ error: 'A record with that value already exists.' });
   }
-});
+  return res.status(500).json({ error: error.message });
+}
 
 // Get all tenants (WEBMASTER only)
 router.get('/', async (req, res) => {
   try {
-    const tenants = await Tenant.find(recordFilterFromRequest(req)).sort({ created_at: -1 });
-    res.json(tenants.map(t => ({ ...t.toObject(), id: t._id })));
+    let query = supabase.from('tenants').select('*').order('created_at', { ascending: false });
+    const showArchived = req.query.showArchived === 'true';
+    if (!showArchived) {
+      query = query.neq('status', 'archived');
+    }
+    const { data: tenants, error } = await query;
+    if (error) throw error;
+    res.json(tenants);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -37,32 +40,47 @@ router.post('/', async (req, res) => {
     }
 
     // Create the tenant
-    const tenant = await Tenant.create({ 
-      name, 
-      dailyReportTime: dailyReportTime || '19:00' 
-    });
+    const { data: tenant, error: tenantError } = await supabase
+      .from('tenants')
+      .insert([{ 
+        name, 
+        daily_report_time: dailyReportTime || '19:00',
+        status: 'active'
+      }])
+      .select()
+      .single();
+
+    if (tenantError) return handleSupabaseError(tenantError, res);
 
     // Hash password and create initial CLIENT_ADMIN user for this tenant
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(adminPassword, salt);
     
-    const adminUser = await User.create({
-      username: adminUsername,
-      email: adminEmail,
-      password_hash,
-      role: 'CLIENT_ADMIN',
-      tenantId: tenant._id
-    });
+    const { data: adminUser, error: userError } = await supabase
+      .from('users')
+      .insert([{
+        username: adminUsername,
+        email: adminEmail,
+        password_hash,
+        role: 'CLIENT_ADMIN',
+        tenant_id: tenant.id,
+        status: 'active'
+      }])
+      .select()
+      .single();
+
+    if (userError) {
+      // Rollback tenant creation since we couldn't create admin user
+      await supabase.from('tenants').delete().eq('id', tenant.id);
+      return handleSupabaseError(userError, res);
+    }
 
     res.json({ 
       message: 'Tenant and initial admin created successfully', 
-      tenantId: tenant._id,
-      adminId: adminUser._id
+      tenantId: tenant.id,
+      adminId: adminUser.id
     });
   } catch (error) {
-    if (error.code === 11000) {
-      return res.status(409).json({ error: 'A tenant, username, or email with that value already exists.' });
-    }
     res.status(500).json({ error: error.message });
   }
 });
@@ -80,15 +98,28 @@ router.put('/:id', async (req, res) => {
     }
     const patch = {};
     if (name !== undefined) patch.name = name;
-    if (dailyReportTime !== undefined) patch.dailyReportTime = dailyReportTime;
+    if (dailyReportTime !== undefined) patch.daily_report_time = dailyReportTime;
     if (normalizedStatus !== undefined) patch.status = normalizedStatus;
 
-    const tenant = await Tenant.findOneAndUpdate(
-      activeRecordFilter({ _id: req.params.id }),
-      { $set: patch },
-      { new: true }
-    );
-    if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+    // First check if active
+    const { data: existing, error: checkError } = await supabase
+      .from('tenants')
+      .select('id')
+      .eq('id', req.params.id)
+      .neq('status', 'archived')
+      .maybeSingle();
+
+    if (checkError) throw checkError;
+    if (!existing) return res.status(404).json({ error: 'Tenant not found' });
+
+    const { data: tenant, error: updateError } = await supabase
+      .from('tenants')
+      .update(patch)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
+    if (updateError) return handleSupabaseError(updateError, res);
     
     res.json({ message: 'Tenant updated successfully', tenant });
   } catch (error) {
@@ -96,7 +127,40 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-router.post('/:id/archive', tenantArchiveHandlers.archive);
-router.post('/:id/restore', tenantArchiveHandlers.restore);
+router.post('/:id/archive', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('tenants')
+      .update({ status: 'archived' })
+      .eq('id', req.params.id)
+      .neq('status', 'archived')
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Tenant not found or already archived' });
+    res.json({ message: 'Archived successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/:id/restore', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('tenants')
+      .update({ status: 'active' })
+      .eq('id', req.params.id)
+      .eq('status', 'archived')
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Tenant not found or not archived' });
+    res.json({ message: 'Restored successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = router;

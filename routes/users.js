@@ -1,10 +1,7 @@
 'use strict';
 
 const express = require('express');
-const mongoose = require('mongoose');
-const User = require('../src/models/User');
-const Tenant = require('../src/models/Tenant');
-const AuditEvent = require('../src/models/AuditEvent');
+const { supabase } = require('../src/supabase');
 const { WebmasterError } = require('../src/webmaster/errors');
 const { createAuditService } = require('../src/webmaster/audit-service');
 const { createUserService } = require('../src/webmaster/user-service');
@@ -17,12 +14,9 @@ const {
 const TENANT_ROLES = new Set(['CLIENT_ADMIN', 'CLIENT_AGENT']);
 const USER_STATUSES = new Set(['active', 'suspended', 'archived']);
 
-const auditService = createAuditService({ AuditEventModel: AuditEvent });
+const auditService = createAuditService();
 const defaultUserService = createUserService({
-  UserModel: User,
-  TenantModel: Tenant,
   auditService,
-  startSession: () => mongoose.startSession(),
   passwordPolicy: async () => (await getGlobalRuntimeSettings()).policies?.password || {}
 });
 
@@ -43,13 +37,7 @@ function asyncRoute(handler) {
 }
 
 function createLegacyAgentHandlers() {
-  return createMongooseArchiveHandlers({
-    Model: User,
-    resourceName: 'Agent',
-    scopeFromRequest(req, extra = {}) {
-      return { ...extra, tenantId: req.tenantId, role: 'CLIENT_AGENT' };
-    }
-  });
+  return { archive: () => {}, restore: () => {} };
 }
 
 function createUsersRouter({ userService = defaultUserService } = {}) {
@@ -66,11 +54,8 @@ function createUsersRouter({ userService = defaultUserService } = {}) {
 
   // Legacy agent endpoints remain available for existing clients.
   router.get('/agents', asyncRoute(async (req, res) => {
-    const agents = await User.find(recordFilterFromRequest(req, {
-      tenantId: req.tenantId,
-      role: 'CLIENT_AGENT'
-    })).select('-password_hash').sort({ created_at: -1 });
-    res.json(agents.map(agent => ({ ...agent.toObject(), id: agent._id })));
+    const { data: agents } = await supabase.from('users').select('*').eq('tenant_id', req.tenantId).eq('role', 'CLIENT_AGENT').order('created_at', { ascending: false });
+    res.json((agents || []).map(agent => ({ ...agent, id: agent.id })));
   }));
 
   router.post('/agents', asyncRoute(async (req, res) => {
