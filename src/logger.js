@@ -149,6 +149,28 @@ function writeLog(levelName, event, details = {}) {
   }
 }
 
+function formatCallType(value) {
+  const normalized = String(value || '').toUpperCase();
+  return normalized === 'THREE_MONTH_FOLLOWUP' ? '3 Month Follow-up' : 'Review Calling';
+}
+
+function formatHumanDateTime(value) {
+  if (!value) return '';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const dateText = date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const timeText = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `${dateText} ${timeText}`;
+}
+
+function formatDuration(seconds) {
+  const totalSeconds = Math.max(0, Number(seconds || 0));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = Math.round(totalSeconds % 60);
+  if (!minutes) return `${remainingSeconds}s`;
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
 const logger = {
   runWithContext,
   getContext,
@@ -157,6 +179,9 @@ const logger = {
   warn: (event, details) => writeLog('WARN', event, details),
   error: (event, details) => writeLog('ERROR', event, details),
   fatal: (event, details) => writeLog('FATAL', event, details),
+  formatCallType,
+  formatHumanDateTime,
+  formatDuration,
 };
 
 // Override global console to ensure 100% coverage of un-instrumented code and dependencies
