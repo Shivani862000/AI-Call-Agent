@@ -27,6 +27,7 @@ const {
   getIncomingCallKey,
   normalizeIcallTimestamp
 } = require('./helpers');
+const { resolvePatientId } = require('./patient-link');
 const { buildIcallMateCallbackUrl } = require('./icallmate-webhook');
 
 // ── Call Initiation ────────────────────────────────────────────────────────────
@@ -82,12 +83,14 @@ async function ensureCustomerForCall({ customerId, customerName, customerPhone }
     return existingByPhone;
   }
 
+  const patientId = await resolvePatientId({ name: customerName || 'Customer', phone: customerPhone });
   const result = await dbRun(
-    `INSERT INTO customers (name, phone, normalized_phone, preferred_slot, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO customers (patient_id, name, phone, normalized_phone, preferred_slot, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (normalized_phone) WHERE normalized_phone IS NOT NULL
-     DO UPDATE SET name = excluded.name`,
+     DO UPDATE SET name = excluded.name, patient_id = excluded.patient_id`,
     [
+      patientId,
       customerName || 'Customer',
       customerPhone,
       normalizePhoneLookupValue(customerPhone),
@@ -158,13 +161,18 @@ async function ensureCustomerForClientReminder(client) {
     return dbGet('SELECT * FROM customers WHERE id = ?', [customer.id]);
   }
 
+  const clientPatientId = await resolvePatientId({
+    name: client.name, phone: client.phone,
+    preferredSlot: client.annual_reminder_slot, serviceInterest: client.treatment_type
+  });
   const result = await dbRun(
     `INSERT INTO customers (
-      name, phone, normalized_phone, preferred_slot, status, created_at, service_interest
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      patient_id, name, phone, normalized_phone, preferred_slot, status, created_at, service_interest
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (normalized_phone) WHERE normalized_phone IS NOT NULL
-     DO UPDATE SET name = excluded.name`,
+     DO UPDATE SET name = excluded.name, patient_id = excluded.patient_id`,
     [
+      clientPatientId,
       client.name,
       client.phone,
       normalizePhoneLookupValue(client.phone),
@@ -201,12 +209,16 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
     return existing;
   }
 
+  const incomingPatientId = await resolvePatientId({
+    name: fallbackName || 'Incoming caller', phone: normalizedPhone
+  });
   const result = await dbRun(
-    `INSERT INTO customers (name, phone, normalized_phone, preferred_slot, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO customers (patient_id, name, phone, normalized_phone, preferred_slot, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (normalized_phone) WHERE normalized_phone IS NOT NULL
-     DO UPDATE SET name = excluded.name`,
+     DO UPDATE SET name = excluded.name, patient_id = excluded.patient_id`,
     [
+      incomingPatientId,
       fallbackName || 'Incoming caller',
       normalizedPhone,
       normalizePhoneLookupValue(normalizedPhone),

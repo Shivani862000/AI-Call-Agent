@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { dbRun, dbGet, dbAll } = require('../db');
 const { normalizePhoneLookupValue } = require('../src/helpers');
+const { resolvePatientId } = require('../src/patient-link');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const logger = require('../services/system-logger');
@@ -257,15 +258,26 @@ function handleSqliteError(error, res) {
 
 async function saveCustomer(payload, isManual = false) {
   const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
+  // Every queue entry has a patient behind it; created here if this is the
+  // first time we have seen the number.
+  const patientId = await resolvePatientId({
+    name: payload.name,
+    phone: payload.phone,
+    preferredSlot: payload.preferred_slot,
+    language: payload.preferred_language,
+    serviceInterest: payload.service_interest
+  });
   return dbRun(
     `INSERT INTO customers (
+      patient_id,
       name, phone, normalized_phone, preferred_slot, scheduled_datetime, status,
       customer_value, urgency_level,
       preferred_language, preferred_dialect, do_not_call, consent_status,
       outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
       campaign_name, service_interest, call_type, is_manual
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
+      patientId,
       payload.name,
       payload.phone,
       normalizePhoneLookupValue(payload.phone),
