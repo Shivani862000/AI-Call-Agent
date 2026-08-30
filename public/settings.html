@@ -26,8 +26,11 @@
     .banner.bad { background: #fae7e3; color: #b23a2c; display: block; }
     .warn { padding: 12px 15px; border-radius: 8px; background: #f8eeda; color: #8a6003; font-size: 13px; margin-bottom: 16px; }
     .rule { border: 1px solid #eef2f6; border-radius: 9px; padding: 14px 16px 2px; margin-bottom: 12px; }
-    .rule-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-    .rule-head strong { flex: 1; }
+    .rule-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    /* Without an explicit size the checkbox is a flex item and stretches to
+       the row height, which also forces the title to wrap one word per line. */
+    .rule-head input[type="checkbox"] { flex: 0 0 auto; width: 18px; height: 18px; margin: 0; }
+    .rule-head strong { flex: 1 1 auto; font-size: 15px; }
     pre { background: #f4f6f8; padding: 14px; border-radius: 8px; overflow-x: auto; font-size: 12.5px; white-space: pre-wrap; }
     @media (max-width: 640px) { .settings { padding: 14px; } }
   </style>

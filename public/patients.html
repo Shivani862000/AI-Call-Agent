@@ -426,6 +426,24 @@
         const actions = document.createElement('td');
         actions.className = 'actions';
 
+        // Only offered when the patient can actually be called; the server
+        // refuses the rest, but an absent button beats an error after a click.
+        if (patient.status === 'active' && Number(patient.do_not_call) !== 1) {
+          const call = document.createElement('button');
+          call.className = 'link';
+          call.textContent = 'Schedule a call';
+          call.onclick = async () => {
+            try {
+              await AppShell.fetchJson('/api/patients/' + patient.id + '/schedule-call', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+              });
+              banner(patient.full_name + ' added to the calling queue', true);
+              load();
+            } catch (error) { banner(error.message, false); }
+          };
+          actions.appendChild(call);
+        }
+
         const edit = document.createElement('button');
         edit.className = 'link'; edit.textContent = 'Edit';
         edit.onclick = async () => {
