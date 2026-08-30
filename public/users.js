@@ -2,7 +2,7 @@
   'use strict';
 
   const API_PATH = '/api/users';
-  const ROLE_LABELS = { CLIENT_ADMIN: 'Tenant admin', CLIENT_AGENT: 'Agent' };
+  const ROLE_LABELS = { ADMIN: 'Admin', AGENT: 'Agent' };
   const state = {
     session: null,
     items: [],
@@ -123,7 +123,7 @@
     byId('userTableBody').innerHTML = state.items.map(item => `
       <tr>
         <td>${accountMarkup(item)}</td>
-        <td><span class="user-badge ${item.role === 'CLIENT_ADMIN' ? 'user-badge--admin' : 'user-badge--agent'}">${escape(roleLabel(item.role))}</span></td>
+        <td><span class="user-badge ${item.role === 'ADMIN' ? 'user-badge--admin' : 'user-badge--agent'}">${escape(roleLabel(item.role))}</span></td>
         <td><span class="user-badge user-badge--${escape(item.status)}">${escape(statusLabel(item.status))}</span></td>
         <td><span class="user-updated-at">${escape(formatUpdated(item.updatedAt))}</span></td>
         <td>${actionMarkup(item)}</td>
@@ -132,7 +132,7 @@
     byId('userCardList').innerHTML = state.items.map(item => `
       <article class="user-card">
         <div class="user-card-top"><div>${accountMarkup(item)}</div><span class="user-badge user-badge--${escape(item.status)}">${escape(statusLabel(item.status))}</span></div>
-        <div class="user-card-meta"><span class="user-badge ${item.role === 'CLIENT_ADMIN' ? 'user-badge--admin' : 'user-badge--agent'}">${escape(roleLabel(item.role))}</span><span class="user-updated-at">Updated ${escape(formatUpdated(item.updatedAt))}</span></div>
+        <div class="user-card-meta"><span class="user-badge ${item.role === 'ADMIN' ? 'user-badge--admin' : 'user-badge--agent'}">${escape(roleLabel(item.role))}</span><span class="user-updated-at">Updated ${escape(formatUpdated(item.updatedAt))}</span></div>
         ${actionMarkup(item)}
       </article>`).join('');
 
@@ -362,7 +362,7 @@
   async function initialize() {
     try {
       const session = await window.AppShell.ensureAuthenticatedSession();
-      if (session.role !== 'CLIENT_ADMIN') {
+      if (session.role !== 'ADMIN') {
         window.location.replace('/admin.html');
         return;
       }
