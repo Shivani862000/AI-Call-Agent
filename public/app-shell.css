@@ -6542,3 +6542,53 @@ a[href="/incoming-calls.html"] {
   font-size: 13px;
   color: #64748b;
 }
+
+/* ── Patient autocomplete rows ─────────────────────────────────────────────── */
+.autocomplete-item {
+  position: relative;
+  /* Room for the absolutely positioned link, so the detail line is not
+     overlapped by it on a narrow dropdown. */
+  padding-right: 96px;
+}
+
+.autocomplete-item .autocomplete-item-title,
+.autocomplete-item .autocomplete-item-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.autocomplete-item-link {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  font-size: 12px;
+  font-weight: 700;
+  color: #1d4ed8;
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #edf4ff;
+}
+
+.autocomplete-item-link:hover,
+.autocomplete-item-link:focus-visible {
+  background: #dbeafe;
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.autocomplete-flag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #fae7e3;
+  color: #b23a2c;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}

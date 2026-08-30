@@ -409,13 +409,19 @@ router.get('/search', async (req, res) => {
       return res.json([]);
     }
     const pattern = `%${q}%`;
+    const digits = q.replace(/\D/g, '');
+    // The phone clause is only added when the query actually contains digits:
+    // an empty digit string becomes '%%', which matches every patient on file.
+    const params = digits.length >= 3 ? [pattern, `%${digits}%`] : [pattern];
     const customers = await dbAll(
-      `SELECT id, name, phone, call_type, preferred_slot
-       FROM customer_queue 
-       WHERE name LIKE ? OR phone LIKE ? 
-       ORDER BY created_at DESC 
-       LIMIT 20`,
-      [pattern, pattern]
+      `SELECT id, patient_id, name, phone, normalized_phone, email, call_type, preferred_slot,
+              preferred_language, blood_group, do_not_call, status, date_of_birth,
+              last_donation_date, last_test_date
+         FROM customer_queue
+        WHERE name ILIKE ?${digits.length >= 3 ? ' OR normalized_phone LIKE ?' : ''}
+        ORDER BY created_at DESC
+        LIMIT 20`,
+      params
     );
     res.json(customers.map((row) => serializeQueueRow(row, roleOf(req))));
   } catch (error) {

@@ -381,7 +381,7 @@
                   <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
                 </div>
                 <div class="saas-selection-card-title">New Patient</div>
-                <div class="saas-selection-card-subtitle">Create record and schedule new call</div>
+                <div class="saas-selection-card-subtitle">Add their full record, then schedule a call</div>
               </div>
             </div>
           </div>
@@ -494,21 +494,18 @@
     `;
 
     const getEl = (key) => document.getElementById(ids[key]);
-    let clientCache = [];
 
-    async function ensureClientsLoaded() {
-      if (clientCache.length) return clientCache;
+    // The clients table is gone; patients is the single person record. Kept as
+    // a lookup by phone because the modal identifies a person that way.
+    async function findPatientByPhone(phone) {
+      const digits = String(phone || '').replace(/\D/g, '').slice(-10);
+      if (digits.length < 10) return null;
       try {
-        clientCache = await fetchJson(`${API_BASE}/clients`);
+        const { patients } = await fetchJson(`${API_BASE}/patients?search=${encodeURIComponent(digits)}`);
+        return (patients || [])[0] || null;
       } catch (error) {
-        clientCache = [];
+        return null;
       }
-      return clientCache;
-    }
-
-    function getClientByPhone(phone) {
-      const normalized = normalizePhoneForApi(phone);
-      return clientCache.find((client) => normalizePhoneForApi(client.phone) === normalized) || null;
     }
 
     function setCallTypeSelection(value) {
@@ -685,17 +682,35 @@
       setSubmitting(false);
     }
 
+    /**
+     * Writes the care details onto the patient record.
+     *
+     * Only updates an existing patient: creating one from this modal captured a
+     * name and a number and nothing else, which is why the patients screen
+     * exists. When there is no match the details are skipped rather than
+     * silently creating a half-empty record.
+     */
     async function saveClientRecord(payload) {
-      await ensureClientsLoaded();
-      const existingClient = getClientByPhone(payload.phone);
-      const endpoint = existingClient ? `${API_BASE}/clients/${existingClient.id}` : `${API_BASE}/clients`;
-      const method = existingClient ? 'PUT' : 'POST';
-      await fetchJson(endpoint, {
-        method,
+      const patient = await findPatientByPhone(payload.phone);
+      if (!patient) return;
+
+      const [firstName, ...rest] = String(payload.name || '').trim().split(/\s+/);
+      await fetchJson(`${API_BASE}/patients/${patient.id}`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          first_name: firstName || patient.first_name,
+          last_name: rest.join(' ') || patient.last_name,
+          phone: patient.phone,
+          email: patient.email,
+          date_of_birth: payload.date_of_birth || patient.date_of_birth,
+          last_test_date: payload.last_visit_date || patient.last_test_date,
+          preferred_call_slot: payload.annual_reminder_slot || patient.preferred_call_slot,
+          notes: payload.treatment_type
+            ? `Service: ${payload.treatment_type}${payload.notes ? ` — ${payload.notes}` : ''}`
+            : (payload.notes || patient.notes)
+        })
       });
-      clientCache = [];
     }
 
     async function submit() {
@@ -788,13 +803,11 @@
           getEl('time').value = scheduledParts.time;
           setCallTypeSelection(customer.call_type || 'REVIEW_CALL');
 
-          await ensureClientsLoaded();
-          const client = getClientByPhone(customer.phone);
-          if (client) {
+          const patient = await findPatientByPhone(customer.phone);
+          if (patient) {
             getEl('careToggle').open = !isMobileModalLayout();
-            getEl('dob').value = client.date_of_birth || '';
-            getEl('lastVisit').value = client.last_visit_date || '';
-            getEl('treatment').value = client.treatment_type || '';
+            getEl('dob').value = patient.date_of_birth || '';
+            getEl('lastVisit').value = patient.last_test_date || patient.last_donation_date || '';
           }
           showFormView(false);
         } else {
@@ -818,7 +831,12 @@
     getEl('cancel').addEventListener('click', close);
     getEl('submit').addEventListener('click', submit);
     getEl('existingPatientBtn').addEventListener('click', () => showFormView(true));
-    getEl('newPatientBtn').addEventListener('click', () => showFormView(false));
+    // The call form only ever captured a name and a number, so anyone added
+    // this way had no blood group, language, date of birth or service history.
+    // Send them to the patient form, which is the record of the person.
+    getEl('newPatientBtn').addEventListener('click', () => {
+      window.location.href = '/patients.html?new=';
+    });
     
     getEl('name').addEventListener('input', (e) => {
       if (!isExistingPatientMode) return;
@@ -838,16 +856,37 @@
         try {
           const results = await fetchJson(`${API_BASE}/customers/search?q=${encodeURIComponent(q)}`);
           if (!results || results.length === 0) {
-            dropdown.innerHTML = '<div class="autocomplete-empty">No matching patients found.</div>';
+            dropdown.innerHTML = `
+              <div class="autocomplete-empty">No matching patients found.</div>
+              <a class="autocomplete-create-new" href="/patients.html?new=${encodeURIComponent(q)}">
+                + Add this patient
+              </a>`;
             return;
           }
           
-          dropdown.innerHTML = results.slice(0, 10).map(c => `
-            <div class="autocomplete-item" data-id="${c.id}" data-name="${(c.name || '').replace(/"/g, '&quot;')}" data-phone="${c.phone || ''}">
-              <div class="autocomplete-item-title">${c.name || 'Unknown'}</div>
-              <div class="autocomplete-item-subtitle">${c.phone || ''}</div>
-            </div>
-          `).join('');
+          dropdown.innerHTML = results.slice(0, 10).map(c => {
+            // Agents receive no phone at all, only a mask; printing c.phone
+            // directly showed them "undefined".
+            const contact = c.phone || c.phone_masked || '';
+            const service = c.last_donation_date
+              ? `Donated ${String(c.last_donation_date).slice(0, 10)}`
+              : (c.last_test_date ? `Tested ${String(c.last_test_date).slice(0, 10)}` : null);
+            const detail = [
+              contact,
+              c.preferred_language === 'en' ? 'English' : 'Hindi',
+              c.blood_group && c.blood_group !== 'unknown' ? c.blood_group : null,
+              service
+            ].filter(Boolean).join(' · ');
+
+            return `
+            <div class="autocomplete-item" data-id="${c.id}" data-name="${escapeHtml(c.name || '')}" data-phone="${c.phone || ''}">
+              <div class="autocomplete-item-title">${escapeHtml(c.name || 'Unknown')}${
+                Number(c.do_not_call) === 1 ? '<span class="autocomplete-flag">Do not call</span>' : ''
+              }</div>
+              <div class="autocomplete-item-subtitle">${escapeHtml(detail)}</div>
+              ${c.patient_id ? `<a class="autocomplete-item-link" href="/patients.html?patient=${encodeURIComponent(c.patient_id)}" title="Open the full patient record">View record</a>` : ''}
+            </div>`;
+          }).join('');
           
           dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
             item.addEventListener('click', async () => {
@@ -856,13 +895,11 @@
               getEl('phone').value = formatPhoneForInput(item.dataset.phone);
               dropdown.style.display = 'none';
               
-              await ensureClientsLoaded();
-              const client = getClientByPhone(item.dataset.phone);
-              if (client) {
+              const patient = await findPatientByPhone(item.dataset.phone);
+              if (patient) {
                 getEl('careToggle').open = !isMobileModalLayout();
-                getEl('dob').value = client.date_of_birth || '';
-                getEl('lastVisit').value = client.last_visit_date || '';
-                getEl('treatment').value = client.treatment_type || '';
+                getEl('dob').value = patient.date_of_birth || '';
+                getEl('lastVisit').value = patient.last_test_date || patient.last_donation_date || '';
               }
             });
           });

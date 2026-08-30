@@ -583,10 +583,48 @@
       $('importFile').value = '';
     };
 
-    AppShell.ensureAuthenticatedSession().then((session) => {
+    /**
+     * Deep links from elsewhere in the app:
+     *   ?patient=<id>  open that patient's record
+     *   ?new=<name>    open the add form, prefilled
+     * Both come from the call modal, which used to capture only a name and a
+     * number and so never recorded anything else about a person.
+     */
+    async function applyDeepLink() {
+      const params = new URLSearchParams(window.location.search);
+
+      const patientId = params.get('patient');
+      if (patientId) {
+        try {
+          const { patient } = await AppShell.fetchJson('/api/patients/' + encodeURIComponent(patientId));
+          fillForm(patient);
+          banner('Showing ' + patient.full_name, true);
+        } catch (error) {
+          banner('That patient could not be found', false);
+        }
+        return;
+      }
+
+      if (params.has('new')) {
+        const typed = (params.get('new') || '').trim();
+        resetForm();
+        setPanel('toggleForm', 'formPanel', true);
+        if (typed) {
+          const parts = typed.split(/\s+/);
+          $('first_name').value = parts[0] || '';
+          $('last_name').value = parts.slice(1).join(' ');
+          $('phone').focus();
+        } else {
+          $('first_name').focus();
+        }
+      }
+    }
+
+    AppShell.ensureAuthenticatedSession().then(async (session) => {
       isAdmin = session.role === 'ADMIN';
       if (!isAdmin) document.querySelectorAll('.admin-only').forEach((n) => n.remove());
-      return load();
+      await load();
+      await applyDeepLink();
     }).catch(() => {});
   </script>
 </body>
