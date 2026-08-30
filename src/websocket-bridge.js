@@ -425,9 +425,10 @@ module.exports = function setupWebSocketBridge(server) {
           });
         }
 
-        if (session.providerCallId && transcript.length) {
+        const activeCallSid = session.providerCallId || session.streamId;
+        if (activeCallSid && transcript.length) {
           await saveCallFeedbackFromTranscript({
-            callSid: session.providerCallId,
+            callSid: activeCallSid,
             callId: session.callId,
             customerId: session.customerId,
             transcript,
@@ -435,11 +436,11 @@ module.exports = function setupWebSocketBridge(server) {
           });
 
           runInBackground('POST CALL PIPELINE ERROR', async () => {
-            const result = await processCompletedCallPipeline({ callSid: session.providerCallId, callId: session.callId });
+            const result = await processCompletedCallPipeline({ callSid: activeCallSid, callId: session.callId });
             if (result.ok) {
-              console.log(`[POST CALL PIPELINE] Processed auto-completed call ${session.providerCallId} with feedback ${result.feedbackId}`);
+              console.log(`[POST CALL PIPELINE] Processed auto-completed call ${activeCallSid} with feedback ${result.feedbackId}`);
             } else {
-              console.log(`[POST CALL PIPELINE] Skipped auto-completed call ${session.providerCallId}: ${result.reason}`);
+              console.log(`[POST CALL PIPELINE] Skipped auto-completed call ${activeCallSid}: ${result.reason}`);
             }
           });
         }
@@ -873,10 +874,20 @@ module.exports = function setupWebSocketBridge(server) {
           clearTimeout(hangupFinalizeTimer);
           hangupFinalizeTimer = null;
         }
-        debugLog('Auto hangup waiting for final audio drain', {
-          streamId: getSessionLabel(),
-          reason: session.pendingHangupReason
-        });
+        
+        session.hangupAfterAudioDrains = true;
+        const audioQueuedBytes = session.audioBuffer ? session.audioBuffer.length : 0;
+        
+        if (audioQueuedBytes === 0) {
+          session.hangupAfterAudioDrains = false;
+          scheduleFinalizeCallHangup(reason, spokenText, { audioDrained: true });
+        } else {
+          debugLog('Auto hangup waiting for final audio drain', {
+            streamId: getSessionLabel(),
+            reason: session.pendingHangupReason,
+            bytes: audioQueuedBytes
+          });
+        }
         return;
       }
 
@@ -1438,17 +1449,18 @@ module.exports = function setupWebSocketBridge(server) {
           }
 
           // Trigger post-call pipeline
-          if (session.providerCallId) {
+          const activeCallSid = session.providerCallId || session.streamId;
+          if (activeCallSid) {
             runInBackground('HANGUP POST CALL PIPELINE', async () => {
               try {
-                const result = await processCompletedCallPipeline({ callSid: session.providerCallId, callId: session.callId });
+                const result = await processCompletedCallPipeline({ callSid: activeCallSid, callId: session.callId });
                 if (result.ok) {
-                  console.log(`[POST CALL PIPELINE] Processed hangup call ${session.providerCallId} feedbackId=${result.feedbackId}`);
+                  console.log(`[POST CALL PIPELINE] Processed hangup call ${activeCallSid} feedbackId=${result.feedbackId}`);
                   console.log(`[TRANSCRIPT] Generated successfully`);
                   console.log(`[SUMMARY] Generated successfully`);
                   console.log(`[ANALYSIS] Generated successfully`);
                 } else {
-                  console.log(`[POST CALL PIPELINE] Skipped hangup call ${session.providerCallId}: ${result.reason}`);
+                  console.log(`[POST CALL PIPELINE] Skipped hangup call ${activeCallSid}: ${result.reason}`);
                 }
               } catch (e) { console.error('[HANGUP POST CALL PIPELINE ERROR]', e.message); }
             });
@@ -1547,18 +1559,19 @@ module.exports = function setupWebSocketBridge(server) {
             } catch (e) { console.error('[CALL STATUS UPDATE ERROR ws close]', e.message); }
           }
           // Safety net: trigger post-call pipeline if not already triggered
-          if (session.providerCallId && session.answered) {
+          const activeCallSid = session.providerCallId || session.streamId;
+          if (activeCallSid && session.answered) {
             runInBackground('WS CLOSE POST CALL PIPELINE', async () => {
               try {
-                const result = await processCompletedCallPipeline({ callSid: session.providerCallId, callId: session.callId });
+                const result = await processCompletedCallPipeline({ callSid: activeCallSid, callId: session.callId });
                 if (result.ok) {
-                  console.log(`[POST CALL PIPELINE] Processed ws-close call ${session.providerCallId} feedbackId=${result.feedbackId}`);
+                  console.log(`[POST CALL PIPELINE] Processed ws-close call ${activeCallSid} feedbackId=${result.feedbackId}`);
                   console.log(`[TRANSCRIPT] Generated successfully`);
                   console.log(`[SUMMARY] Generated successfully`);
                   console.log(`[ANALYSIS] Generated successfully`);
                   console.log(`[UI] Analysis enabled`);
                 } else {
-                  console.log(`[POST CALL PIPELINE] Skipped ws-close call ${session.providerCallId}: ${result.reason}`);
+                  console.log(`[POST CALL PIPELINE] Skipped ws-close call ${activeCallSid}: ${result.reason}`);
                 }
               } catch (e) { console.error('[WS CLOSE POST CALL PIPELINE ERROR]', e.message); }
             });

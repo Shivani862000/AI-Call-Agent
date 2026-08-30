@@ -13,8 +13,8 @@ const LOG_LEVELS = {
   FATAL: 50
 };
 
-const CURRENT_LEVEL = process.env.LOG_LEVEL 
-  ? (LOG_LEVELS[process.env.LOG_LEVEL.toUpperCase()] || LOG_LEVELS.INFO) 
+const CURRENT_LEVEL = process.env.LOG_LEVEL
+  ? (LOG_LEVELS[process.env.LOG_LEVEL.toUpperCase()] || LOG_LEVELS.INFO)
   : LOG_LEVELS.INFO;
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
@@ -78,11 +78,11 @@ function writeLog(levelName, event, details = {}) {
   if (levelValue < CURRENT_LEVEL) return;
 
   const context = getContext();
-  
+
   // Extract error object if provided as details.error or if details is an Error
   let errorObj = undefined;
   let cleanDetails = {};
-  
+
   if (details instanceof Error) {
     errorObj = details;
   } else {
@@ -127,7 +127,7 @@ function writeLog(levelName, event, details = {}) {
     delete meta.timestamp;
     delete meta.service;
     delete meta.environment;
-    
+
     let metaStr = '';
     for (const [k, v] of Object.entries(meta)) {
       if (v === undefined || k === 'error') continue;
@@ -135,7 +135,7 @@ function writeLog(levelName, event, details = {}) {
     }
 
     const line = `[${logEntry.timestamp}] [${levelName}] [${logEntry.event}]${metaStr}`;
-    
+
     if (levelValue >= LOG_LEVELS.ERROR) {
       originalConsoleError(line);
       if (logEntry.error && logEntry.error.stack) {

@@ -150,14 +150,17 @@
         <div class="saas-field">
           <label for="addCustomerName">Patient name</label>
           <input id="addCustomerName" name="name" required minlength="2" maxlength="100" autocomplete="name">
+          <div id="addCustomerNameError" class="saas-field-error"></div>
         </div>
         <div class="saas-field">
           <label for="addCustomerPhone">Mobile number</label>
           <input id="addCustomerPhone" name="phone" required inputmode="tel" placeholder="+91 98765 43210" autocomplete="tel">
+          <div id="addCustomerPhoneError" class="saas-field-error"></div>
         </div>
         <div class="saas-field">
           <label for="addCustomerPreferredSlot">Preferred slot <span class="text-muted">(optional)</span></label>
           <input id="addCustomerPreferredSlot" name="preferred_slot" type="time" min="07:00" max="20:59">
+          <div id="addCustomerPreferredSlotError" class="saas-field-error"></div>
           <small class="form-help">When selected, the first follow-up is scheduled for the next occurrence of this time.</small>
         </div>
         <div class="saas-field">
@@ -168,6 +171,7 @@
             <option value="mixed">Mixed</option>
             <option value="hinglish">Hinglish</option>
           </select>
+          <div id="addCustomerPreferredLanguageError" class="saas-field-error"></div>
         </div>
         <div class="saas-modal-footer" style="padding: 24px 0 0; border-top: none;">
           <button type="button" class="btn-ghost-saas" id="cancelAddCustomerBtn">Cancel</button>

@@ -753,6 +753,11 @@
           matchesDateFilter = isSameDate(targetDate, customDate);
         }
 
+        // Failsafe: if the record is pending/retry_scheduled and dateFilter is empty/today, we should probably just show it anyway to avoid it being hidden unexpectedly
+        if (!dateFilter) {
+          matchesDateFilter = true;
+        }
+
         return matchesSearch && matchesCallType && matchesDateFilter;
       };
 
@@ -787,7 +792,7 @@
         if (activeCustomerMetricFilter === 'scheduled') {
           matchesMetricFilter = ['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled'].includes(computedStatus);
         } else if (activeCustomerMetricFilter === 'pending') {
-          matchesMetricFilter = pendingStatuses.has(computedStatus);
+          matchesMetricFilter = pendingStatuses.has(computedStatus) || pendingStatuses.has(String(customer.status || '').toLowerCase());
         }
         
         return matchesMetricFilter && matchesCommonFilters(customer);

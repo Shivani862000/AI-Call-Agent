@@ -168,6 +168,14 @@ async function handleAddCustomerSubmit(event) {
   const endpoint = editingCustomerId ? `${AppShell.API_BASE}/customers/${editingCustomerId}` : `${AppShell.API_BASE}/customers`;
   submitButton.disabled = true;
   submitButton.textContent = isEditing ? 'Updating...' : 'Adding...';
+  
+  AppShell.clearFieldErrors([
+    'addCustomerName', 
+    'addCustomerPhone', 
+    'addCustomerPreferredSlot', 
+    'addCustomerPreferredLanguage'
+  ]);
+
   try {
     await AppShell.fetchJson(endpoint, {
       method: editingCustomerId ? 'PUT' : 'POST',
@@ -178,6 +186,14 @@ async function handleAddCustomerSubmit(event) {
     AppShell.showAlert(isEditing ? 'Customer updated successfully' : 'Customer added successfully');
     await loadCustomerData();
   } catch (error) {
+    if (error.fieldErrors) {
+      AppShell.applyFieldErrors(error.fieldErrors, {
+        name: 'addCustomerName',
+        phone: 'addCustomerPhone',
+        preferred_slot: 'addCustomerPreferredSlot',
+        preferred_language: 'addCustomerPreferredLanguage'
+      });
+    }
     AppShell.showAlert(error.message, 'error');
   } finally {
     submitButton.disabled = false;

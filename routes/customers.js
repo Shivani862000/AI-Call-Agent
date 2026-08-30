@@ -101,7 +101,7 @@ function normalizeScheduledDate(payload = {}) {
     }
   }
 
-  return '';
+  return getLocalDateValue();
 }
 
 function normalizeCallType(value) {
@@ -311,6 +311,7 @@ router.post('/', async (req, res) => {
     }
 
     if (Object.keys(fieldErrors).length > 0) {
+      logger.warn('CUSTOMER_VALIDATION_FAILED', { payload, fieldErrors, user: req.adminSession?.username });
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
