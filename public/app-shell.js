@@ -582,6 +582,7 @@
       const scheduledDateTime = parseScheduledDateTime(scheduledDate, scheduledTime);
       return {
         name: getEl('name').value.trim(),
+        patient_id: selectedPatientId || undefined,
         phone: normalizePhoneForApi(getEl('phone').value),
         scheduled_date: scheduledDate,
         scheduled_time: scheduledTime,
@@ -622,7 +623,11 @@
     function validate(payload, carePayload) {
       const fieldErrors = {};
       if (!payload.name || payload.name.length < 2) fieldErrors[ids.name] = 'Patient name is required';
-      if (!/^\+\d{12}$/.test(payload.phone)) fieldErrors[ids.phone] = 'Use a valid Indian mobile number';
+      // A chosen patient carries their own number; the field may only hold a
+      // mask, which is not a number and must not be validated as one.
+      if (!payload.patient_id && !/^\+\d{12}$/.test(payload.phone)) {
+        fieldErrors[ids.phone] = 'Use a valid Indian mobile number';
+      }
       if (!payload.scheduled_date) fieldErrors[ids.date] = 'Call date is required';
       if (!payload.preferred_slot) fieldErrors[ids.time] = 'Call time is required';
       const scheduled = parseScheduledDateTime(payload.scheduled_date, payload.preferred_slot);
@@ -664,8 +669,10 @@
       getEl('editingId').value = '';
       getEl('panelTitle').textContent = 'Schedule New Follow-up Call';
       getEl('submit').textContent = 'Schedule Call';
+      selectedPatientId = null;
       getEl('name').value = '';
       getEl('name').readOnly = false;
+      getEl('phone').readOnly = false;
       getEl('nameDropdown').style.display = 'none';
       getEl('phone').value = '';
       getEl('date').value = todayDateValue();
@@ -764,6 +771,7 @@
     }
 
     let searchTimeout = null;
+    let selectedPatientId = null;
     let isExistingPatientMode = false;
 
     function showSelectionView() {
@@ -854,7 +862,11 @@
       clearTimeout(searchTimeout);
       searchTimeout = setTimeout(async () => {
         try {
-          const results = await fetchJson(`${API_BASE}/customers/search?q=${encodeURIComponent(q)}`);
+          // Searches patients, not the call queue. The queue only contains
+          // people who already have a call scheduled, so anyone added on the
+          // Patients screen was invisible here until they had been called.
+          const { patients } = await fetchJson(`${API_BASE}/patients?search=${encodeURIComponent(q)}`);
+          const results = patients;
           if (!results || results.length === 0) {
             dropdown.innerHTML = `
               <div class="autocomplete-empty">No matching patients found.</div>
@@ -875,32 +887,52 @@
               contact,
               c.preferred_language === 'en' ? 'English' : 'Hindi',
               c.blood_group && c.blood_group !== 'unknown' ? c.blood_group : null,
-              service
+              service,
+              c.status === 'inactive' ? 'Not on the calling list' : null
             ].filter(Boolean).join(' · ');
 
             return `
-            <div class="autocomplete-item" data-id="${c.id}" data-name="${escapeHtml(c.name || '')}" data-phone="${c.phone || ''}">
-              <div class="autocomplete-item-title">${escapeHtml(c.name || 'Unknown')}${
+            <div class="autocomplete-item" data-patient-id="${c.id}" data-name="${escapeHtml(c.full_name || '')}"
+                 data-phone="${c.phone || ''}" data-masked="${escapeHtml(c.phone_masked || '')}"
+                 data-slot="${escapeHtml(c.preferred_call_slot || '')}"
+                 data-dob="${c.date_of_birth || ''}"
+                 data-last-visit="${c.last_test_date || c.last_donation_date || ''}">
+              <div class="autocomplete-item-title">${escapeHtml(c.full_name || 'Unknown')}${
                 Number(c.do_not_call) === 1 ? '<span class="autocomplete-flag">Do not call</span>' : ''
               }</div>
               <div class="autocomplete-item-subtitle">${escapeHtml(detail)}</div>
-              ${c.patient_id ? `<a class="autocomplete-item-link" href="/patients.html?patient=${encodeURIComponent(c.patient_id)}" title="Open the full patient record">View record</a>` : ''}
+              <a class="autocomplete-item-link" href="/patients.html?patient=${encodeURIComponent(c.id)}" title="Open the full patient record">View record</a>
             </div>`;
           }).join('');
           
           dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
-            item.addEventListener('click', async () => {
-              getEl('editingId').value = item.dataset.id;
+            item.addEventListener('click', () => {
+              // This is a person, not a queue entry: leave editingId empty so
+              // submitting opens (or refreshes) their queue entry rather than
+              // trying to edit one that may not exist.
+              getEl('editingId').value = '';
+              selectedPatientId = item.dataset.patientId;
               getEl('name').value = item.dataset.name;
-              getEl('phone').value = formatPhoneForInput(item.dataset.phone);
-              dropdown.style.display = 'none';
-              
-              const patient = await findPatientByPhone(item.dataset.phone);
-              if (patient) {
-                getEl('careToggle').open = !isMobileModalLayout();
-                getEl('dob').value = patient.date_of_birth || '';
-                getEl('lastVisit').value = patient.last_test_date || patient.last_donation_date || '';
+
+              const phoneField = getEl('phone');
+              if (item.dataset.phone) {
+                phoneField.value = formatPhoneForInput(item.dataset.phone);
+                phoneField.readOnly = false;
+              } else {
+                // An agent cannot be shown the number, so the field carries the
+                // mask and the server resolves the real one from patient_id.
+                phoneField.value = item.dataset.masked;
+                phoneField.readOnly = true;
               }
+
+              if (item.dataset.slot) getEl('time').value = item.dataset.slot;
+              if (item.dataset.dob || item.dataset.lastVisit) {
+                getEl('careToggle').open = !isMobileModalLayout();
+                getEl('dob').value = item.dataset.dob || '';
+                getEl('lastVisit').value = item.dataset.lastVisit || '';
+              }
+              dropdown.style.display = 'none';
+              clearErrors();
             });
           });
         } catch (error) {

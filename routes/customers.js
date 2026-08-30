@@ -150,6 +150,7 @@ function normalizeCustomerPayload(payload = {}) {
   const scheduled = buildScheduledDateTime(scheduledDate, preferredSlot);
   return {
     name: String(payload.name || payload.patientName || '').trim(),
+    patient_id: Number(payload.patient_id) || null,
     phone: String(payload.phone || payload.phoneNumber || '').trim(),
     scheduled_date: scheduledDate,
     preferred_slot: preferredSlot,
@@ -181,10 +182,15 @@ function validateCustomerPayload(payload) {
     errors.name = 'Customer name must be 100 characters or fewer';
   }
 
-  if (!payload.phone) {
-    errors.phone = 'Phone number is required';
-  } else if (!PHONE_PATTERN.test(payload.phone)) {
-    errors.phone = 'Phone must be in E.164 format, e.g. +919876543210';
+  // An existing patient supplies their own number. An agent never sees it, so
+  // requiring one here would make scheduling for a known patient impossible
+  // for exactly the role that does it most.
+  if (!payload.patient_id) {
+    if (!payload.phone) {
+      errors.phone = 'Phone number is required';
+    } else if (!PHONE_PATTERN.test(payload.phone)) {
+      errors.phone = 'Phone must be in E.164 format, e.g. +919876543210';
+    }
   }
 
   if (!payload.preferred_slot) {
@@ -262,8 +268,12 @@ function handleSqliteError(error, res) {
 async function saveCustomer(payload, isManual = false) {
   const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
   // Every queue entry has a patient behind it; created here if this is the
-  // first time we have seen the number.
-  const patientId = await resolvePatientId({
+  // first time we have seen the number. An explicit patient_id wins: an agent
+  // scheduling for an existing patient never sees the number, so they cannot
+  // supply one to resolve against.
+  const patientId = payload.patient_id
+    ? Number(payload.patient_id)
+    : await resolvePatientId({
     name: payload.name,
     phone: payload.phone,
     preferredSlot: payload.preferred_slot,
