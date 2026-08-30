@@ -1,0 +1,1053 @@
+(function () {
+  const API_BASE = `${window.location.origin}/api`;
+  const NAV_ITEMS = [
+    { href: '/admin.html', label: 'Overview', shortLabel: 'Home' },
+    // Incoming Calls page disabled.
+    // { href: '/incoming-calls.html', label: 'Incoming Calls', shortLabel: 'Calls' },
+    { href: '/customers.html', label: 'Outbound Calls', shortLabel: 'Outbound' },
+    { href: '/feedback.html', label: 'Feedback', shortLabel: 'Feedback' }
+    // Reports page disabled.
+    // { href: '/reports.html', label: 'Reports', shortLabel: 'Reports' }
+  ];
+  const ADMIN_ROLES = new Set(['WEBMASTER', 'CLIENT_ADMIN']);
+  const SHOW_TEST_AI_CALL_WIDGET = false;
+
+  function isAdminRole(role) {
+    return ADMIN_ROLES.has(role);
+  }
+
+  function isEmbeddedTenantView() {
+    return /(?:^|[?&])embedded=1(?:&|$)/.test(String(window.location.search || ''))
+      || window.self !== window.top;
+  }
+
+  function redirectToLogin() {
+    window.location.replace('/login.html');
+  }
+
+  async function fetchJson(path, options = {}) {
+    const response = await fetch(path, {
+      cache: 'no-store',
+      ...options,
+      headers: {
+        ...(options.headers || {})
+      }
+    });
+
+    let payload = null;
+    try {
+      const text = await response.text();
+      const sanitizedText = text ? text.replace(/iCallMate/ig, 'Service provider') : '';
+      if (sanitizedText) {
+        payload = JSON.parse(sanitizedText);
+      }
+    } catch (error) {
+      payload = null;
+    }
+
+    if (response.status === 401) {
+      redirectToLogin();
+      throw new Error('Authentication required');
+    }
+
+    if (!response.ok) {
+      const error = new Error(payload?.error || `Request failed (${response.status})`);
+      error.status = response.status;
+      error.payload = payload;
+      error.fieldErrors = payload?.fieldErrors || null;
+      throw error;
+    }
+
+    return payload;
+  }
+
+  function addAdminSupportNavigation() {
+    const currentPath = window.location.pathname || '/admin.html';
+    const navigationTargets = [
+      { selector: '.nav-list', className: 'nav-link', label: 'Support Tickets' },
+      { selector: '.mobile-dock', className: 'mobile-dock-link', label: 'Support' }
+    ];
+
+    navigationTargets.forEach(({ selector, className, label }) => {
+      const navigation = document.querySelector(selector);
+      if (!navigation || navigation.querySelector('a[href="/support-tickets.html"]')) return;
+
+      const link = document.createElement('a');
+      link.href = '/support-tickets.html';
+      link.className = className;
+      link.textContent = label;
+      if (currentPath === '/support-tickets.html') {
+        link.classList.add('active');
+        link.setAttribute('aria-current', 'page');
+      }
+      navigation.appendChild(link);
+    });
+
+    document.body.classList.add('admin-support-navigation');
+  }
+
+  function addTenantUserNavigation() {
+    const currentPath = window.location.pathname || '/admin.html';
+    const navigationTargets = [
+      { selector: '.nav-list', className: 'nav-link', label: 'Users' },
+      { selector: '.mobile-dock', className: 'mobile-dock-link', label: 'Users' }
+    ];
+
+    navigationTargets.forEach(({ selector, className, label }) => {
+      const navigation = document.querySelector(selector);
+      if (!navigation || navigation.querySelector('a[href="/users.html"]')) return;
+      const link = document.createElement('a');
+      link.href = '/users.html';
+      link.className = className;
+      link.textContent = label;
+      if (currentPath === '/users.html') {
+        link.classList.add('active');
+        link.setAttribute('aria-current', 'page');
+      }
+      navigation.appendChild(link);
+    });
+
+    document.body.classList.add('tenant-user-navigation');
+  }
+
+  function isTenantAgent(role = window.AppShell?.session?.role) {
+    return role === 'CLIENT_AGENT';
+  }
+
+  async function ensureAuthenticatedSession() {
+    const session = await fetchJson('/api/auth/session');
+    if (isTenantAgent(session.role)) {
+      document.body.classList.add('role-agent');
+    }
+    window.AppShell.session = session;
+    if (session.role === 'CLIENT_ADMIN') {
+      if (!isEmbeddedTenantView()) {
+        if (!NAV_ITEMS.some((item) => item.href === '/users.html')) {
+          NAV_ITEMS.push({ href: '/users.html', label: 'Users', shortLabel: 'Users' });
+          buildMobileTabbar();
+        }
+        addTenantUserNavigation();
+      }
+    }
+    if (isAdminRole(session.role)) {
+      if (!isEmbeddedTenantView()) {
+        if (!NAV_ITEMS.some((item) => item.href === '/support-tickets.html')) {
+          NAV_ITEMS.push({ href: '/support-tickets.html', label: 'Support Tickets', shortLabel: 'Support' });
+          buildMobileTabbar();
+        }
+        addAdminSupportNavigation();
+      }
+    }
+    return session;
+  }
+
+  async function logoutAdmin(button) {
+    const originalText = button ? button.textContent : 'Logout';
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Signing out...';
+    }
+
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+      redirectToLogin();
+    }
+  }
+
+  function showAlert(message, type = 'success') {
+    const alertContainer = document.getElementById('alertContainer');
+    if (!alertContainer) return;
+    const alertEl = document.createElement('div');
+    alertEl.className = `alert ${type}`;
+    alertEl.textContent = message;
+    alertContainer.appendChild(alertEl);
+    setTimeout(() => alertEl.remove(), 5000);
+  }
+
+  function clearFieldErrors(fieldIds) {
+    fieldIds.forEach((id) => {
+      const input = document.getElementById(id);
+      const errorEl = document.getElementById(`${id}Error`);
+      if (input) input.classList.remove('input-invalid');
+      if (errorEl) errorEl.textContent = '';
+    });
+  }
+
+  function applyFieldErrors(fieldErrors = {}, fieldIdMap = {}) {
+    Object.entries(fieldErrors).forEach(([field, message]) => {
+      const fieldId = fieldIdMap[field] || field;
+      const input = document.getElementById(fieldId);
+      const errorEl = document.getElementById(`${fieldId}Error`);
+      if (input) input.classList.add('input-invalid');
+      if (errorEl) errorEl.textContent = message;
+    });
+  }
+
+  function formatStatusLabel(status) {
+    const rawStatus = String(status || '').toLowerCase();
+    const statusMap = {
+      called: 'Calling...',
+      retry_scheduled: 'Scheduled',
+      callback_scheduled: 'Scheduled',
+      no_answer: 'No Answer',
+      busy: 'Busy',
+      failed: 'Failed',
+      completed: 'Completed',
+      pending: 'Pending',
+      hot_lead: 'Hot Lead',
+      churn_watch: 'Churn Watch',
+      admin_review: 'Review Needed'
+    };
+
+    if (statusMap[rawStatus]) {
+      return statusMap[rawStatus];
+    }
+
+    return String(status || '')
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (match) => match.toUpperCase()) || 'Unknown';
+  }
+
+  function formatStatus(value) {
+    return formatStatusLabel(value);
+  }
+
+  function formatName(value) {
+    if (!value) return '';
+    return String(value)
+      .toLowerCase()
+      .split(/\s+/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+
+  function formatLabel(value) {
+    if (!value) return '';
+    return String(value)
+      .toLowerCase()
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, match => match.toUpperCase());
+  }
+
+  function formatCallType(value) {
+    if (!value) return '';
+    const raw = String(value).toLowerCase();
+    if (raw === '3_month_follow_up') return '3 Month Follow-up';
+    if (raw === '6_month_follow_up') return '6 Month Follow-up';
+    return formatLabel(value);
+  }
+
+  function formatSentence(value) {
+    if (!value) return '';
+    const str = String(value).toLowerCase().replace(/_/g, ' ');
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
+
+
+  function formatDate(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleDateString();
+  }
+
+  function formatDateTime(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  }
+
+  function formatCurrencyInr(value) {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0
+    }).format(Number(value || 0));
+  }
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function buildMobileTabbar() {
+    const currentPath = window.location.pathname || '/admin.html';
+    const existing = document.querySelector('.mobile-tabbar');
+    if (existing) {
+      existing.remove();
+    }
+
+    const nav = document.createElement('nav');
+    nav.className = 'mobile-tabbar';
+    nav.setAttribute('aria-label', 'Primary');
+    nav.innerHTML = `
+      <div class="mobile-tabbar-inner">
+        ${NAV_ITEMS.map((item) => {
+          const isActive = currentPath === item.href;
+          return `
+            <a href="${item.href}" class="mobile-tab${isActive ? ' active' : ''}" aria-current="${isActive ? 'page' : 'false'}">
+              <span class="mobile-tab-label">${item.shortLabel}</span>
+            </a>
+          `;
+        }).join('')}
+      </div>
+    `;
+    document.body.appendChild(nav);
+  }
+
+  function normalizePhoneForApi(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 10) return `+91${digits}`;
+    if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
+    if (digits.length > 12) return `+${digits.slice(-12)}`;
+    return `+${digits}`;
+  }
+
+  function formatPhoneForInput(value) {
+    const digits = String(value || '').replace(/\D/g, '').slice(-12);
+    const national = digits.startsWith('91') ? digits.slice(2) : digits;
+    if (national.length <= 5) return national ? `+91 ${national}` : '';
+    return `+91 ${national.slice(0, 5)} ${national.slice(5, 10)}`.trim();
+  }
+
+  function normalizeCallType(value) {
+    return String(value || 'REVIEW_CALL').toUpperCase() === 'THREE_MONTH_FOLLOWUP'
+      ? 'THREE_MONTH_FOLLOWUP'
+      : 'REVIEW_CALL';
+  }
+
+  function createNewCallModal(options = {}) {
+    const mount = document.getElementById(options.mountId || 'newCallModalMount');
+    if (!mount) {
+      throw new Error('NewCallModal mount element not found');
+    }
+
+    const modalId = options.modalId || 'sharedNewCallModal';
+    const fieldPrefix = `${modalId}Field`;
+    const ids = {
+      backdrop: modalId,
+      panelTitle: `${modalId}Title`,
+      close: `${modalId}Close`,
+      cancel: `${modalId}Cancel`,
+      submit: `${modalId}Submit`,
+      editingId: `${fieldPrefix}EditingId`,
+      name: `${fieldPrefix}Name`,
+      phone: `${fieldPrefix}Phone`,
+      date: `${fieldPrefix}Date`,
+      time: `${fieldPrefix}Time`,
+      callType: `${fieldPrefix}CallType`,
+      careToggle: `${fieldPrefix}CareToggle`,
+      dob: `${fieldPrefix}Dob`,
+      lastVisit: `${fieldPrefix}LastVisit`,
+      treatment: `${fieldPrefix}Treatment`,
+      notes: `${fieldPrefix}Notes`,
+      selectionBody: `${modalId}SelectionBody`,
+      existingPatientBtn: `${modalId}ExistingPatientBtn`,
+      newPatientBtn: `${modalId}NewPatientBtn`,
+      formBody: `${modalId}FormBody`,
+      nameDropdown: `${fieldPrefix}NameDropdown`
+    };
+
+    mount.innerHTML = `
+      <div id="${ids.backdrop}" class="modal-backdrop schedule-call-modal" aria-hidden="true">
+        <div class="saas-modal-panel schedule-modal" role="dialog" aria-modal="true" aria-labelledby="${ids.panelTitle}">
+          <div class="saas-modal-header">
+            <div>
+              <h3 id="${ids.panelTitle}" class="saas-modal-title">Schedule New Follow-up Call</h3>
+              <div class="saas-modal-subtitle">Create and schedule a customer follow-up call.</div>
+            </div>
+            <button id="${ids.close}" class="saas-modal-close" type="button" aria-label="Close">
+              <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+          </div>
+
+          <input id="${ids.editingId}" type="hidden">
+
+          <div id="${ids.selectionBody}" class="saas-modal-body" style="padding-bottom:24px;">
+            <div class="saas-selection-cards">
+              <div id="${ids.existingPatientBtn}" class="saas-selection-card">
+                <div class="saas-selection-card-icon">
+                  <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 017.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                </div>
+                <div class="saas-selection-card-title">Existing Patient</div>
+                <div class="saas-selection-card-subtitle">Schedule follow-up for a returning patient</div>
+              </div>
+              <div id="${ids.newPatientBtn}" class="saas-selection-card">
+                <div class="saas-selection-card-icon">
+                  <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
+                </div>
+                <div class="saas-selection-card-title">New Patient</div>
+                <div class="saas-selection-card-subtitle">Create record and schedule new call</div>
+              </div>
+            </div>
+          </div>
+
+          <div id="${ids.formBody}" style="display:none; flex: 1 1 auto; overflow:hidden; flex-direction:column;">
+            <div class="saas-modal-body">
+            <div class="saas-form-section saas-card-section">
+              <div class="saas-section-title">Patient Information</div>
+              <div class="saas-grid-2">
+                <div class="saas-field" style="position:relative;">
+                  <label for="${ids.name}">Patient Name <span style="color:var(--color-danger)">*</span></label>
+                  <input id="${ids.name}" type="text" maxlength="100" placeholder="e.g. Rahul Sharma" autocomplete="off" required>
+                  <div id="${ids.nameDropdown}" style="display:none; position:absolute; top:calc(100% + 4px); left:0; right:0; background:#fff; border:1px solid #cbd5e1; border-radius:8px; z-index:50; max-height:220px; overflow-y:auto; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);"></div>
+                  <span class="error-text" id="${ids.name}Error"></span>
+                </div>
+                <div class="saas-field">
+                  <label for="${ids.phone}">Phone Number <span style="color:var(--color-danger)">*</span></label>
+                  <input id="${ids.phone}" type="tel" placeholder="+91 98765 43210" required>
+                  <span class="error-text" id="${ids.phone}Error"></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="saas-form-section">
+              <div class="saas-section-title">Schedule Information</div>
+              <div class="saas-grid-2">
+                <div class="saas-field">
+                  <label for="${ids.date}">Call Date</label>
+                  <input id="${ids.date}" type="date">
+                  <span class="error-text" id="${ids.date}Error"></span>
+                </div>
+                <div class="saas-field">
+                  <label for="${ids.time}">Call Time <span style="color:var(--color-danger)">*</span></label>
+                  <input id="${ids.time}" type="time" required>
+                  <span class="error-text" id="${ids.time}Error"></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="saas-form-section">
+              <div class="saas-section-title">Call Configuration</div>
+              
+              <div class="saas-field">
+                <label style="margin-bottom: 8px;">Call Type</label>
+                <div class="saas-campaign-cards">
+                  <label class="saas-campaign-card selected">
+                    <input type="radio" name="${ids.callType}" value="REVIEW_CALL" checked style="display:none;">
+                    <div class="saas-card-content">
+                      <strong>Review Calling</strong>
+                    </div>
+                    <div class="saas-card-check">
+                      <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
+                  </label>
+                  <label class="saas-campaign-card">
+                    <input type="radio" name="${ids.callType}" value="THREE_MONTH_FOLLOWUP" style="display:none;">
+                    <div class="saas-card-content">
+                      <strong>3 Month Follow-up</strong>
+                    </div>
+                    <div class="saas-card-check">
+                      <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
+                  </label>
+                </div>
+                <span class="error-text" id="${ids.callType}Error"></span>
+              </div>
+
+              <details id="${ids.careToggle}" class="saas-accordion additional-care-details optional-notes-section">
+                <summary>Additional Care Details (Optional)</summary>
+                <div class="saas-accordion-content">
+                  
+                  <div class="saas-field">
+                    <textarea id="${ids.notes}" placeholder="Additional notes for the care team..." rows="3" style="width:100%; border:1px solid #cbd5e1; border-radius:8px; padding:12px; font-size:14px; font-family:inherit; resize:vertical; outline:none; transition:border-color 0.15s, box-shadow 0.15s;" onfocus="this.style.borderColor='#3b82f6'; this.style.boxShadow='0 0 0 3px rgba(59, 130, 246, 0.1)';" onblur="this.style.borderColor='#cbd5e1'; this.style.boxShadow='none';"></textarea>
+                  </div>
+
+                  <div id="additionalContextSection" style="margin-top: 8px; display: flex; flex-direction: column; gap: 16px;">
+                    <div class="saas-grid-2">
+                      <div class="saas-field">
+                        <label for="${ids.dob}">Date of Birth</label>
+                        <input id="${ids.dob}" type="date">
+                        <span class="error-text" id="${ids.dob}Error"></span>
+                      </div>
+                      <div class="saas-field">
+                        <label for="${ids.lastVisit}">Previous Donation Date</label>
+                        <input id="${ids.lastVisit}" type="date">
+                        <span class="error-text" id="${ids.lastVisit}Error"></span>
+                      </div>
+                      <div class="saas-field" style="grid-column: span 2;">
+                        <label for="${ids.treatment}">Treatment Type</label>
+                        <input id="${ids.treatment}" type="text" placeholder="e.g. Blood test">
+                        <span class="error-text" id="${ids.treatment}Error"></span>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              </details>
+              
+            </div>
+
+          </div>
+
+          <div class="saas-modal-footer">
+            <button id="${ids.cancel}" class="btn-ghost-saas" type="button">Cancel</button>
+            <button id="${ids.submit}" class="btn-primary-saas" type="button">Schedule Call</button>
+          </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const getEl = (key) => document.getElementById(ids[key]);
+    let clientCache = [];
+
+    async function ensureClientsLoaded() {
+      if (clientCache.length) return clientCache;
+      try {
+        clientCache = await fetchJson(`${API_BASE}/clients`);
+      } catch (error) {
+        clientCache = [];
+      }
+      return clientCache;
+    }
+
+    function getClientByPhone(phone) {
+      const normalized = normalizePhoneForApi(phone);
+      return clientCache.find((client) => normalizePhoneForApi(client.phone) === normalized) || null;
+    }
+
+    function setCallTypeSelection(value) {
+      const normalized = normalizeCallType(value);
+      document.querySelectorAll(`input[name="${ids.callType}"]`).forEach((input) => {
+        input.checked = input.value === normalized;
+        input.closest('.saas-campaign-card')?.classList.toggle('selected', input.checked);
+      });
+    }
+
+    function getSelectedCallType() {
+      return document.querySelector(`input[name="${ids.callType}"]:checked`)?.value || 'REVIEW_CALL';
+    }
+
+    function isMobileModalLayout() {
+      return window.matchMedia('(max-width: 768px)').matches;
+    }
+
+    function syncMobileOptionalSections() {
+      const isMobile = isMobileModalLayout();
+      mount.querySelectorAll('.additional-care-details, .optional-notes-section, .saas-mobile-hidden').forEach((section) => {
+        section.hidden = isMobile;
+        section.setAttribute('aria-hidden', String(isMobile));
+        if (isMobile && section.tagName === 'DETAILS') {
+          section.open = false;
+        }
+      });
+    }
+
+    function allFieldIds() {
+      return [ids.name, ids.phone, ids.date, ids.time, ids.callType, ids.dob, ids.lastVisit, ids.treatment, ids.notes];
+    }
+
+    function clearErrors() {
+      clearFieldErrors(allFieldIds());
+    }
+
+    function todayDateValue() {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const day = String(now.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function parseScheduledDateTime(dateValue, timeValue) {
+      if (!dateValue || !timeValue) return null;
+      const parsed = new Date(`${dateValue}T${timeValue}:00`);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function splitScheduledDateTime(customer = {}) {
+      const status = String(customer.status || '').toLowerCase();
+      const scheduledValue = ['retry_scheduled', 'callback_scheduled'].includes(status)
+        ? (customer.next_retry_at || customer.scheduled_datetime || '')
+        : (customer.scheduled_datetime || customer.next_retry_at || '');
+      const parsed = scheduledValue ? new Date(scheduledValue) : null;
+      if (parsed && !Number.isNaN(parsed.getTime())) {
+        return {
+          date: `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`,
+          time: `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`
+        };
+      }
+
+      return {
+        date: todayDateValue(),
+        time: customer.preferred_slot || ''
+      };
+    }
+
+    function getPayload() {
+      const scheduledDate = getEl('date').value;
+      const scheduledTime = getEl('time').value.trim();
+      const scheduledDateTime = parseScheduledDateTime(scheduledDate, scheduledTime);
+      return {
+        name: getEl('name').value.trim(),
+        phone: normalizePhoneForApi(getEl('phone').value),
+        scheduled_date: scheduledDate,
+        scheduled_time: scheduledTime,
+        preferred_slot: scheduledTime,
+        scheduled_datetime: scheduledDateTime ? scheduledDateTime.toISOString() : '',
+        callType: getSelectedCallType()
+      };
+    }
+
+    function getCarePayload(customerPayload) {
+      if (isMobileModalLayout()) {
+        return {
+          name: customerPayload.name,
+          phone: customerPayload.phone,
+          date_of_birth: '',
+          last_visit_date: '',
+          treatment_type: '',
+          annual_reminder_enabled: 1,
+          annual_reminder_slot: customerPayload.preferred_slot || '10:00',
+          notes: '',
+          status: 'active'
+        };
+      }
+
+      return {
+        name: customerPayload.name,
+        phone: customerPayload.phone,
+        date_of_birth: getEl('dob').value || '',
+        last_visit_date: getEl('lastVisit').value || '',
+        treatment_type: getEl('treatment').value.trim(),
+        annual_reminder_enabled: 1,
+        annual_reminder_slot: customerPayload.preferred_slot || '10:00',
+        notes: getEl('notes').value.trim(),
+        status: 'active'
+      };
+    }
+
+    function validate(payload, carePayload) {
+      const fieldErrors = {};
+      if (!payload.name || payload.name.length < 2) fieldErrors[ids.name] = 'Patient name is required';
+      if (!/^\+\d{12}$/.test(payload.phone)) fieldErrors[ids.phone] = 'Use a valid Indian mobile number';
+      if (!payload.scheduled_date) fieldErrors[ids.date] = 'Call date is required';
+      if (!payload.preferred_slot) fieldErrors[ids.time] = 'Call time is required';
+      const scheduled = parseScheduledDateTime(payload.scheduled_date, payload.preferred_slot);
+      if (payload.scheduled_date && payload.preferred_slot && (!scheduled || scheduled.getTime() <= Date.now())) {
+        if (payload.scheduled_date === todayDateValue()) {
+          fieldErrors[ids.time] = 'Choose a future time for today';
+        } else {
+          fieldErrors[ids.date] = 'Choose today or a future date';
+        }
+      }
+
+      if (payload.preferred_slot) {
+        const [hourStr] = payload.preferred_slot.split(':');
+        const hour = parseInt(hourStr, 10);
+        if (!isNaN(hour) && (hour >= 21 || hour < 7)) {
+          fieldErrors[ids.time] = 'Calls cannot be scheduled between 9 PM and 7 AM';
+        }
+      }
+
+      const hasCareDetails = carePayload.date_of_birth || carePayload.last_visit_date || carePayload.treatment_type;
+      if (hasCareDetails) {
+        if (!carePayload.last_visit_date) fieldErrors[ids.lastVisit] = 'Last visit is required when adding care details';
+        if (!carePayload.treatment_type) fieldErrors[ids.treatment] = 'Treatment type is required when adding care details';
+      }
+      return fieldErrors;
+    }
+
+    function setSubmitting(isSubmitting) {
+      const submit = getEl('submit');
+      const cancel = getEl('cancel');
+      const close = getEl('close');
+      submit.disabled = isSubmitting;
+      cancel.disabled = isSubmitting;
+      close.disabled = isSubmitting;
+      submit.textContent = isSubmitting ? 'Scheduling...' : (getEl('editingId').value ? 'Save Changes' : 'Schedule Call');
+    }
+
+    function reset() {
+      getEl('editingId').value = '';
+      getEl('panelTitle').textContent = 'Schedule New Follow-up Call';
+      getEl('submit').textContent = 'Schedule Call';
+      getEl('name').value = '';
+      getEl('name').readOnly = false;
+      getEl('nameDropdown').style.display = 'none';
+      getEl('phone').value = '';
+      getEl('date').value = todayDateValue();
+      getEl('date').min = todayDateValue();
+      getEl('time').value = '';
+      getEl('dob').value = '';
+      getEl('lastVisit').value = '';
+      getEl('treatment').value = '';
+      getEl('notes').value = '';
+      getEl('careToggle').open = false;
+      setCallTypeSelection('REVIEW_CALL');
+      syncMobileOptionalSections();
+      clearErrors();
+      setSubmitting(false);
+    }
+
+    async function saveClientRecord(payload) {
+      await ensureClientsLoaded();
+      const existingClient = getClientByPhone(payload.phone);
+      const endpoint = existingClient ? `${API_BASE}/clients/${existingClient.id}` : `${API_BASE}/clients`;
+      const method = existingClient ? 'PUT' : 'POST';
+      await fetchJson(endpoint, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      clientCache = [];
+    }
+
+    async function submit() {
+      clearErrors();
+      const payload = getPayload();
+      const carePayload = getCarePayload(payload);
+      const fieldErrors = validate(payload, carePayload);
+
+      if (Object.keys(fieldErrors).length) {
+        applyFieldErrors(fieldErrors);
+        showAlert('Please fix the highlighted fields', 'error');
+        return;
+      }
+
+      const customerId = getEl('editingId').value;
+      const endpoint = customerId ? `${API_BASE}/customers/${customerId}` : `${API_BASE}/customers`;
+      const method = customerId ? 'PUT' : 'POST';
+
+      try {
+        setSubmitting(true);
+        await fetchJson(endpoint, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (carePayload.last_visit_date || carePayload.treatment_type || carePayload.date_of_birth) {
+          await saveClientRecord(carePayload);
+        }
+
+        showAlert(customerId ? 'Call updated successfully' : 'Call scheduled successfully');
+        close();
+        if (typeof options.onSaved === 'function') {
+          await options.onSaved();
+        }
+      } catch (error) {
+        if (error.fieldErrors) {
+          applyFieldErrors(error.fieldErrors, {
+            phone: ids.phone,
+            name: ids.name,
+            preferred_slot: ids.time,
+            scheduled_date: ids.date,
+            scheduled_datetime: ids.date,
+            call_type: ids.callType
+          });
+        }
+        showAlert(error.message, 'error');
+      } finally {
+        setSubmitting(false);
+      }
+    }
+
+    let searchTimeout = null;
+    let isExistingPatientMode = false;
+
+    function showSelectionView() {
+      getEl('selectionBody').style.display = 'block';
+      getEl('formBody').style.display = 'none';
+      getEl('panelTitle').textContent = 'Schedule Follow-up Call';
+    }
+
+    function showFormView(isExisting) {
+      isExistingPatientMode = isExisting;
+      getEl('selectionBody').style.display = 'none';
+      getEl('formBody').style.display = 'flex';
+      getEl('panelTitle').textContent = isExisting ? 'Select Existing Patient' : 'Schedule New Follow-up Call';
+      
+      const nameInput = getEl('name');
+      if (isExisting) {
+        nameInput.placeholder = 'Search by name or phone...';
+        nameInput.value = '';
+      } else {
+        nameInput.placeholder = 'e.g. Rahul Sharma';
+      }
+      setTimeout(() => nameInput.focus(), 50);
+    }
+
+    async function open(customerId = null) {
+      reset();
+      if (customerId && typeof options.getCustomer === 'function') {
+        const customer = options.getCustomer(customerId);
+        if (customer) {
+          getEl('editingId').value = customer.id;
+          getEl('panelTitle').textContent = 'Edit Scheduled Call';
+          getEl('submit').textContent = 'Save Changes';
+          getEl('name').value = customer.name || '';
+          getEl('phone').value = formatPhoneForInput(customer.phone || '');
+          const scheduledParts = splitScheduledDateTime(customer);
+          getEl('date').value = scheduledParts.date;
+          getEl('time').value = scheduledParts.time;
+          setCallTypeSelection(customer.call_type || 'REVIEW_CALL');
+
+          await ensureClientsLoaded();
+          const client = getClientByPhone(customer.phone);
+          if (client) {
+            getEl('careToggle').open = !isMobileModalLayout();
+            getEl('dob').value = client.date_of_birth || '';
+            getEl('lastVisit').value = client.last_visit_date || '';
+            getEl('treatment').value = client.treatment_type || '';
+          }
+          showFormView(false);
+        } else {
+          showSelectionView();
+        }
+      } else {
+        showSelectionView();
+      }
+
+      getEl('backdrop').classList.add('open');
+      getEl('backdrop').setAttribute('aria-hidden', 'false');
+      syncMobileOptionalSections();
+    }
+
+    function close() {
+      getEl('backdrop').classList.remove('open');
+      getEl('backdrop').setAttribute('aria-hidden', 'true');
+    }
+
+    getEl('close').addEventListener('click', close);
+    getEl('cancel').addEventListener('click', close);
+    getEl('submit').addEventListener('click', submit);
+    getEl('existingPatientBtn').addEventListener('click', () => showFormView(true));
+    getEl('newPatientBtn').addEventListener('click', () => showFormView(false));
+    
+    getEl('name').addEventListener('input', (e) => {
+      if (!isExistingPatientMode) return;
+      const q = e.target.value.trim();
+      const dropdown = getEl('nameDropdown');
+      
+      if (q.length < 2) {
+        dropdown.style.display = 'none';
+        return;
+      }
+      
+      dropdown.style.display = 'block';
+      dropdown.innerHTML = '<div class="autocomplete-loading">Searching...</div>';
+      
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(async () => {
+        try {
+          const results = await fetchJson(`${API_BASE}/customers/search?q=${encodeURIComponent(q)}`);
+          if (!results || results.length === 0) {
+            dropdown.innerHTML = '<div class="autocomplete-empty">No matching patients found.</div>';
+            return;
+          }
+          
+          dropdown.innerHTML = results.slice(0, 10).map(c => `
+            <div class="autocomplete-item" data-id="${c.id}" data-name="${(c.name || '').replace(/"/g, '&quot;')}" data-phone="${c.phone || ''}">
+              <div class="autocomplete-item-title">${c.name || 'Unknown'}</div>
+              <div class="autocomplete-item-subtitle">${c.phone || ''}</div>
+            </div>
+          `).join('');
+          
+          dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
+            item.addEventListener('click', async () => {
+              getEl('editingId').value = item.dataset.id;
+              getEl('name').value = item.dataset.name;
+              getEl('phone').value = formatPhoneForInput(item.dataset.phone);
+              dropdown.style.display = 'none';
+              
+              await ensureClientsLoaded();
+              const client = getClientByPhone(item.dataset.phone);
+              if (client) {
+                getEl('careToggle').open = !isMobileModalLayout();
+                getEl('dob').value = client.date_of_birth || '';
+                getEl('lastVisit').value = client.last_visit_date || '';
+                getEl('treatment').value = client.treatment_type || '';
+              }
+            });
+          });
+        } catch (error) {
+          dropdown.innerHTML = '<div class="autocomplete-empty">Error searching patients.</div>';
+        }
+      }, 300);
+    });
+
+    document.addEventListener('click', (e) => {
+      const dropdown = getEl('nameDropdown');
+      const container = getEl('name').parentElement;
+      if (dropdown && dropdown.style.display !== 'none' && !container.contains(e.target)) {
+        dropdown.style.display = 'none';
+      }
+    });
+
+    getEl('phone').addEventListener('input', (event) => {
+      event.target.value = formatPhoneForInput(event.target.value);
+    });
+    getEl('backdrop').addEventListener('click', (event) => {
+      if (event.target.id === ids.backdrop) close();
+    });
+    document.querySelectorAll(`input[name="${ids.callType}"]`).forEach((input) => {
+      input.addEventListener('change', () => setCallTypeSelection(input.value));
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && getEl('backdrop').classList.contains('open')) {
+        close();
+      }
+    });
+    syncMobileOptionalSections();
+    window.addEventListener('resize', syncMobileOptionalSections);
+
+    return { open, close };
+  }
+
+  function initializeShellChrome() {
+    if (isEmbeddedTenantView()) return;
+    buildMobileTabbar();
+    if (!SHOW_TEST_AI_CALL_WIDGET) {
+      document.querySelector('[data-test-ai-call-widget]')?.remove();
+      window.__testCallWidgetInstance = null;
+      return;
+    }
+
+    if (window.TestCallWidget && !window.__testCallWidgetInstance) {
+      window.__testCallWidgetInstance = new window.TestCallWidget();
+      window.__testCallWidgetInstance.mount();
+    }
+  }
+
+  function loadTestCallWidgetScript() {
+    if (window.TestCallWidget || document.querySelector('script[data-test-call-widget-script]')) {
+      initializeShellChrome();
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = '/test-call-widget.js';
+    script.defer = true;
+    script.dataset.testCallWidgetScript = 'true';
+    script.onload = initializeShellChrome;
+    script.onerror = initializeShellChrome;
+    document.head.appendChild(script);
+  }
+
+  document.addEventListener('DOMContentLoaded', loadTestCallWidgetScript);
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/support-widget.css'; document.head.appendChild(css);
+    const script = document.createElement('script'); script.src = '/support-widget.js'; script.onload = () => window.SupportWidget?.initialize(); document.head.appendChild(script);
+  });
+
+  const Pagination = (() => {
+    let globalItemsPerPage = window.innerWidth <= 640 ? 5 : 10;
+    
+    window.addEventListener('resize', () => {
+      const isMobile = window.innerWidth <= 640;
+      const newItemsPerPage = isMobile ? 5 : 10;
+      if (newItemsPerPage !== globalItemsPerPage) {
+        globalItemsPerPage = newItemsPerPage;
+        window.dispatchEvent(new CustomEvent('app:pagination:resize'));
+      }
+    });
+
+    function getItemsPerPage() {
+      return globalItemsPerPage;
+    }
+
+    function getPagedItems(items, currentPage) {
+      const perPage = getItemsPerPage();
+      const totalPages = Math.max(1, Math.ceil(items.length / perPage));
+      const safePage = Math.min(Math.max(1, currentPage), totalPages);
+      const start = (safePage - 1) * perPage;
+      return {
+        items: items.slice(start, start + perPage),
+        totalPages,
+        currentPage: safePage,
+        totalItems: items.length
+      };
+    }
+
+    function renderControls(currentPage, totalItems, onPageChangeName) {
+      const perPage = getItemsPerPage();
+      if (totalItems <= perPage) return '';
+      
+      const totalPages = Math.ceil(totalItems / perPage) || 1;
+      const startItem = ((currentPage - 1) * perPage) + 1;
+      const endItem = Math.min(currentPage * perPage, totalItems);
+      let desktopPages = '';
+      for (let i = 1; i <= totalPages; i++) {
+        if (totalPages > 5) {
+          if (i !== 1 && i !== totalPages && Math.abs(i - currentPage) > 1) {
+            if (i === 2 && currentPage > 3) desktopPages += '<span style="margin: 0 4px; color: var(--text-muted);">...</span>';
+            if (i === totalPages - 1 && currentPage < totalPages - 2) desktopPages += '<span style="margin: 0 4px; color: var(--text-muted);">...</span>';
+            continue;
+          }
+        }
+        if (i === currentPage) {
+          desktopPages += `<button class="primary" style="padding: 4px 12px; border-radius: 4px; min-width: 32px;" disabled>${i}</button>`;
+        } else {
+          desktopPages += `<button class="secondary" style="padding: 4px 12px; border-radius: 4px; min-width: 32px;" onclick="${onPageChangeName}(${i})">${i}</button>`;
+        }
+      }
+
+      return `
+        <div class="pagination-controls desktop-only" style="justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light);">
+          <span style="color: var(--text-muted); font-size: 14px;">Showing ${totalItems ? startItem : 0}–${endItem} of ${totalItems} records</span>
+          <div style="display: flex; gap: 8px;">
+            <button class="secondary" style="padding: 4px 12px; border-radius: 4px;" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
+            ${desktopPages}
+            <button class="secondary" style="padding: 4px 12px; border-radius: 4px;" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
+          </div>
+        </div>
+        <div class="pagination-controls mobile-only" style="justify-content: space-between; align-items: center; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light); width: 100%; box-sizing: border-box;">
+          <button class="secondary" style="padding: 6px 12px; border-radius: 4px; flex-shrink: 0; min-width: 80px; width: auto !important; max-width: fit-content !important;" ${currentPage <= 1 ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage - 1})">Previous</button>
+          <span style="font-size: 14px; white-space: nowrap; text-align: center; flex: 1;">Page ${currentPage} of ${totalPages}</span>
+          <button class="secondary" style="padding: 6px 12px; border-radius: 4px; flex-shrink: 0; min-width: 80px; width: auto !important; max-width: fit-content !important;" ${currentPage >= totalPages ? 'disabled' : ''} onclick="${onPageChangeName}(${currentPage + 1})">Next</button>
+        </div>
+      `;
+    }
+
+    return {
+      getItemsPerPage,
+      getPagedItems,
+      renderControls
+    };
+  })();
+
+  window.AppShell = {
+    API_BASE,
+    applyFieldErrors,
+    clearFieldErrors,
+    ensureAuthenticatedSession,
+    escapeHtml,
+    fetchJson,
+    formatPhoneForInput,
+    formatCurrencyInr,
+    formatDate,
+    formatDateTime,
+    formatStatusLabel,
+    formatStatus,
+    formatName,
+    formatLabel,
+    formatCallType,
+    formatSentence,
+    initializeShellChrome,
+    isEmbeddedTenantView,
+    isTenantAgent,
+    logoutAdmin,
+    NewCallModal: createNewCallModal,
+    normalizePhoneForApi,
+    Pagination,
+    redirectToLogin,
+    showAlert
+  };
+})();
