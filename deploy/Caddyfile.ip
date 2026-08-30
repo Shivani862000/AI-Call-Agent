@@ -1,0 +1,20 @@
+# INTERIM — plain HTTP on the droplet IP, for use before DNS exists.
+#
+# Let's Encrypt will not issue a certificate for a bare IP address, so there is
+# no TLS here. Do not put real patient data through this. Replace with
+# deploy/Caddyfile the moment app. and uat. resolve.
+#
+#   uat  -> http://<ip>/
+#   prod -> http://<ip>:8080/
+
+{
+	auto_https off
+}
+
+:80 {
+	reverse_proxy uat:3000
+}
+
+:8080 {
+	reverse_proxy prod:3000
+}

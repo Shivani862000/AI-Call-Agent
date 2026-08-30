@@ -7,6 +7,9 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      # Interim only, for Caddyfile.ip before DNS exists. Harmless once the
+      # hostname config is in use — nothing listens on 8080 then.
+      - "8080:8080"
     environment:
       ACME_EMAIL: ${ACME_EMAIL}
     volumes:
