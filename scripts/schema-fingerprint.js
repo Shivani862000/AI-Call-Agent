@@ -52,6 +52,9 @@ const QUERIES = {
     SELECT proname, pg_get_functiondef(oid)
       FROM pg_proc
      WHERE pronamespace = 'public'::regnamespace
+       -- Supabase installs its own helpers into public and they differ by
+       -- platform version, which would make two correct projects look unequal.
+       AND proname NOT IN ('rls_auto_enable')
      ORDER BY proname`,
 
   migrations: `

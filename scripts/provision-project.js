@@ -77,7 +77,7 @@ async function fingerprint(client) {
     `SELECT conrelid::regclass::text, conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE connamespace='public'::regnamespace ORDER BY 1,2`,
     `SELECT table_name, view_definition FROM information_schema.views WHERE table_schema='public' ORDER BY table_name`,
     `SELECT c.relname, t.tgname, pg_get_triggerdef(t.oid) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE NOT t.tgisinternal AND c.relnamespace='public'::regnamespace ORDER BY 1,2`,
-    `SELECT proname, pg_get_functiondef(oid) FROM pg_proc WHERE pronamespace='public'::regnamespace ORDER BY proname`,
+    `SELECT proname, pg_get_functiondef(oid) FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname NOT IN ('rls_auto_enable') ORDER BY proname`,
     `SELECT version, coalesce(name,'') FROM supabase_migrations.schema_migrations ORDER BY version`,
     `SELECT c.relname, c.relrowsecurity FROM pg_class c WHERE c.relnamespace='public'::regnamespace AND c.relkind='r' ORDER BY c.relname`
   ];
