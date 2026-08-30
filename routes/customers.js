@@ -407,6 +407,7 @@ router.get('/', async (req, res) => {
     const { data: customers, error } = await supabase
       .from('customers')
       .select('*')
+      .neq('status', 'archived')
       .order('priority_score', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false });
     
@@ -681,3 +682,22 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+
+// Archive customer
+router.post('/:id/archive', async (req, res) => {
+  try {
+    const { data: existing, error: fetchError } = await supabase.from('customers').select('*').eq('id', req.params.id).single();
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+    if (!existing) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+    
+    const { error: updateError } = await supabase.from('customers').update({ status: 'archived' }).eq('id', req.params.id);
+    if (updateError) throw updateError;
+    
+    res.json({ message: 'Customer archived successfully' });
+  } catch (error) {
+    console.error('Error archiving customer:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
