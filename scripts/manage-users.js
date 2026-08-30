@@ -95,7 +95,7 @@ async function main() {
     console.log(`✓ Created ${role} ${username}`);
   } else {
     const result = await dbRun(
-      'UPDATE users SET password_hash = ?, updated_at = now() WHERE lower(username) = lower(?)',
+      'UPDATE users SET password_hash = ?, password_changed_at = now(), updated_at = now() WHERE lower(username) = lower(?)',
       [hash, username]
     );
     if (!result.changes) throw new Error(`No user named ${username}`);

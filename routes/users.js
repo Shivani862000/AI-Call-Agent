@@ -115,7 +115,7 @@ router.patch('/:id', async (req, res, next) => {
       if (req.body.password !== undefined) {
         const issue = validatePassword(req.body.password);
         if (issue) return { status: 400, body: { error: issue, fieldErrors: { password: issue } } };
-        sets.push('password_hash = ?');
+        sets.push('password_hash = ?', 'password_changed_at = now()');
         params.push(await bcrypt.hash(String(req.body.password), BCRYPT_COST));
       }
 

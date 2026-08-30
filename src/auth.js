@@ -132,7 +132,7 @@ function signAuthValue(value) {
   return crypto.createHmac('sha256', AUTH_SIGNING_SECRET).update(value).digest();
 }
 
-function createAuthToken(username, role) {
+function createAuthToken(username, role, passwordChangedAt) {
   const normalizedUsername = String(username || '').trim();
   const normalizedRole = normalizeRole(role);
   if (!normalizedUsername || normalizedUsername.length > 100 || !normalizedRole) {
@@ -145,6 +145,9 @@ function createAuthToken(username, role) {
     username: normalizedUsername,
     role: normalizedRole,
     issuedAt,
+    // Millisecond epoch of the password this token was issued against. A later
+    // change makes every older token stale without a per-request query.
+    pwd: passwordChangedAt ? new Date(passwordChangedAt).getTime() : 0,
     exp: issuedAt + AUTH_SESSION_TTL_MS,
     nonce: crypto.randomBytes(16).toString('base64url')
   })).toString('base64url');
@@ -204,7 +207,9 @@ function readAuthSession(req) {
       return null;
     }
 
-    return { username, role, issuedAt, exp: expiresAt };
+    // `pwd` must survive: it is what makes a token issued against an older
+    // password detectable as stale.
+    return { username, role, issuedAt, exp: expiresAt, pwd: Number(session?.pwd) || 0 };
   } catch (error) {
     return null;
   }
@@ -334,11 +339,16 @@ async function loadAccountState(username) {
 
   const { dbGet } = require('../db');
   const row = await dbGet(
-    'SELECT username, role, is_active FROM users WHERE lower(username) = lower(?)',
+    'SELECT username, role, is_active, password_changed_at FROM users WHERE lower(username) = lower(?)',
     [key]
   );
   const state = row && Number(row.is_active) === 1
-    ? { active: true, role: normalizeRole(row.role), username: row.username }
+    ? {
+      active: true,
+      role: normalizeRole(row.role),
+      username: row.username,
+      passwordChangedAt: row.password_changed_at ? new Date(row.password_changed_at).getTime() : 0
+    }
     : { active: false };
 
   accountCache.set(key, { state, expiresAt: Date.now() + ACCOUNT_CACHE_TTL_MS });
@@ -357,10 +367,19 @@ async function requireAdminAuth(req, res, next) {
       return res.status(503).json({ error: 'Authentication temporarily unavailable' });
     }
 
-    if (!account.active) {
+    // A token minted before the current password belongs to a session that
+    // existed when the old password did. Tolerance absorbs clock and
+    // millisecond-rounding differences between the token and the column.
+    const stale = account.active
+      && account.passwordChangedAt
+      && Number(session.pwd || 0) + 1000 < account.passwordChangedAt;
+
+    if (!account.active || stale) {
       clearAuthCookie(req, res);
       if (req.path.startsWith('/api/') || req.path === '/call/start') {
-        return res.status(401).json({ error: 'Account is no longer active' });
+        return res.status(401).json({
+          error: stale ? 'Your password changed — please sign in again' : 'Account is no longer active'
+        });
       }
       return res.redirect('/login.html');
     }
@@ -403,7 +422,7 @@ async function verifyCredentials(username, password) {
   const { dbGet } = require('../db');
   try {
     const user = await dbGet(
-      'SELECT id, username, password_hash, role, is_active FROM users WHERE lower(username) = lower(?)',
+      'SELECT id, username, password_hash, role, is_active, password_changed_at FROM users WHERE lower(username) = lower(?)',
       [normalizedUsername]
     );
     const role = normalizeRole(user?.role);
@@ -413,7 +432,12 @@ async function verifyCredentials(username, password) {
       if (Number(user.is_active) !== 1) return { success: false, reason: 'inactive' };
       const { dbRun } = require('../db');
       dbRun('UPDATE users SET last_login_at = now() WHERE id = ?', [user.id]).catch(() => {});
-      return { success: true, username: user.username, role };
+      return {
+        success: true,
+        username: user.username,
+        role,
+        passwordChangedAt: user.password_changed_at
+      };
     }
     return { success: false };
   } catch (error) {

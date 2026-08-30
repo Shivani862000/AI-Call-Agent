@@ -37,7 +37,8 @@ const {
   clearAuthCookie,
   createAuthToken,
   createMediaToken,
-  verifyCredentials
+  verifyCredentials,
+  invalidateAccountCache
 } = require('./auth');
 
 const {
@@ -131,7 +132,7 @@ module.exports = function mountApiRoutes(app) {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const token = createAuthToken(username, authResult.role);
+    const token = createAuthToken(username, authResult.role, authResult.passwordChangedAt);
     setAuthCookie(req, res, token);
     logger.info('USER_LOGIN', { user: username, role: authResult.role });
     return res.json({
@@ -167,10 +168,17 @@ module.exports = function mountApiRoutes(app) {
         return res.status(403).json({ error: 'Current password is incorrect', fieldErrors: { currentPassword: 'Incorrect' } });
       }
 
+      const changedAt = new Date();
       await dbRun(
-        'UPDATE users SET password_hash = ?, updated_at = now() WHERE id = ?',
-        [await bcrypt.hash(next_, 12), user.id]
+        'UPDATE users SET password_hash = ?, password_changed_at = ?, updated_at = now() WHERE id = ?',
+        [await bcrypt.hash(next_, 12), changedAt.toISOString(), user.id]
       );
+      invalidateAccountCache(user.username);
+
+      // Every other session is now stale. Re-issue this one so the person who
+      // just changed their password is not signed out of the tab they did it in.
+      setAuthCookie(req, res, createAuthToken(user.username, session.role, changedAt));
+
       logger.info('PASSWORD_CHANGED', { user: user.username });
       res.json({ success: true });
     } catch (error) { next(error); }
