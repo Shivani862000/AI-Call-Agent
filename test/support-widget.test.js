@@ -54,10 +54,26 @@ test('admin session refreshes navigation after adding the Support Tickets link',
 
 test('admin session adds Support Tickets to the visible sidebar and mobile dock', () => {
   const shell = fs.readFileSync(path.join(__dirname, '..', 'public', 'app-shell.js'), 'utf8');
+  // Sidebar link and mobile dock entry, both gated on the admin role. Asserted
+  // by behaviour rather than by the shape of the internals, which moved when
+  // the admin links were grouped at the foot of the sidebar.
   assert.match(shell, /function addAdminSupportNavigation\(\)/);
-  assert.match(shell, /selector: '\.nav-list'/);
   assert.match(shell, /selector: '\.mobile-dock'/);
+  assert.match(shell, /addAdminNavLink\('\/support-tickets\.html', 'Support Tickets'/);
   assert.match(shell, /if \(session\.role === 'ADMIN'\)[\s\S]*?addAdminSupportNavigation\(\)/);
+});
+
+test('the administration links are grouped at the foot of the sidebar', () => {
+  const shell = fs.readFileSync(path.join(__dirname, '..', 'public', 'app-shell.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'app-shell.css'), 'utf8');
+
+  for (const href of ['/support-tickets.html', '/users.html', '/settings.html']) {
+    assert.match(shell, new RegExp(`addAdminNavLink\\('${href.replace(/\//g, '\\/')}'[^)]*bottom: true`),
+      `${href} must go in the bottom group`);
+  }
+  // Patients is day-to-day work, not administration: it stays at the top.
+  assert.ok(!/addAdminNavLink\('\/patients\.html'[^)]*bottom: true/.test(shell));
+  assert.match(css, /\.nav-list-secondary \{[\s\S]*?margin-top: auto/);
 });
 
 test('support tickets page shares the admin navigation shell', () => {
