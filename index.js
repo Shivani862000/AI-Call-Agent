@@ -111,10 +111,6 @@ app.get('/incoming-calls.html', (req, res) => {
   res.status(404).send('Incoming Calls page is disabled.');
 });
 
-app.get('/reports.html', (req, res) => {
-  res.status(404).send('Reports page is disabled.');
-});
-
 // Static files
 app.use(express.static(path.join(__dirname, 'public')));
 

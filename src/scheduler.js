@@ -172,45 +172,86 @@ async function markSubmittedCallsWithoutMediaFailed() {
 
 // ── Owner Digest ───────────────────────────────────────────────────────────────
 
-async function runOwnerDigestTick() {
-  if (ownerDigestRunning || !shouldTriggerOwnerDigest()) {
-    return;
-  }
+/**
+ * Builds the digest body. Separated from sending so the settings screen can
+ * show exactly what would go out, and so it is testable without SMTP.
+ *
+ * Contains patient names and outcomes by explicit decision -- see the phase 2
+ * plan. This is the only path in the system that sends identifiable patient
+ * data in the clear, so recipients are an allow-list held in the database
+ * rather than anything supplied at send time.
+ */
+async function buildDigestBody() {
+  const digest = await buildOwnerDashboardData();
+  const rupees = (value) => `Rs ${Number(value || 0).toFixed(0)}`;
 
+  const alerts = digest.alerts?.length
+    ? `Priority alerts:\n- ${digest.alerts.map((item) => `${item.customer_name}: ${item.headline}`).join('\n- ')}`
+    : 'Priority alerts: none';
+
+  return [
+    digest.digest_text,
+    '',
+    `Revenue pipeline: ${rupees(digest.roi_snapshot?.revenue_pipeline_estimate)}`,
+    `Estimated AI ops cost: ${rupees(digest.roi_snapshot?.ai_ops_cost_estimate)}`,
+    `Estimated staff saving: ${rupees(digest.roi_snapshot?.estimated_saving_vs_staff)}`,
+    '',
+    alerts,
+    '',
+    'This message contains patient information. Handle accordingly.'
+  ].join('\n');
+}
+
+/** True once the configured local send time has passed today. */
+function digestIsDue(config, now = new Date()) {
+  const [hour, minute] = String(config.send_at || '08:00').split(':').map(Number);
+  const local = new Date(now.toLocaleString('en-US', { timeZone: config.timezone || 'Asia/Kolkata' }));
+  const today = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`;
+  if (config.last_sent_date === today) return { due: false, today };
+  const past = local.getHours() > hour || (local.getHours() === hour && local.getMinutes() >= minute);
+  return { due: past, today };
+}
+
+async function sendOwnerDigest({ force = false, to = null } = {}) {
+  const { sendMail, isMailConfigured } = require('../services/mailer');
+  const config = await settings.get('owner_digest');
+  const recipients = to || config.recipients || [];
+
+  if (!force && !config.enabled) return { sent: false, reason: 'digest is switched off' };
+  if (recipients.length === 0) return { sent: false, reason: 'no recipients configured' };
+  if (!isMailConfigured()) return { sent: false, reason: 'SMTP is not configured' };
+
+  const body = await buildDigestBody();
+  const result = await sendMail({
+    to: recipients,
+    subject: `${CLIENT_NAME || 'Path Lab'} — daily call digest`,
+    text: body
+  });
+  logger.info('OWNER_DIGEST_SENT', { recipients: recipients.length, forced: force });
+  return { sent: true, ...result };
+}
+
+async function runOwnerDigestTick() {
+  if (ownerDigestRunning) return;
   ownerDigestRunning = true;
 
   try {
-    const todayKey = getLocalDateKey();
-    const state = await dbGet('SELECT value FROM app_state WHERE key = ?', ['owner_morning_digest_last_sent']);
-    if (state?.value === todayKey) {
-      return;
+    const config = await settings.get('owner_digest');
+    if (!config.enabled) return;
+
+    const { due, today } = digestIsDue(config);
+    if (!due) return;
+
+    const result = await sendOwnerDigest();
+    if (result.sent) {
+      // Recorded only after a successful send, so a mail outage retries on the
+      // next tick instead of silently skipping the day.
+      await settings.patch('owner_digest', { last_sent_date: today }, 'scheduler');
+    } else {
+      logger.warn('OWNER_DIGEST_SKIPPED', { reason: result.reason });
     }
-
-    const digest = await buildOwnerDashboardData();
-    const lines = [
-      digest.digest_text,
-      '',
-      `Revenue pipeline: Rs ${Number(digest.roi_snapshot?.revenue_pipeline_estimate || 0).toFixed(0)}`,
-      `Estimated AI ops cost: Rs ${Number(digest.roi_snapshot?.ai_ops_cost_estimate || 0).toFixed(0)}`,
-      `Estimated staff saving: Rs ${Number(digest.roi_snapshot?.estimated_saving_vs_staff || 0).toFixed(0)}`,
-      '',
-      digest.alerts?.length
-        ? `Priority alerts:\n- ${digest.alerts.map((item) => `${item.customer_name}: ${item.headline}`).join('\n- ')}`
-        : 'Priority alerts: none'
-    ].join('\n');
-
-
-
-    await dbRun(
-      `INSERT INTO app_state (key, value, updated_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-      ['owner_morning_digest_last_sent', todayKey, new Date().toISOString()]
-    );
-
-    console.log('[OWNER DIGEST] Morning digest sent successfully');
   } catch (error) {
-    console.error('[OWNER DIGEST ERROR]', error.message);
+    logger.warn('OWNER_DIGEST_FAILED', { reason: error.message });
   } finally {
     ownerDigestRunning = false;
   }
@@ -601,6 +642,9 @@ async function runSchedulerTick() {
 
 module.exports = {
   markSubmittedCallsWithoutMediaFailed,
+  buildDigestBody,
+  digestIsDue,
+  sendOwnerDigest,
   retryPendingRecordingUploads,
   queuePatientsFromRules,
   runOwnerDigestTick,

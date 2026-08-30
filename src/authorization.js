@@ -9,8 +9,8 @@ const ADMIN_ONLY_PREFIXES = [
   '/api/support-tickets',
   '/api/agents',
   '/api/users',
+  '/api/settings',
   '/api/feedback',
-  '/api/reports',
   '/api/logs',
   '/api/test-call',
   '/api/test-ai-call',
@@ -20,9 +20,9 @@ const ADMIN_ONLY_PREFIXES = [
 const ADMIN_ONLY_HTML = new Set([
   '/support-tickets.html',
   '/users.html',
+  '/settings.html',
   '/feedback.html',
-  '/feedback-analysis.html',
-  '/reports.html'
+  '/feedback-analysis.html'
 ]);
 
 function isAdminOnlyRequest(req) {

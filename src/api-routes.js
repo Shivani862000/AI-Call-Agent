@@ -11,7 +11,6 @@ const campaignsRouter = require('../routes/campaigns');
 const feedbackRouter = require('../routes/feedback');
 const createSupportTicketsRouter = require('../routes/support-tickets');
 const { createSlackSupportNotifier } = require('../services/slack-support');
-const reportsRouter = require('../routes/reports');
 const agentsRouter = require('../routes/agents');
 const testCallRouter = require('../routes/test-call');
 const testAiCallRouter = require('../routes/test-ai-call');
@@ -77,7 +76,6 @@ const { dbGet, dbRun, dbAll, dbTx } = require('../db');
 const { computePriorityScore, applyCallOutcomeWorkflow, createSupervisorEvent } = require('../services/call-orchestration');
 const { getAgentConfigById, getDefaultAgentConfig } = require('./prompt-builder');
 const { buildCallAnalysis, storeCallAnalysis } = require('../services/call-analysis');
-const { generateCallAnalysisPDF } = require('../services/pdf');
 const { initiateCall, buildMasterPostPayload } = require('../services/icallmate');
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
 const {
@@ -85,6 +83,7 @@ const {
   hasValidIcallMateWebhookSecret
 } = require('./icallmate-webhook');
 const logger = require('../services/system-logger');
+const { generateCallAnalysisPDF } = require('../services/pdf');
 
 module.exports = function mountApiRoutes(app) {
   app.get('/health', (req, res) => {
@@ -194,10 +193,10 @@ module.exports = function mountApiRoutes(app) {
   app.use('/api/campaigns', campaignsRouter);
   app.use('/api/feedback', feedbackRouter);
   app.use('/api/support-tickets', createSupportTicketsRouter({ dbRun, dbGet, dbAll, dbTx, notifyNewTicket: createSlackSupportNotifier({ webhookUrl: process.env.SLACK_SUPPORT_WEBHOOK_URL }) }));
-  app.use('/api/reports', reportsRouter);
   app.use('/api/agents', agentsRouter);
   app.use('/api/users', require('../routes/users'));
   app.use('/api/patients', require('../routes/patients'));
+  app.use('/api/settings', require('../routes/settings'));
   app.use('/api/test-call', testCallRouter);
   app.use('/api/test-ai-call', testAiCallRouter);
 

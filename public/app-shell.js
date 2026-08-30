@@ -106,6 +106,7 @@
       }
       addAdminSupportNavigation();
       addAdminNavLink('/users.html', 'Users');
+      addAdminNavLink('/settings.html', 'Settings');
     }
     return session;
   }

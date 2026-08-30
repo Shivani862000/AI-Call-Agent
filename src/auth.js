@@ -14,12 +14,12 @@ const PROTECTED_HTML_PATHS = new Set([
   '/admin.html',
   '/support-tickets.html',
   '/users.html',
+  '/settings.html',
   '/patients.html',
   '/incoming-calls.html',
   '/customers.html',
   '/feedback.html',
-  '/feedback-analysis.html',
-  '/reports.html'
+  '/feedback-analysis.html'
 ]);
 
 const VALID_ROLES = new Set(['ADMIN', 'AGENT']);

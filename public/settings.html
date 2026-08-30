@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Settings</title>
+  <link rel="stylesheet" href="/app-shell.css">
+  <style>
+    .settings { padding: 24px; max-width: 900px; margin: 0 auto; }
+    .card { padding: 20px; border: 1px solid #d9e1e8; border-radius: 10px; margin: 0 0 16px; background: #fff; }
+    .card h3 { margin: 0 0 4px; }
+    .card p.hint { margin: 0 0 16px; color: #52606d; font-size: 13px; max-width: 62ch; }
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+    .field label { font-size: 13px; font-weight: 700; color: #3d4753; }
+    .field input, .field select, .field textarea { padding: 10px; border: 1px solid #d9e1e8; border-radius: 8px; font: inherit; }
+    .field .help { color: #7b8794; font-size: 12px; }
+    .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 16px; }
+    .switch { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .switch input { width: 18px; height: 18px; }
+    .switch label { font-weight: 600; }
+    button { padding: 10px 15px; border-radius: 8px; border: 1px solid #1d4ed8; background: #1d4ed8; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #fff; color: #1d4ed8; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .banner { padding: 12px 15px; border-radius: 8px; margin-bottom: 14px; font-size: 14px; display: none; }
+    .banner.ok { background: #e1f0e8; color: #23694e; display: block; }
+    .banner.bad { background: #fae7e3; color: #b23a2c; display: block; }
+    .warn { padding: 12px 15px; border-radius: 8px; background: #f8eeda; color: #8a6003; font-size: 13px; margin-bottom: 16px; }
+    .rule { border: 1px solid #eef2f6; border-radius: 9px; padding: 14px 16px 2px; margin-bottom: 12px; }
+    .rule-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .rule-head strong { flex: 1; }
+    pre { background: #f4f6f8; padding: 14px; border-radius: 8px; overflow-x: auto; font-size: 12.5px; white-space: pre-wrap; }
+    @media (max-width: 640px) { .settings { padding: 14px; } }
+  </style>
+</head>
+<body class="poc-page settings-page">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-mark">PL</div>
+          <div class="brand-copy">
+            <h1>Path Lab Console</h1>
+            <p>Patient follow-up operations</p>
+          </div>
+        </div>
+        <nav class="nav-list">
+          <a href="/admin.html" class="nav-link">Overview</a>
+          <a href="/customers.html" class="nav-link">Outbound Calls</a>
+          <a href="/feedback.html" class="nav-link">Feedback</a>
+        </nav>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <section class="settings">
+        <header class="page-header desktop-page-header">
+          <div class="page-title-wrap">
+            <h2>Settings</h2>
+            <div class="page-subtitle">Control the daily email and automatic calling.</div>
+          </div>
+        </header>
+
+        <div id="banner" class="banner"></div>
+
+        <div class="card">
+          <h3>Daily email summary</h3>
+          <p class="hint">A summary of the day's calls and feedback, sent to the addresses below.</p>
+          <div class="warn">
+            This email includes patient names and call outcomes. Only add addresses that are
+            allowed to receive patient information.
+          </div>
+          <div id="mailWarning" class="warn" hidden>
+            Email is not set up on the server yet, so nothing can be sent. Ask your developer to
+            add the mail settings, then come back here.
+          </div>
+
+          <div class="switch">
+            <input type="checkbox" id="digestEnabled">
+            <label for="digestEnabled">Send the daily summary</label>
+          </div>
+          <div class="field">
+            <label for="recipients">Send to</label>
+            <textarea id="recipients" rows="3" placeholder="one address per line"></textarea>
+            <span class="help">One email address per line.</span>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="sendAt">Send at</label>
+              <input id="sendAt" type="time" value="08:00">
+            </div>
+            <div class="field">
+              <label for="timezone">Time zone</label>
+              <input id="timezone" type="text" value="Asia/Kolkata">
+            </div>
+          </div>
+          <button id="saveDigest">Save</button>
+          <button id="testDigest" class="secondary">Send one now</button>
+          <button id="previewDigest" class="secondary">Show what it would say</button>
+          <pre id="digestPreview" hidden></pre>
+        </div>
+
+        <div class="card">
+          <h3>Automatic calling</h3>
+          <p class="hint">
+            When this is on, the system decides by itself which patients to call, using the
+            rules below. Patients marked do not call, or who have refused consent, are never
+            called whatever the rules say.
+          </p>
+          <div class="switch">
+            <input type="checkbox" id="autoEnabled">
+            <label for="autoEnabled">Let the system schedule calls automatically</label>
+          </div>
+          <div id="rules"></div>
+          <button id="saveRules">Save</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
+    <a href="/admin.html" class="mobile-dock-link">Overview</a>
+    <a href="/customers.html" class="mobile-dock-link">Outbound</a>
+    <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
+  </nav>
+
+  <script src="/app-shell.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let autoQueue = { enabled: false, rules: [] };
+
+    function banner(message, ok) {
+      const node = $('banner');
+      node.textContent = message;
+      node.className = 'banner ' + (ok ? 'ok' : 'bad');
+    }
+
+    function renderRules() {
+      const host = $('rules');
+      host.replaceChildren();
+      autoQueue.rules.forEach((rule, index) => {
+        const box = document.createElement('div');
+        box.className = 'rule';
+
+        const head = document.createElement('div');
+        head.className = 'rule-head';
+        const toggle = document.createElement('input');
+        toggle.type = 'checkbox';
+        toggle.checked = rule.enabled !== false;
+        toggle.onchange = () => { autoQueue.rules[index].enabled = toggle.checked; };
+        const title = document.createElement('strong');
+        title.textContent = rule.id === 'annual-reminder' ? 'Yearly reminder' : 'Follow up after a donation';
+        head.append(toggle, title);
+
+        const row = document.createElement('div');
+        row.className = 'row';
+
+        const serviceField = document.createElement('div');
+        serviceField.className = 'field';
+        serviceField.innerHTML = '<label>Applies to</label>';
+        const service = document.createElement('select');
+        [['donation', 'Blood donation'], ['test', 'Blood test'], ['any', 'Either']].forEach(([value, label]) => {
+          const option = document.createElement('option');
+          option.value = value; option.textContent = label;
+          option.selected = rule.service === value;
+          service.appendChild(option);
+        });
+        service.onchange = () => { autoQueue.rules[index].service = service.value; };
+        serviceField.appendChild(service);
+
+        const daysField = document.createElement('div');
+        daysField.className = 'field';
+        daysField.innerHTML = '<label>Call after this many days</label>';
+        const days = document.createElement('input');
+        days.type = 'number'; days.min = '1'; days.value = rule.min_days_since;
+        days.onchange = () => { autoQueue.rules[index].min_days_since = Number(days.value); };
+        const help = document.createElement('span');
+        help.className = 'help';
+        help.textContent = 'Counted from their last recorded service';
+        daysField.append(days, help);
+
+        const slotField = document.createElement('div');
+        slotField.className = 'field';
+        slotField.innerHTML = '<label>Call at</label>';
+        const slot = document.createElement('input');
+        slot.type = 'time'; slot.value = rule.slot || '10:00';
+        slot.onchange = () => { autoQueue.rules[index].slot = slot.value; };
+        slotField.appendChild(slot);
+
+        row.append(serviceField, daysField, slotField);
+        box.append(head, row);
+        host.appendChild(box);
+      });
+    }
+
+    async function load() {
+      const data = await AppShell.fetchJson('/api/settings');
+      $('digestEnabled').checked = data.owner_digest.enabled;
+      $('recipients').value = (data.owner_digest.recipients || []).join('\n');
+      $('sendAt').value = data.owner_digest.send_at || '08:00';
+      $('timezone').value = data.owner_digest.timezone || 'Asia/Kolkata';
+      $('mailWarning').hidden = data.mail_configured;
+      autoQueue = data.auto_queue;
+      $('autoEnabled').checked = autoQueue.enabled;
+      renderRules();
+    }
+
+    $('saveDigest').onclick = async function save() {
+      this.disabled = true;
+      try {
+        await AppShell.fetchJson('/api/settings/owner_digest', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: $('digestEnabled').checked,
+            recipients: $('recipients').value.split('\n').map((s) => s.trim()).filter(Boolean),
+            send_at: $('sendAt').value,
+            timezone: $('timezone').value.trim() || 'Asia/Kolkata'
+          })
+        });
+        banner('Saved', true);
+      } catch (error) { banner(error.message, false); } finally { this.disabled = false; }
+    };
+
+    $('saveRules').onclick = async function save() {
+      this.disabled = true;
+      try {
+        await AppShell.fetchJson('/api/settings/auto_queue', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: $('autoEnabled').checked, rules: autoQueue.rules })
+        });
+        banner($('autoEnabled').checked ? 'Saved — the system will now schedule calls automatically' : 'Saved', true);
+      } catch (error) { banner(error.message, false); } finally { this.disabled = false; }
+    };
+
+    $('testDigest').onclick = async function test() {
+      this.disabled = true;
+      try {
+        const result = await AppShell.fetchJson('/api/settings/digest/test', { method: 'POST' });
+        banner('Sent to ' + (result.accepted || []).join(', '), true);
+      } catch (error) { banner(error.message, false); } finally { this.disabled = false; }
+    };
+
+    $('previewDigest').onclick = async function preview() {
+      this.disabled = true;
+      try {
+        const { body } = await AppShell.fetchJson('/api/settings/digest/preview');
+        $('digestPreview').textContent = body;
+        $('digestPreview').hidden = false;
+      } catch (error) { banner(error.message, false); } finally { this.disabled = false; }
+    };
+
+    AppShell.ensureAuthenticatedSession().then(load).catch(() => {});
+  </script>
+</body>
+</html>
