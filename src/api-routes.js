@@ -74,7 +74,7 @@ const {
   buildScriptedRatingResponse
 } = require('./scripted-ivr');
 
-const { dbGet, dbRun, dbAll } = require('../db');
+const { dbGet, dbRun, dbAll, dbTx } = require('../db');
 const { computePriorityScore, applyCallOutcomeWorkflow, createSupervisorEvent } = require('../services/call-orchestration');
 const { getAgentConfigById, getDefaultAgentConfig } = require('./prompt-builder');
 const { buildCallAnalysis, storeCallAnalysis } = require('../services/call-analysis');
@@ -153,7 +153,7 @@ module.exports = function mountApiRoutes(app) {
   app.use('/api/clients', clientsRouter);
   app.use('/api/campaigns', campaignsRouter);
   app.use('/api/feedback', feedbackRouter);
-  app.use('/api/support-tickets', createSupportTicketsRouter({ dbRun, dbGet, dbAll, notifyNewTicket: createSlackSupportNotifier({ webhookUrl: process.env.SLACK_SUPPORT_WEBHOOK_URL }) }));
+  app.use('/api/support-tickets', createSupportTicketsRouter({ dbRun, dbGet, dbAll, dbTx, notifyNewTicket: createSlackSupportNotifier({ webhookUrl: process.env.SLACK_SUPPORT_WEBHOOK_URL }) }));
   app.use('/api/reports', reportsRouter);
   app.use('/api/agents', agentsRouter);
   app.use('/api/test-call', testCallRouter);

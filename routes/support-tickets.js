@@ -3,7 +3,7 @@ const express = require('express');
 const crypto = require('crypto');
 const { TICKET_STATUS, createTicketId, validateSubmission } = require('../src/support-ticket');
 
-module.exports = function createSupportTicketsRouter({ dbRun, dbGet, dbAll, notifyNewTicket }) {
+module.exports = function createSupportTicketsRouter({ dbRun, dbGet, dbAll, dbTx, notifyNewTicket }) {
   const router = express.Router();
   const select = `SELECT ticket_id, type, description, status, reporter_username, reporter_role, page_url, page_title, context_json, assignee_username, internal_update, resolution_note, created_at, updated_at FROM support_tickets`;
   router.post('/', async (req, res, next) => {
@@ -11,16 +11,21 @@ module.exports = function createSupportTicketsRouter({ dbRun, dbGet, dbAll, noti
       const payload = validateSubmission(req.body);
       const session = req.adminSession;
       const now = new Date().toISOString();
-      await dbRun('BEGIN IMMEDIATE');
-      let ticket;
-      try {
-        const insert = await dbRun(`INSERT INTO support_tickets (ticket_id,type,description,status,reporter_username,reporter_role,page_url,page_title,context_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-          [`PENDING-${crypto.randomUUID()}`, payload.type, payload.description, TICKET_STATUS.NEW, session.username, session.role, payload.context.pageUrl, payload.context.pageTitle, JSON.stringify(payload.context), now, now]);
+
+      // Must share one connection: the row is inserted with a placeholder
+      // ticket_id and updated to the real one. A pool would split these.
+      const ticket = await dbTx(async (tx) => {
+        const insert = await tx.run(
+          `INSERT INTO support_tickets (ticket_id,type,description,status,reporter_username,reporter_role,page_url,page_title,context_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+          [`PENDING-${crypto.randomUUID()}`, payload.type, payload.description, TICKET_STATUS.NEW,
+            session.username, session.role, payload.context.pageUrl, payload.context.pageTitle,
+            JSON.stringify(payload.context), now, now]
+        );
         const ticketId = createTicketId(payload.type, insert.lastID + 1000);
-        await dbRun('UPDATE support_tickets SET ticket_id = ? WHERE id = ?', [ticketId, insert.lastID]);
-        ticket = await dbGet(`${select} WHERE ticket_id = ?`, [ticketId]);
-        await dbRun('COMMIT');
-      } catch (error) { await dbRun('ROLLBACK').catch(() => {}); throw error; }
+        await tx.run('UPDATE support_tickets SET ticket_id = ? WHERE id = ?', [ticketId, insert.lastID]);
+        return tx.get(`${select} WHERE ticket_id = ?`, [ticketId]);
+      });
+
       const admin_url = `${payload.context.pageUrl.replace(/\/[^/]*$/, '')}/support-tickets.html?ticket=${encodeURIComponent(ticket.ticket_id)}`;
       notifyNewTicket({ ...ticket, admin_url }).catch(() => {});
       res.status(201).json({ ticket });
