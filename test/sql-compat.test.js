@@ -57,3 +57,24 @@ test('id table list covers every table except app_state', () => {
   assert.ok(ID_TABLES.has('support_tickets'));
   assert.ok(!ID_TABLES.has('app_state'));
 });
+
+test('ID_TABLES covers every table declared with an identity id', () => {
+  // Guards the failure mode where a new table is added to a migration but not
+  // here: the INSERT succeeds, RETURNING id is skipped, and lastID is silently
+  // null -- so the API returns nothing for a row that was created.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, '..', 'supabase', 'migrations');
+
+  const declared = new Set();
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.sql'))) {
+    const sql = fs.readFileSync(path.join(dir, file), 'utf8');
+    for (const match of sql.matchAll(/create table (?:if not exists )?(\w+)\s*\(([\s\S]*?)\n\);/gi)) {
+      if (/id\s+bigint generated always as identity/i.test(match[2])) declared.add(match[1].toLowerCase());
+    }
+  }
+
+  assert.ok(declared.size >= 10, `expected to find the tables, found ${declared.size}`);
+  const missing = [...declared].filter((table) => !ID_TABLES.has(table));
+  assert.deepStrictEqual(missing, [], `add these to ID_TABLES in src/sql-compat.js: ${missing.join(', ')}`);
+});

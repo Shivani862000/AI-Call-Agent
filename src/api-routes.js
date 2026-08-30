@@ -191,6 +191,7 @@ module.exports = function mountApiRoutes(app) {
   app.use('/api/reports', reportsRouter);
   app.use('/api/agents', agentsRouter);
   app.use('/api/users', require('../routes/users'));
+  app.use('/api/patients', require('../routes/patients'));
   app.use('/api/test-call', testCallRouter);
   app.use('/api/test-ai-call', testAiCallRouter);
 

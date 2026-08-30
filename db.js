@@ -6,11 +6,17 @@ const { Pool, types } = require('pg');
 // derive their number from `lastID + 1000`, which silently concatenates on a
 // string. Our ids stay far below Number.MAX_SAFE_INTEGER, so parse them back.
 types.setTypeParser(types.builtins.INT8, (value) => parseInt(value, 10));
+
+// A DATE column has no time and no timezone. pg's default parser builds a Date
+// at local midnight, so serialising it to ISO shifts it back a day anywhere
+// east of UTC -- a date of birth entered as the 15th displays as the 14th.
+// Hand back the raw 'YYYY-MM-DD' string instead.
+types.setTypeParser(types.builtins.DATE, (value) => value);
 const { toPgPlaceholders, withReturningId } = require('./src/sql-compat');
 const { resolveDatabaseUrl } = require('./src/config');
 
 /** Bump this when a migration is added. Checked against Supabase at boot. */
-const EXPECTED_SCHEMA_VERSION = '0004';
+const EXPECTED_SCHEMA_VERSION = '0005';
 
 let pool;
 

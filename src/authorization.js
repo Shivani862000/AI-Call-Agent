@@ -28,6 +28,14 @@ const ADMIN_ONLY_HTML = new Set([
 function isAdminOnlyRequest(req) {
   const method = String(req.method || 'GET').toUpperCase();
   const requestPath = String(req.path || '');
+
+  // Patients: agents may list, add, edit and deactivate. Import and permanent
+  // delete are admin-only. Contact masking is enforced in the route itself,
+  // not here, because it depends on the role rather than on the path.
+  if (requestPath.startsWith('/api/patients')) {
+    if (requestPath.startsWith('/api/patients/import')) return true;
+    return method === 'DELETE';
+  }
   if (method === 'POST' && requestPath === '/api/support-tickets') return false;
 
   if (requestPath === '/api/icallmate/callback') {

@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Patients</title>
+  <link rel="stylesheet" href="/app-shell.css">
+  <style>
+    .patients { padding: 24px; max-width: 1180px; margin: 0 auto; }
+    .card { padding: 18px; border: 1px solid #d9e1e8; border-radius: 10px; margin: 0 0 16px; background: #fff; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 16px; }
+    .toolbar .grow { flex: 1 1 240px; }
+    .searchbox { width: 100%; padding: 11px 14px; border: 1px solid #d9e1e8; border-radius: 9px; font: inherit; }
+    button { padding: 10px 15px; border-radius: 8px; border: 1px solid #1d4ed8; background: #1d4ed8; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #fff; color: #1d4ed8; }
+    button.danger { background: #fff; color: #b23a2c; border-color: #e3b5ae; }
+    button.link { background: none; border: none; color: #1d4ed8; padding: 4px 6px; font-weight: 600; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    button[aria-expanded="true"] { background: #1d4ed8; color: #fff; }
+    .panel[hidden] { display: none; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0 16px; }
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+    .field label { font-size: 13px; font-weight: 700; color: #3d4753; }
+    .field label .opt { font-weight: 500; color: #8794a3; }
+    .field input, .field select, .field textarea { padding: 10px; border: 1px solid #d9e1e8; border-radius: 8px; font: inherit; }
+    .field .err { color: #b23a2c; font-size: 12px; min-height: 15px; }
+    .field .help { color: #7b8794; font-size: 12px; }
+    .field.check { flex-direction: row; align-items: center; gap: 8px; }
+    .field.check input { width: 18px; height: 18px; }
+    fieldset { border: 1px solid #eef2f6; border-radius: 9px; padding: 14px 16px 2px; margin: 0 0 14px; }
+    legend { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #7b8794; padding: 0 6px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid #eef2f6; vertical-align: middle; }
+    th { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #52606d; }
+    td.actions { white-space: nowrap; }
+    .contact { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+    .pill { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 5px; font-weight: 700; display: inline-block; }
+    .pill.dnc { background: #fae7e3; color: #b23a2c; }
+    .pill.inactive { background: #f1f3f6; color: #52606d; }
+    .banner { padding: 12px 15px; border-radius: 8px; margin-bottom: 14px; font-size: 14px; display: none; }
+    .banner.ok { background: #e1f0e8; color: #23694e; display: block; }
+    .banner.bad { background: #fae7e3; color: #b23a2c; display: block; }
+    .empty { padding: 44px 20px; text-align: center; color: #52606d; }
+    .empty h3 { margin: 0 0 6px; color: #12161c; }
+    .tablewrap { overflow-x: auto; }
+    .import-step { margin-bottom: 14px; }
+    .import-summary { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+    .stat { padding: 10px 14px; border-radius: 8px; background: #f4f6f8; min-width: 96px; }
+    .stat b { display: block; font-size: 20px; line-height: 1.1; }
+    .stat span { font-size: 12px; color: #52606d; }
+    .stat.bad { background: #fae7e3; color: #b23a2c; }
+    .problems { max-height: 220px; overflow-y: auto; font-size: 13px; }
+    .problems li { margin-bottom: 5px; }
+    @media (max-width: 720px) { .patients { padding: 14px; } th:nth-child(3), td:nth-child(3), th:nth-child(4), td:nth-child(4) { display: none; } }
+  </style>
+</head>
+<body class="poc-page patients-page">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-mark">PL</div>
+          <div class="brand-copy">
+            <h1>Path Lab Console</h1>
+            <p>Patient follow-up operations</p>
+          </div>
+        </div>
+        <nav class="nav-list">
+          <a href="/admin.html" class="nav-link">Overview</a>
+          <a href="/customers.html" class="nav-link">Outbound Calls</a>
+          <a href="/feedback.html" class="nav-link">Feedback</a>
+        </nav>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <section class="patients">
+        <header class="page-header desktop-page-header">
+          <div class="page-title-wrap">
+            <h2>Patients</h2>
+            <div class="page-subtitle">Add, update and remove the people this service calls.</div>
+          </div>
+        </header>
+
+        <div id="banner" class="banner"></div>
+
+        <div class="toolbar">
+          <div class="grow">
+            <input id="search" class="searchbox" type="search" placeholder="Search by name, mobile number or reference ID">
+          </div>
+          <button type="button" id="toggleForm" aria-expanded="false" aria-controls="formPanel">Add a patient</button>
+          <button type="button" id="toggleImport" class="secondary admin-only" aria-expanded="false" aria-controls="importPanel">Import from Excel</button>
+        </div>
+
+        <!-- Add / edit -->
+        <div class="card panel" id="formPanel" hidden>
+          <h3 id="formTitle" style="margin:0 0 14px">Add a patient</h3>
+
+          <fieldset>
+            <legend>Who they are</legend>
+            <div class="grid">
+              <div class="field">
+                <label for="first_name">First name</label>
+                <input id="first_name" type="text" autocomplete="off">
+                <span class="err" id="err-first_name"></span>
+              </div>
+              <div class="field">
+                <label for="last_name">Last name <span class="opt">(optional)</span></label>
+                <input id="last_name" type="text" autocomplete="off">
+                <span class="err" id="err-last_name"></span>
+              </div>
+              <div class="field">
+                <label for="reference_id">Reference ID <span class="opt">(optional)</span></label>
+                <input id="reference_id" type="text" autocomplete="off">
+                <span class="help">Their ID in your lab system, if they have one</span>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>How to reach them</legend>
+            <div class="grid">
+              <div class="field">
+                <label for="phone">Mobile number</label>
+                <input id="phone" type="tel" autocomplete="off" placeholder="98765 43210">
+                <span class="help" id="phoneHelp">Any format is fine</span>
+                <span class="err" id="err-phone"></span>
+              </div>
+              <div class="field">
+                <label for="email">Email <span class="opt">(optional)</span></label>
+                <input id="email" type="email" autocomplete="off">
+                <span class="err" id="err-email"></span>
+              </div>
+              <div class="field">
+                <label for="preferred_call_slot">Best time to call</label>
+                <input id="preferred_call_slot" type="time" value="10:00">
+                <span class="err" id="err-preferred_call_slot"></span>
+              </div>
+              <div class="field">
+                <label for="preferred_language">Language for the call</label>
+                <select id="preferred_language">
+                  <option value="hi">Hindi</option>
+                  <option value="en">English</option>
+                </select>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Their details</legend>
+            <div class="grid">
+              <div class="field">
+                <label for="date_of_birth">Date of birth <span class="opt">(optional)</span></label>
+                <input id="date_of_birth" type="date">
+                <span class="err" id="err-date_of_birth"></span>
+              </div>
+              <div class="field">
+                <label for="gender">Gender <span class="opt">(optional)</span></label>
+                <select id="gender">
+                  <option value="unknown">Not recorded</option>
+                  <option value="female">Female</option>
+                  <option value="male">Male</option>
+                  <option value="other">Other</option>
+                </select>
+                <span class="help">Helps the Hindi agent speak correctly</span>
+              </div>
+              <div class="field">
+                <label for="blood_group">Blood group <span class="opt">(optional)</span></label>
+                <select id="blood_group">
+                  <option value="unknown">Not recorded</option>
+                </select>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Last service</legend>
+            <div class="grid">
+              <div class="field">
+                <label for="last_donation_date">Last blood donation <span class="opt">(optional)</span></label>
+                <input id="last_donation_date" type="date">
+                <span class="err" id="err-last_donation_date"></span>
+              </div>
+              <div class="field">
+                <label for="last_test_date">Last blood test <span class="opt">(optional)</span></label>
+                <input id="last_test_date" type="date">
+                <span class="err" id="err-last_test_date"></span>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Calling permission</legend>
+            <div class="field check">
+              <input id="do_not_call" type="checkbox">
+              <label for="do_not_call" style="font-weight:600">Do not call this person</label>
+            </div>
+            <div class="field">
+              <label for="notes">Notes <span class="opt">(optional)</span></label>
+              <textarea id="notes" rows="2"></textarea>
+            </div>
+          </fieldset>
+
+          <button id="saveBtn">Save patient</button>
+          <button id="cancelBtn" class="secondary" type="button">Cancel</button>
+        </div>
+
+        <!-- Import -->
+        <div class="card panel admin-only" id="importPanel" hidden>
+          <div class="import-step">
+            <strong>Step 1 — start from the template.</strong>
+            <p style="margin:6px 0 10px;color:#52606d;font-size:14px">
+              The template has the exact column names this import expects. Fill in your patients below the example row.
+            </p>
+            <button type="button" id="downloadTemplate" class="secondary">Download template</button>
+          </div>
+
+          <div class="import-step">
+            <strong>Step 2 — upload your file.</strong>
+            <p style="margin:6px 0 10px;color:#52606d;font-size:14px">
+              Nothing is saved yet. You will see exactly what will change before anything is imported.
+            </p>
+            <input id="importFile" type="file" accept=".xlsx,.xls,.csv">
+            <button type="button" id="previewBtn">Check the file</button>
+          </div>
+
+          <div id="importResult" hidden>
+            <div class="import-summary" id="importSummary"></div>
+            <div id="importProblems"></div>
+            <button type="button" id="commitBtn">Import them</button>
+            <button type="button" id="discardBtn" class="secondary">Start over</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="tablewrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th><th>Contact</th><th>Language</th>
+                  <th>Last service</th><th>Status</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="rows"><tr><td colspan="6">Loading…</td></tr></tbody>
+            </table>
+          </div>
+          <div id="empty" class="empty" hidden>
+            <h3>No patients yet</h3>
+            <p>Add one with the button above, or import a spreadsheet.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
+    <a href="/admin.html" class="mobile-dock-link">Overview</a>
+    <a href="/customers.html" class="mobile-dock-link">Outbound</a>
+    <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
+  </nav>
+
+  <script src="/app-shell.js"></script>
+  <script>
+    const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+    const FIELDS = ['reference_id', 'first_name', 'last_name', 'phone', 'email',
+      'preferred_call_slot', 'preferred_language', 'date_of_birth', 'gender',
+      'blood_group', 'last_donation_date', 'last_test_date', 'notes'];
+
+    let isAdmin = false;
+    let editingId = null;
+    let importToken = null;
+
+    BLOOD_GROUPS.forEach((group) => {
+      const option = document.createElement('option');
+      option.value = group; option.textContent = group;
+      document.getElementById('blood_group').appendChild(option);
+    });
+
+    const $ = (id) => document.getElementById(id);
+    const banner = (message, ok) => {
+      const node = $('banner');
+      node.textContent = message;
+      node.className = 'banner ' + (ok ? 'ok' : 'bad');
+      node.scrollIntoView({ block: 'nearest' });
+    };
+    const clearErrors = () => document.querySelectorAll('.err').forEach((n) => { n.textContent = ''; });
+    const showErrors = (error) => {
+      clearErrors();
+      Object.entries(error.fieldErrors || {}).forEach(([field, message]) => {
+        const node = $('err-' + field);
+        if (node) node.textContent = message;
+      });
+      banner(error.message || 'Something went wrong', false);
+    };
+
+    function setPanel(buttonId, panelId, open) {
+      $(panelId).hidden = !open;
+      $(buttonId).setAttribute('aria-expanded', String(open));
+    }
+
+    // ── Form ────────────────────────────────────────────────────────────────
+    function resetForm() {
+      editingId = null;
+      FIELDS.forEach((field) => {
+        const node = $(field);
+        if (!node) return;
+        if (field === 'preferred_call_slot') node.value = '10:00';
+        else if (field === 'preferred_language') node.value = 'hi';
+        else if (field === 'gender' || field === 'blood_group') node.value = 'unknown';
+        else node.value = '';
+      });
+      $('do_not_call').checked = false;
+      $('phone').disabled = false;
+      $('email').disabled = false;
+      $('phoneHelp').textContent = 'Any format is fine';
+      $('formTitle').textContent = 'Add a patient';
+      clearErrors();
+    }
+
+    function fillForm(patient) {
+      resetForm();
+      editingId = patient.id;
+      FIELDS.forEach((field) => {
+        const node = $(field);
+        if (node && patient[field] != null) node.value = patient[field];
+      });
+      $('do_not_call').checked = Number(patient.do_not_call) === 1;
+
+      // An agent cannot read the stored contact details, so the inputs are
+      // locked and show the mask rather than sitting empty and looking editable.
+      if (!isAdmin) {
+        $('phone').value = '';
+        $('phone').disabled = true;
+        $('phone').placeholder = patient.phone_masked || 'Hidden';
+        $('email').value = '';
+        $('email').disabled = true;
+        $('email').placeholder = patient.email_masked || 'Hidden';
+        $('phoneHelp').textContent = 'Only an admin can see or change this';
+      }
+      $('formTitle').textContent = 'Edit ' + (patient.full_name || 'patient');
+      setPanel('toggleForm', 'formPanel', true);
+      $('first_name').focus();
+    }
+
+    function collectForm() {
+      const body = { do_not_call: $('do_not_call').checked };
+      FIELDS.forEach((field) => {
+        const node = $(field);
+        if (node && !node.disabled) body[field] = node.value;
+      });
+      return body;
+    }
+
+    $('saveBtn').onclick = async function save() {
+      clearErrors();
+      this.disabled = true;
+      try {
+        const body = collectForm();
+        const path = editingId ? '/api/patients/' + editingId : '/api/patients';
+        await AppShell.fetchJson(path, {
+          method: editingId ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        banner(editingId ? 'Patient updated' : 'Patient added', true);
+        resetForm();
+        setPanel('toggleForm', 'formPanel', false);
+        load();
+      } catch (error) { showErrors(error); } finally { this.disabled = false; }
+    };
+
+    $('cancelBtn').onclick = () => { resetForm(); setPanel('toggleForm', 'formPanel', false); };
+
+    $('toggleForm').onclick = () => {
+      const open = $('formPanel').hidden;
+      if (open) resetForm();
+      setPanel('toggleForm', 'formPanel', open);
+      if (open) $('first_name').focus();
+    };
+
+    $('toggleImport').onclick = () => setPanel('toggleImport', 'importPanel', $('importPanel').hidden);
+
+    // ── List ────────────────────────────────────────────────────────────────
+    function serviceSummary(patient) {
+      const parts = [];
+      if (patient.last_donation_date) parts.push('Donated ' + patient.last_donation_date);
+      if (patient.last_test_date) parts.push('Tested ' + patient.last_test_date);
+      return parts.join(' · ') || '—';
+    }
+
+    async function load() {
+      const search = $('search').value.trim();
+      const { patients } = await AppShell.fetchJson('/api/patients' + (search ? '?search=' + encodeURIComponent(search) : ''));
+      const body = $('rows');
+      body.replaceChildren();
+      $('empty').hidden = patients.length > 0 || Boolean(search);
+
+      patients.forEach((patient) => {
+        const row = document.createElement('tr');
+
+        const name = document.createElement('td');
+        name.textContent = patient.full_name + ' ';
+        if (Number(patient.do_not_call) === 1) {
+          const pill = document.createElement('span');
+          pill.className = 'pill dnc'; pill.textContent = 'Do not call';
+          name.appendChild(pill);
+        }
+
+        const contact = document.createElement('td');
+        contact.className = 'contact';
+        contact.textContent = isAdmin ? (patient.phone || '—') : (patient.phone_masked || '—');
+
+        const language = document.createElement('td');
+        language.textContent = patient.preferred_language === 'en' ? 'English' : 'Hindi';
+
+        const service = document.createElement('td');
+        service.textContent = serviceSummary(patient);
+
+        const status = document.createElement('td');
+        if (patient.status === 'inactive') {
+          const pill = document.createElement('span');
+          pill.className = 'pill inactive'; pill.textContent = 'Not called';
+          status.appendChild(pill);
+        } else { status.textContent = 'Active'; }
+
+        const actions = document.createElement('td');
+        actions.className = 'actions';
+
+        const edit = document.createElement('button');
+        edit.className = 'link'; edit.textContent = 'Edit';
+        edit.onclick = async () => {
+          const { patient: full } = await AppShell.fetchJson('/api/patients/' + patient.id);
+          fillForm(full);
+        };
+        actions.appendChild(edit);
+
+        const toggle = document.createElement('button');
+        toggle.className = 'link';
+        toggle.textContent = patient.status === 'active' ? 'Remove from calling' : 'Put back on calling';
+        toggle.onclick = async () => {
+          try {
+            await AppShell.fetchJson('/api/patients/' + patient.id + '/status', {
+              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: patient.status === 'active' ? 'inactive' : 'active' })
+            });
+            banner(patient.full_name + (patient.status === 'active' ? ' removed from the calling list' : ' put back on the calling list'), true);
+            load();
+          } catch (error) { banner(error.message, false); }
+        };
+        actions.appendChild(toggle);
+
+        if (isAdmin) {
+          const remove = document.createElement('button');
+          remove.className = 'link'; remove.style.color = '#b23a2c';
+          remove.textContent = 'Delete';
+          remove.onclick = async () => {
+            const typed = window.prompt('This permanently deletes the record.\nType the patient’s first name to confirm:');
+            if (typed == null) return;
+            if (typed.trim().toLowerCase() !== String(patient.first_name).toLowerCase()) {
+              return banner('Name did not match — nothing was deleted', false);
+            }
+            try {
+              await AppShell.fetchJson('/api/patients/' + patient.id, { method: 'DELETE' });
+              banner(patient.full_name + ' deleted', true);
+              load();
+            } catch (error) { banner(error.message, false); }
+          };
+          actions.appendChild(remove);
+        }
+
+        row.append(name, contact, language, service, status, actions);
+        body.appendChild(row);
+      });
+
+      if (patients.length === 0 && search) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 6; cell.style.padding = '22px'; cell.style.color = '#52606d';
+        cell.textContent = 'No patients match “' + search + '”.';
+        row.appendChild(cell); body.appendChild(row);
+      }
+    }
+
+    let searchTimer = null;
+    $('search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(load, 250); };
+
+    // ── Import ──────────────────────────────────────────────────────────────
+    $('downloadTemplate').onclick = async () => {
+      const response = await fetch('/api/patients/import/template', { credentials: 'same-origin' });
+      if (!response.ok) return banner('Could not download the template', false);
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url; link.download = 'patient-import-template.xlsx';
+      document.body.appendChild(link); link.click(); link.remove();
+      URL.revokeObjectURL(url);
+    };
+
+    $('previewBtn').onclick = async function preview() {
+      const file = $('importFile').files[0];
+      if (!file) return banner('Choose a file first', false);
+      this.disabled = true;
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const response = await fetch('/api/patients/import/preview', { method: 'POST', body: form, credentials: 'same-origin' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Could not read that file');
+
+        importToken = payload.token;
+        const s = payload.summary;
+        $('importSummary').replaceChildren(...[
+          ['New patients', s.new, false],
+          ['Updates', s.updates, false],
+          ['Problems', s.problems, s.problems > 0]
+        ].map(([label, value, bad]) => {
+          const stat = document.createElement('div');
+          stat.className = 'stat' + (bad ? ' bad' : '');
+          const b = document.createElement('b'); b.textContent = value;
+          const span = document.createElement('span'); span.textContent = label;
+          stat.append(b, span);
+          return stat;
+        }));
+
+        const problems = $('importProblems');
+        problems.replaceChildren();
+        if (payload.problems.length) {
+          const heading = document.createElement('p');
+          heading.innerHTML = '<strong>These rows will be skipped:</strong>';
+          const list = document.createElement('ul');
+          list.className = 'problems';
+          payload.problems.forEach((problem) => {
+            const item = document.createElement('li');
+            item.textContent = 'Row ' + problem.row + ' (' + problem.name + '): ' + problem.messages.join('; ');
+            list.appendChild(item);
+          });
+          problems.append(heading, list);
+        }
+
+        $('commitBtn').disabled = (s.new + s.updates) === 0;
+        $('importResult').hidden = false;
+        banner('Nothing has been saved yet — review below, then press Import them.', true);
+      } catch (error) { banner(error.message, false); } finally { this.disabled = false; }
+    };
+
+    $('commitBtn').onclick = async function commit() {
+      if (!importToken) return;
+      this.disabled = true;
+      try {
+        const result = await AppShell.fetchJson('/api/patients/import/commit', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: importToken })
+        });
+        banner(`Imported ${result.created} new and updated ${result.updated} patients.`, true);
+        importToken = null;
+        $('importResult').hidden = true;
+        $('importFile').value = '';
+        setPanel('toggleImport', 'importPanel', false);
+        load();
+      } catch (error) { banner(error.message, false); } finally { this.disabled = false; }
+    };
+
+    $('discardBtn').onclick = () => {
+      importToken = null;
+      $('importResult').hidden = true;
+      $('importFile').value = '';
+    };
+
+    AppShell.ensureAuthenticatedSession().then((session) => {
+      isAdmin = session.role === 'ADMIN';
+      if (!isAdmin) document.querySelectorAll('.admin-only').forEach((n) => n.remove());
+      return load();
+    }).catch(() => {});
+  </script>
+</body>
+</html>

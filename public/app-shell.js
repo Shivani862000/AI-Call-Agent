@@ -94,6 +94,7 @@
 
   async function ensureAuthenticatedSession() {
     const session = await fetchJson('/api/auth/session');
+    addAdminNavLink('/patients.html', 'Patients');
     if (session.role === 'AGENT') {
       document.body.classList.add('role-agent');
     }
