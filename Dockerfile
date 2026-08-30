@@ -4,9 +4,7 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
-
-RUN npm ci --omit=dev --build-from-source=sqlite3 && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 COPY . .
 

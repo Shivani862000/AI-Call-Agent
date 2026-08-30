@@ -29,8 +29,6 @@ spec:
               value: "production"
             - name: TZ
               value: "Asia/Kolkata"
-            - name: DATABASE_URL
-              value: /app/data/feedback.db
             - name: RECORDINGS_DIR
               value: /tmp/feedback-call-recordings
           envFrom:

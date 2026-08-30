@@ -5,7 +5,9 @@ services:
     env_file:
       - ${ENV_FILE}
     environment:
-      DATABASE_URL: ${DATABASE_URL:-/app/data/feedback.db}
+      # Supabase Postgres connection string. No default: the app refuses to
+      # boot without it rather than silently writing nowhere.
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       NODE_ENV: production
       PORT: 3000
     volumes:
