@@ -14,6 +14,8 @@ const reportsRouter = require('../routes/reports');
 const agentsRouter = require('../routes/agents');
 const testCallRouter = require('../routes/test-call');
 const testAiCallRouter = require('../routes/test-ai-call');
+const createSupportTicketsRouter = require('../routes/support-tickets');
+const usersRouter = require('../routes/users');
 
 const {
   CALL_MODE,
@@ -155,6 +157,8 @@ module.exports = function mountApiRoutes(app) {
   app.use('/api/agents', agentsRouter);
   app.use('/api/test-call', testCallRouter);
   app.use('/api/test-ai-call', testAiCallRouter);
+  app.use('/api/support-tickets', createSupportTicketsRouter());
+  app.use('/api/users', usersRouter);
 
   app.get('/api/logs', async (req, res) => {
     try {

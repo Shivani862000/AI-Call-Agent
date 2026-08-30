@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Management</title>
+  <link rel="stylesheet" href="/app-shell.css">
+  <link rel="stylesheet" href="/users.css">
+</head>
+<body class="poc-page users-page">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-mark">PL</div>
+          <div class="brand-copy">
+            <h1>Path Lab Console</h1>
+            <p>Patient follow-up operations</p>
+          </div>
+        </div>
+        <nav class="nav-list" aria-label="Primary navigation">
+          <a href="/admin.html" class="nav-link">Overview</a>
+          <a href="/customer-list.html" class="nav-link">Customer List</a>
+          <a href="/customers.html" class="nav-link">Outbound Calls</a>
+          <a href="/feedback.html" class="nav-link">Feedback</a>
+          <div style="margin: 20px 0 8px; padding: 0 16px; font-size: 11px; font-weight: 700; color: #52606d; text-transform: uppercase; letter-spacing: 0.5px;">SETTINGS</div>
+          <a href="/support-tickets.html" class="nav-link">Support Tickets</a>
+          <a href="/users.html" class="nav-link active">Users</a>
+
+        </nav>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <header class="page-header">
+        <div class="page-title-wrap">
+          <span class="page-kicker">Tenant administration</span>
+          <h2>User Management</h2>
+          <div class="page-subtitle">Create accounts, assign tenant roles, and control access for your organization.</div>
+        </div>
+        <div class="header-actions">
+          <button id="addUserButton" class="primary" type="button">Add User</button>
+          <button id="usersLogoutButton" class="secondary" type="button">Logout</button>
+        </div>
+      </header>
+
+      <div id="alertContainer" class="alert-stack" aria-live="polite"></div>
+
+      <section class="user-summary" aria-label="User summary">
+        <article class="user-summary-card"><span>Total users</span><strong id="totalUserCount">0</strong></article>
+        <article class="user-summary-card"><span>Current view</span><strong id="visibleUserCount">0</strong></article>
+      </section>
+
+      <section class="table-card user-directory-card" aria-labelledby="userDirectoryTitle">
+        <div class="user-directory-heading">
+          <div>
+            <h3 id="userDirectoryTitle">Tenant users</h3>
+            <p>Administrators can manage every account in this tenant. Your own role and access are protected.</p>
+          </div>
+        </div>
+
+        <form id="userFilters" class="user-filter-bar" role="search">
+          <label class="user-search-field">
+            <span class="sr-only">Search users</span>
+            <input id="userSearch" class="search-input" type="search" maxlength="100" placeholder="Search username or email">
+          </label>
+          <label>
+            <span class="sr-only">Filter by role</span>
+            <select id="userRoleFilter" class="table-filter">
+              <option value="">All roles</option>
+              <option value="CLIENT_ADMIN">Tenant admins</option>
+              <option value="CLIENT_AGENT">Agents</option>
+            </select>
+          </label>
+          <label>
+            <span class="sr-only">Filter by status</span>
+            <select id="userStatusFilter" class="table-filter">
+              <option value="">All statuses</option>
+              <option value="active">Active</option>
+              <option value="suspended">Suspended</option>
+              <option value="archived">Archived</option>
+            </select>
+          </label>
+          <button class="secondary" type="submit">Apply</button>
+        </form>
+
+        <div id="userLoading" class="user-state-message">Loading users…</div>
+        <div id="userResults" hidden>
+          <div class="table-wrap user-table-wrap">
+            <table>
+              <thead><tr><th>Account</th><th>Role</th><th>Status</th><th>Updated</th><th><span class="sr-only">Actions</span></th></tr></thead>
+              <tbody id="userTableBody"></tbody>
+            </table>
+          </div>
+          <div id="userCardList" class="user-card-list"></div>
+        </div>
+        <div id="userEmpty" class="user-state-message" hidden>No users match these filters.</div>
+        <div id="userPagination" class="user-pagination" aria-label="User list pagination"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="userFormModal" class="modal-backdrop" aria-hidden="true">
+    <section class="modal-panel modal-panel--narrow user-modal" role="dialog" aria-modal="true" aria-labelledby="userFormTitle">
+      <div class="user-modal-header">
+        <div><h3 id="userFormTitle">Add user</h3><p id="userFormSubtitle">Create an account in this tenant.</p></div>
+        <button class="secondary modal-close-icon" type="button" data-close-modal="userFormModal" aria-label="Close">&times;</button>
+      </div>
+      <form id="userForm" class="poc-form-grid" novalidate>
+        <input id="userEditingId" type="hidden">
+        <input id="userEditingVersion" type="hidden">
+        <label>Username<input id="userUsername" name="username" minlength="3" maxlength="100" autocomplete="off" required><span id="userUsernameError" class="error-text"></span></label>
+        <label>Email<input id="userEmail" name="email" type="email" maxlength="200" required><span id="userEmailError" class="error-text"></span></label>
+        <label>Role<select id="userRole" name="role"><option value="CLIENT_AGENT">Agent</option><option value="CLIENT_ADMIN">Tenant admin</option></select><span id="userRoleError" class="error-text"></span></label>
+        <label id="userCreatePasswordField">Temporary password<input id="userCreatePassword" name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password"><span id="userCreatePasswordError" class="error-text"></span></label>
+        <div id="userFormError" class="form-error span-2" role="alert"></div>
+        <div class="user-modal-actions span-2"><button class="secondary" type="button" data-close-modal="userFormModal">Cancel</button><button id="saveUserButton" class="primary" type="submit">Create user</button></div>
+      </form>
+    </section>
+  </div>
+
+  <div id="userPasswordModal" class="modal-backdrop" aria-hidden="true">
+    <section class="modal-panel modal-panel--narrow user-modal" role="dialog" aria-modal="true" aria-labelledby="userPasswordTitle">
+      <div class="user-modal-header"><div><h3 id="userPasswordTitle">Set temporary password</h3><p id="userPasswordSubtitle"></p></div><button class="secondary modal-close-icon" type="button" data-close-modal="userPasswordModal" aria-label="Close">&times;</button></div>
+      <form id="userPasswordForm" class="poc-form-grid" novalidate>
+        <label class="span-2">Temporary password<input id="userPassword" type="password" minlength="8" maxlength="128" autocomplete="new-password" required><span id="userPasswordError" class="error-text"></span></label>
+        <div id="userPasswordFormError" class="form-error span-2" role="alert"></div>
+        <div class="user-modal-actions span-2"><button class="secondary" type="button" data-close-modal="userPasswordModal">Cancel</button><button id="savePasswordButton" class="primary" type="submit">Update password</button></div>
+      </form>
+    </section>
+  </div>
+
+  <div id="userLifecycleModal" class="modal-backdrop" aria-hidden="true">
+    <section class="modal-panel modal-panel--narrow user-modal" role="dialog" aria-modal="true" aria-labelledby="userLifecycleTitle">
+      <div class="user-modal-header"><div><h3 id="userLifecycleTitle">Change account access</h3><p id="userLifecycleMessage"></p></div><button class="secondary modal-close-icon" type="button" data-close-modal="userLifecycleModal" aria-label="Close">&times;</button></div>
+      <label class="user-reason-field">Reason (optional)<textarea id="userLifecycleReason" maxlength="500" rows="3"></textarea></label>
+      <div id="userLifecycleError" class="form-error" role="alert"></div>
+      <div class="user-modal-actions"><button class="secondary" type="button" data-close-modal="userLifecycleModal">Cancel</button><button id="confirmLifecycleButton" class="danger" type="button">Confirm</button></div>
+    </section>
+  </div>
+
+  <script src="/app-shell.js"></script>
+  <script src="/users.js"></script>
+</body>
+</html>

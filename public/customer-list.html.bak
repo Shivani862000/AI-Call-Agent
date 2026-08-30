@@ -60,10 +60,6 @@
           <a href="/customer-list.html" class="nav-link active">Customer List</a>
           <a href="/customers.html" class="nav-link">Outbound Calls</a>
           <a href="/feedback.html" class="nav-link">Feedback</a>
-          <div style="margin: 20px 0 8px; padding: 0 16px; font-size: 11px; font-weight: 700; color: #52606d; text-transform: uppercase; letter-spacing: 0.5px;">SETTINGS</div>
-          <a href="/support-tickets.html" class="nav-link">Support Tickets</a>
-          <a href="/users.html" class="nav-link">Users</a>
-
           <a href="/support-tickets.html" class="nav-link">Support Tickets</a>
         </nav>
       </div>
@@ -183,10 +179,6 @@
     <a href="/customer-list.html" class="mobile-dock-link active">Customers</a>
     <a href="/customers.html" class="mobile-dock-link">Calls</a>
     <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
-          <div style="margin: 20px 0 8px; padding: 0 16px; font-size: 11px; font-weight: 700; color: #52606d; text-transform: uppercase; letter-spacing: 0.5px;">SETTINGS</div>
-          <a href="/support-tickets.html" class="nav-link">Support Tickets</a>
-          <a href="/users.html" class="nav-link">Users</a>
-
   </nav>
 
   <!-- Bulk Import Modal -->

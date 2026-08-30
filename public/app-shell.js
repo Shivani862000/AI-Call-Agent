@@ -860,6 +860,11 @@
 
   document.addEventListener('DOMContentLoaded', loadTestCallWidgetScript);
 
+  document.addEventListener('DOMContentLoaded', () => {
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/support-widget.css'; document.head.appendChild(css);
+    const script = document.createElement('script'); script.src = '/support-widget.js'; script.onload = () => window.SupportWidget?.initialize(); document.head.appendChild(script);
+  });
+
   const Pagination = (() => {
     let globalItemsPerPage = window.innerWidth <= 640 ? 5 : 10;
     
