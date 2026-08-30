@@ -74,7 +74,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
       SUBSTR(f.review_text, 1, 180) as review_excerpt,
       f.submitted_at
     FROM feedback f
-    JOIN customers c ON f.customer_id = c.id
+    JOIN customer_queue c ON f.customer_id = c.id
     WHERE f.submitted_at >= ? AND f.submitted_at <= ?
     ORDER BY f.submitted_at DESC
     LIMIT 20
@@ -107,7 +107,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
       calls.live_red_flag,
       calls.supervisor_alert_level
     FROM calls
-    JOIN customers c ON c.id = calls.customer_id
+    JOIN customer_queue c ON c.id = calls.customer_id
     WHERE calls.called_at >= ? AND calls.called_at <= ?
     ORDER BY calls.called_at DESC
     LIMIT 25
@@ -124,7 +124,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
       calls.analysis_status,
       calls.follow_up_task
     FROM calls
-    JOIN customers c ON c.id = calls.customer_id
+    JOIN customer_queue c ON c.id = calls.customer_id
     WHERE calls.called_at >= ? AND calls.called_at <= ?
       AND (
         COALESCE(calls.recording_status, 'pending') != 'completed'
@@ -397,7 +397,7 @@ async function buildOwnerDashboardData() {
       c.pending_follow_ups,
       c.revenue_estimate
     FROM calls
-    JOIN customers c ON c.id = calls.customer_id
+    JOIN customer_queue c ON c.id = calls.customer_id
     WHERE calls.called_at >= (now() - interval '7 days')
     ORDER BY calls.called_at DESC
     LIMIT 40
@@ -417,7 +417,7 @@ async function buildOwnerDashboardData() {
       SUM(CASE WHEN status IN ('hot_lead', 'completed', 'called', 'callback_scheduled') THEN 1 ELSE 0 END) AS active_leads,
       SUM(CASE WHEN revenue_stage IN ('qualified', 'follow_up') THEN 1 ELSE 0 END) AS qualified_leads,
       SUM(COALESCE(revenue_estimate, 0)) AS revenue_pipeline
-    FROM customers
+    FROM customer_queue
     GROUP BY COALESCE(campaign_name, 'Unassigned')
     ORDER BY revenue_pipeline DESC, total_customers DESC
   `);

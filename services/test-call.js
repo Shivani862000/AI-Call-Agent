@@ -143,7 +143,7 @@ function scriptedReply(session) {
 
 async function createCustomerForTestCall(name, phone) {
   const normalizedPhone = normalizeText(phone) || `test-${Date.now()}`;
-  const existing = await dbGet('SELECT id FROM customers WHERE phone = ?', [normalizedPhone]);
+  const existing = await dbGet('SELECT id FROM customer_queue WHERE phone = ?', [normalizedPhone]);
   if (existing) {
     return existing.id;
   }

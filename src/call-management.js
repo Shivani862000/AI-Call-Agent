@@ -72,13 +72,13 @@ function computeNextAnnualReminderDate(lastVisitDate, referenceDate = new Date()
 
 async function ensureCustomerForCall({ customerId, customerName, customerPhone }) {
   if (customerId) {
-    const existingById = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
+    const existingById = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [customerId]);
     if (existingById) {
       return existingById;
     }
   }
 
-  const existingByPhone = await dbGet('SELECT * FROM customers WHERE phone = ?', [customerPhone]);
+  const existingByPhone = await dbGet('SELECT * FROM customer_queue WHERE phone = ?', [customerPhone]);
   if (existingByPhone) {
     return existingByPhone;
   }
@@ -100,7 +100,7 @@ async function ensureCustomerForCall({ customerId, customerName, customerPhone }
     ]
   );
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  return dbGet('SELECT * FROM customer_queue WHERE id = ?', [result.lastID]);
 }
 
 async function claimCustomerForOutboundCall(customerId) {
@@ -130,11 +130,11 @@ async function ensureCustomerForClientReminder(client) {
   let customer = null;
 
   if (client.linked_customer_id) {
-    customer = await dbGet('SELECT * FROM customers WHERE id = ?', [client.linked_customer_id]);
+    customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [client.linked_customer_id]);
   }
 
   if (!customer) {
-    customer = await dbGet('SELECT * FROM customers WHERE phone = ?', [client.phone]);
+    customer = await dbGet('SELECT * FROM customer_queue WHERE phone = ?', [client.phone]);
   }
 
   if (customer) {
@@ -158,7 +158,7 @@ async function ensureCustomerForClientReminder(client) {
       'UPDATE clients SET linked_customer_id = ?, updated_at = ? WHERE id = ?',
       [customer.id, new Date().toISOString(), client.id]
     );
-    return dbGet('SELECT * FROM customers WHERE id = ?', [customer.id]);
+    return dbGet('SELECT * FROM customer_queue WHERE id = ?', [customer.id]);
   }
 
   const clientPatientId = await resolvePatientId({
@@ -188,7 +188,7 @@ async function ensureCustomerForClientReminder(client) {
     [result.lastID, new Date().toISOString(), client.id]
   );
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  return dbGet('SELECT * FROM customer_queue WHERE id = ?', [result.lastID]);
 }
 
 async function findCustomerByPhone(phoneValue) {
@@ -196,7 +196,7 @@ async function findCustomerByPhone(phoneValue) {
   if (!normalized) return null;
 
   const customer = await dbGet(
-    'SELECT * FROM customers WHERE normalized_phone = ? LIMIT 1',
+    'SELECT * FROM customer_queue WHERE normalized_phone = ? LIMIT 1',
     [normalized]
   );
   return customer || null;
@@ -228,7 +228,7 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
     ]
   );
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  return dbGet('SELECT * FROM customer_queue WHERE id = ?', [result.lastID]);
 }
 
 // ── Call Context & Intelligence ───────────────────────────────────────────────
@@ -375,7 +375,7 @@ async function shouldBlockCustomerCall(customer) {
 
   if (customer.phone) {
     const activeCall = await dbGet(
-      `SELECT 1 FROM customers WHERE phone = ? AND status IN ('calling', 'in_progress') AND id != ? LIMIT 1`,
+      `SELECT 1 FROM customer_queue WHERE phone = ? AND status IN ('calling', 'in_progress') AND id != ? LIMIT 1`,
       [customer.phone, customer.id]
     );
     if (activeCall) {
@@ -383,7 +383,7 @@ async function shouldBlockCustomerCall(customer) {
     }
     if (customer.is_manual !== 1) {
       const completedCall = await dbGet(
-        `SELECT 1 FROM customers WHERE phone = ? AND call_type = ? AND status = 'completed' AND id != ? LIMIT 1`,
+        `SELECT 1 FROM customer_queue WHERE phone = ? AND call_type = ? AND status = 'completed' AND id != ? LIMIT 1`,
         [customer.phone, customer.call_type, customer.id]
       );
       if (completedCall) {
@@ -397,7 +397,7 @@ async function shouldBlockCustomerCall(customer) {
     const callsToday = await dbAll(
       `SELECT called_at 
        FROM calls c
-       JOIN customers cu ON cu.id = c.customer_id
+       JOIN customer_queue cu ON cu.id = c.customer_id
        WHERE cu.phone = ? 
          AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
          AND COALESCE(c.call_direction, 'outbound') = 'outbound'

@@ -63,7 +63,7 @@ async function syncCallToCrm({ dbGet, dbRun, callId }) {
     return { skipped: true, reason: 'call_not_found' };
   }
 
-  const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [call.customer_id]);
+  const customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [call.customer_id]);
   const feedback = await dbGet('SELECT * FROM feedback WHERE call_id = ?', [call.id]);
 
   try {

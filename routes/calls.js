@@ -11,7 +11,7 @@ router.post('/initiate/:customerId', async (req, res) => {
     const { customerId } = req.params;
 
     // Fetch customer
-    const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
+    const customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [customerId]);
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -90,7 +90,7 @@ router.post('/status', async (req, res) => {
       
       // Retry Logic
       if (['failed', 'busy', 'no_answer'].includes(mappedStatus)) {
-        const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [call.customer_id]);
+        const customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [call.customer_id]);
         if (customer && customer.auto_retry_enabled !== 0) {
           const attemptCount = (customer.attempt_count || 0);
           if (attemptCount < 3) {

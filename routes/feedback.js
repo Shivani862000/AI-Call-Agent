@@ -31,7 +31,7 @@ router.post('/manual', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
-    const customer = await dbGet('SELECT id FROM customers WHERE id = ?', [customer_id]);
+    const customer = await dbGet('SELECT id FROM customer_queue WHERE id = ?', [customer_id]);
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found', fieldErrors: { customer_id: 'Selected customer no longer exists' } });
     }
@@ -123,7 +123,7 @@ async function listUnifiedFeedback() {
       calls.transcript_status,
       CASE WHEN COALESCE(calls.transcript_text, '') != '' THEN 1 ELSE 0 END AS transcript_available
     FROM feedback f
-    JOIN customers c ON c.id = f.customer_id
+    JOIN customer_queue c ON c.id = f.customer_id
     LEFT JOIN calls ON calls.id = f.call_id
     ORDER BY f.submitted_at DESC
     LIMIT 500
@@ -134,8 +134,8 @@ async function listUnifiedFeedback() {
       SELECT 
         calls.id AS call_id,
         calls.customer_id,
-        customers.name AS customer_name,
-        customers.phone AS customer_phone,
+        customer_queue.name AS customer_name,
+        customer_queue.phone AS customer_phone,
         calls.extracted_review_text,
         calls.analysis_summary,
         calls.summary,
@@ -153,7 +153,7 @@ async function listUnifiedFeedback() {
         calls.transcript_status,
         CASE WHEN COALESCE(calls.transcript_text, '') != '' THEN 1 ELSE 0 END AS transcript_available
       FROM calls
-      JOIN customers ON customers.id = calls.customer_id
+      JOIN customer_queue ON customer_queue.id = calls.customer_id
       WHERE calls.extracted_rating IS NOT NULL 
          OR calls.sentiment IS NOT NULL 
          OR calls.analysis_summary IS NOT NULL
@@ -289,12 +289,12 @@ router.get('/analytics', async (req, res) => {
     const feedback = await dbAll(`
       SELECT f.*, c.name as customer_name, c.phone as customer_phone
       FROM feedback f
-      LEFT JOIN customers c ON f.customer_id = c.id
+      LEFT JOIN customer_queue c ON f.customer_id = c.id
     `);
     const recentCalls = await dbAll(`
       SELECT calls.*, c.name as customer_name, c.phone as customer_phone
       FROM calls
-      LEFT JOIN customers c ON calls.customer_id = c.id
+      LEFT JOIN customer_queue c ON calls.customer_id = c.id
       ORDER BY calls.created_at DESC LIMIT 500
     `);
 

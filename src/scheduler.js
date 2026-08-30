@@ -70,11 +70,11 @@ async function markSubmittedCallsWithoutMediaFailed() {
             calls.provider_call_id,
             calls.called_at,
             calls.call_type,
-            customers.name,
-            customers.phone,
-            customers.status AS customer_status,
-            COALESCE(customers.auto_retry_enabled, 1) AS auto_retry_enabled,
-            COALESCE(customers.attempt_count, 0) AS attempt_count,
+            customer_queue.name,
+            customer_queue.phone,
+            customer_queue.status AS customer_status,
+            COALESCE(customer_queue.auto_retry_enabled, 1) AS auto_retry_enabled,
+            COALESCE(customer_queue.attempt_count, 0) AS attempt_count,
             EXISTS (
               SELECT 1
                 FROM calls newer_call
@@ -82,7 +82,7 @@ async function markSubmittedCallsWithoutMediaFailed() {
                  AND newer_call.called_at > calls.called_at
             ) AS has_newer_call
        FROM calls
-       LEFT JOIN customers ON customers.id = calls.customer_id
+       LEFT JOIN customer_queue ON customer_queue.id = calls.customer_id
       WHERE calls.call_direction = 'outbound'
         AND calls.outcome IN ('initiated', 'scheduled_initiated')
         AND COALESCE(calls.media_packets, 0) = 0
@@ -233,7 +233,7 @@ async function triggerScheduledCalls() {
 
   const dueCustomers = await dbAll(
     `SELECT c.*
-     FROM customers c
+     FROM customer_queue c
      WHERE COALESCE(c.do_not_call, 0) = 0
        AND COALESCE(c.wrong_number_flag, 0) = 0
        AND COALESCE(c.admin_review_required, 0) = 0

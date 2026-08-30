@@ -115,9 +115,9 @@ async function upsertFeedbackFromAnalysis({ dbGet, dbRun, callRecord, reviewText
 
 async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   const callRecord = await dbGet(
-    `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone
+    `SELECT calls.*, customer_queue.name AS customer_name, customer_queue.phone AS customer_phone
      FROM calls
-     LEFT JOIN customers ON customers.id = calls.customer_id
+     LEFT JOIN customer_queue ON customer_queue.id = calls.customer_id
      WHERE ${callId ? 'calls.id = ?' : 'calls.provider_call_id = ?'}
      ORDER BY
        CASE WHEN COALESCE(calls.transcript_text, '') != '' THEN 0 ELSE 1 END,
@@ -347,7 +347,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   logger.info(feedbackEvent, feedbackDetails);
 
   const refreshedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [callRecord.id]);
-  const refreshedCustomer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+  const refreshedCustomer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [callRecord.customer_id]);
 
   const workflowResult = await applyCallOutcomeWorkflow({
     dbGet,
@@ -373,7 +373,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   }
 
   const updatedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [callRecord.id]);
-  const updatedCustomer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+  const updatedCustomer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [callRecord.customer_id]);
 
   await dbRun(
     `UPDATE customers

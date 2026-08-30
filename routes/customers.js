@@ -323,7 +323,7 @@ router.post('/', async (req, res) => {
       const callsTodayRow = await dbGet(
         `SELECT COUNT(*) as count 
          FROM calls c
-         JOIN customers cu ON cu.id = c.customer_id
+         JOIN customer_queue cu ON cu.id = c.customer_id
          WHERE cu.phone = ? 
            AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
            AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
@@ -413,7 +413,7 @@ router.get('/search', async (req, res) => {
     const pattern = `%${q}%`;
     const customers = await dbAll(
       `SELECT id, name, phone, call_type, preferred_slot
-       FROM customers 
+       FROM customer_queue 
        WHERE name LIKE ? OR phone LIKE ? 
        ORDER BY created_at DESC 
        LIMIT 20`,
@@ -429,7 +429,7 @@ router.get('/search', async (req, res) => {
 // List all customers
 router.get('/', async (req, res) => {
   try {
-    const customers = await dbAll('SELECT * FROM customers ORDER BY COALESCE(priority_score, 0) DESC, created_at DESC');
+    const customers = await dbAll('SELECT * FROM customer_queue ORDER BY COALESCE(priority_score, 0) DESC, created_at DESC');
     res.json(customers);
   } catch (error) {
     console.error('Error fetching customers:', error);
@@ -440,7 +440,7 @@ router.get('/', async (req, res) => {
 // Get one customer
 router.get('/:id', async (req, res) => {
   try {
-    const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [req.params.id]);
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -455,7 +455,7 @@ router.get('/:id', async (req, res) => {
 // Update customer
 router.put('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const existing = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [req.params.id]);
     if (!existing) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -467,7 +467,7 @@ router.put('/:id', async (req, res) => {
       const callsTodayRow = await dbGet(
         `SELECT COUNT(*) as count 
          FROM calls c
-         JOIN customers cu ON cu.id = c.customer_id
+         JOIN customer_queue cu ON cu.id = c.customer_id
          WHERE cu.phone = ? 
            AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
            AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
@@ -560,7 +560,7 @@ router.put('/:id', async (req, res) => {
 
 router.patch('/:id/workflow', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const existing = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [req.params.id]);
     if (!existing) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -603,7 +603,7 @@ router.patch('/:id/workflow', async (req, res) => {
 
 router.post('/:id/retry', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const existing = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [req.params.id]);
     if (!existing) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -628,7 +628,7 @@ router.post('/:id/retry', async (req, res) => {
 // Toggle auto-retry
 router.put('/:id/auto-retry', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const existing = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [req.params.id]);
     if (!existing) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -663,7 +663,7 @@ router.delete('/bulk', async (req, res) => {
   try {
     const counts = await dbGet(`
       SELECT
-        (SELECT COUNT(*) FROM customers) AS customer_count,
+        (SELECT COUNT(*) FROM customer_queue) AS customer_count,
         (SELECT COUNT(*) FROM calls) AS call_count,
         (SELECT COUNT(*) FROM feedback) AS feedback_count
     `);
@@ -687,7 +687,7 @@ router.delete('/bulk', async (req, res) => {
 // Delete customer
 router.delete('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const existing = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [req.params.id]);
     if (!existing) {
       return res.status(404).json({ error: 'Customer not found' });
     }

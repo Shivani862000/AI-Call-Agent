@@ -398,7 +398,7 @@ module.exports = function mountApiRoutes(app) {
 
       const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [providerCallSid]);
       const customerId = req.query.customerId || callRecord?.customer_id;
-      const customer = customerId ? await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]) : null;
+      const customer = customerId ? await dbGet('SELECT * FROM customer_queue WHERE id = ?', [customerId]) : null;
 
       if (callRecord) {
         let mappedOutcome = null;
@@ -499,7 +499,7 @@ module.exports = function mountApiRoutes(app) {
 
       const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ? ORDER BY id DESC LIMIT 1', [callSid]);
       if (callRecord) {
-        const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+        const customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [callRecord.customer_id]);
         await dbRun(
           `UPDATE calls
             SET recording_sid = ?,
@@ -542,7 +542,7 @@ module.exports = function mountApiRoutes(app) {
   app.post('/api/calls/initiate/:customerId', async (req, res) => {
     let customer = null;
     try {
-      customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.customerId]);
+      customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [req.params.customerId]);
       if (!customer) {
         return res.status(404).json({ error: 'Customer not found' });
       }
@@ -648,8 +648,8 @@ module.exports = function mountApiRoutes(app) {
       `SELECT
        calls.id,
        calls.provider_call_id AS stream_id,
-       customers.name AS caller_name,
-       customers.phone AS phone,
+       customer_queue.name AS caller_name,
+       customer_queue.phone AS phone,
        calls.did,
        calls.call_direction,
        calls.outcome AS status,
@@ -662,7 +662,7 @@ module.exports = function mountApiRoutes(app) {
        calls.created_at,
        calls.provider_payload_json
      FROM calls
-     JOIN customers ON customers.id = calls.customer_id
+     JOIN customer_queue ON customer_queue.id = calls.customer_id
      WHERE calls.call_direction = 'incoming'
      ORDER BY COALESCE(calls.ended_at, calls.answered_at, calls.called_at, calls.created_at) DESC
      LIMIT 100`
@@ -829,8 +829,8 @@ module.exports = function mountApiRoutes(app) {
           const cleanPhone = phone.replace(/^\\+91/, '').slice(-10);
           const callRecord = await dbGet(`
             SELECT calls.* FROM calls
-            JOIN customers ON customers.id = calls.customer_id
-            WHERE customers.phone LIKE '%' || ? AND calls.call_direction = 'outbound'
+            JOIN customer_queue ON customer_queue.id = calls.customer_id
+            WHERE customer_queue.phone LIKE '%' || ? AND calls.call_direction = 'outbound'
             ORDER BY calls.id DESC LIMIT 1
           `, [cleanPhone]);
 
@@ -856,7 +856,7 @@ module.exports = function mountApiRoutes(app) {
               }, 1500);
             }
 
-            const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+            const customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [callRecord.customer_id]);
             if (customer) {
               await applyCallOutcomeWorkflow({
                 dbGet,
@@ -1150,8 +1150,8 @@ module.exports = function mountApiRoutes(app) {
          calls.id,
          calls.customer_id,
          calls.agent_id,
-         customers.name AS customer_name,
-         customers.phone AS customer_phone,
+         customer_queue.name AS customer_name,
+         customer_queue.phone AS customer_phone,
          agents.name AS agent_name,
          agents.slug AS agent_slug,
          calls.called_at,
@@ -1203,7 +1203,7 @@ module.exports = function mountApiRoutes(app) {
          calls.objections_json,
          calls.competitor_mentions_json
        FROM calls
-       JOIN customers ON customers.id = calls.customer_id
+       JOIN customer_queue ON customer_queue.id = calls.customer_id
        LEFT JOIN agents ON agents.id = calls.agent_id
        ORDER BY calls.id DESC
        LIMIT 25`
@@ -1223,8 +1223,8 @@ module.exports = function mountApiRoutes(app) {
          calls.id,
          calls.customer_id,
          calls.agent_id,
-         customers.name AS customer_name,
-         customers.phone AS customer_phone,
+         customer_queue.name AS customer_name,
+         customer_queue.phone AS customer_phone,
          agents.name AS agent_name,
          agents.slug AS agent_slug,
          calls.called_at,
@@ -1275,7 +1275,7 @@ module.exports = function mountApiRoutes(app) {
          calls.objections_json,
          calls.competitor_mentions_json
        FROM calls
-       JOIN customers ON customers.id = calls.customer_id
+       JOIN customer_queue ON customer_queue.id = calls.customer_id
        LEFT JOIN agents ON agents.id = calls.agent_id
       WHERE calls.id = ?`,
         [req.params.callId]
@@ -1324,9 +1324,9 @@ module.exports = function mountApiRoutes(app) {
   app.post('/api/calls/:callId(\\d+)/analyze', async (req, res) => {
     try {
       const call = await dbGet(
-        `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone, agents.name AS agent_name, agents.slug AS agent_slug
+        `SELECT calls.*, customer_queue.name AS customer_name, customer_queue.phone AS customer_phone, agents.name AS agent_name, agents.slug AS agent_slug
          FROM calls
-         JOIN customers ON customers.id = calls.customer_id
+         JOIN customer_queue ON customer_queue.id = calls.customer_id
          LEFT JOIN agents ON agents.id = calls.agent_id
         WHERE calls.id = ?`,
         [req.params.callId]
@@ -1376,9 +1376,9 @@ module.exports = function mountApiRoutes(app) {
   app.get('/api/calls/:callId(\\d+)/analysis-pdf', async (req, res) => {
     try {
       const call = await dbGet(
-        `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone, agents.name AS agent_name, agents.slug AS agent_slug
+        `SELECT calls.*, customer_queue.name AS customer_name, customer_queue.phone AS customer_phone, agents.name AS agent_name, agents.slug AS agent_slug
          FROM calls
-         JOIN customers ON customers.id = calls.customer_id
+         JOIN customer_queue ON customer_queue.id = calls.customer_id
          LEFT JOIN agents ON agents.id = calls.agent_id
         WHERE calls.id = ?`,
         [req.params.callId]
@@ -1428,10 +1428,10 @@ module.exports = function mountApiRoutes(app) {
          calls.live_red_flag,
          calls.supervisor_alert_level,
          calls.human_escalation_requested,
-         customers.name AS customer_name,
+         customer_queue.name AS customer_name,
          agents.name AS agent_name
        FROM calls
-       JOIN customers ON customers.id = calls.customer_id
+       JOIN customer_queue ON customer_queue.id = calls.customer_id
        LEFT JOIN agents ON agents.id = calls.agent_id
        WHERE calls.called_at >= (now() - interval '60 minutes')
        ORDER BY calls.called_at DESC
@@ -1573,9 +1573,9 @@ module.exports = function mountApiRoutes(app) {
          calls.language,
          calls.transcript_text,
          calls.transcript_status,
-         customers.name AS customer_name
+         customer_queue.name AS customer_name
        FROM calls
-       LEFT JOIN customers ON customers.id = calls.customer_id
+       LEFT JOIN customer_queue ON customer_queue.id = calls.customer_id
        WHERE calls.id = ?`,
         [req.params.callId]
       );

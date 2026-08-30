@@ -218,7 +218,7 @@ router.delete('/:id(\\d+)', async (req, res, next) => {
     if (!patient) return res.status(404).json({ error: 'Patient not found' });
 
     const linked = await dbGet(
-      'SELECT COUNT(*) AS count FROM customers WHERE patient_id = ?', [req.params.id]
+      'SELECT COUNT(*) AS count FROM customer_queue WHERE patient_id = ?', [req.params.id]
     );
     if (Number(linked?.count || 0) > 0) {
       return res.status(409).json({
