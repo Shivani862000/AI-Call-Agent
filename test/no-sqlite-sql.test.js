@@ -10,6 +10,12 @@ const ROOTS = ['src', 'services', 'routes', 'scripts'];
 // keeps JS helpers like formatHumanDateTime / buildScheduledDateTime out of it.
 const BANNED = [
   { name: 'DATETIME()',     re: /(?<![A-Za-z])DATETIME\s*\(/i },
+  // Bare DATE(x, 'localtime') is SQLite's; Postgres wants x::date. The
+  // lookbehind keeps JavaScript's `new Date(` out of it, and the quote
+  // requirement keeps the DATE column type in DDL out of it.
+  // A single-character lookbehind is not enough: `new Date(` has a space
+  // before Date, so the JS constructor has to be excluded by name.
+  { name: "DATE(x,'...')",  re: /(?<!new )(?<![A-Za-z_.])DATE\s*\([^)]*'/i },
   { name: 'STRFTIME()',     re: /(?<![A-Za-z])STRFTIME\s*\(/i },
   { name: 'JULIANDAY()',    re: /(?<![A-Za-z])JULIANDAY\s*\(/i },
   { name: 'IFNULL()',       re: /(?<![A-Za-z])IFNULL\s*\(/i },

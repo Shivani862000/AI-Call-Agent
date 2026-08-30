@@ -294,7 +294,7 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
       `SELECT COUNT(*) as count 
        FROM calls c
        WHERE c.customer_id = ? 
-         AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
+         AND c.called_at::date = current_date
          AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
       [customer.id]
     );
@@ -361,6 +361,16 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
     customerUpdates.status = normalized;
   }
 
+  // Consent belongs to the person, not the call attempt, so an opt-out given
+  // on one call still applies on the next.
+  if (customerUpdates.consent_status) {
+    await dbRun(
+      `UPDATE patients SET consent_status = ?, consent_updated_at = now(), updated_at = now()
+        WHERE id = (SELECT patient_id FROM customers WHERE id = ?)`,
+      [customerUpdates.consent_status, customer.id]
+    );
+  }
+
   await dbRun(
     `UPDATE customers
         SET status = ?,
@@ -371,7 +381,6 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
             wrong_number_flag = ?,
             admin_review_required = ?,
             callback_requested_at = ?,
-            consent_status = ?,
             priority_score = ?,
             ai_score = ?,
             failed_reason = COALESCE(?, failed_reason),
@@ -386,7 +395,6 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
       customerUpdates.wrong_number_flag,
       customerUpdates.admin_review_required,
       customerUpdates.callback_requested_at,
-      customerUpdates.consent_status,
       priorityScore,
       priorityScore,
       customerUpdates.failed_reason || null,

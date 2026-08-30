@@ -479,7 +479,7 @@ async function triggerScheduledCalls() {
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
 
       const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND c.called_at::date = current_date AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
         [customer.id]
       );
       const attempt = callsTodayRow ? callsTodayRow.count : 1;

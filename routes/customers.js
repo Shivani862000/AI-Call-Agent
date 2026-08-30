@@ -52,10 +52,17 @@ const RESCHEDULABLE_STATUSES = new Set([
   'cancelled',
   'rescheduled'
 ]);
+/**
+ * Coerces the many ways a flag arrives — boolean, 1/0, "1"/"0", "true"/"yes" —
+ * into the integer the schema stores. Returns 0 for anything unrecognised
+ * rather than undefined: this feeds NOT NULL columns, and the previous version
+ * fell off the end and returned undefined for every non-boolean input.
+ */
 function toBooleanFlag(value) {
   if (typeof value === 'boolean') return value ? 1 : 0;
-  const normalized = String(value || '').trim().toLowerCase();
-
+  if (typeof value === 'number') return value ? 1 : 0;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on', 'y'].includes(normalized) ? 1 : 0;
 }
 
 function getNextIsoForPreferredSlot(slot, now = new Date()) {
@@ -333,7 +340,7 @@ router.post('/', async (req, res) => {
          FROM calls c
          JOIN customer_queue cu ON cu.id = c.customer_id
          WHERE cu.phone = ? 
-           AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
+           AND c.called_at::date = current_date
            AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
         [payload.phone]
       );
@@ -483,7 +490,7 @@ router.put('/:id', async (req, res) => {
          FROM calls c
          JOIN customer_queue cu ON cu.id = c.customer_id
          WHERE cu.phone = ? 
-           AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
+           AND c.called_at::date = current_date
            AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
         [payload.phone]
       );
@@ -506,18 +513,13 @@ router.put('/:id', async (req, res) => {
     const nextStatus = shouldRescheduleStatus ? 'scheduled' : existing.status;
 
     await dbRun(
+      // Person fields (name, phone, language, consent) live on patients now
+      // and are updated separately below; only queue state is set here.
       `UPDATE customers
-          SET name = ?,
-              phone = ?,
-              preferred_slot = ?,
-              scheduled_datetime = ?,
+          SET scheduled_datetime = ?,
               status = ?,
               customer_value = ?,
               urgency_level = ?,
-              preferred_language = ?,
-              preferred_dialect = ?,
-              do_not_call = ?,
-              consent_status = ?,
               outstanding_issues = ?,
               pending_follow_ups = ?,
               next_retry_at = ?,
@@ -531,17 +533,10 @@ router.put('/:id', async (req, res) => {
               locked_at = NULL
         WHERE id = ?`,
       [
-        payload.name,
-        payload.phone,
-        payload.preferred_slot,
         payload.scheduled_datetime,
         nextStatus,
         payload.customer_value,
         payload.urgency_level,
-        payload.preferred_language,
-        payload.preferred_dialect || null,
-        payload.do_not_call,
-        payload.consent_status,
         payload.outstanding_issues || null,
         payload.pending_follow_ups || null,
         nextRetryAt,
@@ -588,20 +583,25 @@ router.patch('/:id/workflow', async (req, res) => {
       pending_follow_ups: req.body.pending_follow_ups === undefined ? existing.pending_follow_ups : String(req.body.pending_follow_ups || '').trim()
     };
 
+    // do-not-call and consent describe the person and must outlive this call
+    // attempt; the rest is queue state.
+    await dbRun(
+      `UPDATE patients
+          SET do_not_call = ?, consent_status = ?, consent_updated_at = now(), updated_at = now()
+        WHERE id = (SELECT patient_id FROM customers WHERE id = ?)`,
+      [patch.do_not_call, patch.consent_status, req.params.id]
+    );
+
     await dbRun(
       `UPDATE customers
-          SET do_not_call = ?,
-              wrong_number_flag = ?,
+          SET wrong_number_flag = ?,
               admin_review_required = ?,
-              consent_status = ?,
               next_retry_at = ?,
               pending_follow_ups = ?
         WHERE id = ?`,
       [
-        patch.do_not_call,
         patch.wrong_number_flag,
         patch.admin_review_required,
-        patch.consent_status,
         patch.next_retry_at,
         patch.pending_follow_ups || null,
         req.params.id

@@ -247,21 +247,17 @@ async function hydratePreCallIntelligence(customer) {
         SET priority_score = ?,
             ai_score = ?,
             best_call_slot = ?,
-            preferred_dialect = ?,
             outstanding_issues = ?,
             last_sentiment_label = ?,
-            pickup_rate_score = ?,
-            dnd_checked_at = ?
+            pickup_rate_score = ?
       WHERE id = ?`,
     [
       intelligence.priorityScore,
       intelligence.priorityScore,
       intelligence.bestCallSlot,
-      intelligence.preferredDialect,
       intelligence.outstandingIssues.join('\n') || null,
       intelligence.lastSentimentLabel || null,
       intelligence.pickupRateScore,
-      new Date().toISOString(),
       customer.id
     ]
   );
@@ -316,7 +312,7 @@ async function shouldBlockCustomerCall(customer) {
        FROM calls c
        JOIN customer_queue cu ON cu.id = c.customer_id
        WHERE cu.phone = ? 
-         AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
+         AND c.called_at::date = current_date
          AND COALESCE(c.call_direction, 'outbound') = 'outbound'
        ORDER BY c.called_at DESC`,
       [customer.phone]
