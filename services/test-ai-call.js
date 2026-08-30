@@ -102,10 +102,11 @@ function scriptedReply(session) {
 async function getOrCreateBrowserTestCustomer() {
   const phone = `browser-test-${Date.now()}`;
   const result = await dbRun(
-    `INSERT INTO customers (patient_id, name, phone, normalized_phone, preferred_slot, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO customers (patient_id, status, created_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT (patient_id) DO UPDATE SET updated_at = now()`,
     [await require('../src/patient-link').resolvePatientId({ name: BROWSER_TEST_CALLER, phone }),
-     BROWSER_TEST_CALLER, phone, null, 'browser', 'completed', new Date().toISOString()]
+     'completed', new Date().toISOString()]
   );
   return result.lastID;
 }

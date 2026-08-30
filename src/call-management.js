@@ -85,19 +85,10 @@ async function ensureCustomerForCall({ customerId, customerName, customerPhone }
 
   const patientId = await resolvePatientId({ name: customerName || 'Customer', phone: customerPhone });
   const result = await dbRun(
-    `INSERT INTO customers (patient_id, name, phone, normalized_phone, preferred_slot, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (normalized_phone) WHERE normalized_phone IS NOT NULL
-     DO UPDATE SET name = excluded.name, patient_id = excluded.patient_id`,
-    [
-      patientId,
-      customerName || 'Customer',
-      customerPhone,
-      normalizePhoneLookupValue(customerPhone),
-      '10:00',
-      'pending',
-      new Date().toISOString()
-    ]
+    `INSERT INTO customers (patient_id, status, created_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT (patient_id) DO UPDATE SET updated_at = now()`,
+    [patientId, 'pending', new Date().toISOString()]
   );
 
   return dbGet('SELECT * FROM customer_queue WHERE id = ?', [result.lastID]);
@@ -166,17 +157,11 @@ async function ensureCustomerForClientReminder(client) {
     preferredSlot: client.annual_reminder_slot, serviceInterest: client.treatment_type
   });
   const result = await dbRun(
-    `INSERT INTO customers (
-      patient_id, name, phone, normalized_phone, preferred_slot, status, created_at, service_interest
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (normalized_phone) WHERE normalized_phone IS NOT NULL
-     DO UPDATE SET name = excluded.name, patient_id = excluded.patient_id`,
+    `INSERT INTO customers (patient_id, status, created_at, service_interest)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (patient_id) DO UPDATE SET updated_at = now()`,
     [
       clientPatientId,
-      client.name,
-      client.phone,
-      normalizePhoneLookupValue(client.phone),
-      client.annual_reminder_slot || '10:00',
       'pending',
       new Date().toISOString(),
       client.treatment_type || null
@@ -213,19 +198,10 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
     name: fallbackName || 'Incoming caller', phone: normalizedPhone
   });
   const result = await dbRun(
-    `INSERT INTO customers (patient_id, name, phone, normalized_phone, preferred_slot, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (normalized_phone) WHERE normalized_phone IS NOT NULL
-     DO UPDATE SET name = excluded.name, patient_id = excluded.patient_id`,
-    [
-      incomingPatientId,
-      fallbackName || 'Incoming caller',
-      normalizedPhone,
-      normalizePhoneLookupValue(normalizedPhone),
-      getCurrentSlotLabel(new Date()),
-      'incoming',
-      new Date().toISOString()
-    ]
+    `INSERT INTO customers (patient_id, status, created_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT (patient_id) DO UPDATE SET updated_at = now()`,
+    [incomingPatientId, 'incoming', new Date().toISOString()]
   );
 
   return dbGet('SELECT * FROM customer_queue WHERE id = ?', [result.lastID]);

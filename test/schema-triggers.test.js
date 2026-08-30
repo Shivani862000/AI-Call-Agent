@@ -11,9 +11,11 @@ test('calls.status mirrors calls.outcome via trigger', { skip: !HAS_DB && 'no Su
   await initializeDatabase();
 
   const marker = `trigger-test-${Date.now()}`;
+  const patient = await dbRun(
+    'INSERT INTO patients (first_name, phone) VALUES (?, ?)', [marker, marker]
+  );
   const customer = await dbRun(
-    'INSERT INTO customers (name, phone, status) VALUES (?, ?, ?)',
-    [marker, marker, 'pending']
+    'INSERT INTO customers (patient_id, status) VALUES (?, ?)', [patient.lastID, 'pending']
   );
 
   try {
@@ -32,6 +34,7 @@ test('calls.status mirrors calls.outcome via trigger', { skip: !HAS_DB && 'no Su
   } finally {
     // Cascade removes the call row with the customer.
     await dbRun('DELETE FROM customers WHERE id = ?', [customer.lastID]);
+    await dbRun('DELETE FROM patients WHERE id = ?', [patient.lastID]);
     await closeDatabase();
   }
 });
@@ -41,9 +44,11 @@ test('deleting a customer cascades to calls and feedback', { skip: !HAS_DB && 'n
   await initializeDatabase();
 
   const marker = `cascade-test-${Date.now()}`;
+  const patient = await dbRun(
+    'INSERT INTO patients (first_name, phone) VALUES (?, ?)', [marker, marker]
+  );
   const customer = await dbRun(
-    'INSERT INTO customers (name, phone, status) VALUES (?, ?, ?)',
-    [marker, marker, 'pending']
+    'INSERT INTO customers (patient_id, status) VALUES (?, ?)', [patient.lastID, 'pending']
   );
   const call = await dbRun(
     'INSERT INTO calls (customer_id, outcome) VALUES (?, ?)',
@@ -61,5 +66,6 @@ test('deleting a customer cascades to calls and feedback', { skip: !HAS_DB && 'n
   assert.equal(orphanCall, undefined);
   assert.equal(orphanFeedback, undefined);
 
+  await dbRun('DELETE FROM patients WHERE id = ?', [patient.lastID]);
   await closeDatabase();
 });

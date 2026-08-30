@@ -269,27 +269,21 @@ async function saveCustomer(payload, isManual = false) {
   });
   return dbRun(
     `INSERT INTO customers (
-      patient_id,
-      name, phone, normalized_phone, preferred_slot, scheduled_datetime, status,
+      patient_id, scheduled_datetime, status,
       customer_value, urgency_level,
-      preferred_language, preferred_dialect, do_not_call, consent_status,
       outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
       campaign_name, service_interest, call_type, is_manual
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (patient_id) DO UPDATE SET
+       scheduled_datetime = excluded.scheduled_datetime,
+       status = excluded.status,
+       updated_at = now()`,
     [
       patientId,
-      payload.name,
-      payload.phone,
-      normalizePhoneLookupValue(payload.phone),
-      payload.preferred_slot,
       payload.scheduled_datetime,
       initialStatus,
       payload.customer_value,
       payload.urgency_level,
-      payload.preferred_language,
-      payload.preferred_dialect || null,
-      payload.do_not_call,
-      payload.consent_status,
       payload.outstanding_issues || null,
       payload.pending_follow_ups || null,
       payload.revenue_stage,
@@ -300,6 +294,7 @@ async function saveCustomer(payload, isManual = false) {
       isManual ? 1 : 0
     ]
   );
+
 }
 
 function baseCustomerLogDetails(customer, extra = {}) {
