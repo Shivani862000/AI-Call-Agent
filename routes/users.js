@@ -7,8 +7,8 @@ const supabase = require('../src/supabase');
 const router = express.Router();
 
 router.use((req, res, next) => {
-  // Simple check since we are adapting to the current branch which may only have ADMIN
-  if (req.adminSession?.role !== 'ADMIN' && req.adminSession?.role !== 'CLIENT_ADMIN') {
+  const role = req.adminSession?.role;
+  if (role !== 'ADMIN' && role !== 'AGENT') {
     return res.status(403).json({ error: 'Only administrators can manage users' });
   }
   next();

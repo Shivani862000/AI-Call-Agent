@@ -67,9 +67,9 @@
           <label>
             <span class="sr-only">Filter by role</span>
             <select id="userRoleFilter" class="table-filter">
-              <option value="">All roles</option>
-              <option value="CLIENT_ADMIN">Tenant admins</option>
-              <option value="CLIENT_AGENT">Agents</option>
+              <option value="">All Roles</option>
+              <option value="ADMIN">Admins</option>
+              <option value="AGENT">Agents</option>
             </select>
           </label>
           <label>
@@ -111,7 +111,7 @@
         <input id="userEditingVersion" type="hidden">
         <label>Username<input id="userUsername" name="username" minlength="3" maxlength="100" autocomplete="off" required><span id="userUsernameError" class="error-text"></span></label>
         <label>Email<input id="userEmail" name="email" type="email" maxlength="200" required><span id="userEmailError" class="error-text"></span></label>
-        <label>Role<select id="userRole" name="role"><option value="CLIENT_AGENT">Agent</option><option value="CLIENT_ADMIN">Tenant admin</option></select><span id="userRoleError" class="error-text"></span></label>
+        <label>Role<select id="userRole" name="role"><option value="AGENT">Agent</option><option value="ADMIN">Admin</option></select><span id="userRoleError" class="error-text"></span></label>
         <label id="userCreatePasswordField">Temporary password<input id="userCreatePassword" name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password"><span id="userCreatePasswordError" class="error-text"></span></label>
         <div id="userFormError" class="form-error span-2" role="alert"></div>
         <div class="user-modal-actions span-2"><button class="secondary" type="button" data-close-modal="userFormModal">Cancel</button><button id="saveUserButton" class="primary" type="submit">Create user</button></div>
