@@ -54,7 +54,6 @@
   function addAdminSupportNavigation() {
     const currentPath = window.location.pathname || '/admin.html';
     const navigationTargets = [
-      { selector: '.nav-list', className: 'nav-link', label: 'Support Tickets' },
       { selector: '.mobile-dock', className: 'mobile-dock-link', label: 'Support' }
     ];
 
@@ -76,10 +75,30 @@
     document.body.classList.add('admin-support-navigation');
   }
 
-  function addAdminNavLink(href, label) {
+  /**
+   * The admin group lives in its own nav at the foot of the sidebar, so the
+   * links people use all day stay at the top and configuration sits out of the
+   * way. Created on demand as a sibling of the brand/nav wrapper, which is what
+   * lets the sidebar's space-between push it down.
+   */
+  function secondaryNavList() {
+    const existing = document.querySelector('.nav-list-secondary');
+    if (existing) return existing;
+
+    const sidebar = document.querySelector('.sidebar');
+    if (!sidebar) return null;
+
+    const nav = document.createElement('nav');
+    nav.className = 'nav-list nav-list-secondary';
+    nav.setAttribute('aria-label', 'Administration');
+    sidebar.appendChild(nav);
+    return nav;
+  }
+
+  function addAdminNavLink(href, label, { bottom = false } = {}) {
     const currentPath = window.location.pathname || '/admin.html';
-    const navigation = document.querySelector('.nav-list');
-    if (!navigation || navigation.querySelector('a[href="' + href + '"]')) return;
+    const navigation = bottom ? secondaryNavList() : document.querySelector('.nav-list');
+    if (!navigation || document.querySelector('.sidebar a[href="' + href + '"]')) return;
 
     const link = document.createElement('a');
     link.href = href;
@@ -105,8 +124,9 @@
         buildMobileTabbar();
       }
       addAdminSupportNavigation();
-      addAdminNavLink('/users.html', 'Users');
-      addAdminNavLink('/settings.html', 'Settings');
+      addAdminNavLink('/support-tickets.html', 'Support Tickets', { bottom: true });
+      addAdminNavLink('/users.html', 'Users', { bottom: true });
+      addAdminNavLink('/settings.html', 'Settings', { bottom: true });
     }
     return session;
   }

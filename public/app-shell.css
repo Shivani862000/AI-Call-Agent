@@ -371,6 +371,16 @@ body.poc-page .nav-link {
   border-radius: 14px;
 }
 
+/* Administration links sit at the foot of the sidebar. margin-top: auto does
+   the pushing; the sidebar's space-between only helps when there are exactly
+   two children, and the brand wrapper plus this nav may not always be. */
+body.poc-page .nav-list-secondary {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+  gap: 6px;
+}
+
 body.poc-page .main-panel {
   padding: 28px;
 }
