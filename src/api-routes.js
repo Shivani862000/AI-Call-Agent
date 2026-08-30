@@ -81,13 +81,13 @@ const { buildCallAnalysis, storeCallAnalysis } = require('../services/call-analy
 const { generateCallAnalysisPDF } = require('../services/pdf');
 const { initiateCall, buildMasterPostPayload } = require('../services/icallmate');
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
-const {
-  buildIcallMateCallbackUrl,
-  hasValidIcallMateWebhookSecret
-} = require('./icallmate-webhook');
-const logger = require('../services/system-logger');
+const { buildIcallMateCallbackUrl, hasValidIcallMateWebhookSecret } = require('./icallmate-webhook');
+const logger = require('./logger');
+const { requestLoggingMiddleware } = require('./middlewares/logging');
 
 module.exports = function mountApiRoutes(app) {
+  app.use(requestLoggingMiddleware);
+
   app.get('/health', (req, res) => {
     res.json({
       ok: true,
@@ -124,17 +124,20 @@ module.exports = function mountApiRoutes(app) {
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
 
+    logger.info('AUTH_LOGIN_START', { username: username || 'unknown' });
+
     const authResult = await verifyCredentials(username, password);
 
     if (!authResult.success) {
       clearAuthCookie(req, res);
-      logger.warn('USER_LOGIN', { user: username || 'unknown', status: 'failed' });
+      logger.warn('AUTH_LOGIN_FAILED', { username: username || 'unknown', reason: 'Invalid credentials' });
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
     const token = createAuthToken(username, authResult.role);
     setAuthCookie(req, res, token);
-    logger.info('USER_LOGIN', { user: username, role: authResult.role });
+
+    logger.info('AUTH_LOGIN_SUCCESS', { userId: username, role: authResult.role });
     return res.json({
       success: true,
       username,
@@ -145,7 +148,7 @@ module.exports = function mountApiRoutes(app) {
   app.post('/api/auth/logout', (req, res) => {
     const session = readAuthSession(req);
     clearAuthCookie(req, res);
-    logger.info('USER_LOGOUT', { user: session?.username || req.adminSession?.username || 'admin' });
+    logger.info('AUTH_LOGOUT', { userId: session?.username || req.adminSession?.username || 'admin' });
     return res.json({ success: true });
   });
 
@@ -222,21 +225,24 @@ module.exports = function mountApiRoutes(app) {
         return res.status(409).json({ success: false, error: 'A call for this customer is already in progress' });
       }
 
-      console.log(
-        `[CALL REQUEST] to=${logger.maskPhone(customerPhone)} serviceNo=${process.env.ICALLMATE_SERVICE_NO || ''} baseUrl=${PUBLIC_BASE_URL} ` +
-        `mode=${CALL_MODE} pipeline=${VOICE_PIPELINE} model=${REALTIME_MODEL}`
-      );
-      console.log(
-        `[CALL REQUEST CONFIG] ` +
-        `APP_BASE_URL=${describeEnvValue(process.env.APP_BASE_URL || '')} ` +
-        `NGROK_URL=${describeEnvValue(process.env.NGROK_URL || '')} ` +
-        `WEBHOOK_URL=${describeEnvValue(process.env.WEBHOOK_URL || '')} ` +
-        `SERVER_NAME=${describeEnvValue(process.env.SERVER_NAME || '')} ` +
-        `ICALLMATE_OBD_API_ENDPOINT=${process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in'} ` +
-        `ICALLMATE_SERVICE_NO=${process.env.ICALLMATE_SERVICE_NO || ''} ` +
-        `ICALLMATE_IVR_TEMPLATE_ID=${process.env.ICALLMATE_IVR_TEMPLATE_ID || ''} ` +
-        `TZ=${process.env.TZ || ''}`
-      );
+      logger.info('CALL_CREATE_START', {
+        to: customerPhone,
+        serviceNo: process.env.ICALLMATE_SERVICE_NO || '',
+        mode: CALL_MODE,
+        pipeline: VOICE_PIPELINE,
+        model: REALTIME_MODEL,
+        customerId: customer.id
+      });
+      logger.debug('CALL_REQUEST_CONFIG', {
+        APP_BASE_URL: describeEnvValue(process.env.APP_BASE_URL || ''),
+        NGROK_URL: describeEnvValue(process.env.NGROK_URL || ''),
+        WEBHOOK_URL: describeEnvValue(process.env.WEBHOOK_URL || ''),
+        SERVER_NAME: describeEnvValue(process.env.SERVER_NAME || ''),
+        ICALLMATE_OBD_API_ENDPOINT: process.env.ICALLMATE_OBD_API_ENDPOINT || 'https://ecp1.icallmate.in',
+        ICALLMATE_SERVICE_NO: process.env.ICALLMATE_SERVICE_NO || '',
+        ICALLMATE_IVR_TEMPLATE_ID: process.env.ICALLMATE_IVR_TEMPLATE_ID || '',
+        TZ: process.env.TZ || ''
+      });
       const call = await placeRealtimeCall({
         customerPhone,
         customerName: customer.name || customerName,
@@ -263,7 +269,7 @@ module.exports = function mountApiRoutes(app) {
       }]).select('id').single();
       const result = { lastID: callResult.id };
       await supabase.from('customers').update({ status: 'called' }).eq('id', customer.id);
-      
+
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
       const { count } = await supabase.from('calls')
@@ -273,7 +279,7 @@ module.exports = function mountApiRoutes(app) {
         .gte('called_at', startOfDay.toISOString());
       const attempt = count || 1;
       logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone || customerPhone, attempt });
-      
+
       logger.info('CALL_STARTED', {
         callId: result.lastID,
         customerId: customer.id,
@@ -296,22 +302,22 @@ module.exports = function mountApiRoutes(app) {
       if (customer?.id) {
         try {
           await releaseCustomerOutboundClaim(customer.id, customer.status || 'pending');
-        } catch (releaseError) {
-          console.error('[CALL CLAIM RELEASE ERROR]', releaseError.message);
+        }
+        catch (releaseError) {
+          logger.error('CALL_CLAIM_RELEASE_ERROR', { error: releaseError, customerId: customer.id });
         }
       }
-      logger.error('CALL_FAILED', {
+      logger.error('CALL_CREATE_FAILED', {
         customerId: customer?.id,
-        patient: customer?.name,
         phone: customer?.phone || req.body.customerPhone,
-        reason: error.message
+        error
       });
       res.status(500).json({ success: false, error: error.message });
     }
   });
 
   app.post('/call/scripted/consent', (req, res) => {
-    console.log(`[SCRIPTED] Consent lang=${req.query.lang || 'hi'} digits=${req.body.Digits || ''} speech=${req.body.SpeechResult || ''}`);
+    logger.debug('SCRIPTED_IVR_CONSENT', { lang: req.query.lang || 'hi', digits: req.body.Digits || '', speech: req.body.SpeechResult || '' });
     res.type('text/xml').send(buildScriptedConsentResponse(req));
   });
 
@@ -530,7 +536,7 @@ module.exports = function mountApiRoutes(app) {
       const result = { lastID: callResult.id };
 
       await supabase.from('customers').update({ status: 'called' }).eq('id', customer.id);
-      
+
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
       const { count } = await supabase.from('calls')
@@ -648,7 +654,7 @@ module.exports = function mountApiRoutes(app) {
       const callsArray = callsData || [];
       const todayIso = new Date().toISOString().split('T')[0];
       const rowsMap = {};
-      
+
       callsArray.forEach(call => {
         const dir = call.call_direction || 'outbound';
         const out = call.outcome || 'unknown';
@@ -1188,7 +1194,7 @@ module.exports = function mountApiRoutes(app) {
         `)
         .eq('id', req.params.callId)
         .single();
-        
+
       const row = dbRow ? {
         ...dbRow,
         customer_name: dbRow.customers?.name,
@@ -1659,9 +1665,13 @@ module.exports = function mountApiRoutes(app) {
 </body>
 </html>`);
     } catch (error) {
-      console.error('[TRANSCRIPT FETCH ERROR]', error.message);
+      logger.error('TRANSCRIPT_FETCH_ERROR', { error });
       res.status(500).json({ error: 'Failed to fetch transcript' });
     }
   });
 
+  app.use((err, req, res, next) => {
+    logger.error('UNHANDLED_ERROR', { error: err });
+    res.status(500).json({ error: 'Internal Server Error' });
+  });
 };

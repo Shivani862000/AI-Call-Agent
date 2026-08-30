@@ -21,76 +21,62 @@ const {
 const { runSchedulerTick, runOwnerDigestTick } = require('./scheduler');
 const { pruneLiveCallState } = require('./helpers');
 const { validateAuthConfig } = require('./auth');
+const logger = require('./logger');
 
 module.exports = function startServer(server) {
   (async () => {
   try {
+    logger.info('SERVER_STARTING');
     validateConfig();
     validateAuthConfig();
 
-    logConfigSnapshot('SERVER');
+    // Configuration is logged separately or we can just log success
+    logger.info('CONFIG_LOADED', { environment: process.env.NODE_ENV || 'development' });
 
     if (!DISABLE_SCHEDULER) {
       setInterval(() => {
-        runSchedulerTick().catch((error) => {
-          console.error('[SCHEDULER ERROR]', error.message);
-        });
+        runSchedulerTick().catch((error) => logger.error('SCHEDULER_FAILED', { error }));
       }, 10000);
     }
 
     if (!DISABLE_OWNER_DIGEST) {
       setInterval(() => {
-        runOwnerDigestTick().catch((error) => {
-          console.error('[OWNER DIGEST ERROR]', error.message);
-        });
+        runOwnerDigestTick().catch((error) => logger.error('OWNER_DIGEST_FAILED', { error }));
       }, 60000);
     }
 
-    setInterval(() => {
-      pruneLiveCallState();
-    }, 60000);
+    setInterval(() => pruneLiveCallState(), 60000);
 
     if (!DISABLE_SCHEDULER) {
-      runSchedulerTick().catch((error) => {
-        console.error('[SCHEDULER ERROR]', error.message);
-      });
+      runSchedulerTick().catch((error) => logger.error('SCHEDULER_FAILED', { error }));
     }
 
     if (!DISABLE_OWNER_DIGEST) {
-      runOwnerDigestTick().catch((error) => {
-        console.error('[OWNER DIGEST ERROR]', error.message);
-      });
+      runOwnerDigestTick().catch((error) => logger.error('OWNER_DIGEST_FAILED', { error }));
     }
 
     const supabaseAdmin = require('./supabase');
+    logger.info('DATABASE_CONNECTION_START', { provider: 'supabase' });
     const { error: dbError } = await supabaseAdmin.from('customers').select('id').limit(1);
     if (dbError) {
-      console.error('=============================================');
-      console.error('[SERVER] ❌ Database connection failed:', dbError.message);
-      console.error('=============================================');
+      logger.error('DATABASE_CONNECTION_FAILED', { error: dbError });
     } else {
-      console.log('=============================================');
-      console.log('[SERVER] ✅ Database connected successfully!');
-      console.log('=============================================');
+      logger.info('DATABASE_CONNECTION_SUCCESS');
     }
+    
+    logger.info('AUTH_INITIALIZED', { provider: 'supabase' });
+    logger.info('SCHEDULER_INITIALIZED', { enabled: !DISABLE_SCHEDULER, interval: '10s' });
 
     server.listen(PORT, '0.0.0.0', () => {
-      console.log(`[SERVER] Running on port ${PORT} (0.0.0.0)`);
-      console.log(`[SERVER] Public base URL: ${PUBLIC_BASE_URL}`);
-      console.log(`[SERVER] Call mode: ${CALL_MODE}`);
-      console.log(`[SERVER] Voice pipeline: ${VOICE_PIPELINE}`);
-      console.log(`[SERVER] Realtime model: ${REALTIME_MODEL}`);
-      console.log(DISABLE_SCHEDULER
-        ? '[SERVER] Scheduler disabled by DISABLE_SCHEDULER=true'
-        : '[SERVER] Scheduler active: checks pending customers every 10 seconds');
-      console.log(DISABLE_OWNER_DIGEST
-        ? '[SERVER] Owner digest disabled by DISABLE_OWNER_DIGEST=true'
-        : '[SERVER] Owner digest active: checks 8 AM morning delivery every 60 seconds');
-      console.log('[SERVER] Admin UI: http://localhost:3000/admin.html');
-      console.log('[SERVER] Ready. Trigger a call with: curl -X POST http://localhost:3000/call/start');
+      logger.info('SERVER_READY', { 
+        port: PORT, 
+        publicBaseUrl: PUBLIC_BASE_URL,
+        callMode: CALL_MODE,
+        voicePipeline: VOICE_PIPELINE
+      });
     });
   } catch (error) {
-    console.error('[CONFIG ERROR]', error.message);
+    logger.fatal('CONFIG_ERROR', { error });
     process.exit(1);
   }
   })();

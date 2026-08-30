@@ -5,6 +5,8 @@
 
 require('dotenv').config();
 
+require('./src/logger');
+
 const express = require('express');
 const http = require('http');
 const path = require('path');

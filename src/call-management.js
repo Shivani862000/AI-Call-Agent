@@ -8,6 +8,7 @@
 const supabase = require('./supabase');
 const crypto = require('crypto');
 const { initiateCall } = require('../services/icallmate');
+const logger = require('./logger');
 const {
   buildPreCallIntelligence,
   getCurrentSlotLabel
@@ -91,7 +92,7 @@ async function ensureCustomerForCall({ customerId, customerName, customerPhone }
   }]).select('*').single();
 
   if (error) {
-    console.error('ensureCustomerForCall Insert Error:', error);
+    logger.error('CUSTOMER_CREATE_FAILED', { error, customerPhone });
     // If unique constraint violated, return existing
     const { data: retry } = await supabase.from('customers').select('*').eq('phone', customerPhone).single();
     if (retry) return retry;
@@ -111,7 +112,7 @@ async function claimCustomerForOutboundCall(customerId) {
     .select('id');
 
   if (error) {
-    console.error('Error claiming customer:', error);
+    logger.error('CUSTOMER_UPDATE_FAILED', { error, customerId, action: 'claim_for_call' });
     return false;
   }
 
@@ -271,11 +272,13 @@ async function hydrateIcallMateSessionContext(session, message = {}, extraParams
       session.videoSent = context.customer.video_sent === 1;
       session.lastVisitDate = context.customer.last_visit_date || 'kal';
 
-      console.log(
-        `[ICALLMATE] Hydrated outbound context streamId=${message.streamId || session.streamId || ''} ` +
-        `phone=${message.callerId || session.callerId || ''} customerId=${session.customerId} ` +
-        `callId=${session.callId} callType=${session.callType}`
-      );
+      logger.debug('CALL_HYDRATED', {
+        streamId: message.streamId || session.streamId || '',
+        phone: message.callerId || session.callerId || '',
+        customerId: session.customerId,
+        callId: session.callId,
+        callType: session.callType
+      });
     } finally {
       session.contextHydrating = false;
     }
@@ -498,7 +501,7 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
       }]);
     }
   } catch (error) {
-    console.error('[ICALLMATE INCOMING DB ERROR]', error.message);
+    logger.error('DB_UPSERT_FAILED', { error, table: 'customers', action: 'upsertIncomingCall' });
   }
 
   return row;

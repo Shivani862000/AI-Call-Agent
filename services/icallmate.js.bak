@@ -3,7 +3,7 @@ const {
   buildIcallMateCallbackUrl,
   redactIcallMateCallbackUrl
 } = require('../src/icallmate-webhook');
-const logger = require('../src/logger');
+const logger = require('./system-logger');
 
 const ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE = 'ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE';
 
@@ -270,12 +270,10 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
     throw new Error('Missing iCallMate master-post config: wsurl or ICALLMATE_MASTER_POST_WSURL is required.');
   }
 
-  logger.info('EXTERNAL_REQUEST_START', {
-    provider: 'masterpost',
-    endpoint,
-    campid: payload.campid,
-    leadid: payload.leadid
-  });
+  console.log(
+    `[ICALLMATE OUTBOUND] Initiating call to ${logger.maskPhone(customerPhone)} provider=masterpost endpoint=${endpoint} ` +
+    `campid=${payload.campid} leadid=${payload.leadid}`
+  );
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -302,7 +300,7 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
   const sid = extractCallSid(parsed, `icallmate-masterpost-${payload.leadid}-${Date.now()}`);
   const providerReason = getProviderReason(parsed);
   const status = providerReturnedSid ? 'queued' : 'submitted';
-  logger.info('EXTERNAL_REQUEST_COMPLETE', { provider: 'masterpost', status, sid, providerReason });
+  console.log(`[ICALLMATE OUTBOUND] Call ${status} sid=${sid}${providerReason ? ` reason="${providerReason}"` : ''}`);
   return {
     sid,
     status,
@@ -332,19 +330,17 @@ async function initiateCall(customerPhone, customerId, options = {}) {
 
   if (!payload.ukey || !payload.serviceno || !payload.ivrtemplateid) {
     if (process.env.ICALLMATE_MASTER_POST_API_ENDPOINT || process.env.ICALLMATE_MASTER_POST_WSURL) {
-      logger.warn('EXTERNAL_REQUEST_FALLBACK', { provider: 'masterpost', reason: 'Missing campaign credentials' });
+      console.log('[ICALLMATE OUTBOUND] Falling back to masterpost provider due to missing campaign credentials');
       const result = await initiateMasterPostCall(customerPhone, customerId, authenticatedOptions);
       return { ...result, requestPayload: redactRequestPayload(result.requestPayload) };
     }
     throw new Error('Missing iCallMate outbound config: ICALLMATE_UKEY, ICALLMATE_SERVICE_NO, and ICALLMATE_IVR_TEMPLATE_ID are required.');
   }
 
-  logger.info('EXTERNAL_REQUEST_START', {
-    provider: 'icallmate',
-    endpoint,
-    serviceNo: payload.serviceno,
-    ivrTemplate: payload.ivrtemplateid
-  });
+  console.log(
+    `[ICALLMATE OUTBOUND] Initiating call to ${logger.maskPhone(customerPhone)} endpoint=${endpoint} ` +
+    `serviceNo=${payload.serviceno} ivrTemplate=${payload.ivrtemplateid}`
+  );
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -368,7 +364,7 @@ async function initiateCall(customerPhone, customerId, options = {}) {
   }
 
   const sid = extractCallSid(parsed, payload.s_unique);
-  logger.info('EXTERNAL_REQUEST_SUCCESS', { provider: 'icallmate', sid });
+  console.log(`[ICALLMATE OUTBOUND] Call accepted sid=${sid}`);
   return {
     sid,
     status: 'queued',

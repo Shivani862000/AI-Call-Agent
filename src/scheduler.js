@@ -200,9 +200,9 @@ async function runOwnerDigestTick() {
       .from('app_state')
       .upsert({ key: 'owner_morning_digest_last_sent', value: todayKey, updated_at: new Date().toISOString() });
 
-    console.log('[OWNER DIGEST] Morning digest sent successfully');
+    logger.info('OWNER_DIGEST_SUCCESS');
   } catch (error) {
-    console.error('[OWNER DIGEST ERROR]', error.message);
+    logger.error('OWNER_DIGEST_FAILED', { error });
   } finally {
     ownerDigestRunning = false;
   }
@@ -216,7 +216,7 @@ async function triggerScheduledCalls() {
   }
 
   if (global.providerFailureCooldownUntil && Date.now() < global.providerFailureCooldownUntil) {
-    console.log('[SCHEDULER] Paused due to recent provider failure (global cooldown)');
+    logger.warn('SCHEDULER_PAUSED_COOLDOWN');
     return;
   }
 
@@ -308,14 +308,16 @@ async function triggerScheduledCalls() {
   }
 
   hydratedCustomers.sort((a, b) => (Number(b.priority_score) || 0) - (Number(a.priority_score) || 0));
-  console.log(`[SCHEDULER] Found ${hydratedCustomers.length} eligible customer(s) due at ${currentSlot}`);
+  if (hydratedCustomers.length > 0) {
+    logger.info('SCHEDULER_FOUND_CUSTOMERS', { count: hydratedCustomers.length, slot: currentSlot });
+  }
 
   for (const customer of hydratedCustomers) {
     try {
       const agentConfig = customer.default_agent_id ? await getAgentConfigById(customer.default_agent_id) : await getDefaultAgentConfig();
       const blockedReason = await shouldBlockCustomerCall(customer);
       if (blockedReason) {
-        console.log(`[SCHEDULER] Skipping customerId=${customer.id}: ${blockedReason.reason}`);
+        logger.debug('SCHEDULER_SKIP_CUSTOMER', { customerId: customer.id, reason: blockedReason.reason });
         if (blockedReason.code === 'CALL_SKIPPED_QUIET_HOURS') {
           const nextRetry = new Date();
           nextRetry.setHours(7, 0, 0, 0);
@@ -462,11 +464,12 @@ async function triggerScheduledCalls() {
         providerReason: call.providerReason || call.raw?.reason || call.raw?.message || '',
         status: acceptedOnly ? 'provider_accepted_waiting_for_media' : 'started'
       });
-      console.log(
+      logger.info('CALL_SCHEDULED', {
+        customerId: customer.id,
+        sid: call.sid,
+        status: call.status,
         acceptedOnly
-          ? `[SCHEDULER] Scheduled call submitted for customerId=${customer.id}; waiting for iCallMate media (${call.sid}) providerStatus=${call.status}`
-          : `[SCHEDULER] Scheduled call started for customerId=${customer.id} (${call.sid})`
-      );
+      });
     } catch (error) {
       const retryAt = new Date(Date.now() + (5 * 60 * 1000)).toISOString();
       logger.error('CALL_FAILED', {
@@ -488,7 +491,7 @@ async function triggerScheduledCalls() {
           .eq('id', customer.id)
           .eq('status', 'calling');
       } catch (rollbackError) {
-        console.error(`[SCHEDULER] Failed to roll back customer ${customer.id}:`, rollbackError.message);
+        logger.error('CUSTOMER_ROLLBACK_FAILED', { error: rollbackError, customerId: customer.id });
       }
     }
   }
