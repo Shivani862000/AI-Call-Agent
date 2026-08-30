@@ -1,3 +1,4 @@
+const supabase = require('../src/supabase');
 
 const VALUE_SCORES = {
   vip: 95,
@@ -252,15 +253,18 @@ async function maybeSendBusyFallback({ customer, callId }) {
 }
 
 
-async function createSupervisorEvent({ dbRun, callId, eventType, severity = 'info', payload = {} }) {
+async function createSupervisorEvent({ callId, eventType, severity = 'info', payload = {} }) {
   if (!callId) return;
-  await dbRun(
-    'INSERT INTO call_supervisor_events (call_id, event_type, severity, payload_json, created_at) VALUES (?, ?, ?, ?, ?)',
-    [callId, eventType, severity, JSON.stringify(payload || {}), new Date().toISOString()]
-  );
+  await supabase.from('call_supervisor_events').insert([{
+    call_id: callId,
+    event_type: eventType,
+    severity: severity,
+    payload_json: JSON.stringify(payload || {}),
+    created_at: new Date().toISOString()
+  }]);
 }
 
-async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, providerStatus, inferredOutcome }) {
+async function applyCallOutcomeWorkflow({ callRecord, customer, providerStatus, inferredOutcome }) {
   const nowIso = new Date().toISOString();
   const currentOutcome = inferredOutcome || providerStatus;
   const normalized = String(currentOutcome || '').toLowerCase();
@@ -276,7 +280,8 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
     admin_review_required: customer?.admin_review_required || 0,
     callback_requested_at: customer?.callback_requested_at || null,
     consent_status: customer?.consent_status || 'unknown',
-    auto_retry_enabled: customer?.auto_retry_enabled !== undefined ? customer.auto_retry_enabled : 0
+    auto_retry_enabled: customer?.auto_retry_enabled !== undefined ? customer.auto_retry_enabled : 0,
+    do_not_call: customer?.do_not_call || 0
   };
 
   const callUpdates = {
@@ -290,16 +295,16 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
 
   let attemptsToday = (Number(customer?.retry_count) || 0) + 1;
   if (customer && customer.phone) {
-    const callsTodayRow = await dbGet(
-      `SELECT COUNT(*) as count 
-       FROM calls c
-       WHERE c.customer_id = ? 
-         AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
-         AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
-      [customer.id]
-    );
-    if (callsTodayRow && callsTodayRow.count > 0) {
-      attemptsToday = callsTodayRow.count;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const { data: callsTodayRow } = await supabase.from('calls')
+      .select('id', { count: 'exact' })
+      .eq('customer_id', customer.id)
+      .gte('called_at', todayStart.toISOString())
+      .or('call_direction.eq.outbound,call_direction.is.null');
+    
+    if (callsTodayRow && callsTodayRow.length > 0) {
+      attemptsToday = callsTodayRow.length;
     }
   }
 
@@ -361,60 +366,32 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
     customerUpdates.status = normalized;
   }
 
-  await dbRun(
-    `UPDATE customers
-        SET status = ?,
-            last_contact_outcome = ?,
-            last_called_at = ?,
-            next_retry_at = ?,
-            retry_count = ?,
-            wrong_number_flag = ?,
-            admin_review_required = ?,
-            callback_requested_at = ?,
-            consent_status = ?,
-            priority_score = ?,
-            ai_score = ?,
-            failed_reason = COALESCE(?, failed_reason),
-            auto_retry_enabled = ?
-      WHERE id = ?`,
-    [
-      customerUpdates.status,
-      customerUpdates.last_contact_outcome,
-      customerUpdates.last_called_at,
-      customerUpdates.next_retry_at,
-      customerUpdates.retry_count,
-      customerUpdates.wrong_number_flag,
-      customerUpdates.admin_review_required,
-      customerUpdates.callback_requested_at,
-      customerUpdates.consent_status,
-      priorityScore,
-      priorityScore,
-      customerUpdates.failed_reason || null,
-      customerUpdates.auto_retry_enabled,
-      customer.id
-    ]
-  );
+  await supabase.from('customers').update({
+    status: customerUpdates.status,
+    last_contact_outcome: customerUpdates.last_contact_outcome,
+    last_called_at: customerUpdates.last_called_at,
+    next_retry_at: customerUpdates.next_retry_at,
+    retry_count: customerUpdates.retry_count,
+    wrong_number_flag: customerUpdates.wrong_number_flag,
+    admin_review_required: customerUpdates.admin_review_required,
+    callback_requested_at: customerUpdates.callback_requested_at,
+    consent_status: customerUpdates.consent_status,
+    priority_score: priorityScore,
+    ai_score: priorityScore,
+    failed_reason: customerUpdates.failed_reason || customer?.failed_reason || null,
+    auto_retry_enabled: customerUpdates.auto_retry_enabled,
+    do_not_call: customerUpdates.do_not_call
+  }).eq('id', customer.id);
 
   if (callRecord?.id) {
-    await dbRun(
-      `UPDATE calls
-          SET outcome = ?,
-              outcome_detail = ?,
-              fallback_triggered = ?,
-              next_action_at = ?,
-              follow_up_task = ?,
-              hot_lead_score = ?
-        WHERE id = ?`,
-      [
-        callUpdates.outcome,
-        callUpdates.outcome_detail,
-        callUpdates.fallback_triggered,
-        callUpdates.next_action_at,
-        callUpdates.follow_up_task,
-        callUpdates.hot_lead_score,
-        callRecord.id
-      ]
-    );
+    await supabase.from('calls').update({
+      outcome: callUpdates.outcome,
+      outcome_detail: callUpdates.outcome_detail,
+      fallback_triggered: callUpdates.fallback_triggered,
+      next_action_at: callUpdates.next_action_at,
+      follow_up_task: callUpdates.follow_up_task,
+      hot_lead_score: callUpdates.hot_lead_score
+    }).eq('id', callRecord.id);
   }
 
   return {

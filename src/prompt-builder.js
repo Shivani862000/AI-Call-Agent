@@ -10,7 +10,7 @@ const { buildReviewCallingPrompt, buildReviewCallingOpeningPrompt } = require('.
 const { buildThreeMonthFollowupPrompt, buildThreeMonthFollowupOpeningPrompt } = require('../prompts/three-month-followup.ts');
 const { CALL_TYPES } = require('./config');
 const { normalizeOutboundCallType, applyAgentTemplate } = require('./helpers');
-const { dbGet } = require('../db');
+const supabase = require('../src/supabase');
 
 function buildCallTypeSystemPrompt(callType, clientName, customerName, extraOptions = {}) {
   const normalizedCallType = normalizeOutboundCallType(callType);
@@ -61,11 +61,13 @@ function buildOpeningPrompt(clientName, customerName, agentConfig = null, callTy
 
 async function getAgentConfigById(agentId) {
   if (!agentId) return null;
-  return dbGet('SELECT * FROM agents WHERE id = ? AND is_active = 1', [agentId]);
+  const { data } = await supabase.from('agents').select('*').eq('id', agentId).eq('is_active', 1).single();
+  return data;
 }
 
 async function getDefaultAgentConfig() {
-  return dbGet('SELECT * FROM agents WHERE is_default = 1 AND is_active = 1 ORDER BY id ASC LIMIT 1');
+  const { data } = await supabase.from('agents').select('*').eq('is_default', 1).eq('is_active', 1).order('id', { ascending: true }).limit(1);
+  return data && data.length > 0 ? data[0] : null;
 }
 
 module.exports = {

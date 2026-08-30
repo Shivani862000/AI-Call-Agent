@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { dbRun, dbGet, dbAll } = require('../db');
+const supabase = require('../src/supabase');
 const { categorizeFeedback } = require('../services/gemini');
 
 // Manual feedback entry
@@ -31,7 +31,13 @@ router.post('/manual', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
-    const customer = await dbGet('SELECT id FROM customers WHERE id = ?', [customer_id]);
+    const { data: customer, error: fetchError } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('id', customer_id)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found', fieldErrors: { customer_id: 'Selected customer no longer exists' } });
     }
@@ -40,13 +46,19 @@ router.post('/manual', async (req, res) => {
     const categorization = await categorizeFeedback(review_text, stars);
 
     // Save to feedback table
-    const result = await dbRun(
-      'INSERT INTO feedback (customer_id, review_text, category, stars, submitted_at, source) VALUES (?, ?, ?, ?, ?, ?)',
-      [customer_id, review_text, categorization.category, stars, new Date().toISOString(), 'manual']
-    );
+    const { data: result, error: insertError } = await supabase.from('feedback').insert([{
+      customer_id,
+      review_text,
+      category: categorization.category,
+      stars,
+      submitted_at: new Date().toISOString(),
+      source: 'manual'
+    }]).select('id').single();
+    
+    if (insertError) throw insertError;
 
     res.json({
-      id: result.lastID,
+      id: result.id,
       category: categorization.category,
       reason: categorization.reason
     });
@@ -98,68 +110,64 @@ function getFollowUpAnswers(analysisJson) {
 }
 
 async function listUnifiedFeedback() {
-  const feedbackRows = await dbAll(`
-    SELECT
-      f.id,
-      f.customer_id,
-      f.call_id,
-      c.name AS customer_name,
-      c.phone AS customer_phone,
-      f.review_text,
-      f.category,
-      f.stars,
-      f.source,
-      f.submitted_at,
-      calls.call_type,
-      calls.outcome,
-      calls.called_at,
-      calls.extracted_review_text,
-      calls.extracted_rating,
-      calls.sentiment_label,
-      calls.sentiment,
-      calls.analysis_summary,
-      calls.analysis_status,
-      calls.analysis_json,
-      calls.transcript_status,
-      CASE WHEN COALESCE(calls.transcript_text, '') != '' THEN 1 ELSE 0 END AS transcript_available
-    FROM feedback f
-    JOIN customers c ON c.id = f.customer_id
-    LEFT JOIN calls ON calls.id = f.call_id
-    ORDER BY f.submitted_at DESC
-    LIMIT 500
-  `);
+  const { data: fData, error: fError } = await supabase
+    .from('feedback')
+    .select(`
+      id, customer_id, call_id, review_text, category, stars, source, submitted_at,
+      customers (name, phone),
+      calls (call_type, outcome, called_at, extracted_review_text, extracted_rating, sentiment_label, sentiment, analysis_summary, analysis_status, analysis_json, transcript_status, transcript_text)
+    `)
+    .order('submitted_at', { ascending: false })
+    .limit(500);
+
+  if (fError) throw fError;
+
+  const feedbackRows = (fData || []).map(r => ({
+    ...r,
+    customer_name: r.customers?.name,
+    customer_phone: r.customers?.phone,
+    call_type: r.calls?.call_type,
+    outcome: r.calls?.outcome,
+    called_at: r.calls?.called_at,
+    extracted_review_text: r.calls?.extracted_review_text,
+    extracted_rating: r.calls?.extracted_rating,
+    sentiment_label: r.calls?.sentiment_label,
+    sentiment: r.calls?.sentiment,
+    analysis_summary: r.calls?.analysis_summary,
+    analysis_status: r.calls?.analysis_status,
+    analysis_json: r.calls?.analysis_json,
+    transcript_status: r.calls?.transcript_status,
+    transcript_available: r.calls?.transcript_text ? 1 : 0
+  }));
 
   const linkedCallIds = new Set(feedbackRows.map((row) => Number(row.call_id || 0)).filter(Boolean));
-  const analyzedCalls = await dbAll(`
-      SELECT 
-        calls.id AS call_id,
-        calls.customer_id,
-        customers.name AS customer_name,
-        customers.phone AS customer_phone,
-        calls.extracted_review_text,
-        calls.analysis_summary,
-        calls.summary,
-        calls.report_excerpt,
-        calls.extracted_rating AS stars,
-        calls.sentiment_label,
-        calls.sentiment,
-        calls.analysis_status,
-        calls.analysis_completed_at,
-        calls.feedback_saved_at,
-        calls.called_at,
-        calls.call_type,
-        calls.outcome,
-        calls.analysis_json,
-        calls.transcript_status,
-        CASE WHEN COALESCE(calls.transcript_text, '') != '' THEN 1 ELSE 0 END AS transcript_available
-      FROM calls
-      JOIN customers ON customers.id = calls.customer_id
-      WHERE calls.extracted_rating IS NOT NULL 
-         OR calls.sentiment IS NOT NULL 
-         OR calls.analysis_summary IS NOT NULL
-      ORDER BY COALESCE(calls.analysis_completed_at, calls.feedback_saved_at, calls.called_at) DESC
-      LIMIT 500
-  `);
+  
+  const { data: cData, error: cError } = await supabase
+    .from('calls')
+    .select(`
+      id, customer_id, extracted_review_text, analysis_summary, summary, report_excerpt, extracted_rating,
+      sentiment_label, sentiment, analysis_status, analysis_completed_at, feedback_saved_at, called_at,
+      call_type, outcome, analysis_json, transcript_status, transcript_text,
+      customers (name, phone)
+    `)
+    .or('extracted_rating.not.is.null,sentiment.not.is.null,analysis_summary.not.is.null')
+    .order('called_at', { ascending: false })
+    .limit(500);
+
+  if (cError) throw cError;
+
+  const analyzedCalls = (cData || []).map(r => ({
+    ...r,
+    call_id: r.id,
+    customer_name: r.customers?.name,
+    customer_phone: r.customers?.phone,
+    stars: r.extracted_rating,
+    transcript_available: r.transcript_text ? 1 : 0
+  })).sort((a, b) => {
+    const tA = new Date(a.analysis_completed_at || a.feedback_saved_at || a.called_at || 0);
+    const tB = new Date(b.analysis_completed_at || b.feedback_saved_at || b.called_at || 0);
+    return tB - tA;
+  });
 
   const storedFeedback = feedbackRows.map((row) => {
     const stars = normalizeRating(row.stars || row.extracted_rating);
@@ -194,7 +202,7 @@ async function listUnifiedFeedback() {
       const sentiment = normalizeSentiment(row.sentiment_label || row.sentiment);
       const followUpAnswers = getFollowUpAnswers(parseAnalysisJson(row.analysis_json));
       return {
-        id: `analysis-${row.call_id}`,
+        id: `analysis-\${row.call_id}`,
         feedback_id: null,
         customer_id: row.customer_id,
         call_id: row.call_id,
@@ -275,7 +283,7 @@ router.get('/items', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const feedback = await listUnifiedFeedback();
-    console.log(`[FEEDBACK_ANALYSIS_RECORDS_FOUND] count=${feedback.length}`);
+    console.log(`[FEEDBACK_ANALYSIS_RECORDS_FOUND] count=\${feedback.length}`);
     res.json(feedback);
   } catch (error) {
     console.error('Error fetching feedback:', error);
@@ -286,17 +294,25 @@ router.get('/', async (req, res) => {
 // Analytics endpoint for unified feedback stats
 router.get('/analytics', async (req, res) => {
   try {
-    const feedback = await dbAll(`
-      SELECT f.*, c.name as customer_name, c.phone as customer_phone
-      FROM feedback f
-      LEFT JOIN customers c ON f.customer_id = c.id
-    `);
-    const recentCalls = await dbAll(`
-      SELECT calls.*, c.name as customer_name, c.phone as customer_phone
-      FROM calls
-      LEFT JOIN customers c ON calls.customer_id = c.id
-      ORDER BY calls.created_at DESC LIMIT 500
-    `);
+    const { data: fData, error: fError } = await supabase
+      .from('feedback')
+      .select('*, customers(name, phone)');
+    if (fError) throw fError;
+    
+    const feedback = (fData || []).map(r => ({
+      ...r, customer_name: r.customers?.name, customer_phone: r.customers?.phone
+    }));
+
+    const { data: cData, error: cError } = await supabase
+      .from('calls')
+      .select('*, customers(name, phone)')
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (cError) throw cError;
+    
+    const recentCalls = (cData || []).map(r => ({
+      ...r, customer_name: r.customers?.name, customer_phone: r.customers?.phone
+    }));
 
     // Positive Feedback
     const fbPositive = feedback.filter((item) => normalizeRating(item.stars) >= 4);

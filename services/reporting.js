@@ -1,4 +1,4 @@
-const { dbAll, dbGet } = require('../db');
+const supabase = require('../src/supabase');
 
 function getDateRangeForDays(days, endDate = new Date()) {
   const end = new Date(endDate);
@@ -38,124 +38,123 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const range = start && end ? { start, end } : getTodayDateRange();
   const publicBaseUrl = process.env.NGROK_URL || process.env.PUBLIC_BASE_URL || '';
 
-  const callStats = await dbGet(`
-    SELECT 
-      COUNT(*) as total_calls,
-      SUM(CASE WHEN outcome = 'completed' THEN 1 ELSE 0 END) as completed_calls,
-      SUM(CASE WHEN outcome = 'callback' THEN 1 ELSE 0 END) as callbacks_requested,
-      SUM(CASE WHEN outcome IN ('failed', 'busy', 'no_answer', 'declined') THEN 1 ELSE 0 END) as failed_calls,
-      SUM(CASE WHEN outcome IN ('answered', 'completed', 'consent_given', 'interested', 'callback', 'not_interested', 'hot_lead') THEN 1 ELSE 0 END) as answered,
-      SUM(CASE WHEN outcome = 'no_answer' THEN 1 ELSE 0 END) as no_answer,
-      SUM(CASE WHEN outcome = 'declined' THEN 1 ELSE 0 END) as declined,
-      SUM(CASE WHEN outcome = 'consent_given' THEN 1 ELSE 0 END) as consent_given,
-      SUM(CASE WHEN fallback_triggered = 1 THEN 1 ELSE 0 END) as fallbacks_triggered,
-      SUM(CASE WHEN outcome IN ('interested', 'hot_lead') THEN 1 ELSE 0 END) as hot_leads
-    FROM calls
-    WHERE called_at >= ? AND called_at <= ?
-  `, [range.start, range.end]);
+  const { data: callsData } = await supabase
+    .from('calls')
+    .select('outcome, fallback_triggered, called_at, call_script_version, extracted_rating, id, call_type, outcome_detail, recording_status, recording_url, transcript_status, transcript_text, analysis_status, analysis_summary, report_excerpt, follow_up_task, next_action_at, hot_lead_score, sentiment_label, crm_sync_status, objections_json, competitor_mentions_json, live_red_flag, supervisor_alert_level, customers(name, phone)')
+    .gte('called_at', range.start)
+    .lte('called_at', range.end);
+    
+  const allCallsInRange = callsData || [];
 
-  const feedbackStats = await dbGet(`
-    SELECT 
-      COUNT(*) as feedback_count,
-      ROUND(AVG(CASE WHEN stars IS NOT NULL THEN stars END), 1) as average_rating,
-      SUM(CASE WHEN category = 'good' THEN 1 ELSE 0 END) as good_count,
-      SUM(CASE WHEN category = 'average' THEN 1 ELSE 0 END) as average_count,
-      SUM(CASE WHEN category = 'bad' THEN 1 ELSE 0 END) as bad_count
-    FROM feedback
-    WHERE submitted_at >= ? AND submitted_at <= ?
-  `, [range.start, range.end]);
+  const callStats = {
+    total_calls: 0, completed_calls: 0, callbacks_requested: 0,
+    failed_calls: 0, answered: 0, no_answer: 0, declined: 0,
+    consent_given: 0, fallbacks_triggered: 0, hot_leads: 0
+  };
+  
+  const analyzedCalls = [];
+  const pendingItems = [];
+  const peakSlotsMap = new Map();
+  const scriptPerfMap = new Map();
 
-  const feedbackList = await dbAll(`
-    SELECT 
-      f.id,
-      c.name as customer_name,
-      f.category,
-      f.stars,
-      SUBSTR(f.review_text, 1, 180) as review_excerpt,
-      f.submitted_at
-    FROM feedback f
-    JOIN customers c ON f.customer_id = c.id
-    WHERE f.submitted_at >= ? AND f.submitted_at <= ?
-    ORDER BY f.submitted_at DESC
-    LIMIT 20
-  `, [range.start, range.end]);
+  allCallsInRange.forEach(c => {
+    callStats.total_calls++;
+    if (c.outcome === 'completed') callStats.completed_calls++;
+    if (c.outcome === 'callback') callStats.callbacks_requested++;
+    if (['failed', 'busy', 'no_answer', 'declined'].includes(c.outcome)) callStats.failed_calls++;
+    if (['answered', 'completed', 'consent_given', 'interested', 'callback', 'not_interested', 'hot_lead'].includes(c.outcome)) callStats.answered++;
+    if (c.outcome === 'no_answer') callStats.no_answer++;
+    if (c.outcome === 'declined') callStats.declined++;
+    if (c.outcome === 'consent_given') callStats.consent_given++;
+    if (c.fallback_triggered === 1) callStats.fallbacks_triggered++;
+    if (['interested', 'hot_lead'].includes(c.outcome)) callStats.hot_leads++;
+    
+    analyzedCalls.push({
+      ...c,
+      customer_name: c.customers?.name,
+      customer_phone: c.customers?.phone
+    });
+    
+    const isPending = (c.recording_status !== 'completed' || c.transcript_status !== 'completed' || c.analysis_status !== 'completed' || ['initiated', 'scheduled_initiated', 'no_answer', 'busy', 'callback'].includes(c.outcome));
+    if (isPending) {
+      pendingItems.push({
+        id: c.id,
+        customer_name: c.customers?.name,
+        called_at: c.called_at,
+        outcome: c.outcome,
+        recording_status: c.recording_status,
+        transcript_status: c.transcript_status,
+        analysis_status: c.analysis_status,
+        follow_up_task: c.follow_up_task
+      });
+    }
+    
+    if (c.called_at) {
+      const d = new Date(c.called_at);
+      const slot = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      peakSlotsMap.set(slot, (peakSlotsMap.get(slot) || 0) + 1);
+    }
+    
+    const scriptVer = c.call_script_version || 'default';
+    if (!scriptPerfMap.has(scriptVer)) scriptPerfMap.set(scriptVer, { total: 0, ratingSum: 0, ratingCount: 0 });
+    const stat = scriptPerfMap.get(scriptVer);
+    stat.total++;
+    if (c.extracted_rating != null) {
+      stat.ratingSum += Number(c.extracted_rating);
+      stat.ratingCount++;
+    }
+  });
 
-  const analyzedCalls = await dbAll(`
-    SELECT
-      calls.id,
-      c.name AS customer_name,
-      c.phone AS customer_phone,
-      calls.called_at,
-      calls.outcome,
-      calls.call_type,
-      calls.outcome_detail,
-      calls.recording_status,
-      calls.recording_url,
-      calls.transcript_status,
-      calls.transcript_text,
-      calls.analysis_status,
-      calls.analysis_summary,
-      calls.report_excerpt,
-      calls.extracted_rating,
-      calls.follow_up_task,
-      calls.next_action_at,
-      calls.hot_lead_score,
-      calls.sentiment_label,
-      calls.crm_sync_status,
-      calls.objections_json,
-      calls.competitor_mentions_json,
-      calls.live_red_flag,
-      calls.supervisor_alert_level
-    FROM calls
-    JOIN customers c ON c.id = calls.customer_id
-    WHERE calls.called_at >= ? AND calls.called_at <= ?
-    ORDER BY calls.called_at DESC
-    LIMIT 25
-  `, [range.start, range.end]);
+  const { data: feedbackData } = await supabase
+    .from('feedback')
+    .select('id, category, stars, review_text, submitted_at, customers(name)')
+    .gte('submitted_at', range.start)
+    .lte('submitted_at', range.end);
+    
+  const allFeedback = feedbackData || [];
+  
+  const feedbackStats = {
+    feedback_count: 0, average_rating: 0, good_count: 0, average_count: 0, bad_count: 0
+  };
+  
+  let starsSum = 0, starsCount = 0;
+  const feedbackList = [];
+  
+  allFeedback.forEach(f => {
+    feedbackStats.feedback_count++;
+    if (f.stars != null) { starsSum += f.stars; starsCount++; }
+    if (f.category === 'good') feedbackStats.good_count++;
+    if (f.category === 'average') feedbackStats.average_count++;
+    if (f.category === 'bad') feedbackStats.bad_count++;
+    feedbackList.push({
+      id: f.id,
+      customer_name: f.customers?.name,
+      category: f.category,
+      stars: f.stars,
+      review_excerpt: f.review_text ? f.review_text.substring(0, 180) : '',
+      submitted_at: f.submitted_at
+    });
+  });
+  feedbackStats.average_rating = starsCount ? Number((starsSum / starsCount).toFixed(1)) : 0;
+  
+  feedbackList.sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at)).splice(20);
+  analyzedCalls.sort((a, b) => new Date(b.called_at) - new Date(a.called_at)).splice(25);
+  pendingItems.sort((a, b) => new Date(b.called_at) - new Date(a.called_at)).splice(12);
 
-  const pendingItems = await dbAll(`
-    SELECT
-      calls.id,
-      c.name AS customer_name,
-      calls.called_at,
-      calls.outcome,
-      calls.recording_status,
-      calls.transcript_status,
-      calls.analysis_status,
-      calls.follow_up_task
-    FROM calls
-    JOIN customers c ON c.id = calls.customer_id
-    WHERE calls.called_at >= ? AND calls.called_at <= ?
-      AND (
-        COALESCE(calls.recording_status, 'pending') != 'completed'
-        OR COALESCE(calls.transcript_status, 'pending') != 'completed'
-        OR COALESCE(calls.analysis_status, 'pending') != 'completed'
-        OR calls.outcome IN ('initiated', 'scheduled_initiated', 'no_answer', 'busy', 'callback')
-      )
-    ORDER BY calls.called_at DESC
-    LIMIT 12
-  `, [range.start, range.end]);
+  const peakSlots = [...peakSlotsMap.entries()]
+    .map(([slot, total_calls]) => ({ slot, total_calls }))
+    .sort((a, b) => b.total_calls - a.total_calls || a.slot.localeCompare(b.slot))
+    .slice(0, 5);
+    
+  const scriptPerformance = [...scriptPerfMap.entries()]
+    .map(([script_version, stats]) => ({
+      script_version,
+      total_calls: stats.total,
+      avg_rating: stats.ratingCount ? stats.ratingSum / stats.ratingCount : null
+    }))
+    .sort((a, b) => (b.avg_rating || 0) - (a.avg_rating || 0) || b.total_calls - a.total_calls)
+    .slice(0, 5);
 
-  const peakSlots = await dbAll(`
-    SELECT STRFTIME('%H:%M', DATETIME(called_at, 'localtime')) AS slot, COUNT(*) AS total_calls
-    FROM calls
-    WHERE called_at >= ? AND called_at <= ?
-    GROUP BY STRFTIME('%H:%M', DATETIME(called_at, 'localtime'))
-    ORDER BY total_calls DESC, slot ASC
-    LIMIT 5
-  `, [range.start, range.end]);
-
-  const scriptPerformance = await dbAll(`
-    SELECT
-      COALESCE(call_script_version, 'default') AS script_version,
-      COUNT(*) AS total_calls,
-      AVG(CASE WHEN extracted_rating IS NOT NULL THEN extracted_rating END) AS avg_rating
-    FROM calls
-    WHERE called_at >= ? AND called_at <= ?
-    GROUP BY COALESCE(call_script_version, 'default')
-    ORDER BY avg_rating DESC, total_calls DESC
-    LIMIT 5
-  `, [range.start, range.end]);
 
   const safeTotalCalls = Number(callStats?.total_calls) || 0;
   const safeAnswered = Number(callStats?.answered) || 0;
@@ -179,8 +178,9 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const sentimentCounts = { positive: 0, neutral: 0, negative: 0 };
 
   analyzedCalls.forEach((call) => {
-    const objections = JSON.parse(call.objections_json || '[]');
-    const competitors = JSON.parse(call.competitor_mentions_json || '[]');
+    let objections = [], competitors = [];
+    try { objections = JSON.parse(call.objections_json || '[]'); } catch(e) {}
+    try { competitors = JSON.parse(call.competitor_mentions_json || '[]'); } catch(e) {}
     const sentiment = String(call.sentiment_label || '').toLowerCase();
 
     objections.forEach((item) => objectionCounts.set(item, (objectionCounts.get(item) || 0) + 1));
@@ -373,54 +373,65 @@ async function buildOwnerDashboardData() {
     ? Number(((today.revenue_pipeline_estimate || 0) / aiOpsCost).toFixed(1))
     : 0;
   const staffSaving = Math.max(staffOpsCost - aiOpsCost, 0);
+  
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-  const ownerAlerts = await dbAll(`
-    SELECT
-      calls.id AS call_id,
-      c.id AS customer_id,
-      c.name AS customer_name,
-      c.phone AS customer_phone,
-      calls.called_at,
-      calls.outcome,
-      calls.call_type,
-      calls.hot_lead_score,
-      calls.follow_up_task,
-      calls.next_action_at,
-      calls.analysis_summary,
-      calls.report_excerpt,
-      calls.sentiment_label,
-      calls.supervisor_alert_level,
-      calls.live_red_flag,
-      c.admin_review_required,
-      c.wrong_number_flag,
-      c.next_retry_at,
-      c.pending_follow_ups,
-      c.revenue_estimate
-    FROM calls
-    JOIN customers c ON c.id = calls.customer_id
-    WHERE calls.called_at >= DATETIME('now', '-7 days')
-    ORDER BY calls.called_at DESC
-    LIMIT 40
-  `);
+  const { data: callsOwnerAlerts } = await supabase
+    .from('calls')
+    .select('id, customer_id, called_at, outcome, call_type, hot_lead_score, follow_up_task, next_action_at, analysis_summary, report_excerpt, sentiment_label, supervisor_alert_level, live_red_flag, customers(name, phone, admin_review_required, wrong_number_flag, next_retry_at, pending_follow_ups, revenue_estimate)')
+    .gte('called_at', sevenDaysAgo.toISOString())
+    .order('called_at', { ascending: false })
+    .limit(40);
+    
+  const ownerAlerts = (callsOwnerAlerts || []).map(c => ({
+    call_id: c.id,
+    customer_id: c.customer_id,
+    customer_name: c.customers?.name,
+    customer_phone: c.customers?.phone,
+    called_at: c.called_at,
+    outcome: c.outcome,
+    call_type: c.call_type,
+    hot_lead_score: c.hot_lead_score,
+    follow_up_task: c.follow_up_task,
+    next_action_at: c.next_action_at,
+    analysis_summary: c.analysis_summary,
+    report_excerpt: c.report_excerpt,
+    sentiment_label: c.sentiment_label,
+    supervisor_alert_level: c.supervisor_alert_level,
+    live_red_flag: c.live_red_flag,
+    admin_review_required: c.customers?.admin_review_required,
+    wrong_number_flag: c.customers?.wrong_number_flag,
+    next_retry_at: c.customers?.next_retry_at,
+    pending_follow_ups: c.customers?.pending_follow_ups,
+    revenue_estimate: c.customers?.revenue_estimate
+  }));
 
-  const campaignConfigs = await dbAll(`
-    SELECT name, service_name, monthly_spend_inr, status
-    FROM campaign_configs
-    WHERE COALESCE(status, 'active') = 'active'
-    ORDER BY created_at DESC, name ASC
-  `);
+  const { data: campaignConfigsData } = await supabase
+    .from('campaign_configs')
+    .select('name, service_name, monthly_spend_inr, status')
+    .or('status.is.null,status.eq.active')
+    .order('created_at', { ascending: false })
+    .order('name', { ascending: true });
+    
+  const campaignConfigs = campaignConfigsData || [];
 
-  const campaignPerformance = await dbAll(`
-    SELECT
-      COALESCE(campaign_name, 'Unassigned') AS campaign_name,
-      COUNT(*) AS total_customers,
-      SUM(CASE WHEN status IN ('hot_lead', 'completed', 'called', 'callback_scheduled') THEN 1 ELSE 0 END) AS active_leads,
-      SUM(CASE WHEN revenue_stage IN ('qualified', 'follow_up') THEN 1 ELSE 0 END) AS qualified_leads,
-      SUM(COALESCE(revenue_estimate, 0)) AS revenue_pipeline
-    FROM customers
-    GROUP BY COALESCE(campaign_name, 'Unassigned')
-    ORDER BY revenue_pipeline DESC, total_customers DESC
-  `);
+  const { data: customersCampaignData } = await supabase
+    .from('customers')
+    .select('campaign_name, status, revenue_stage, revenue_estimate');
+    
+  const campaignPerfMap = new Map();
+  (customersCampaignData || []).forEach(c => {
+    const cname = c.campaign_name || 'Unassigned';
+    if (!campaignPerfMap.has(cname)) campaignPerfMap.set(cname, { total_customers: 0, active_leads: 0, qualified_leads: 0, revenue_pipeline: 0 });
+    const cp = campaignPerfMap.get(cname);
+    cp.total_customers++;
+    if (['hot_lead', 'completed', 'called', 'callback_scheduled'].includes(c.status)) cp.active_leads++;
+    if (['qualified', 'follow_up'].includes(c.revenue_stage)) cp.qualified_leads++;
+    cp.revenue_pipeline += Number(c.revenue_estimate || 0);
+  });
+  
+  const campaignPerformance = [...campaignPerfMap.entries()].map(([campaign_name, metrics]) => ({ campaign_name, ...metrics })).sort((a, b) => b.revenue_pipeline - a.revenue_pipeline || b.total_customers - a.total_customers);
 
   const normalizedAlerts = ownerAlerts.map((item) => {
     const outcome = String(item.outcome || '').toLowerCase();

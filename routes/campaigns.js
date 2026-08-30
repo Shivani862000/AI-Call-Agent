@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { dbAll, dbGet, dbRun } = require('../db');
+const supabase = require('../src/supabase');
 
 function normalizePayload(payload = {}) {
   return {
@@ -13,7 +13,12 @@ function normalizePayload(payload = {}) {
 
 router.get('/', async (req, res) => {
   try {
-    const rows = await dbAll('SELECT * FROM campaign_configs ORDER BY created_at DESC, name ASC');
+    const { data: rows, error } = await supabase
+      .from('campaign_configs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .order('name', { ascending: true });
+    if (error) throw error;
     res.json(rows);
   } catch (error) {
     console.error('Error fetching campaigns:', error);
@@ -28,11 +33,15 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Campaign name is required' });
     }
 
-    const result = await dbRun(
-      'INSERT INTO campaign_configs (name, service_name, monthly_spend_inr, status) VALUES (?, ?, ?, ?)',
-      [payload.name, payload.service_name || null, payload.monthly_spend_inr, payload.status]
-    );
-    res.json({ id: result.lastID, message: 'Campaign created successfully' });
+    const { data: result, error } = await supabase.from('campaign_configs').insert([{
+      name: payload.name,
+      service_name: payload.service_name || null,
+      monthly_spend_inr: payload.monthly_spend_inr,
+      status: payload.status
+    }]).select('id').single();
+
+    if (error) throw error;
+    res.json({ id: result.id, message: 'Campaign created successfully' });
   } catch (error) {
     console.error('Error creating campaign:', error);
     res.status(500).json({ error: error.message });
@@ -41,7 +50,13 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM campaign_configs WHERE id = ?', [req.params.id]);
+    const { data: existing, error: fetchError } = await supabase
+      .from('campaign_configs')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+      
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
     if (!existing) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
@@ -51,10 +66,14 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Campaign name is required' });
     }
 
-    await dbRun(
-      'UPDATE campaign_configs SET name = ?, service_name = ?, monthly_spend_inr = ?, status = ? WHERE id = ?',
-      [payload.name, payload.service_name || null, payload.monthly_spend_inr, payload.status, req.params.id]
-    );
+    const { error: updateError } = await supabase.from('campaign_configs').update({
+      name: payload.name,
+      service_name: payload.service_name || null,
+      monthly_spend_inr: payload.monthly_spend_inr,
+      status: payload.status
+    }).eq('id', req.params.id);
+
+    if (updateError) throw updateError;
     res.json({ message: 'Campaign updated successfully' });
   } catch (error) {
     console.error('Error updating campaign:', error);
@@ -64,7 +83,8 @@ router.put('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    await dbRun('DELETE FROM campaign_configs WHERE id = ?', [req.params.id]);
+    const { error } = await supabase.from('campaign_configs').delete().eq('id', req.params.id);
+    if (error) throw error;
     res.json({ message: 'Campaign deleted successfully' });
   } catch (error) {
     console.error('Error deleting campaign:', error);

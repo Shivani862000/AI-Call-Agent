@@ -1,4 +1,4 @@
-const { dbRun, dbGet } = require('../db');
+const supabase = require('../src/supabase');
 const { extractCallFeedback } = require('./call-feedback');
 const { categorizeFeedback, generateGeminiReply } = require('./gemini');
 
@@ -88,14 +88,9 @@ function applyAgentTemplate(template, values) {
   return String(template || '').replace(/\{\{\s*(client_name|customer_name|language|agent_name)\s*\}\}/g, (match, key) => values[key] || '');
 }
 
-async function getOutboundFeedbackPrompt(patientName) {
-  const agent = await dbGet(
-    `SELECT *
-       FROM agents
-      WHERE is_active = 1
-      ORDER BY is_default DESC, id ASC
-      LIMIT 1`
-  );
+async function buildTestPrompt(patientName) {
+  const { data: agents } = await supabase.from('agents').select('*').eq('is_active', 1).order('is_default', { ascending: false }).order('id', { ascending: true }).limit(1);
+  const agent = agents && agents.length > 0 ? agents[0] : null;
   const clientName = agent?.client_name || DEFAULT_CLIENT_NAME;
 
   if (agent?.system_prompt) {
@@ -141,18 +136,20 @@ function scriptedReply(session) {
 
 async function createCustomerForTestCall(name, phone) {
   const normalizedPhone = normalizeText(phone) || `test-${Date.now()}`;
-  const existing = await dbGet('SELECT id FROM customers WHERE phone = ?', [normalizedPhone]);
+  const { data: existing } = await supabase.from('customers').select('id').eq('phone', normalizedPhone).single();
   if (existing) {
     return existing.id;
   }
 
-  const result = await dbRun(
-    `INSERT INTO customers (name, phone, preferred_slot, status, created_at)
-     VALUES (?, ?, ?, ?, ?)`,
-    [name, normalizedPhone, 'test', 'completed', new Date().toISOString()]
-  );
+  const { data: result } = await supabase.from('customers').insert([{
+    name: name,
+    phone: normalizedPhone,
+    preferred_slot: 'test',
+    status: 'completed',
+    created_at: new Date().toISOString()
+  }]).select('id').single();
 
-  return result.lastID;
+  return result.id;
 }
 
 function toPlainTranscript(transcript) {
@@ -178,29 +175,23 @@ async function startTestCall({ patientName, phone }) {
   const promptConfig = await getOutboundFeedbackPrompt(name);
   const customerId = await createCustomerForTestCall(name, normalizedPhone);
   const providerCallId = `test-call-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const callResult = await dbRun(
-    `INSERT INTO calls (
-       customer_id, called_at, outcome, provider_call_id, call_direction, call_source,
-       transcript_status, analysis_status, call_script_version, agent_id, notes
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      customerId,
-      new Date().toISOString(),
-      'initiated',
-      providerCallId,
-      'outbound',
-      TEST_CALL_SOURCE,
-      'in_progress',
-      'pending',
-      'test-feedback-v1',
-      promptConfig.agentId,
-      `${TEST_CALL_TYPE}; prompt_source=${promptConfig.promptSource}`
-    ]
-  );
+  const { data: callResult } = await supabase.from('calls').insert([{
+    customer_id: customerId,
+    called_at: new Date().toISOString(),
+    outcome: 'initiated',
+    provider_call_id: providerCallId,
+    call_direction: 'outbound',
+    call_source: TEST_CALL_SOURCE,
+    transcript_status: 'in_progress',
+    analysis_status: 'pending',
+    call_script_version: 'test-feedback-v1',
+    agent_id: promptConfig.agentId,
+    notes: `${TEST_CALL_TYPE}; prompt_source=${promptConfig.promptSource}`
+  }]).select('id').single();
 
   const session = {
     id: providerCallId,
-    callId: callResult.lastID,
+    callId: callResult.id,
     customerId,
     patientName: name,
     phone: normalizedPhone,
@@ -276,24 +267,13 @@ async function sendUserResponse({ sessionId, message }) {
   const isCompleted = session.step > QUESTION_PLAN.length;
   session.transcript.push({ role: 'AGENT', text: assistantText, at: new Date().toISOString() });
 
-  await dbRun(
-    `UPDATE calls
-        SET transcript_text = ?,
-            transcript_status = ?,
-            analysis_status = ?,
-            outcome = ?,
-            ended_at = CASE WHEN ? THEN ? ELSE ended_at END
-      WHERE id = ?`,
-    [
-      toPlainTranscript(session.transcript),
-      isCompleted ? 'completed' : 'in_progress',
-      isCompleted ? 'processing' : 'pending',
-      isCompleted ? 'completed' : 'answered',
-      isCompleted ? 1 : 0,
-      isCompleted ? new Date().toISOString() : null,
-      session.callId
-    ]
-  );
+  await supabase.from('calls').update({
+    transcript_text: toPlainTranscript(session.transcript),
+    transcript_status: isCompleted ? 'completed' : 'in_progress',
+    analysis_status: isCompleted ? 'processing' : 'pending',
+    outcome: isCompleted ? 'completed' : 'answered',
+    ended_at: isCompleted ? new Date().toISOString() : undefined
+  }).eq('id', session.callId);
 
   let saveResult = null;
   if (isCompleted) {
@@ -314,48 +294,31 @@ async function saveTestFeedback(session) {
   const reviewText = extraction.reviewText || 'Patient completed a test feedback call.';
   const stars = Number.isInteger(extraction.stars) ? extraction.stars : 3;
   const categorization = await categorizeFeedback(reviewText, stars);
-  const existingFeedback = await dbGet('SELECT id FROM feedback WHERE call_id = ?', [session.callId]);
+  const { data: existingFeedback } = await supabase.from('feedback').select('id').eq('call_id', session.callId).single();
 
-  await dbRun(
-    `UPDATE calls
-        SET transcript_text = ?,
-            transcript_status = ?,
-            analysis_status = ?,
-            extracted_rating = ?,
-            extracted_review_text = ?,
-            feedback_saved_at = ?,
-            outcome = ?
-      WHERE id = ?`,
-    [
-      toPlainTranscript(session.transcript),
-      'completed',
-      'completed',
-      stars,
-      reviewText,
-      new Date().toISOString(),
-      'completed',
-      session.callId
-    ]
-  );
+  await supabase.from('calls').update({
+    transcript_text: toPlainTranscript(session.transcript),
+    transcript_status: 'completed',
+    analysis_status: 'completed',
+    extracted_rating: stars,
+    extracted_review_text: reviewText,
+    feedback_saved_at: new Date().toISOString(),
+    outcome: 'completed'
+  }).eq('id', session.callId);
 
   if (existingFeedback) {
-    await dbRun(
-      `UPDATE feedback
-          SET review_text = ?, category = ?, stars = ?, submitted_at = ?, source = ?
-        WHERE id = ?`,
-      [reviewText, categorization.category, stars, new Date().toISOString(), TEST_CALL_SOURCE, existingFeedback.id]
-    );
+    await supabase.from('feedback').update({
+      review_text: reviewText, category: categorization.category, stars: stars, submitted_at: new Date().toISOString(), source: TEST_CALL_SOURCE
+    }).eq('id', existingFeedback.id);
     return { saved: true, feedbackId: existingFeedback.id, updated: true };
   }
 
-  const result = await dbRun(
-    `INSERT INTO feedback (customer_id, call_id, review_text, category, stars, submitted_at, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [session.customerId, session.callId, reviewText, categorization.category, stars, new Date().toISOString(), TEST_CALL_SOURCE]
-  );
+  const { data: result } = await supabase.from('feedback').insert([{
+    customer_id: session.customerId, call_id: session.callId, review_text: reviewText, category: categorization.category, stars: stars, submitted_at: new Date().toISOString(), source: TEST_CALL_SOURCE
+  }]).select('id').single();
 
-  console.log(`[TEST CALL] saved feedback session=${session.id} feedbackId=${result.lastID}`);
-  return { saved: true, feedbackId: result.lastID, updated: false };
+  console.log(`[TEST CALL] saved feedback session=${session.id} feedbackId=${result.id}`);
+  return { saved: true, feedbackId: result.id, updated: false };
 }
 
 async function endTestCall({ sessionId, reason = 'ended_by_admin' }) {
@@ -373,25 +336,16 @@ async function endTestCall({ sessionId, reason = 'ended_by_admin' }) {
     at: new Date().toISOString()
   });
 
-  await dbRun(
-    `UPDATE calls
-        SET transcript_text = ?,
-            transcript_status = ?,
-            analysis_status = ?,
-            outcome = ?,
-            ended_at = ?,
-            notes = COALESCE(notes, '') || ?
-      WHERE id = ?`,
-    [
-      toPlainTranscript(session.transcript),
-      'completed',
-      'completed',
-      'completed',
-      new Date().toISOString(),
-      `; ${reason}`,
-      session.callId
-    ]
-  );
+  const { data: callInfo } = await supabase.from('calls').select('notes').eq('id', session.callId).single();
+  const existingNotes = callInfo?.notes || '';
+  await supabase.from('calls').update({
+    transcript_text: toPlainTranscript(session.transcript),
+    transcript_status: 'completed',
+    analysis_status: 'completed',
+    outcome: 'completed',
+    ended_at: new Date().toISOString(),
+    notes: `${existingNotes}; ${reason}`
+  }).eq('id', session.callId);
 
   const saveResult = await saveTestFeedback(session);
   sessions.delete(session.id);

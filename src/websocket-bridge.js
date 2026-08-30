@@ -42,7 +42,7 @@ const {
   buildOpeningPrompt
 } = require('./prompt-builder');
 
-const { dbGet, dbRun } = require('../db');
+const supabase = require('./supabase');
 const { saveCallFeedbackFromTranscript } = require('../services/call-feedback');
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
 const { generateGeminiReply } = require('../services/gemini');
@@ -396,41 +396,25 @@ module.exports = function setupWebSocketBridge(server) {
 
       try {
         if (session.callId) {
-          await dbRun(
-            `UPDATE calls
-              SET outcome = ?,
-                  outcome_detail = ?,
-                  transcript_text = COALESCE(NULLIF(?, ''), transcript_text),
-                  transcript_status = ?,
-                  transcript_source = COALESCE(transcript_source, ?),
-                  analysis_status = CASE
-                    WHEN COALESCE(analysis_status, '') = 'completed' THEN analysis_status
-                    ELSE COALESCE(analysis_status, 'pending')
-                  END,
-                  ended_at = COALESCE(ended_at, ?),
-                  last_event = ?,
-                  notes = ?
-            WHERE id = ?`,
-            [
-              'completed',
-              reason,
-              transcriptText,
-              transcriptText ? 'completed' : 'missing',
-              transcriptText ? 'live_stream' : null,
-              nowIso,
-              'ai-completed',
-              'AI conversation completed and auto hangup requested',
-              session.callId
-            ]
-          );
+          const { data: oldCall } = await supabase.from('calls').select('transcript_text, transcript_source, analysis_status, ended_at').eq('id', session.callId).single();
+          if (oldCall) {
+            await supabase.from('calls').update({
+              outcome: 'completed',
+              outcome_detail: reason,
+              transcript_text: transcriptText || oldCall.transcript_text,
+              transcript_status: transcriptText ? 'completed' : 'missing',
+              transcript_source: oldCall.transcript_source || (transcriptText ? 'live_stream' : null),
+              analysis_status: oldCall.analysis_status === 'completed' ? 'completed' : (oldCall.analysis_status || 'pending'),
+              ended_at: oldCall.ended_at || nowIso,
+              last_event: 'ai-completed',
+              notes: 'AI conversation completed and auto hangup requested'
+            }).eq('id', session.callId);
+          }
         }
 
         // Update customer status so UI badge changes from "Calling..." to "Completed"
         if (session.customerId) {
-          await dbRun(
-            'UPDATE customers SET status = ?, last_called_at = ? WHERE id = ?',
-            ['completed', nowIso, session.customerId]
-          );
+          await supabase.from('customers').update({ status: 'completed', last_called_at: nowIso }).eq('id', session.customerId);
           logger.info('CALL_COMPLETED', {
             callId: session.callId,
             customerId: session.customerId,
@@ -443,8 +427,6 @@ module.exports = function setupWebSocketBridge(server) {
 
         if (session.providerCallId && transcript.length) {
           await saveCallFeedbackFromTranscript({
-            dbGet,
-            dbRun,
             callSid: session.providerCallId,
             callId: session.callId,
             customerId: session.customerId,
@@ -453,7 +435,7 @@ module.exports = function setupWebSocketBridge(server) {
           });
 
           runInBackground('POST CALL PIPELINE ERROR', async () => {
-            const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: session.providerCallId, callId: session.callId });
+            const result = await processCompletedCallPipeline({ callSid: session.providerCallId, callId: session.callId });
             if (result.ok) {
               console.log(`[POST CALL PIPELINE] Processed auto-completed call ${session.providerCallId} with feedback ${result.feedbackId}`);
             } else {
@@ -1404,10 +1386,10 @@ module.exports = function setupWebSocketBridge(server) {
           if (session.pendingMediaPackets >= 25) {
             const mediaPackets = session.pendingMediaPackets;
             session.pendingMediaPackets = 0;
-            runInBackground('ICALLMATE MEDIA COUNTER ERROR', () => dbRun(
-              'UPDATE calls SET media_packets = COALESCE(media_packets, 0) + ? WHERE id = ?',
-              [mediaPackets, session.callId]
-            ));
+            runInBackground('ICALLMATE MEDIA COUNTER ERROR', async () => {
+              const { data: callRow } = await supabase.from('calls').select('media_packets').eq('id', session.callId).single();
+              if (callRow) await supabase.from('calls').update({ media_packets: (callRow.media_packets || 0) + mediaPackets }).eq('id', session.callId);
+            });
           }
         }
         return;
@@ -1433,10 +1415,15 @@ module.exports = function setupWebSocketBridge(server) {
             const transcriptText = aiBridge.getTranscriptText();
             if (transcriptText) {
               try {
-                await dbRun(
-                  `UPDATE calls SET outcome = 'completed', transcript_text = COALESCE(NULLIF(?, ''), transcript_text), transcript_status = COALESCE(NULLIF(transcript_status, 'pending'), 'completed'), ended_at = COALESCE(ended_at, ?) WHERE id = ?`,
-                  [transcriptText, new Date().toISOString(), session.callId]
-                );
+                const { data: oldCall } = await supabase.from('calls').select('transcript_text, transcript_status, ended_at').eq('id', session.callId).single();
+                if (oldCall) {
+                  await supabase.from('calls').update({
+                    outcome: 'completed',
+                    transcript_text: transcriptText || oldCall.transcript_text,
+                    transcript_status: oldCall.transcript_status !== 'pending' && oldCall.transcript_status ? oldCall.transcript_status : 'completed',
+                    ended_at: oldCall.ended_at || new Date().toISOString()
+                  }).eq('id', session.callId);
+                }
                 console.log(`[TRANSCRIPT] Saved from hangup-call (callId=${session.callId}, length=${transcriptText.length})`);
               } catch (e) { console.error('[TRANSCRIPT SAVE ERROR]', e.message); }
             }
@@ -1445,8 +1432,7 @@ module.exports = function setupWebSocketBridge(server) {
           // Update customer status
           if (session.customerId) {
             try {
-              await dbRun('UPDATE customers SET status = ?, last_called_at = ? WHERE id = ?',
-                ['completed', new Date().toISOString(), session.customerId]);
+              await supabase.from('customers').update({ status: 'completed', last_called_at: new Date().toISOString() }).eq('id', session.customerId);
               console.log(`[CALL STATUS] Calling -> Completed (hangup-call, customerId=${session.customerId})`);
             } catch (e) { console.error('[CALL STATUS UPDATE ERROR]', e.message); }
           }
@@ -1455,7 +1441,7 @@ module.exports = function setupWebSocketBridge(server) {
           if (session.providerCallId) {
             runInBackground('HANGUP POST CALL PIPELINE', async () => {
               try {
-                const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: session.providerCallId, callId: session.callId });
+                const result = await processCompletedCallPipeline({ callSid: session.providerCallId, callId: session.callId });
                 if (result.ok) {
                   console.log(`[POST CALL PIPELINE] Processed hangup call ${session.providerCallId} feedbackId=${result.feedbackId}`);
                   console.log(`[TRANSCRIPT] Generated successfully`);
@@ -1522,28 +1508,41 @@ module.exports = function setupWebSocketBridge(server) {
 
             if (transcriptText) {
               try {
-                await dbRun(
-                  `UPDATE calls SET outcome = 'completed', transcript_text = COALESCE(NULLIF(?, ''), transcript_text), transcript_status = COALESCE(NULLIF(transcript_status, 'pending'), 'completed'), ended_at = COALESCE(ended_at, ?), recording_local_path = ? WHERE id = ?`,
-                  [transcriptText, closeTimestamp, recordingPath, session.callId]
-                );
+                const { data: oldCall } = await supabase.from('calls').select('transcript_text, transcript_status, ended_at').eq('id', session.callId).single();
+                if (oldCall) {
+                  await supabase.from('calls').update({
+                    outcome: 'completed',
+                    transcript_text: transcriptText || oldCall.transcript_text,
+                    transcript_status: oldCall.transcript_status !== 'pending' && oldCall.transcript_status ? oldCall.transcript_status : 'completed',
+                    ended_at: oldCall.ended_at || closeTimestamp,
+                    recording_local_path: recordingPath
+                  }).eq('id', session.callId);
+                }
                 console.log(`[TRANSCRIPT] Saved from ws close (callId=${session.callId}, length=${transcriptText.length})`);
               } catch (e) { console.error('[TRANSCRIPT SAVE ERROR ws close]', e.message); }
             } else {
               try {
-                await dbRun(
-                  `UPDATE calls SET outcome = 'completed', ended_at = COALESCE(ended_at, ?), recording_local_path = ? WHERE id = ?`,
-                  [closeTimestamp, recordingPath, session.callId]
-                );
+                const { data: oldCall } = await supabase.from('calls').select('ended_at').eq('id', session.callId).single();
+                if (oldCall) {
+                  await supabase.from('calls').update({
+                    outcome: 'completed',
+                    ended_at: oldCall.ended_at || closeTimestamp,
+                    recording_local_path: recordingPath
+                  }).eq('id', session.callId);
+                }
               } catch (e) { console.error('[CALL UPDATE ERROR ws close]', e.message); }
             }
           }
           // Safety net: update customer status if still 'called'
           if (session.customerId && session.answered) {
             try {
-              await dbRun(
-                `UPDATE customers SET status = CASE WHEN status = 'called' THEN 'completed' ELSE status END, last_called_at = ? WHERE id = ?`,
-                [closeTimestamp, session.customerId]
-              );
+              const { data: oldC } = await supabase.from('customers').select('status').eq('id', session.customerId).single();
+              if (oldC) {
+                await supabase.from('customers').update({
+                  status: oldC.status === 'called' ? 'completed' : oldC.status,
+                  last_called_at: closeTimestamp
+                }).eq('id', session.customerId);
+              }
               console.log(`[CALL STATUS] Calling -> Completed (ws close, customerId=${session.customerId})`);
             } catch (e) { console.error('[CALL STATUS UPDATE ERROR ws close]', e.message); }
           }
@@ -1551,7 +1550,7 @@ module.exports = function setupWebSocketBridge(server) {
           if (session.providerCallId && session.answered) {
             runInBackground('WS CLOSE POST CALL PIPELINE', async () => {
               try {
-                const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: session.providerCallId, callId: session.callId });
+                const result = await processCompletedCallPipeline({ callSid: session.providerCallId, callId: session.callId });
                 if (result.ok) {
                   console.log(`[POST CALL PIPELINE] Processed ws-close call ${session.providerCallId} feedbackId=${result.feedbackId}`);
                   console.log(`[TRANSCRIPT] Generated successfully`);

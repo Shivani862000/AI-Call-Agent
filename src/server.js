@@ -17,7 +17,7 @@ const {
   logConfigSnapshot
 } = require('./config');
 
-const { initializeDatabase, startDatabaseBackupSchedule } = require('../db');
+
 const { runSchedulerTick, runOwnerDigestTick } = require('./scheduler');
 const { pruneLiveCallState } = require('./helpers');
 const { validateAuthConfig } = require('./auth');
@@ -27,8 +27,7 @@ module.exports = function startServer(server) {
   try {
     validateConfig();
     validateAuthConfig();
-    await initializeDatabase();
-    startDatabaseBackupSchedule();
+
     logConfigSnapshot('SERVER');
 
     if (!DISABLE_SCHEDULER) {
@@ -61,6 +60,18 @@ module.exports = function startServer(server) {
       runOwnerDigestTick().catch((error) => {
         console.error('[OWNER DIGEST ERROR]', error.message);
       });
+    }
+
+    const supabaseAdmin = require('./supabase');
+    const { error: dbError } = await supabaseAdmin.from('customers').select('id').limit(1);
+    if (dbError) {
+      console.error('=============================================');
+      console.error('[SERVER] ❌ Database connection failed:', dbError.message);
+      console.error('=============================================');
+    } else {
+      console.log('=============================================');
+      console.log('[SERVER] ✅ Database connected successfully!');
+      console.log('=============================================');
     }
 
     server.listen(PORT, '0.0.0.0', () => {

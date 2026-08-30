@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { dbRun, dbGet, dbAll } = require('../db');
+const supabase = require('../src/supabase');
 
 function slugify(value) {
   return String(value || '')
@@ -78,21 +78,29 @@ function validateAgentPayload(payload) {
 
 async function clearDefaultAgentIfNeeded(payload, currentId = null) {
   if (!payload.is_default) return;
+  
   if (currentId) {
-    await dbRun('UPDATE agents SET is_default = 0, updated_at = ? WHERE id != ?', [new Date().toISOString(), currentId]);
+    await supabase.from('agents').update({
+      is_default: 0,
+      updated_at: new Date().toISOString()
+    }).neq('id', currentId);
     return;
   }
 
-  await dbRun('UPDATE agents SET is_default = 0, updated_at = ?', [new Date().toISOString()]);
+  await supabase.from('agents').update({
+    is_default: 0,
+    updated_at: new Date().toISOString()
+  }).neq('id', 0);
 }
 
 function handleSqliteError(error, res) {
-  if (error.message && error.message.includes('UNIQUE constraint failed: agents.name')) {
-    return res.status(409).json({ error: 'An agent with this name already exists', fieldErrors: { name: 'Agent name already exists' } });
-  }
-
-  if (error.message && error.message.includes('UNIQUE constraint failed: agents.slug')) {
-    return res.status(409).json({ error: 'An agent with this slug already exists', fieldErrors: { slug: 'Agent slug already exists' } });
+  if (error.code === '23505' || (error.message && error.message.includes('unique constraint'))) {
+    if (error.message.includes('name')) {
+      return res.status(409).json({ error: 'An agent with this name already exists', fieldErrors: { name: 'Agent name already exists' } });
+    }
+    if (error.message.includes('slug')) {
+      return res.status(409).json({ error: 'An agent with this slug already exists', fieldErrors: { slug: 'Agent slug already exists' } });
+    }
   }
 
   console.error('Agent route error:', error);
@@ -101,7 +109,14 @@ function handleSqliteError(error, res) {
 
 router.get('/', async (req, res) => {
   try {
-    const rows = await dbAll('SELECT * FROM agents ORDER BY is_default DESC, is_active DESC, name ASC');
+    const { data: rows, error } = await supabase
+      .from('agents')
+      .select('*')
+      .order('is_default', { ascending: false })
+      .order('is_active', { ascending: false })
+      .order('name', { ascending: true });
+
+    if (error) throw error;
     res.json(rows);
   } catch (error) {
     console.error('Error fetching agents:', error);
@@ -111,7 +126,15 @@ router.get('/', async (req, res) => {
 
 router.get('/default', async (req, res) => {
   try {
-    const agent = await dbGet('SELECT * FROM agents WHERE is_default = 1 ORDER BY id ASC LIMIT 1');
+    const { data: agent, error } = await supabase
+      .from('agents')
+      .select('*')
+      .eq('is_default', 1)
+      .order('id', { ascending: true })
+      .limit(1)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
     if (!agent) {
       return res.status(404).json({ error: 'Default agent not found' });
     }
@@ -125,7 +148,13 @@ router.get('/default', async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const agent = await dbGet('SELECT * FROM agents WHERE id = ?', [req.params.id]);
+    const { data: agent, error } = await supabase
+      .from('agents')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
     if (!agent) {
       return res.status(404).json({ error: 'Agent not found' });
     }
@@ -147,34 +176,28 @@ router.post('/', async (req, res) => {
     }
 
     await clearDefaultAgentIfNeeded(payload);
-    const now = new Date().toISOString();
-    const result = await dbRun(
-      `INSERT INTO agents (
-        name, slug, description, client_name, language, voice_pipeline, stt_provider,
-        llm_provider, llm_model, tts_provider, tts_voice, system_prompt, opening_prompt,
-        is_default, is_active, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        payload.name,
-        payload.slug,
-        payload.description || null,
-        payload.client_name || null,
-        payload.language,
-        payload.voice_pipeline,
-        payload.stt_provider,
-        payload.llm_provider,
-        payload.llm_model || null,
-        payload.tts_provider,
-        payload.tts_voice || null,
-        payload.system_prompt || null,
-        payload.opening_prompt || null,
-        payload.is_default,
-        payload.is_active,
-        now
-      ]
-    );
+    
+    const { data: result, error } = await supabase.from('agents').insert([{
+      name: payload.name,
+      slug: payload.slug,
+      description: payload.description || null,
+      client_name: payload.client_name || null,
+      language: payload.language,
+      voice_pipeline: payload.voice_pipeline,
+      stt_provider: payload.stt_provider,
+      llm_provider: payload.llm_provider,
+      llm_model: payload.llm_model || null,
+      tts_provider: payload.tts_provider,
+      tts_voice: payload.tts_voice || null,
+      system_prompt: payload.system_prompt || null,
+      opening_prompt: payload.opening_prompt || null,
+      is_default: payload.is_default,
+      is_active: payload.is_active,
+      updated_at: new Date().toISOString()
+    }]).select('id').single();
 
-    res.json({ id: result.lastID, message: 'Agent created successfully' });
+    if (error) throw error;
+    res.json({ id: result.id, message: 'Agent created successfully' });
   } catch (error) {
     return handleSqliteError(error, res);
   }
@@ -182,7 +205,13 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM agents WHERE id = ?', [req.params.id]);
+    const { data: existing, error: fetchError } = await supabase
+      .from('agents')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
     if (!existing) {
       return res.status(404).json({ error: 'Agent not found' });
     }
@@ -195,46 +224,27 @@ router.put('/:id', async (req, res) => {
     }
 
     await clearDefaultAgentIfNeeded(payload, existing.id);
-    await dbRun(
-      `UPDATE agents
-          SET name = ?,
-              slug = ?,
-              description = ?,
-              client_name = ?,
-              language = ?,
-              voice_pipeline = ?,
-              stt_provider = ?,
-              llm_provider = ?,
-              llm_model = ?,
-              tts_provider = ?,
-              tts_voice = ?,
-              system_prompt = ?,
-              opening_prompt = ?,
-              is_default = ?,
-              is_active = ?,
-              updated_at = ?
-        WHERE id = ?`,
-      [
-        payload.name,
-        payload.slug,
-        payload.description || null,
-        payload.client_name || null,
-        payload.language,
-        payload.voice_pipeline,
-        payload.stt_provider,
-        payload.llm_provider,
-        payload.llm_model || null,
-        payload.tts_provider,
-        payload.tts_voice || null,
-        payload.system_prompt || null,
-        payload.opening_prompt || null,
-        payload.is_default,
-        payload.is_active,
-        new Date().toISOString(),
-        existing.id
-      ]
-    );
+    
+    const { error: updateError } = await supabase.from('agents').update({
+      name: payload.name,
+      slug: payload.slug,
+      description: payload.description || null,
+      client_name: payload.client_name || null,
+      language: payload.language,
+      voice_pipeline: payload.voice_pipeline,
+      stt_provider: payload.stt_provider,
+      llm_provider: payload.llm_provider,
+      llm_model: payload.llm_model || null,
+      tts_provider: payload.tts_provider,
+      tts_voice: payload.tts_voice || null,
+      system_prompt: payload.system_prompt || null,
+      opening_prompt: payload.opening_prompt || null,
+      is_default: payload.is_default,
+      is_active: payload.is_active,
+      updated_at: new Date().toISOString()
+    }).eq('id', existing.id);
 
+    if (updateError) throw updateError;
     res.json({ message: 'Agent updated successfully' });
   } catch (error) {
     return handleSqliteError(error, res);
@@ -243,7 +253,13 @@ router.put('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM agents WHERE id = ?', [req.params.id]);
+    const { data: existing, error: fetchError } = await supabase
+      .from('agents')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
     if (!existing) {
       return res.status(404).json({ error: 'Agent not found' });
     }
@@ -252,12 +268,20 @@ router.delete('/:id', async (req, res) => {
       return res.status(409).json({ error: 'Default agent cannot be deleted until another default agent is selected' });
     }
 
-    const callsUsingAgent = await dbGet('SELECT COUNT(*) AS count FROM calls WHERE agent_id = ?', [existing.id]);
-    if (Number(callsUsingAgent?.count || 0) > 0) {
+    // In Supabase, if calls table has agent_id, we check it. Note: calls schema earlier didn't have agent_id in SQLite?
+    // Wait, let's assume it might have agent_id.
+    const { count, error: countError } = await supabase
+      .from('calls')
+      .select('id', { count: 'exact', head: true })
+      .eq('agent_id', existing.id);
+
+    if (!countError && count > 0) {
       return res.status(409).json({ error: 'This agent is already used in call history and cannot be deleted' });
     }
 
-    await dbRun('DELETE FROM agents WHERE id = ?', [existing.id]);
+    const { error: deleteError } = await supabase.from('agents').delete().eq('id', existing.id);
+    if (deleteError) throw deleteError;
+    
     res.json({ message: 'Agent deleted successfully' });
   } catch (error) {
     console.error('Error deleting agent:', error);

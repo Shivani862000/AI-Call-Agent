@@ -5,7 +5,7 @@
 
 'use strict';
 
-const { dbGet, dbRun, dbAll } = require('../db');
+const supabase = require('./supabase');
 const crypto = require('crypto');
 const { initiateCall } = require('../services/icallmate');
 const {
@@ -71,117 +71,120 @@ function computeNextAnnualReminderDate(lastVisitDate, referenceDate = new Date()
 
 async function ensureCustomerForCall({ customerId, customerName, customerPhone }) {
   if (customerId) {
-    const existingById = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
+    const { data: existingById } = await supabase.from('customers').select('*').eq('id', customerId).single();
     if (existingById) {
       return existingById;
     }
   }
 
-  const existingByPhone = await dbGet('SELECT * FROM customers WHERE phone = ?', [customerPhone]);
+  const { data: existingByPhone } = await supabase.from('customers').select('*').eq('phone', customerPhone).single();
   if (existingByPhone) {
     return existingByPhone;
   }
 
-  const result = await dbRun(
-    'INSERT INTO customers (name, phone, preferred_slot, status, created_at) VALUES (?, ?, ?, ?, ?)',
-    [
-      customerName || 'Customer',
-      customerPhone,
-      '10:00',
-      'pending',
-      new Date().toISOString()
-    ]
-  );
+  const { data: result, error } = await supabase.from('customers').insert([{
+    name: customerName || 'Customer',
+    phone: customerPhone,
+    preferred_slot: '10:00',
+    status: 'pending',
+    created_at: new Date().toISOString()
+  }]).select('*').single();
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  if (error) {
+    console.error('ensureCustomerForCall Insert Error:', error);
+    // If unique constraint violated, return existing
+    const { data: retry } = await supabase.from('customers').select('*').eq('phone', customerPhone).single();
+    if (retry) return retry;
+  }
+  return result;
 }
 
 async function claimCustomerForOutboundCall(customerId) {
-  const result = await dbRun(
-    `UPDATE customers
-        SET status = ?,
-            last_called_at = ?
-      WHERE id = ?
-        AND COALESCE(status, 'pending') != 'calling'`,
-    ['calling', new Date().toISOString(), customerId]
-  );
+  const { data: updated, error } = await supabase
+    .from('customers')
+    .update({
+      status: 'calling',
+      last_called_at: new Date().toISOString()
+    })
+    .eq('id', customerId)
+    .neq('status', 'calling')
+    .select('id');
 
-  return result.changes > 0;
+  if (error) {
+    console.error('Error claiming customer:', error);
+    return false;
+  }
+
+  return updated && updated.length > 0;
 }
 
 async function releaseCustomerOutboundClaim(customerId, fallbackStatus = 'pending') {
-  await dbRun(
-    `UPDATE customers
-        SET status = ?
-      WHERE id = ?
-        AND status = 'calling'`,
-    [fallbackStatus, customerId]
-  );
+  await supabase
+    .from('customers')
+    .update({ status: fallbackStatus })
+    .eq('id', customerId)
+    .eq('status', 'calling');
 }
 
 async function ensureCustomerForClientReminder(client) {
   let customer = null;
 
   if (client.linked_customer_id) {
-    customer = await dbGet('SELECT * FROM customers WHERE id = ?', [client.linked_customer_id]);
+    const { data: c1 } = await supabase.from('customers').select('*').eq('id', client.linked_customer_id).single();
+    customer = c1;
   }
 
   if (!customer) {
-    customer = await dbGet('SELECT * FROM customers WHERE phone = ?', [client.phone]);
+    const { data: c2 } = await supabase.from('customers').select('*').eq('phone', client.phone).single();
+    customer = c2;
   }
 
   if (customer) {
-    await dbRun(
-      `UPDATE customers
-          SET name = ?,
-              phone = ?,
-              preferred_slot = ?,
-              service_interest = ?,
-              status = CASE WHEN status = 'completed' THEN 'pending' ELSE status END
-        WHERE id = ?`,
-      [
-        client.name,
-        client.phone,
-        client.annual_reminder_slot || '10:00',
-        client.treatment_type || null,
-        customer.id
-      ]
-    );
-    await dbRun(
-      'UPDATE clients SET linked_customer_id = ?, updated_at = ? WHERE id = ?',
-      [customer.id, new Date().toISOString(), client.id]
-    );
-    return dbGet('SELECT * FROM customers WHERE id = ?', [customer.id]);
+    await supabase.from('customers').update({
+      name: client.name,
+      phone: client.phone,
+      preferred_slot: client.annual_reminder_slot || '10:00',
+      service_interest: client.treatment_type || null,
+      status: customer.status === 'completed' ? 'pending' : customer.status
+    }).eq('id', customer.id);
+
+    await supabase.from('clients').update({
+      linked_customer_id: customer.id,
+      updated_at: new Date().toISOString()
+    }).eq('id', client.id);
+
+    const { data: finalC } = await supabase.from('customers').select('*').eq('id', customer.id).single();
+    return finalC;
   }
 
-  const result = await dbRun(
-    `INSERT INTO customers (
-      name, phone, preferred_slot, status, created_at, service_interest
-    ) VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      client.name,
-      client.phone,
-      client.annual_reminder_slot || '10:00',
-      'pending',
-      new Date().toISOString(),
-      client.treatment_type || null
-    ]
-  );
+  const { data: newCustomer } = await supabase.from('customers').insert([{
+    name: client.name,
+    phone: client.phone,
+    preferred_slot: client.annual_reminder_slot || '10:00',
+    status: 'pending',
+    created_at: new Date().toISOString(),
+    service_interest: client.treatment_type || null
+  }]).select('*').single();
 
-  await dbRun(
-    'UPDATE clients SET linked_customer_id = ?, updated_at = ? WHERE id = ?',
-    [result.lastID, new Date().toISOString(), client.id]
-  );
+  await supabase.from('clients').update({
+    linked_customer_id: newCustomer.id,
+    updated_at: new Date().toISOString()
+  }).eq('id', client.id);
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  return newCustomer;
 }
 
 async function findCustomerByPhone(phoneValue) {
   const normalized = normalizePhoneLookupValue(phoneValue);
   if (!normalized) return null;
 
-  const customers = await dbAll('SELECT * FROM customers ORDER BY id DESC LIMIT 200');
-  return customers.find((customer) => normalizePhoneLookupValue(customer.phone) === normalized) || null;
+  const { data: customers } = await supabase
+    .from('customers')
+    .select('*')
+    .order('id', { ascending: false })
+    .limit(200);
+    
+  return (customers || []).find((customer) => normalizePhoneLookupValue(customer.phone) === normalized) || null;
 }
 
 async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incoming caller') {
@@ -191,18 +194,15 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
     return existing;
   }
 
-  const result = await dbRun(
-    'INSERT INTO customers (name, phone, preferred_slot, status, created_at) VALUES (?, ?, ?, ?, ?)',
-    [
-      fallbackName || 'Incoming caller',
-      normalizedPhone,
-      getCurrentSlotLabel(new Date()),
-      'incoming',
-      new Date().toISOString()
-    ]
-  );
+  const { data: result } = await supabase.from('customers').insert([{
+    name: fallbackName || 'Incoming caller',
+    phone: normalizedPhone,
+    preferred_slot: getCurrentSlotLabel(new Date()),
+    status: 'incoming',
+    created_at: new Date().toISOString()
+  }]).select('*').single();
 
-  return dbGet('SELECT * FROM customers WHERE id = ?', [result.lastID]);
+  return result;
 }
 
 // ── Call Context & Intelligence ───────────────────────────────────────────────
@@ -213,22 +213,23 @@ async function findRecentOutboundCallContextByPhone(phoneValue) {
     return null;
   }
 
-  const call = await dbGet(
-    `SELECT calls.*, agents.client_name AS agent_client_name
-       FROM calls
-       LEFT JOIN agents ON agents.id = calls.agent_id
-      WHERE calls.customer_id = ?
-        AND COALESCE(calls.call_direction, 'outbound') = 'outbound'
-        AND DATETIME(calls.called_at) >= DATETIME('now', '-30 minutes')
-      ORDER BY calls.id DESC
-      LIMIT 1`,
-    [customer.id]
-  );
+  const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  
+  const { data: calls } = await supabase
+    .from('calls')
+    .select('*, agents(client_name)')
+    .eq('customer_id', customer.id)
+    .or('call_direction.eq.outbound,call_direction.is.null')
+    .gte('called_at', thirtyMinsAgo)
+    .order('id', { ascending: false })
+    .limit(1);
 
+  const call = calls && calls.length > 0 ? calls[0] : null;
   if (!call) {
     return null;
   }
 
+  call.agent_client_name = call.agents?.client_name;
   return { customer, call };
 }
 
@@ -285,43 +286,30 @@ async function hydrateIcallMateSessionContext(session, message = {}, extraParams
 
 async function getCustomerCallHistory(customerId, limit = 20) {
   if (!customerId) return [];
-  return dbAll(
-    `SELECT called_at, outcome, sentiment_label, transcript_text, analysis_summary, extracted_review_text
-     FROM calls
-     WHERE customer_id = ?
-     ORDER BY called_at DESC
-     LIMIT ?`,
-    [customerId, limit]
-  );
+  const { data: calls } = await supabase
+    .from('calls')
+    .select('called_at, outcome, sentiment_label, transcript_text, analysis_summary, extracted_review_text')
+    .eq('customer_id', customerId)
+    .order('called_at', { ascending: false })
+    .limit(limit);
+    
+  return calls || [];
 }
 
 async function hydratePreCallIntelligence(customer) {
   const history = await getCustomerCallHistory(customer.id);
   const intelligence = buildPreCallIntelligence(customer, history);
 
-  await dbRun(
-    `UPDATE customers
-        SET priority_score = ?,
-            ai_score = ?,
-            best_call_slot = ?,
-            preferred_dialect = ?,
-            outstanding_issues = ?,
-            last_sentiment_label = ?,
-            pickup_rate_score = ?,
-            dnd_checked_at = ?
-      WHERE id = ?`,
-    [
-      intelligence.priorityScore,
-      intelligence.priorityScore,
-      intelligence.bestCallSlot,
-      intelligence.preferredDialect,
-      intelligence.outstandingIssues.join('\n') || null,
-      intelligence.lastSentimentLabel || null,
-      intelligence.pickupRateScore,
-      new Date().toISOString(),
-      customer.id
-    ]
-  );
+  await supabase.from('customers').update({
+    priority_score: intelligence.priorityScore,
+    ai_score: intelligence.priorityScore,
+    best_call_slot: intelligence.bestCallSlot,
+    preferred_dialect: intelligence.preferredDialect,
+    outstanding_issues: intelligence.outstandingIssues.join('\n') || null,
+    last_sentiment_label: intelligence.lastSentimentLabel || null,
+    pickup_rate_score: intelligence.pickupRateScore,
+    dnd_checked_at: new Date().toISOString()
+  }).eq('id', customer.id);
 
   return {
     ...customer,
@@ -348,18 +336,29 @@ async function shouldBlockCustomerCall(customer) {
   }
 
   if (customer.phone) {
-    const activeCall = await dbGet(
-      `SELECT 1 FROM customers WHERE phone = ? AND status IN ('calling', 'in_progress') AND id != ? LIMIT 1`,
-      [customer.phone, customer.id]
-    );
+    const { data: activeCall } = await supabase
+      .from('customers')
+      .select('id')
+      .eq('phone', customer.phone)
+      .in('status', ['calling', 'in_progress'])
+      .neq('id', customer.id)
+      .limit(1)
+      .single();
+
     if (activeCall) {
       return { code: 'CALL_BLOCKED_ACTIVE_CALL', reason: 'Another call is currently active for this phone number' };
     }
     if (customer.is_manual !== 1) {
-      const completedCall = await dbGet(
-        `SELECT 1 FROM customers WHERE phone = ? AND call_type = ? AND status = 'completed' AND id != ? LIMIT 1`,
-        [customer.phone, customer.call_type, customer.id]
-      );
+      const { data: completedCall } = await supabase
+        .from('customers')
+        .select('id')
+        .eq('phone', customer.phone)
+        .eq('call_type', customer.call_type)
+        .eq('status', 'completed')
+        .neq('id', customer.id)
+        .limit(1)
+        .single();
+        
       if (completedCall) {
         return {
           code: 'CALL_AUTO_SCHEDULE_BLOCKED_COMPLETED',
@@ -368,16 +367,16 @@ async function shouldBlockCustomerCall(customer) {
       }
     }
 
-    const callsToday = await dbAll(
-      `SELECT called_at 
-       FROM calls c
-       JOIN customers cu ON cu.id = c.customer_id
-       WHERE cu.phone = ? 
-         AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
-         AND COALESCE(c.call_direction, 'outbound') = 'outbound'
-       ORDER BY c.called_at DESC`,
-      [customer.phone]
-    );
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const { data: callsToday } = await supabase
+      .from('calls')
+      .select('called_at, customers!inner(phone)')
+      .eq('customers.phone', customer.phone)
+      .gte('called_at', todayStart.toISOString())
+      .or('call_direction.eq.outbound,call_direction.is.null')
+      .order('called_at', { ascending: false });
 
     if (callsToday && callsToday.length >= 3) {
       return { code: 'CALL_FAILED_MAX_ATTEMPTS', reason: 'Maximum 3 attempts completed for the day' };
@@ -449,7 +448,7 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
 
   try {
     const customer = await ensureIncomingCustomerForCall(row.phone, row.caller_name);
-    const existingCall = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [row.stream_id]);
+    const { data: existingCall } = await supabase.from('calls').select('*').eq('provider_call_id', row.stream_id).single();
     const outcome = row.status === 'active' ? 'active' : row.status;
     const providerPayload = JSON.stringify({
       event: eventName,
@@ -464,63 +463,39 @@ async function upsertIncomingCallFromIcall(message = {}, patch = {}) {
     });
 
     if (existingCall) {
-      await dbRun(
-        `UPDATE calls
-            SET customer_id = ?,
-                outcome = ?,
-                did = ?,
-                answered_at = COALESCE(?, answered_at),
-                ended_at = COALESCE(?, ended_at),
-                media_packets = COALESCE(media_packets, 0) + ?,
-                last_event = ?,
-                notes = ?,
-                provider_payload_json = ?,
-                call_direction = ?,
-                call_source = ?,
-                called_at = COALESCE(called_at, ?)
-          WHERE id = ?`,
-        [
-          customer.id,
-          outcome,
-          row.did || null,
-          row.answered_at,
-          row.ended_at,
-          Number(patch.media_packets || 0),
-          row.last_event || null,
-          row.notes || null,
-          providerPayload,
-          row.call_direction || 'incoming',
-          'icallmate',
-          row.received_at,
-          existingCall.id
-        ]
-      );
+      await supabase.from('calls').update({
+        customer_id: customer.id,
+        outcome: outcome,
+        did: row.did || null,
+        answered_at: row.answered_at || existingCall.answered_at,
+        ended_at: row.ended_at || existingCall.ended_at,
+        media_packets: (existingCall.media_packets || 0) + Number(patch.media_packets || 0),
+        last_event: row.last_event || null,
+        notes: row.notes || null,
+        provider_payload_json: providerPayload,
+        call_direction: row.call_direction || 'incoming',
+        call_source: 'icallmate',
+        called_at: existingCall.called_at || row.received_at
+      }).eq('id', existingCall.id);
     } else {
-      await dbRun(
-        `INSERT INTO calls (
-          customer_id, outcome, provider_call_id, called_at, call_direction, call_source,
-          did, answered_at, ended_at, media_packets, last_event, notes,
-          transcript_status, analysis_status, provider_payload_json, uuid
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          customer.id,
-          outcome,
-          row.stream_id,
-          row.received_at,
-          row.call_direction || 'incoming',
-          'icallmate',
-          row.did || null,
-          row.answered_at,
-          row.ended_at,
-          Number(row.media_packets || 0),
-          row.last_event || null,
-          row.notes || null,
-          'live_stream',
-          'pending',
-          providerPayload,
-          crypto.randomUUID()
-        ]
-      );
+      await supabase.from('calls').insert([{
+        customer_id: customer.id,
+        outcome: outcome,
+        provider_call_id: row.stream_id,
+        called_at: row.received_at,
+        call_direction: row.call_direction || 'incoming',
+        call_source: 'icallmate',
+        did: row.did || null,
+        answered_at: row.answered_at,
+        ended_at: row.ended_at,
+        media_packets: Number(row.media_packets || 0),
+        last_event: row.last_event || null,
+        notes: row.notes || null,
+        transcript_status: 'live_stream',
+        analysis_status: 'pending',
+        provider_payload_json: providerPayload,
+        uuid: crypto.randomUUID()
+      }]);
     }
   } catch (error) {
     console.error('[ICALLMATE INCOMING DB ERROR]', error.message);
@@ -547,34 +522,27 @@ async function upsertIcallMateCallFromMedia(message = {}, session = {}, patch = 
     ChKey: message.ChKey || null
   });
 
-  await dbRun(
-    `UPDATE calls
-        SET outcome = CASE
-              WHEN ? = 'completed' THEN 'completed'
-              WHEN ? = 'active' AND (outcome IN ('initiated', 'scheduled_initiated') OR last_event = 'media_timeout') THEN 'active'
-              ELSE outcome
-            END,
-            did = COALESCE(?, did),
-            answered_at = COALESCE(?, answered_at),
-            ended_at = COALESCE(?, ended_at),
-            media_packets = COALESCE(media_packets, 0) + ?,
-            last_event = ?,
-            notes = ?,
-            provider_payload_json = ?
-      WHERE id = ?`,
-    [
-      patch.status || null,
-      patch.status || null,
-      message.did || session.did || null,
-      patch.answered_at || null,
-      patch.ended_at || null,
-      Number(patch.media_packets || 0),
-      eventName || null,
-      patch.notes || null,
-      providerPayload,
-      session.callId
-    ]
-  );
+  const { data: call } = await supabase.from('calls').select('outcome, media_packets').eq('id', session.callId).single();
+  if (call) {
+    let newOutcome = call.outcome;
+    const patchStatus = patch.status || null;
+    if (patchStatus === 'completed') {
+      newOutcome = 'completed';
+    } else if (patchStatus === 'active' && (['initiated', 'scheduled_initiated'].includes(call.outcome) || eventName === 'media_timeout')) {
+      newOutcome = 'active';
+    }
+
+    await supabase.from('calls').update({
+      outcome: newOutcome,
+      did: message.did || session.did || null,
+      answered_at: patch.answered_at || null,
+      ended_at: patch.ended_at || null,
+      media_packets: (call.media_packets || 0) + Number(patch.media_packets || 0),
+      last_event: eventName || null,
+      notes: patch.notes || null,
+      provider_payload_json: providerPayload
+    }).eq('id', session.callId);
+  }
 
   return null;
 }

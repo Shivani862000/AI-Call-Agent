@@ -1,3 +1,5 @@
+const supabase = require('../src/supabase');
+
 const CALL_TYPES = Object.freeze({
   REVIEW_CALL: 'REVIEW_CALL',
   THREE_MONTH_FOLLOWUP: 'THREE_MONTH_FOLLOWUP'
@@ -308,42 +310,23 @@ function buildCallAnalysis(call = {}) {
   };
 }
 
-async function storeCallAnalysis({ dbRun, callId, analysis }) {
-  await dbRun(
-    `UPDATE calls
-        SET summary = ?,
-            analysis_summary = ?,
-            sentiment = ?,
-            sentiment_label = ?,
-            sentiment_score = ?,
-            call_duration = ?,
-            ai_talk_time = ?,
-            patient_talk_time = ?,
-            quality_score = ?,
-            timeline_events = ?,
-            extracted_entities = ?,
-            analysis_json = ?,
-            analysis_status = ?,
-            analysis_completed_at = ?
-      WHERE id = ?`,
-    [
-      analysis.summary,
-      analysis.summary,
-      analysis.sentiment,
-      analysis.sentiment,
-      analysis.sentiment_score,
-      analysis.metrics.total_duration,
-      analysis.metrics.ai_talk_time,
-      analysis.metrics.patient_talk_time,
-      analysis.quality_score,
-      JSON.stringify(analysis.timeline_events || []),
-      JSON.stringify(analysis.entities || {}),
-      JSON.stringify(analysis),
-      'completed',
-      new Date().toISOString(),
-      callId
-    ]
-  );
+async function storeCallAnalysis({ callId, analysis }) {
+  await supabase.from('calls').update({
+    summary: analysis.summary,
+    analysis_summary: analysis.summary,
+    sentiment: analysis.sentiment,
+    sentiment_label: analysis.sentiment,
+    sentiment_score: analysis.sentiment_score,
+    call_duration: analysis.metrics.total_duration,
+    ai_talk_time: analysis.metrics.ai_talk_time,
+    patient_talk_time: analysis.metrics.patient_talk_time,
+    quality_score: analysis.quality_score,
+    timeline_events: JSON.stringify(analysis.timeline_events || []),
+    extracted_entities: JSON.stringify(analysis.entities || {}),
+    analysis_json: JSON.stringify(analysis),
+    analysis_status: 'completed',
+    analysis_completed_at: new Date().toISOString()
+  }).eq('id', callId);
 }
 
 module.exports = {

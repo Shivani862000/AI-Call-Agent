@@ -72,7 +72,7 @@ const {
   buildScriptedRatingResponse
 } = require('./scripted-ivr');
 
-const { dbGet, dbRun, dbAll } = require('../db');
+const supabase = require('./supabase');
 const { computePriorityScore, applyCallOutcomeWorkflow, createSupervisorEvent } = require('../services/call-orchestration');
 const { getAgentConfigById, getDefaultAgentConfig } = require('./prompt-builder');
 const { buildCallAnalysis, storeCallAnalysis } = require('../services/call-analysis');
@@ -242,35 +242,32 @@ module.exports = function mountApiRoutes(app) {
         callType
       });
 
-      const result = await dbRun(
-        `INSERT INTO calls (
-        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
-        provider_payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          customer.id,
-          agentConfig?.id || null,
-          'initiated',
-          call.sid,
-          new Date().toISOString(),
-          customer.priority_score || computePriorityScore(customer),
-          1,
-          agentConfig?.slug || 'hindi-feedback-v1',
-          'normal',
-          'outbound',
-          'icallmate',
-          callType,
-          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
-        ]
-      );
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      const { data: callResult } = await supabase.from('calls').insert([{
+        customer_id: customer.id,
+        agent_id: agentConfig?.id || null,
+        outcome: 'initiated',
+        provider_call_id: call.sid,
+        called_at: new Date().toISOString(),
+        hot_lead_score: customer.priority_score || computePriorityScore(customer),
+        consent_message_played: 1,
+        call_script_version: agentConfig?.slug || 'hindi-feedback-v1',
+        supervisor_alert_level: 'normal',
+        call_direction: 'outbound',
+        call_source: 'icallmate',
+        call_type: callType,
+        provider_payload_json: JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
+      }]).select('id').single();
+      const result = { lastID: callResult.id };
+      await supabase.from('customers').update({ status: 'called' }).eq('id', customer.id);
       
-      const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
-        [customer.id]
-      );
-      const attempt = callsTodayRow ? callsTodayRow.count : 1;
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const { count } = await supabase.from('calls')
+        .select('id', { count: 'exact', head: true })
+        .eq('customer_id', customer.id)
+        .eq('call_direction', 'outbound')
+        .gte('called_at', startOfDay.toISOString());
+      const attempt = count || 1;
       logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone || customerPhone, attempt });
       
       logger.info('CALL_STARTED', {
@@ -344,9 +341,9 @@ module.exports = function mountApiRoutes(app) {
         });
       }
 
-      const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [providerCallSid]);
+      const { data: callRecord } = await supabase.from('calls').select('*').eq('provider_call_id', providerCallSid).limit(1).single();
       const customerId = req.query.customerId || callRecord?.customer_id;
-      const customer = customerId ? await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]) : null;
+      const { data: customer } = customerId ? await supabase.from('customers').select('*').eq('id', customerId).single() : { data: null };
 
       if (callRecord) {
         let mappedOutcome = null;
@@ -366,23 +363,15 @@ module.exports = function mountApiRoutes(app) {
           : null;
 
         if (normalizedRecordingUrl || providerRecordingSid) {
-          await dbRun(
-            `UPDATE calls
-              SET recording_sid = COALESCE(?, recording_sid),
-                  recording_url = COALESCE(?, recording_url),
-                  recording_status = ?
-            WHERE id = ?`,
-            [
-              providerRecordingSid || null,
-              normalizedRecordingUrl,
-              normalizedRecordingUrl ? 'completed' : (providerStatus || eventType || 'pending'),
-              callRecord.id
-            ]
-          );
+          await supabase.from('calls').update({
+            recording_sid: providerRecordingSid || callRecord.recording_sid || null,
+            recording_url: normalizedRecordingUrl || callRecord.recording_url,
+            recording_status: normalizedRecordingUrl ? 'completed' : (providerStatus || eventType || 'pending')
+          }).eq('id', callRecord.id);
         }
 
         if (mappedOutcome) {
-          await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ? WHERE id = ?', [mappedOutcome, providerStatus, callRecord.id]);
+          await supabase.from('calls').update({ outcome: mappedOutcome, outcome_detail: providerStatus }).eq('id', callRecord.id);
           const eventName = mappedOutcome === 'completed'
             ? 'CALL_COMPLETED'
             : (mappedOutcome === 'failed' || mappedOutcome === 'busy' || mappedOutcome === 'no_answer' ? 'CALL_FAILED' : 'CALL_PENDING');
@@ -405,7 +394,7 @@ module.exports = function mountApiRoutes(app) {
         if (mappedOutcome === 'completed' && normalizedRecordingUrl) {
           setTimeout(() => {
             runInBackground('POST CALL PIPELINE ERROR', async () => {
-              const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: providerCallSid, callId: callRecord.id });
+              const result = await processCompletedCallPipeline({ callSid: providerCallSid, callId: callRecord.id });
               if (result.ok) {
                 console.log(`[POST CALL PIPELINE] Processed call ${providerCallSid} with feedback ${result.feedbackId}`);
               } else {
@@ -418,8 +407,6 @@ module.exports = function mountApiRoutes(app) {
         if (customerId) {
           if (customer && mappedOutcome) {
             await applyCallOutcomeWorkflow({
-              dbGet,
-              dbRun,
               callRecord: { ...callRecord, outcome: mappedOutcome },
               customer,
               providerStatus: mappedOutcome,
@@ -445,22 +432,19 @@ module.exports = function mountApiRoutes(app) {
 
       console.log(`[RECORDING STATUS] ${recordingStatus} | Call SID: ${callSid} | Recording SID: ${recordingSid}`);
 
-      const callRecord = await dbGet('SELECT * FROM calls WHERE provider_call_id = ? ORDER BY id DESC LIMIT 1', [callSid]);
+      const { data: callRecord } = await supabase.from('calls').select('*').eq('provider_call_id', callSid).order('id', { ascending: false }).limit(1).single();
       if (callRecord) {
-        const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
-        await dbRun(
-          `UPDATE calls
-            SET recording_sid = ?,
-                recording_url = ?,
-                recording_status = ?
-          WHERE id = ?`,
-          [recordingSid || null, recordingUrl, recordingStatus || null, callRecord.id]
-        );
+        const { data: customer } = await supabase.from('customers').select('*').eq('id', callRecord.customer_id).single();
+        await supabase.from('calls').update({
+          recording_sid: recordingSid || null,
+          recording_url: recordingUrl,
+          recording_status: recordingStatus || null
+        }).eq('id', callRecord.id);
 
         if (recordingStatus === 'completed' && recordingUrl) {
           setTimeout(() => {
             runInBackground('POST CALL PIPELINE ERROR', async () => {
-              const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid, callId: callRecord.id });
+              const result = await processCompletedCallPipeline({ callSid, callId: callRecord.id });
               if (result.ok) {
                 console.log(`[POST CALL PIPELINE] Processed call ${callSid} with feedback ${result.feedbackId}`);
               } else {
@@ -490,7 +474,8 @@ module.exports = function mountApiRoutes(app) {
   app.post('/api/calls/initiate/:customerId', async (req, res) => {
     let customer = null;
     try {
-      customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.customerId]);
+      const { data: cData } = await supabase.from('customers').select('*').eq('id', req.params.customerId).single();
+      customer = cData;
       if (!customer) {
         return res.status(404).json({ error: 'Customer not found' });
       }
@@ -523,36 +508,33 @@ module.exports = function mountApiRoutes(app) {
         callType
       });
 
-      const result = await dbRun(
-        `INSERT INTO calls (
-        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
-        provider_payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          customer.id,
-          agentConfig?.id || null,
-          'initiated',
-          call.sid,
-          new Date().toISOString(),
-          customer.priority_score || computePriorityScore(customer),
-          1,
-          agentConfig?.slug || 'hindi-feedback-v1',
-          'normal',
-          'outbound',
-          'icallmate',
-          callType,
-          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
-        ]
-      );
+      const { data: callResult } = await supabase.from('calls').insert([{
+        customer_id: customer.id,
+        agent_id: agentConfig?.id || null,
+        outcome: 'initiated',
+        provider_call_id: call.sid,
+        called_at: new Date().toISOString(),
+        hot_lead_score: customer.priority_score || computePriorityScore(customer),
+        consent_message_played: 1,
+        call_script_version: agentConfig?.slug || 'hindi-feedback-v1',
+        supervisor_alert_level: 'normal',
+        call_direction: 'outbound',
+        call_source: 'icallmate',
+        call_type: callType,
+        provider_payload_json: JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
+      }]).select('id').single();
+      const result = { lastID: callResult.id };
 
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      await supabase.from('customers').update({ status: 'called' }).eq('id', customer.id);
       
-      const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
-        [customer.id]
-      );
-      const attempt = callsTodayRow ? callsTodayRow.count : 1;
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const { count } = await supabase.from('calls')
+        .select('id', { count: 'exact', head: true })
+        .eq('customer_id', customer.id)
+        .eq('call_direction', 'outbound')
+        .gte('called_at', startOfDay.toISOString());
+      const attempt = count || 1;
       logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone, attempt });
 
       logger.info('CALL_STARTED', {
@@ -592,34 +574,53 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/incoming', async (req, res) => {
     pruneIncomingCallState();
-    const dbRows = await dbAll(
-      `SELECT
-       calls.id,
-       calls.provider_call_id AS stream_id,
-       customers.name AS caller_name,
-       customers.phone AS phone,
-       calls.did,
-       calls.call_direction,
-       calls.outcome AS status,
-       calls.called_at AS received_at,
-       calls.answered_at,
-       calls.ended_at,
-       calls.media_packets,
-       calls.last_event,
-       calls.notes,
-       calls.created_at,
-       calls.provider_payload_json
-     FROM calls
-     JOIN customers ON customers.id = calls.customer_id
-     WHERE calls.call_direction = 'incoming'
-     ORDER BY COALESCE(calls.ended_at, calls.answered_at, calls.called_at, calls.created_at) DESC
-     LIMIT 100`
-    );
+    const { data: dbRows } = await supabase
+      .from('calls')
+      .select(`
+        id,
+        provider_call_id,
+        did,
+        call_direction,
+        outcome,
+        called_at,
+        answered_at,
+        ended_at,
+        media_packets,
+        last_event,
+        notes,
+        created_at,
+        provider_payload_json,
+        customers!inner(name, phone)
+      `)
+      .eq('call_direction', 'incoming')
+      .order('ended_at', { ascending: false, nullsFirst: false })
+      .order('answered_at', { ascending: false, nullsFirst: false })
+      .order('called_at', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .limit(100);
 
-    const seen = new Set(dbRows.map((row) => row.stream_id).filter(Boolean));
+    const formattedRows = (dbRows || []).map(row => ({
+      id: row.id,
+      stream_id: row.provider_call_id,
+      caller_name: row.customers?.name,
+      phone: row.customers?.phone,
+      did: row.did,
+      call_direction: row.call_direction,
+      status: row.outcome,
+      received_at: row.called_at,
+      answered_at: row.answered_at,
+      ended_at: row.ended_at,
+      media_packets: row.media_packets,
+      last_event: row.last_event,
+      notes: row.notes,
+      created_at: row.created_at,
+      provider_payload_json: row.provider_payload_json
+    }));
+
+    const seen = new Set(formattedRows.map((row) => row.stream_id).filter(Boolean));
     const liveOnlyRows = [...incomingCallState.values()].filter((row) => row.stream_id && !seen.has(row.stream_id));
     const calls = [
-      ...dbRows.map((row) => ({
+      ...formattedRows.map((row) => ({
         ...row,
         status: row.status || 'active',
         updated_at: row.ended_at || row.answered_at || row.received_at || row.created_at
@@ -639,16 +640,25 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/metrics', async (req, res) => {
     try {
-      const rows = await dbAll(
-        `SELECT
-         COALESCE(call_direction, 'outbound') AS direction,
-         COALESCE(outcome, 'unknown') AS outcome,
-         COUNT(*) AS count,
-         SUM(CASE WHEN DATE(called_at) = DATE('now') THEN 1 ELSE 0 END) AS today_count,
-         SUM(COALESCE(media_packets, 0)) AS media_packets
-       FROM calls
-       GROUP BY COALESCE(call_direction, 'outbound'), COALESCE(outcome, 'unknown')`
-      );
+      const { data: callsData } = await supabase.from('calls').select('call_direction, outcome, called_at, media_packets');
+      const callsArray = callsData || [];
+      const todayIso = new Date().toISOString().split('T')[0];
+      const rowsMap = {};
+      
+      callsArray.forEach(call => {
+        const dir = call.call_direction || 'outbound';
+        const out = call.outcome || 'unknown';
+        const key = `${dir}_${out}`;
+        if (!rowsMap[key]) {
+          rowsMap[key] = { direction: dir, outcome: out, count: 0, today_count: 0, media_packets: 0 };
+        }
+        rowsMap[key].count++;
+        rowsMap[key].media_packets += (call.media_packets || 0);
+        if (call.called_at && call.called_at.startsWith(todayIso)) {
+          rowsMap[key].today_count++;
+        }
+      });
+      const rows = Object.values(rowsMap);
 
       const summary = {
         inbound: { total: 0, today: 0, active: 0, completed: 0, missed: 0, media_packets: 0 },
@@ -775,26 +785,27 @@ module.exports = function mountApiRoutes(app) {
 
         if (phone) {
           const cleanPhone = phone.replace(/^\\+91/, '').slice(-10);
-          const callRecord = await dbGet(`
-            SELECT calls.* FROM calls
-            JOIN customers ON customers.id = calls.customer_id
-            WHERE customers.phone LIKE '%' || ? AND calls.call_direction = 'outbound'
-            ORDER BY calls.id DESC LIMIT 1
-          `, [cleanPhone]);
+          const { data: callRecordList } = await supabase
+            .from('calls')
+            .select('*, customers!inner(phone)')
+            .like('customers.phone', `%${cleanPhone}`)
+            .eq('call_direction', 'outbound')
+            .order('id', { ascending: false })
+            .limit(1);
+          const callRecord = callRecordList?.[0] || null;
 
           if (callRecord) {
-            await dbRun('UPDATE calls SET outcome = ?, status = ?, outcome_detail = ?, recording_url = COALESCE(NULLIF(?, \'\'), recording_url) WHERE id = ?', [
-              mappedOutcome,
-              mappedOutcome,
-              payload.call_status || 'callback',
-              payload.recording_filename || '',
-              callRecord.id
-            ]);
+            await supabase.from('calls').update({
+              outcome: mappedOutcome,
+              status: mappedOutcome,
+              outcome_detail: payload.call_status || 'callback',
+              recording_url: payload.recording_filename || callRecord.recording_url
+            }).eq('id', callRecord.id);
 
             if (mappedOutcome === 'completed' && payload.recording_filename) {
               setTimeout(() => {
                 runInBackground('POST CALL PIPELINE ERROR', async () => {
-                  const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: callRecord.provider_call_id, callId: callRecord.id });
+                  const result = await processCompletedCallPipeline({ callSid: callRecord.provider_call_id, callId: callRecord.id });
                   if (result.ok) {
                     console.log(`[POST CALL PIPELINE] Processed call ${callRecord.provider_call_id} with feedback ${result.feedbackId}`);
                   } else {
@@ -804,11 +815,9 @@ module.exports = function mountApiRoutes(app) {
               }, 1500);
             }
 
-            const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [callRecord.customer_id]);
+            const { data: customer } = await supabase.from('customers').select('*').eq('id', callRecord.customer_id).single();
             if (customer) {
               await applyCallOutcomeWorkflow({
-                dbGet,
-                dbRun,
                 callRecord: { ...callRecord, outcome: mappedOutcome },
                 customer,
                 providerStatus: payload.call_status || mappedOutcome,
@@ -1000,30 +1009,24 @@ module.exports = function mountApiRoutes(app) {
         callType
       });
 
-      const result = await dbRun(
-        `INSERT INTO calls (
-        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-        consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source,
-        provider_payload_json, call_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          customer.id,
-          agentConfig?.id || null,
-          'initiated',
-          call.sid,
-          new Date().toISOString(),
-          customer.priority_score || computePriorityScore(customer),
-          1,
-          agentConfig?.slug || 'gemini-deepgram-outgoing-v1',
-          'normal',
-          'outbound',
-          'icallmate-masterpost',
-          JSON.stringify({ request: call.requestPayload || payload, response: call.raw || null }),
-          callType
-        ]
-      );
+      const { data: callResult } = await supabase.from('calls').insert([{
+        customer_id: customer.id,
+        agent_id: agentConfig?.id || null,
+        outcome: 'initiated',
+        provider_call_id: call.sid,
+        called_at: new Date().toISOString(),
+        hot_lead_score: customer.priority_score || computePriorityScore(customer),
+        consent_message_played: 1,
+        call_script_version: agentConfig?.slug || 'gemini-deepgram-outgoing-v1',
+        supervisor_alert_level: 'normal',
+        call_direction: 'outbound',
+        call_source: 'icallmate-masterpost',
+        provider_payload_json: JSON.stringify({ request: call.requestPayload || payload, response: call.raw || null }),
+        call_type: callType
+      }]).select('id').single();
+      const result = { lastID: callResult.id };
 
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      await supabase.from('customers').update({ status: 'called' }).eq('id', customer.id);
       logger.info('CALL_STARTED', {
         callId: result.lastID,
         customerId: customer.id,
@@ -1093,71 +1096,77 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/recent', async (req, res) => {
     try {
-      const rows = await dbAll(
-        `SELECT
-         calls.id,
-         calls.customer_id,
-         calls.agent_id,
-         customers.name AS customer_name,
-         customers.phone AS customer_phone,
-         agents.name AS agent_name,
-         agents.slug AS agent_slug,
-         calls.called_at,
-         calls.outcome,
-         calls.outcome_detail,
-         calls.call_type,
-         calls.call_direction,
-         calls.call_source,
-         calls.did,
-         calls.media_packets,
-         calls.answered_at,
-         calls.ended_at,
-         calls.notes,
-         calls.provider_call_id,
-         calls.recording_sid,
-         calls.recording_url,
-         calls.recording_status,
-         calls.recording_local_path,
-         calls.transcript_text,
-         calls.transcript_status,
-         calls.transcript_source,
-         calls.analysis_status,
-         calls.summary,
-         calls.analysis_summary,
-         calls.analysis_json,
-         calls.key_points_json,
-         calls.report_excerpt,
-         calls.language,
-         calls.extracted_rating,
-         calls.extracted_review_text,
-         calls.sentiment_label,
-         calls.sentiment,
-         calls.sentiment_score,
-         calls.call_duration,
-         calls.ai_talk_time,
-         calls.patient_talk_time,
-         calls.quality_score,
-         calls.timeline_events,
-         calls.extracted_entities,
-         calls.hot_lead_score,
-         calls.next_action_at,
-         calls.follow_up_task,
-         calls.crm_sync_status,
-         calls.live_sentiment_score,
-         calls.live_sentiment_label,
-         calls.live_red_flag,
-         calls.supervisor_alert_level,
-         calls.human_escalation_requested,
-         calls.objections_json,
-         calls.competitor_mentions_json
-       FROM calls
-       JOIN customers ON customers.id = calls.customer_id
-       LEFT JOIN agents ON agents.id = calls.agent_id
-       ORDER BY calls.id DESC
-       LIMIT 25`
-      );
+      const { data: rows } = await supabase
+        .from('calls')
+        .select(`
+         id,
+         customer_id,
+         agent_id,
+         called_at,
+         outcome,
+         outcome_detail,
+         call_type,
+         call_direction,
+         call_source,
+         did,
+         media_packets,
+         answered_at,
+         ended_at,
+         notes,
+         provider_call_id,
+         recording_sid,
+         recording_url,
+         recording_status,
+         recording_local_path,
+         transcript_text,
+         transcript_status,
+         transcript_source,
+         analysis_status,
+         summary,
+         analysis_summary,
+         analysis_json,
+         key_points_json,
+         report_excerpt,
+         language,
+         extracted_rating,
+         extracted_review_text,
+         sentiment_label,
+         sentiment,
+         sentiment_score,
+         call_duration,
+         ai_talk_time,
+         patient_talk_time,
+         quality_score,
+         timeline_events,
+         extracted_entities,
+         hot_lead_score,
+         next_action_at,
+         follow_up_task,
+         crm_sync_status,
+         live_sentiment_score,
+         live_sentiment_label,
+         live_red_flag,
+         supervisor_alert_level,
+         human_escalation_requested,
+         objections_json,
+         competitor_mentions_json,
+         customers(name, phone),
+         agents(name, slug)
+        `)
+        .order('id', { ascending: false })
+        .limit(25);
 
-      res.json(rows);
+      const formattedRows = (rows || []).map(row => ({
+        ...row,
+        customer_name: row.customers?.name,
+        customer_phone: row.customers?.phone,
+        agent_name: row.agents?.name,
+        agent_slug: row.agents?.slug,
+        customers: undefined,
+        agents: undefined
+      }));
+
+      res.json(formattedRows);
     } catch (error) {
       console.error('[RECENT CALLS ERROR]', error.message);
       res.status(500).json({ error: error.message });
@@ -1166,68 +1175,25 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId(\\d+)', async (req, res) => {
     try {
-      const row = await dbGet(
-        `SELECT
-         calls.id,
-         calls.customer_id,
-         calls.agent_id,
-         customers.name AS customer_name,
-         customers.phone AS customer_phone,
-         agents.name AS agent_name,
-         agents.slug AS agent_slug,
-         calls.called_at,
-         calls.outcome,
-         calls.call_type,
-         calls.call_direction,
-         calls.call_source,
-         calls.did,
-         calls.media_packets,
-         calls.answered_at,
-         calls.ended_at,
-         calls.notes,
-         calls.provider_call_id,
-         calls.recording_sid,
-         calls.recording_url,
-         calls.recording_status,
-         calls.recording_local_path,
-         calls.transcript_text,
-         calls.transcript_status,
-         calls.transcript_source,
-         calls.analysis_status,
-         calls.summary,
-         calls.analysis_summary,
-         calls.analysis_json,
-         calls.key_points_json,
-         calls.report_excerpt,
-         calls.language,
-         calls.extracted_rating,
-         calls.extracted_review_text,
-         calls.sentiment_label,
-         calls.sentiment,
-         calls.sentiment_score,
-         calls.call_duration,
-         calls.ai_talk_time,
-         calls.patient_talk_time,
-         calls.quality_score,
-         calls.timeline_events,
-         calls.extracted_entities,
-         calls.hot_lead_score,
-         calls.next_action_at,
-         calls.follow_up_task,
-         calls.crm_sync_status,
-         calls.live_sentiment_score,
-         calls.live_sentiment_label,
-         calls.live_red_flag,
-         calls.supervisor_alert_level,
-         calls.human_escalation_requested,
-         calls.objections_json,
-         calls.competitor_mentions_json
-       FROM calls
-       JOIN customers ON customers.id = calls.customer_id
-       LEFT JOIN agents ON agents.id = calls.agent_id
-      WHERE calls.id = ?`,
-        [req.params.callId]
-      );
+      const { data: dbRow } = await supabase
+        .from('calls')
+        .select(`
+         *,
+         customers(name, phone),
+         agents(name, slug)
+        `)
+        .eq('id', req.params.callId)
+        .single();
+        
+      const row = dbRow ? {
+        ...dbRow,
+        customer_name: dbRow.customers?.name,
+        customer_phone: dbRow.customers?.phone,
+        agent_name: dbRow.agents?.name,
+        agent_slug: dbRow.agents?.slug,
+        customers: undefined,
+        agents: undefined
+      } : null;
 
       if (!row) {
         return res.status(404).json({ error: 'Call not found' });
@@ -1271,14 +1237,12 @@ module.exports = function mountApiRoutes(app) {
 
   app.post('/api/calls/:callId(\\d+)/analyze', async (req, res) => {
     try {
-      const call = await dbGet(
-        `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone, agents.name AS agent_name, agents.slug AS agent_slug
-         FROM calls
-         JOIN customers ON customers.id = calls.customer_id
-         LEFT JOIN agents ON agents.id = calls.agent_id
-        WHERE calls.id = ?`,
-        [req.params.callId]
-      );
+      const { data: dbRow } = await supabase
+        .from('calls')
+        .select('*, customers(name, phone), agents(name, slug)')
+        .eq('id', req.params.callId)
+        .single();
+      const call = dbRow ? { ...dbRow, customer_name: dbRow.customers?.name, customer_phone: dbRow.customers?.phone, agent_name: dbRow.agents?.name, agent_slug: dbRow.agents?.slug, customers: undefined, agents: undefined } : null;
 
       if (!call) {
         return res.status(404).json({ error: 'Call not found' });
@@ -1298,8 +1262,9 @@ module.exports = function mountApiRoutes(app) {
         ...productAnalysis,
         product_analysis: productAnalysis
       };
-      await storeCallAnalysis({ dbRun, callId: call.id, analysis });
-      const updatedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [call.id]);
+      await storeCallAnalysis({ callId: call.id, analysis });
+      const { data: dbUpdatedRow } = await supabase.from('calls').select('*').eq('id', call.id).single();
+      const updatedCall = dbUpdatedRow;
       const sentiment = updatedCall.sentiment || updatedCall.sentiment_label || analysis.sentiment || 'neutral';
       const rating = Number(updatedCall.extracted_rating || 0);
       logger.info('FEEDBACK_ANALYSIS_COMPLETED', {
@@ -1323,14 +1288,12 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId(\\d+)/analysis-pdf', async (req, res) => {
     try {
-      const call = await dbGet(
-        `SELECT calls.*, customers.name AS customer_name, customers.phone AS customer_phone, agents.name AS agent_name, agents.slug AS agent_slug
-         FROM calls
-         JOIN customers ON customers.id = calls.customer_id
-         LEFT JOIN agents ON agents.id = calls.agent_id
-        WHERE calls.id = ?`,
-        [req.params.callId]
-      );
+      const { data: dbRow } = await supabase
+        .from('calls')
+        .select('*, customers(name, phone), agents(name, slug)')
+        .eq('id', req.params.callId)
+        .single();
+      const call = dbRow ? { ...dbRow, customer_name: dbRow.customers?.name, customer_phone: dbRow.customers?.phone, agent_name: dbRow.agents?.name, agent_slug: dbRow.agents?.slug, customers: undefined, agents: undefined } : null;
 
       if (!call) {
         return res.status(404).json({ error: 'Call not found' });
@@ -1362,29 +1325,36 @@ module.exports = function mountApiRoutes(app) {
       const inMemoryRows = [...liveCallState.values()];
       const seenCallSids = new Set(inMemoryRows.map((row) => row.call_sid).filter(Boolean));
       const now = Date.now();
-      const recentDbRows = await dbAll(
-        `SELECT
-         calls.id,
-         calls.customer_id,
-         calls.agent_id,
-         calls.called_at,
-         calls.outcome,
-         calls.provider_call_id,
-         calls.transcript_text,
-         calls.live_sentiment_score,
-         calls.live_sentiment_label,
-         calls.live_red_flag,
-         calls.supervisor_alert_level,
-         calls.human_escalation_requested,
-         customers.name AS customer_name,
-         agents.name AS agent_name
-       FROM calls
-       JOIN customers ON customers.id = calls.customer_id
-       LEFT JOIN agents ON agents.id = calls.agent_id
-       WHERE DATETIME(calls.called_at) >= DATETIME('now', '-60 minutes')
-       ORDER BY calls.called_at DESC
-       LIMIT 12`
-      );
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { data: dbRowsData } = await supabase
+        .from('calls')
+        .select(`
+         id,
+         customer_id,
+         agent_id,
+         called_at,
+         outcome,
+         provider_call_id,
+         transcript_text,
+         live_sentiment_score,
+         live_sentiment_label,
+         live_red_flag,
+         supervisor_alert_level,
+         human_escalation_requested,
+         customers(name),
+         agents(name)
+        `)
+        .gte('called_at', oneHourAgo)
+        .order('called_at', { ascending: false })
+        .limit(12);
+
+      const recentDbRows = (dbRowsData || []).map(r => ({
+        ...r,
+        customer_name: r.customers?.name,
+        agent_name: r.agents?.name,
+        customers: undefined,
+        agents: undefined
+      }));
 
       const mergedRows = [
         ...inMemoryRows,
@@ -1427,11 +1397,8 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId/supervisor-events', async (req, res) => {
     try {
-      const rows = await dbAll(
-        'SELECT * FROM call_supervisor_events WHERE call_id = ? ORDER BY created_at DESC LIMIT 50',
-        [req.params.callId]
-      );
-      res.json(rows);
+      const { data: rows } = await supabase.from('call_supervisor_events').select('*').eq('call_id', req.params.callId).order('created_at', { ascending: false }).limit(50);
+      res.json(rows || []);
     } catch (error) {
       console.error('[SUPERVISOR EVENTS ERROR]', error.message);
       res.status(500).json({ error: error.message });
@@ -1440,12 +1407,12 @@ module.exports = function mountApiRoutes(app) {
 
   app.post('/api/calls/:callId/escalate', async (req, res) => {
     try {
-      await dbRun(
-        'UPDATE calls SET human_escalation_requested = ?, supervisor_alert_level = ?, supervisor_notes = ? WHERE id = ?',
-        [1, 'critical', String(req.body.note || 'Manual escalation requested').trim(), req.params.callId]
-      );
+      await supabase.from('calls').update({
+        human_escalation_requested: 1,
+        supervisor_alert_level: 'critical',
+        supervisor_notes: String(req.body.note || 'Manual escalation requested').trim()
+      }).eq('id', req.params.callId);
       await createSupervisorEvent({
-        dbRun,
         callId: Number(req.params.callId),
         eventType: 'human_escalation_requested',
         severity: 'critical',
@@ -1460,7 +1427,7 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId/recording', async (req, res) => {
     try {
-      const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status, recording_local_path FROM calls WHERE id = ?', [req.params.callId]);
+      const { data: call } = await supabase.from('calls').select('id, provider_call_id, recording_url, recording_status, recording_local_path').eq('id', req.params.callId).single();
 
       if (call?.recording_local_path) {
         const fs = require('fs');
@@ -1497,12 +1464,12 @@ module.exports = function mountApiRoutes(app) {
 
   app.delete('/api/calls/bulk', async (req, res) => {
     try {
-      const counts = await dbGet('SELECT COUNT(*) AS call_count FROM calls');
-      await dbRun('DELETE FROM call_supervisor_events');
-      await dbRun('DELETE FROM calls');
+      const { count } = await supabase.from('calls').select('*', { count: 'exact', head: true });
+      await supabase.from('call_supervisor_events').delete().neq('id', 0);
+      await supabase.from('calls').delete().neq('id', 0);
       logger.warn('ALL_RECORDS_DELETED', {
         deletedBy: req.adminSession?.username || 'admin',
-        calls: counts?.call_count || 0,
+        calls: count || 0,
         scope: 'call_history'
       });
       res.json({ message: 'All call history deleted successfully' });
@@ -1514,21 +1481,21 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId/transcript', async (req, res) => {
     try {
-      const call = await dbGet(
-        `SELECT
-         calls.id,
-         calls.provider_call_id,
-         calls.called_at,
-         calls.outcome,
-         calls.language,
-         calls.transcript_text,
-         calls.transcript_status,
-         customers.name AS customer_name
-       FROM calls
-       LEFT JOIN customers ON customers.id = calls.customer_id
-       WHERE calls.id = ?`,
-        [req.params.callId]
-      );
+      const { data: dbRow } = await supabase
+        .from('calls')
+        .select(`
+         id,
+         provider_call_id,
+         called_at,
+         outcome,
+         language,
+         transcript_text,
+         transcript_status,
+         customers(name)
+        `)
+        .eq('id', req.params.callId)
+        .single();
+      const call = dbRow ? { ...dbRow, customer_name: dbRow.customers?.name, customers: undefined } : null;
 
       if (!call) {
         return res.status(404).json({ error: 'Call not found' });

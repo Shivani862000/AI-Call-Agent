@@ -5,7 +5,7 @@
 
 'use strict';
 
-const { dbGet, dbRun, dbAll } = require('../db');
+const supabase = require('./supabase');
 const { CLIENT_NAME, CALL_TYPES } = require('./config');
 const {
   shouldTriggerOwnerDigest,
@@ -62,59 +62,58 @@ async function markSubmittedCallsWithoutMediaFailed() {
   const retryAt = new Date(Date.now() + SUBMITTED_CALL_RETRY_MS).toISOString();
   const nowIso = new Date().toISOString();
   const timeoutLabel = formatTimeoutLabel(SUBMITTED_CALL_GRACE_MS);
-  const staleCalls = await dbAll(
-    `SELECT calls.id AS call_id,
-            calls.customer_id,
-            calls.provider_call_id,
-            calls.called_at,
-            calls.call_type,
-            customers.name,
-            customers.phone,
-            customers.status AS customer_status,
-            COALESCE(customers.auto_retry_enabled, 1) AS auto_retry_enabled,
-            COALESCE(customers.attempt_count, 0) AS attempt_count,
-            EXISTS (
-              SELECT 1
-                FROM calls newer_call
-               WHERE newer_call.customer_id = calls.customer_id
-                 AND DATETIME(newer_call.called_at) > DATETIME(calls.called_at)
-            ) AS has_newer_call
-       FROM calls
-       LEFT JOIN customers ON customers.id = calls.customer_id
-      WHERE calls.call_direction = 'outbound'
-        AND calls.outcome IN ('initiated', 'scheduled_initiated')
-        AND COALESCE(calls.media_packets, 0) = 0
-        AND DATETIME(calls.called_at) <= DATETIME(?)
-      ORDER BY DATETIME(calls.called_at) ASC`,
-    [cutoffIso]
-  );
+  
+  const { data: staleCallsRaw } = await supabase
+    .from('calls')
+    .select('id, customer_id, provider_call_id, called_at, call_type, customers(name, phone, status, auto_retry_enabled, attempt_count)')
+    .eq('call_direction', 'outbound')
+    .in('outcome', ['initiated', 'scheduled_initiated'])
+    .lte('called_at', cutoffIso)
+    .or('media_packets.eq.0,media_packets.is.null')
+    .order('called_at', { ascending: true });
+
+  const staleCalls = (staleCallsRaw || []).map(row => ({
+    call_id: row.id,
+    customer_id: row.customer_id,
+    provider_call_id: row.provider_call_id,
+    called_at: row.called_at,
+    call_type: row.call_type,
+    name: row.customers?.name,
+    phone: row.customers?.phone,
+    customer_status: row.customers?.status,
+    auto_retry_enabled: row.customers?.auto_retry_enabled !== false ? 1 : 0,
+    attempt_count: row.customers?.attempt_count || 0
+  }));
 
   for (const call of staleCalls) {
-    const failResult = await dbRun(
-      `UPDATE calls
-          SET outcome = ?,
-              outcome_detail = ?,
-              ended_at = COALESCE(ended_at, ?),
-              last_event = ?,
-              notes = ?
-        WHERE id = ?
-          AND outcome IN ('initiated', 'scheduled_initiated')
-          AND COALESCE(media_packets, 0) = 0`,
-      [
-        'failed',
-        `Connection timeout after ${timeoutLabel} (User may not have answered or is out of network)`,
-        nowIso,
-        'media_timeout',
-        'Provider accepted request, but no media stream was received. Assume no-answer or network issue.',
-        call.call_id
-      ]
-    );
+    const { data: newerCall } = await supabase
+      .from('calls')
+      .select('id')
+      .eq('customer_id', call.customer_id)
+      .gt('called_at', call.called_at)
+      .limit(1)
+      .single();
+      
+    call.has_newer_call = !!newerCall;
 
-    if (!failResult.changes) {
+    const { data: failResult, error } = await supabase
+      .from('calls')
+      .update({
+        outcome: 'failed',
+        outcome_detail: `Connection timeout after ${timeoutLabel} (User may not have answered or is out of network)`,
+        ended_at: nowIso,
+        last_event: 'media_timeout',
+        notes: 'Provider accepted request, but no media stream was received. Assume no-answer or network issue.'
+      })
+      .eq('id', call.call_id)
+      .in('outcome', ['initiated', 'scheduled_initiated'])
+      .or('media_packets.eq.0,media_packets.is.null')
+      .select('id');
+
+    if (!failResult || failResult.length === 0) {
       continue;
     }
 
-    // Finalize every stale attempt, but let only the newest one alter customer retry state.
     if (call.has_newer_call) {
       continue;
     }
@@ -129,17 +128,17 @@ async function markSubmittedCallsWithoutMediaFailed() {
       nextRetryAt = enforceBusinessHours(retryDate.toISOString());
     }
 
-    await dbRun(
-      `UPDATE customers
-          SET status = ?,
-              next_retry_at = ?,
-              last_contact_outcome = 'failed',
-              retry_count = COALESCE(retry_count, 0) + 1,
-              attempt_count = COALESCE(attempt_count, 0) + 1
-        WHERE id = ?
-          AND status IN ('calling', 'called')`,
-      [nextStatus, nextRetryAt, call.customer_id]
-    );
+    await supabase
+      .from('customers')
+      .update({
+        status: nextStatus,
+        next_retry_at: nextRetryAt,
+        last_contact_outcome: 'failed',
+        retry_count: attempts,
+        attempt_count: attempts
+      })
+      .eq('id', call.customer_id)
+      .in('status', ['calling', 'called']);
 
     logger.error('CALL_FAILED', {
       callId: call.call_id,
@@ -177,7 +176,7 @@ async function runOwnerDigestTick() {
 
   try {
     const todayKey = getLocalDateKey();
-    const state = await dbGet('SELECT value FROM app_state WHERE key = ?', ['owner_morning_digest_last_sent']);
+    const { data: state } = await supabase.from('app_state').select('value').eq('key', 'owner_morning_digest_last_sent').single();
     if (state?.value === todayKey) {
       return;
     }
@@ -191,18 +190,15 @@ async function runOwnerDigestTick() {
       `Estimated staff saving: Rs ${Number(digest.roi_snapshot?.estimated_saving_vs_staff || 0).toFixed(0)}`,
       '',
       digest.alerts?.length
-        ? `Priority alerts:\n- ${digest.alerts.map((item) => `${item.customer_name}: ${item.headline}`).join('\n- ')}`
+        ? `Priority alerts:\\n- ${digest.alerts.map((item) => `${item.customer_name}: ${item.headline}`).join('\\n- ')}`
         : 'Priority alerts: none'
-    ].join('\n');
+    ].join('\\n');
 
 
 
-    await dbRun(
-      `INSERT INTO app_state (key, value, updated_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-      ['owner_morning_digest_last_sent', todayKey, new Date().toISOString()]
-    );
+    await supabase
+      .from('app_state')
+      .upsert({ key: 'owner_morning_digest_last_sent', value: todayKey, updated_at: new Date().toISOString() });
 
     console.log('[OWNER DIGEST] Morning digest sent successfully');
   } catch (error) {
@@ -229,52 +225,66 @@ async function triggerScheduledCalls() {
   const now = new Date();
   const currentSlot = getCurrentSlotLabel(now);
 
-  const dueCustomers = await dbAll(
-    `SELECT c.*
-     FROM customers c
-     WHERE COALESCE(c.do_not_call, 0) = 0
-       AND COALESCE(c.wrong_number_flag, 0) = 0
-       AND COALESCE(c.admin_review_required, 0) = 0
-       AND COALESCE(c.consent_status, 'unknown') != 'denied'
-       AND c.status IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')
-       AND (c.locked_at IS NULL OR DATETIME(c.locked_at) <= DATETIME('now', '-10 minutes'))
-       AND (
-         COALESCE(c.attempt_count, 0) = 0
-         OR COALESCE(c.auto_retry_enabled, 0) = 1
-       )
-       AND COALESCE(c.attempt_count, 0) < 3
-       AND (
-         (
-           c.status IN ('pending', 'scheduled')
-           AND (
-             (c.scheduled_datetime IS NOT NULL AND DATETIME(c.scheduled_datetime) <= DATETIME('now'))
-             OR (c.scheduled_datetime IS NULL AND COALESCE(c.best_call_slot, c.preferred_slot) <= ?)
-           )
-         )
-         OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND c.next_retry_at IS NOT NULL AND DATETIME(c.next_retry_at) <= DATETIME('now'))
-       )
-       AND (
-         c.status IN ('retry_scheduled', 'callback_scheduled')
-         OR NOT EXISTS (
-           SELECT 1
-           FROM calls recent_call
-           WHERE recent_call.customer_id = c.id
-             AND DATETIME(recent_call.called_at) >= DATETIME('now', '-45 minutes')
-             AND (
-               c.scheduled_datetime IS NULL
-               OR DATETIME(recent_call.called_at) >= DATETIME(c.scheduled_datetime)
-             )
-         )
-       )`,
-    [currentSlot]
-  );
+  const { data: dueCustomers } = await supabase
+    .from('customers')
+    .select('*')
+    .or('do_not_call.is.null,do_not_call.eq.0')
+    .or('wrong_number_flag.is.null,wrong_number_flag.eq.0')
+    .or('admin_review_required.is.null,admin_review_required.eq.0')
+    .neq('consent_status', 'denied')
+    .in('status', ['pending', 'scheduled', 'retry_scheduled', 'callback_scheduled'])
+    .or('attempt_count.is.null,attempt_count.eq.0,auto_retry_enabled.eq.1')
+    .lt('attempt_count', 3);
 
-  if (!dueCustomers.length) {
+  // Filter the rest in memory since the query would be too complex
+  const filteredCustomers = (dueCustomers || []).filter(c => {
+    const lockedAtDate = c.locked_at ? new Date(c.locked_at) : null;
+    if (lockedAtDate && Date.now() - lockedAtDate.getTime() < 10 * 60 * 1000) return false;
+    
+    let timeConditionMet = false;
+    if (['pending', 'scheduled'].includes(c.status)) {
+      if (c.scheduled_datetime && new Date(c.scheduled_datetime) <= now) {
+        timeConditionMet = true;
+      } else if (!c.scheduled_datetime && (c.best_call_slot || c.preferred_slot || '') <= currentSlot) {
+        timeConditionMet = true;
+      }
+    } else if (['retry_scheduled', 'callback_scheduled'].includes(c.status) && c.next_retry_at && new Date(c.next_retry_at) <= now) {
+      timeConditionMet = true;
+    }
+
+    return timeConditionMet;
+  });
+
+  if (!filteredCustomers.length) {
+    return;
+  }
+  
+  // Further filter by checking recent calls
+  const verifiedDueCustomers = [];
+  for (const c of filteredCustomers) {
+    if (['retry_scheduled', 'callback_scheduled'].includes(c.status)) {
+      verifiedDueCustomers.push(c);
+      continue;
+    }
+    const fortyFiveMinsAgo = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+    const { data: recentCall } = await supabase
+      .from('calls')
+      .select('id')
+      .eq('customer_id', c.id)
+      .gte('called_at', fortyFiveMinsAgo)
+      .limit(1)
+      .single();
+    if (!recentCall) {
+      verifiedDueCustomers.push(c);
+    }
+  }
+
+  if (!verifiedDueCustomers.length) {
     return;
   }
 
   const uniqueByPhone = new Map();
-  for (const customer of dueCustomers) {
+  for (const customer of verifiedDueCustomers) {
     const phoneKey = normalizePhoneLookupValue(customer.phone) || String(customer.phone || '').trim();
     if (!phoneKey) {
       continue;
@@ -313,16 +323,16 @@ async function triggerScheduledCalls() {
             nextRetry.setDate(nextRetry.getDate() + 1);
           }
           logger.warn('CALL_SKIPPED_QUIET_HOURS', { phone: customer.phone, scheduledTime: logger.formatHumanDateTime(customer.scheduled_datetime || customer.next_retry_at || ''), reason: blockedReason.reason });
-          await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', nextRetry.toISOString(), customer.id]);
+          await supabase.from('customers').update({ status: 'retry_scheduled', next_retry_at: nextRetry.toISOString() }).eq('id', customer.id);
         } else if (blockedReason.code === 'CALL_FAILED_MAX_ATTEMPTS' || blockedReason.code === 'CALL_BLOCKED_DAILY_LIMIT') {
           logger.error('CALL_FAILED_MAX_ATTEMPTS', { phone: customer.phone, attempts: 3, reason: blockedReason.reason });
-          await dbRun(`UPDATE customers SET status = ?, failed_reason = ? WHERE id = ?`, ['failed', blockedReason.reason, customer.id]);
+          await supabase.from('customers').update({ status: 'failed', failed_reason: blockedReason.reason }).eq('id', customer.id);
         } else if (blockedReason.code === 'CALL_BLOCKED_THREE_HOUR_GAP') {
           logger.warn('CALL_BLOCKED_THREE_HOUR_GAP', { phone: customer.phone, lastAttemptAt: logger.formatHumanDateTime(blockedReason.lastAttemptAt), nextAllowedAt: logger.formatHumanDateTime(blockedReason.nextAllowedAt) });
-          await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', blockedReason.nextAllowedAt, customer.id]);
+          await supabase.from('customers').update({ status: 'retry_scheduled', next_retry_at: blockedReason.nextAllowedAt }).eq('id', customer.id);
         } else if (blockedReason.code === 'CALL_AUTO_SCHEDULE_BLOCKED_COMPLETED') {
           logger.warn('CALL_AUTO_SCHEDULE_BLOCKED_COMPLETED', { phone: customer.phone, callType: customer.call_type, reason: blockedReason.reason });
-          await dbRun(`UPDATE customers SET status = ?, failed_reason = ? WHERE id = ?`, ['cancelled', blockedReason.reason, customer.id]);
+          await supabase.from('customers').update({ status: 'cancelled', failed_reason: blockedReason.reason }).eq('id', customer.id);
         } else if (blockedReason.code === 'CALL_BLOCKED_ACTIVE_CALL') {
           logger.warn('CALL_BLOCKED_ACTIVE_CALL', { phone: customer.phone, reason: blockedReason.reason });
           // Don't update status, just skip for now, it'll be picked up later when the other call is done
@@ -331,26 +341,27 @@ async function triggerScheduledCalls() {
       }
 
       const idempotencyKey = `${customer.id}-${customer.attempt_count || 0}-${customer.scheduled_datetime || customer.next_retry_at || 'now'}`;
-      const existingCall = await dbGet('SELECT 1 FROM calls WHERE idempotency_key = ?', [idempotencyKey]);
+      const { data: existingCall } = await supabase.from('calls').select('id').eq('idempotency_key', idempotencyKey).single();
       if (existingCall) {
         logger.warn('CALL_START_BLOCKED_DUPLICATE', { phone: customer.phone, reason: 'Already calling' });
         // Fix: Advance the attempt_count to break out of infinite loop for this idempotency key
-        await dbRun('UPDATE customers SET attempt_count = COALESCE(attempt_count, 0) + 1 WHERE id = ?', [customer.id]);
+        await supabase.from('customers').update({ attempt_count: (customer.attempt_count || 0) + 1 }).eq('id', customer.id);
         continue;
       }
 
-      const claimResult = await dbRun(
-        `UPDATE customers
-            SET status = ?,
-                last_called_at = ?,
-                locked_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-            AND COALESCE(status, 'pending') IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')
-            AND (locked_at IS NULL OR DATETIME(locked_at) <= DATETIME('now', '-10 minutes'))`,
-        ['calling', new Date().toISOString(), customer.id]
-      );
+      const { data: claimResult, error: claimError } = await supabase
+        .from('customers')
+        .update({
+          status: 'calling',
+          last_called_at: new Date().toISOString(),
+          locked_at: new Date().toISOString()
+        })
+        .eq('id', customer.id)
+        .in('status', ['pending', 'scheduled', 'retry_scheduled', 'callback_scheduled'])
+        .or(`locked_at.is.null,locked_at.lte.${new Date(Date.now() - 10 * 60 * 1000).toISOString()}`)
+        .select('id');
 
-      if (!claimResult.changes) {
+      if (!claimResult || claimResult.length === 0) {
         logger.warn('CALL_START_BLOCKED_DUPLICATE', { phone: customer.phone, reason: 'Already calling or locked' });
         continue;
       }
@@ -389,15 +400,13 @@ async function triggerScheduledCalls() {
           logger.error('SCHEDULER_PAUSED_PROVIDER_DOWN', { reason: 'Provider failed, pausing scheduler for 15 minutes' });
         }
 
-        await dbRun(
-          `UPDATE customers
-              SET status = ?,
-                  next_retry_at = ?,
-                  attempt_count = COALESCE(attempt_count, 0) + ?,
-                  locked_at = NULL
-            WHERE id = ?`,
-          ['retry_scheduled', nextRetry.toISOString(), mediaEndpointUnavailable ? 0 : 1, customer.id]
-        );
+        await supabase.from('customers').update({
+          status: 'retry_scheduled',
+          next_retry_at: nextRetry.toISOString(),
+          attempt_count: (customer.attempt_count || 0) + (mediaEndpointUnavailable ? 0 : 1),
+          locked_at: null
+        }).eq('id', customer.id);
+        
         logger.info('CALL_RETRY_SCHEDULED', {
           callId: customer.id,
           nextAttemptAt: logger.formatHumanDateTime(nextRetry),
@@ -408,39 +417,38 @@ async function triggerScheduledCalls() {
         continue;
       }
 
-      const insertResult = await dbRun(
-        `INSERT INTO calls (
-          customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
-          provider_payload_json, idempotency_key
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          customer.id,
-          agentConfig?.id || null,
-          'scheduled_initiated',
-          call.sid,
-          new Date().toISOString(),
-          customer.priority_score || computePriorityScore(customer),
-          1,
-          agentConfig?.slug || 'hindi-feedback-v1',
-          'normal',
-          'outbound',
-          'icallmate',
-          normalizeOutboundCallType(customer.call_type),
-          JSON.stringify({ request: call.requestPayload || null, response: call.raw || null }),
-          idempotencyKey
-        ]
-      );
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      const { data: insertResult, error: insertError } = await supabase.from('calls').insert([{
+        customer_id: customer.id,
+        agent_id: agentConfig?.id || null,
+        outcome: 'scheduled_initiated',
+        provider_call_id: call.sid,
+        called_at: new Date().toISOString(),
+        hot_lead_score: customer.priority_score || computePriorityScore(customer),
+        consent_message_played: 1,
+        call_script_version: agentConfig?.slug || 'hindi-feedback-v1',
+        supervisor_alert_level: 'normal',
+        call_direction: 'outbound',
+        call_source: 'icallmate',
+        call_type: normalizeOutboundCallType(customer.call_type),
+        provider_payload_json: JSON.stringify({ request: call.requestPayload || null, response: call.raw || null }),
+        idempotency_key: idempotencyKey
+      }]).select('id').single();
+      
+      await supabase.from('customers').update({ status: 'called' }).eq('id', customer.id);
 
-      const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
-        [customer.id]
-      );
-      const attempt = callsTodayRow ? callsTodayRow.count : 1;
-      logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone, attempt });
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
 
-      const insertedCall = { id: insertResult.lastID };
+      const { count: attempt } = await supabase
+        .from('calls')
+        .select('*', { count: 'exact', head: true })
+        .eq('customer_id', customer.id)
+        .gte('called_at', todayStart.toISOString())
+        .or('call_direction.eq.outbound,call_direction.is.null');
+
+      logger.info('CALL_ATTEMPT_STARTED', { phone: customer.phone, attempt: attempt || 1 });
+
+      const insertedCall = { id: insertResult.id };
       const acceptedOnly = isProviderAcceptedOnly(call);
       logger.info(acceptedOnly ? 'CALL_PENDING' : 'CALL_STARTED', {
         callId: insertedCall?.id,
@@ -470,15 +478,15 @@ async function triggerScheduledCalls() {
         retryAt: logger.formatHumanDateTime(retryAt)
       });
       try {
-        await dbRun(
-          `UPDATE customers
-              SET status = ?,
-                  next_retry_at = ?,
-                  retry_count = COALESCE(retry_count, 0) + 1
-            WHERE id = ?
-              AND status = 'calling'`,
-          ['retry_scheduled', retryAt, customer.id]
-        );
+        await supabase
+          .from('customers')
+          .update({
+            status: 'retry_scheduled',
+            next_retry_at: retryAt,
+            retry_count: (customer.retry_count || 0) + 1
+          })
+          .eq('id', customer.id)
+          .eq('status', 'calling');
       } catch (rollbackError) {
         console.error(`[SCHEDULER] Failed to roll back customer ${customer.id}:`, rollbackError.message);
       }
@@ -490,23 +498,38 @@ async function triggerAnnualClientReminderCalls() {
   const now = new Date();
   const currentSlot = getCurrentSlotLabel(now);
   const currentYear = now.getUTCFullYear();
+  const todayIso = new Date().toISOString().split('T')[0];
 
-  const dueClients = await dbAll(
-    `SELECT client.*
-     FROM clients client
-     LEFT JOIN calls recent_call
-       ON recent_call.customer_id = client.linked_customer_id
-      AND DATETIME(recent_call.called_at) >= DATETIME('now', '-45 minutes')
-     WHERE COALESCE(client.annual_reminder_enabled, 1) = 1
-       AND COALESCE(client.status, 'active') = 'active'
-       AND client.next_annual_reminder_date IS NOT NULL
-       AND DATE(client.next_annual_reminder_date) <= DATE('now')
-       AND COALESCE(client.annual_reminder_slot, '10:00') <= ?
-       AND COALESCE(client.last_annual_reminder_year, 0) < ?
-       AND recent_call.id IS NULL
-     ORDER BY client.next_annual_reminder_date ASC, client.annual_reminder_slot ASC`,
-    [currentSlot, currentYear]
-  );
+  const { data: clients } = await supabase
+    .from('clients')
+    .select('*')
+    .or('annual_reminder_enabled.is.null,annual_reminder_enabled.eq.1')
+    .or('status.is.null,status.eq.active')
+    .not('next_annual_reminder_date', 'is', null)
+    .lte('next_annual_reminder_date', todayIso)
+    .lte('annual_reminder_slot', currentSlot)
+    .lt('last_annual_reminder_year', currentYear)
+    .order('next_annual_reminder_date', { ascending: true })
+    .order('annual_reminder_slot', { ascending: true });
+
+  const dueClients = [];
+  for (const client of (clients || [])) {
+    if (client.linked_customer_id) {
+      const fortyFiveMinsAgo = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      const { data: recentCall } = await supabase
+        .from('calls')
+        .select('id')
+        .eq('customer_id', client.linked_customer_id)
+        .gte('called_at', fortyFiveMinsAgo)
+        .limit(1)
+        .single();
+      if (!recentCall) {
+        dueClients.push(client);
+      }
+    } else {
+      dueClients.push(client);
+    }
+  }
 
   if (!dueClients.length) {
     return;
@@ -528,13 +551,13 @@ async function triggerAnnualClientReminderCalls() {
             nextRetry.setDate(nextRetry.getDate() + 1);
           }
           logger.warn('CALL_SKIPPED_QUIET_HOURS', { phone: hydratedCustomer.phone, scheduledTime: 'Annual Reminder', reason: blockedReason.reason });
-          await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', nextRetry.toISOString(), hydratedCustomer.id]);
+          await supabase.from('customers').update({ status: 'retry_scheduled', next_retry_at: nextRetry.toISOString() }).eq('id', hydratedCustomer.id);
         } else if (blockedReason.code === 'CALL_FAILED_MAX_ATTEMPTS' || blockedReason.code === 'CALL_BLOCKED_DAILY_LIMIT') {
           logger.error('CALL_FAILED_MAX_ATTEMPTS', { phone: hydratedCustomer.phone, attempts: 3, reason: blockedReason.reason });
-          await dbRun(`UPDATE customers SET status = ?, failed_reason = ? WHERE id = ?`, ['failed', blockedReason.reason, hydratedCustomer.id]);
+          await supabase.from('customers').update({ status: 'failed', failed_reason: blockedReason.reason }).eq('id', hydratedCustomer.id);
         } else if (blockedReason.code === 'CALL_BLOCKED_THREE_HOUR_GAP') {
           logger.warn('CALL_BLOCKED_THREE_HOUR_GAP', { phone: hydratedCustomer.phone, lastAttemptAt: logger.formatHumanDateTime(blockedReason.lastAttemptAt), nextAllowedAt: logger.formatHumanDateTime(blockedReason.nextAllowedAt) });
-          await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', blockedReason.nextAllowedAt, hydratedCustomer.id]);
+          await supabase.from('customers').update({ status: 'retry_scheduled', next_retry_at: blockedReason.nextAllowedAt }).eq('id', hydratedCustomer.id);
         }
         continue;
       }
@@ -543,16 +566,17 @@ async function triggerAnnualClientReminderCalls() {
         ? await getAgentConfigById(hydratedCustomer.default_agent_id)
         : await getDefaultAgentConfig();
 
-      const claimResult = await dbRun(
-        `UPDATE customers
-            SET status = ?,
-                last_called_at = ?
-          WHERE id = ?
-            AND COALESCE(status, 'pending') IN ('pending', 'retry_scheduled', 'callback_scheduled', 'called', 'completed')`,
-        ['calling', new Date().toISOString(), hydratedCustomer.id]
-      );
+      const { data: claimResult } = await supabase
+        .from('customers')
+        .update({
+          status: 'calling',
+          last_called_at: new Date().toISOString()
+        })
+        .eq('id', hydratedCustomer.id)
+        .in('status', ['pending', 'retry_scheduled', 'callback_scheduled', 'called', 'completed'])
+        .select('id');
 
-      if (!claimResult.changes) {
+      if (!claimResult || claimResult.length === 0) {
         console.log(`[CLIENT REMINDER] Skipping clientId=${client.id}: customer row is already in use`);
         continue;
       }
@@ -566,51 +590,44 @@ async function triggerAnnualClientReminderCalls() {
         callType: CALL_TYPES.THREE_MONTH_FOLLOWUP
       });
 
-      await dbRun(
-        `INSERT INTO calls (
-          customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          hydratedCustomer.id,
-          agentConfig?.id || null,
-          'scheduled_initiated',
-          call.sid,
-          new Date().toISOString(),
-          hydratedCustomer.priority_score || computePriorityScore(hydratedCustomer),
-          1,
-          `annual-reminder:${client.treatment_type || 'client-care'}`,
-          'normal',
-          'outbound',
-          'icallmate',
-          CALL_TYPES.THREE_MONTH_FOLLOWUP
-        ]
-      );
+      await supabase.from('calls').insert([{
+        customer_id: hydratedCustomer.id,
+        agent_id: agentConfig?.id || null,
+        outcome: 'scheduled_initiated',
+        provider_call_id: call.sid,
+        called_at: new Date().toISOString(),
+        hot_lead_score: hydratedCustomer.priority_score || computePriorityScore(hydratedCustomer),
+        consent_message_played: 1,
+        call_script_version: `annual-reminder:${client.treatment_type || 'client-care'}`,
+        supervisor_alert_level: 'normal',
+        call_direction: 'outbound',
+        call_source: 'icallmate',
+        call_type: CALL_TYPES.THREE_MONTH_FOLLOWUP
+      }]);
 
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', hydratedCustomer.id]);
+      await supabase.from('customers').update({ status: 'called' }).eq('id', hydratedCustomer.id);
 
-      const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
-        [hydratedCustomer.id]
-      );
-      const attempt = callsTodayRow ? callsTodayRow.count : 1;
-      logger.info('CALL_ATTEMPT_STARTED', { phone: hydratedCustomer.phone, attempt });
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
 
-      await dbRun(
-        `UPDATE clients
-            SET last_annual_reminder_at = ?,
-                last_annual_reminder_year = ?,
-                next_annual_reminder_date = ?,
-                updated_at = ?
-          WHERE id = ?`,
-        [
-          new Date().toISOString(),
-          currentYear,
-          computeNextAnnualReminderDate(client.last_visit_date, new Date(Date.UTC(currentYear + 1, 0, 1))),
-          new Date().toISOString(),
-          client.id
-        ]
-      );
+      const { count: attempt } = await supabase
+        .from('calls')
+        .select('*', { count: 'exact', head: true })
+        .eq('customer_id', hydratedCustomer.id)
+        .gte('called_at', todayStart.toISOString())
+        .or('call_direction.eq.outbound,call_direction.is.null');
+        
+      logger.info('CALL_ATTEMPT_STARTED', { phone: hydratedCustomer.phone, attempt: attempt || 1 });
+
+      await supabase
+        .from('clients')
+        .update({
+          last_annual_reminder_at: new Date().toISOString(),
+          last_annual_reminder_year: currentYear,
+          next_annual_reminder_date: computeNextAnnualReminderDate(client.last_visit_date, new Date(Date.UTC(currentYear + 1, 0, 1))),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', client.id);
 
       console.log(`[CLIENT REMINDER] Annual reminder call started for clientId=${client.id} (${call.sid})`);
     } catch (error) {

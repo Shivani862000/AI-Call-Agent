@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { dbRun, dbGet, dbAll } = require('../db');
+const supabase = require('../src/supabase');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const logger = require('../services/system-logger');
@@ -241,7 +241,7 @@ function validateCustomerPayload(payload) {
 }
 
 function handleSqliteError(error, res) {
-  if (error.message && error.message.includes('UNIQUE constraint failed: customers.phone')) {
+  if (error.code === '23505' || (error.message && error.message.includes('unique constraint'))) {
     return res.status(409).json({
       error: 'The database still has an old unique phone constraint. Restart the server so migrations can remove it.',
       fieldErrors: { phone: 'Phone number can be reused after the database migration runs' }
@@ -254,35 +254,29 @@ function handleSqliteError(error, res) {
 
 async function saveCustomer(payload, isManual = false) {
   const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
-  return dbRun(
-    `INSERT INTO customers (
-      name, phone, preferred_slot, scheduled_datetime, status, customer_value, urgency_level,
-      preferred_language, preferred_dialect, do_not_call, consent_status,
-      outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
-      campaign_name, service_interest, call_type, is_manual
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      payload.name,
-      payload.phone,
-      payload.preferred_slot,
-      payload.scheduled_datetime,
-      initialStatus,
-      payload.customer_value,
-      payload.urgency_level,
-      payload.preferred_language,
-      payload.preferred_dialect || null,
-      payload.do_not_call,
-      payload.consent_status,
-      payload.outstanding_issues || null,
-      payload.pending_follow_ups || null,
-      payload.revenue_stage,
-      payload.revenue_estimate,
-      payload.campaign_name || null,
-      payload.service_interest || null,
-      payload.call_type,
-      isManual ? 1 : 0
-    ]
-  );
+  const { data, error } = await supabase.from('customers').insert([{
+      name: payload.name,
+      phone: payload.phone,
+      preferred_slot: payload.preferred_slot,
+      scheduled_datetime: payload.scheduled_datetime,
+      status: initialStatus,
+      customer_value: payload.customer_value,
+      urgency_level: payload.urgency_level,
+      preferred_language: payload.preferred_language,
+      preferred_dialect: payload.preferred_dialect || null,
+      do_not_call: payload.do_not_call,
+      consent_status: payload.consent_status,
+      outstanding_issues: payload.outstanding_issues || null,
+      pending_follow_ups: payload.pending_follow_ups || null,
+      revenue_stage: payload.revenue_stage,
+      revenue_estimate: payload.revenue_estimate,
+      campaign_name: payload.campaign_name || null,
+      service_interest: payload.service_interest || null,
+      call_type: payload.call_type,
+      is_manual: isManual ? 1 : 0
+  }]).select('id').single();
+  if (error) throw error;
+  return { lastID: data.id };
 }
 
 function baseCustomerLogDetails(customer, extra = {}) {
@@ -303,16 +297,15 @@ router.post('/', async (req, res) => {
     const fieldErrors = validateCustomerPayload(payload);
 
     if (payload.phone && payload.scheduled_date === getLocalDateValue()) {
-      const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count 
-         FROM calls c
-         JOIN customers cu ON cu.id = c.customer_id
-         WHERE cu.phone = ? 
-           AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
-           AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
-        [payload.phone]
-      );
-      if (callsTodayRow && callsTodayRow.count >= 3) {
+              const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const { count, error } = await supabase
+          .from('calls')
+          .select('id, customers!inner(phone)', { count: 'exact', head: true })
+          .eq('customers.phone', payload.phone)
+          .eq('call_direction', 'outbound')
+          .gte('called_at', startOfDay.toISOString());
+        if (!error && count >= 3) {
         fieldErrors.preferred_slot = 'Maximum 3 attempts completed for the day';
       }
     }
@@ -393,15 +386,14 @@ router.get('/search', async (req, res) => {
     if (q.length < 2) {
       return res.json([]);
     }
-    const pattern = `%${q}%`;
-    const customers = await dbAll(
-      `SELECT id, name, phone, call_type, preferred_slot
-       FROM customers 
-       WHERE name LIKE ? OR phone LIKE ? 
-       ORDER BY created_at DESC 
-       LIMIT 20`,
-      [pattern, pattern]
-    );
+    const { data: customers, error } = await supabase
+      .from('customers')
+      .select('id, name, phone, call_type, preferred_slot')
+      .or(`name.ilike.%${q}%,phone.ilike.%${q}%`)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    
+    if (error) throw error;
     res.json(customers);
   } catch (error) {
     console.error('Error searching customers:', error);
@@ -412,7 +404,13 @@ router.get('/search', async (req, res) => {
 // List all customers
 router.get('/', async (req, res) => {
   try {
-    const customers = await dbAll('SELECT * FROM customers ORDER BY COALESCE(priority_score, 0) DESC, created_at DESC');
+    const { data: customers, error } = await supabase
+      .from('customers')
+      .select('*')
+      .order('priority_score', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
     res.json(customers);
   } catch (error) {
     console.error('Error fetching customers:', error);
@@ -423,7 +421,13 @@ router.get('/', async (req, res) => {
 // Get one customer
 router.get('/:id', async (req, res) => {
   try {
-    const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const { data: customer, error } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+      
+    if (error && error.code !== 'PGRST116') throw error;
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -438,7 +442,13 @@ router.get('/:id', async (req, res) => {
 // Update customer
 router.put('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const { data: existing, error: fetchError } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+      
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
     if (!existing) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -447,16 +457,15 @@ router.put('/:id', async (req, res) => {
     const fieldErrors = validateCustomerPayload(payload);
 
     if (payload.phone && payload.scheduled_date === getLocalDateValue()) {
-      const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count 
-         FROM calls c
-         JOIN customers cu ON cu.id = c.customer_id
-         WHERE cu.phone = ? 
-           AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime')
-           AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
-        [payload.phone]
-      );
-      if (callsTodayRow && callsTodayRow.count >= 3) {
+              const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        const { count, error } = await supabase
+          .from('calls')
+          .select('id, customers!inner(phone)', { count: 'exact', head: true })
+          .eq('customers.phone', payload.phone)
+          .eq('call_direction', 'outbound')
+          .gte('called_at', startOfDay.toISOString());
+        if (!error && count >= 3) {
         fieldErrors.preferred_slot = 'Maximum 3 attempts completed for the day';
       }
     }
@@ -474,55 +483,32 @@ router.put('/:id', async (req, res) => {
       : existing.next_retry_at;
     const nextStatus = shouldRescheduleStatus ? 'scheduled' : existing.status;
 
-    await dbRun(
-      `UPDATE customers
-          SET name = ?,
-              phone = ?,
-              preferred_slot = ?,
-              scheduled_datetime = ?,
-              status = ?,
-              customer_value = ?,
-              urgency_level = ?,
-              preferred_language = ?,
-              preferred_dialect = ?,
-              do_not_call = ?,
-              consent_status = ?,
-              outstanding_issues = ?,
-              pending_follow_ups = ?,
-              next_retry_at = ?,
-              revenue_stage = ?,
-              revenue_estimate = ?,
-              campaign_name = ?,
-              service_interest = ?,
-              call_type = ?,
-              attempt_count = ?,
-              is_manual = 1,
-              locked_at = NULL
-        WHERE id = ?`,
-      [
-        payload.name,
-        payload.phone,
-        payload.preferred_slot,
-        payload.scheduled_datetime,
-        nextStatus,
-        payload.customer_value,
-        payload.urgency_level,
-        payload.preferred_language,
-        payload.preferred_dialect || null,
-        payload.do_not_call,
-        payload.consent_status,
-        payload.outstanding_issues || null,
-        payload.pending_follow_ups || null,
-        nextRetryAt,
-        payload.revenue_stage,
-        payload.revenue_estimate,
-        payload.campaign_name || null,
-        payload.service_interest || null,
-        payload.call_type,
-        shouldRescheduleStatus ? 0 : (existing.attempt_count || 0),
-        req.params.id
-      ]
-    );
+    const { error: updateError } = await supabase.from('customers').update({
+        name: payload.name,
+        phone: payload.phone,
+        preferred_slot: payload.preferred_slot,
+        scheduled_datetime: payload.scheduled_datetime,
+        status: nextStatus,
+        customer_value: payload.customer_value,
+        urgency_level: payload.urgency_level,
+        preferred_language: payload.preferred_language,
+        preferred_dialect: payload.preferred_dialect || null,
+        do_not_call: payload.do_not_call,
+        consent_status: payload.consent_status,
+        outstanding_issues: payload.outstanding_issues || null,
+        pending_follow_ups: payload.pending_follow_ups || null,
+        next_retry_at: nextRetryAt,
+        revenue_stage: payload.revenue_stage,
+        revenue_estimate: payload.revenue_estimate,
+        campaign_name: payload.campaign_name || null,
+        service_interest: payload.service_interest || null,
+        call_type: payload.call_type,
+        attempt_count: shouldRescheduleStatus ? 0 : (existing.attempt_count || 0),
+        is_manual: 1,
+        locked_at: null
+    }).eq('id', req.params.id);
+    
+    if (updateError) throw updateError;
 
     if (existingStatus === 'completed' && nextStatus === 'scheduled') {
       logger.info('CALL_MANUALLY_RESCHEDULED', {
@@ -543,7 +529,12 @@ router.put('/:id', async (req, res) => {
 
 router.patch('/:id/workflow', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const { data: existing, error: fetchError } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
     if (!existing) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -557,25 +548,16 @@ router.patch('/:id/workflow', async (req, res) => {
       pending_follow_ups: req.body.pending_follow_ups === undefined ? existing.pending_follow_ups : String(req.body.pending_follow_ups || '').trim()
     };
 
-    await dbRun(
-      `UPDATE customers
-          SET do_not_call = ?,
-              wrong_number_flag = ?,
-              admin_review_required = ?,
-              consent_status = ?,
-              next_retry_at = ?,
-              pending_follow_ups = ?
-        WHERE id = ?`,
-      [
-        patch.do_not_call,
-        patch.wrong_number_flag,
-        patch.admin_review_required,
-        patch.consent_status,
-        patch.next_retry_at,
-        patch.pending_follow_ups || null,
-        req.params.id
-      ]
-    );
+    const { error: updateError } = await supabase.from('customers').update({
+        do_not_call: patch.do_not_call,
+        wrong_number_flag: patch.wrong_number_flag,
+        admin_review_required: patch.admin_review_required,
+        consent_status: patch.consent_status,
+        next_retry_at: patch.next_retry_at,
+        pending_follow_ups: patch.pending_follow_ups || null
+    }).eq('id', req.params.id);
+    
+    if (updateError) throw updateError;
 
     res.json({ message: 'Workflow updated successfully' });
   } catch (error) {
@@ -586,16 +568,19 @@ router.patch('/:id/workflow', async (req, res) => {
 
 router.post('/:id/retry', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const { data: existing, error: fetchError } = await supabase.from('customers').select('*').eq('id', req.params.id).single();
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
     if (!existing) {
       return res.status(404).json({ error: 'Customer not found' });
     }
 
     const retryAt = req.body.retry_at || new Date(Date.now() + (60 * 60 * 1000)).toISOString();
-    await dbRun(
-      'UPDATE customers SET status = ?, next_retry_at = ?, retry_count = COALESCE(retry_count, 0) + 1 WHERE id = ?',
-      ['retry_scheduled', retryAt, req.params.id]
-    );
+    const { error: updateError } = await supabase.from('customers').update({
+        status: 'retry_scheduled',
+        next_retry_at: retryAt,
+        retry_count: (existing.retry_count || 0) + 1
+    }).eq('id', req.params.id);
+    if (updateError) throw updateError;
 
     logger.info('CALL_RETRY', baseCustomerLogDetails(existing, {
       customerId: existing.id,
@@ -611,12 +596,14 @@ router.post('/:id/retry', async (req, res) => {
 // Toggle auto-retry
 router.put('/:id/auto-retry', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const { data: existing, error: fetchError } = await supabase.from('customers').select('*').eq('id', req.params.id).single();
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
     if (!existing) {
       return res.status(404).json({ error: 'Customer not found' });
     }
     const auto_retry_enabled = req.body.auto_retry_enabled ? 1 : 0;
-    await dbRun('UPDATE customers SET auto_retry_enabled = ? WHERE id = ?', [auto_retry_enabled, req.params.id]);
+    const { error: updateError } = await supabase.from('customers').update({ auto_retry_enabled }).eq('id', req.params.id);
+    if (updateError) throw updateError;
 
     if (auto_retry_enabled === 0) {
       logger.info('AUTO_RETRY_DISABLED', {
@@ -644,21 +631,20 @@ router.put('/:id/auto-retry', async (req, res) => {
 // Delete all customers and their data
 router.delete('/bulk', async (req, res) => {
   try {
-    const counts = await dbGet(`
-      SELECT
-        (SELECT COUNT(*) FROM customers) AS customer_count,
-        (SELECT COUNT(*) FROM calls) AS call_count,
-        (SELECT COUNT(*) FROM feedback) AS feedback_count
-    `);
-    await dbRun('DELETE FROM feedback');
-    await dbRun('DELETE FROM call_supervisor_events');
-    await dbRun('DELETE FROM calls');
-    await dbRun('DELETE FROM customers');
+    const { count: customer_count } = await supabase.from('customers').select('*', { count: 'exact', head: true });
+    const { count: call_count } = await supabase.from('calls').select('*', { count: 'exact', head: true });
+    const { count: feedback_count } = await supabase.from('feedback').select('*', { count: 'exact', head: true });
+    
+    await supabase.from('feedback').delete().neq('id', 0);
+    await supabase.from('call_supervisor_events').delete().neq('id', 0);
+    await supabase.from('calls').delete().neq('id', 0);
+    await supabase.from('customers').delete().neq('id', 0);
+    
     logger.warn('ALL_RECORDS_DELETED', {
       deletedBy: req.adminSession?.username || 'admin',
-      customers: counts?.customer_count || 0,
-      calls: counts?.call_count || 0,
-      feedback: counts?.feedback_count || 0
+      customers: customer_count || 0,
+      calls: call_count || 0,
+      feedback: feedback_count || 0
     });
     res.json({ message: 'All patients and call history deleted successfully' });
   } catch (error) {
@@ -670,15 +656,14 @@ router.delete('/bulk', async (req, res) => {
 // Delete customer
 router.delete('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM customers WHERE id = ?', [req.params.id]);
+    const { data: existing, error: fetchError } = await supabase.from('customers').select('*').eq('id', req.params.id).single();
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
     if (!existing) {
       return res.status(404).json({ error: 'Customer not found' });
     }
-    const latestCall = await dbGet('SELECT id, outcome FROM calls WHERE customer_id = ? ORDER BY id DESC LIMIT 1', [req.params.id]);
+    const { data: latestCall } = await supabase.from('calls').select('id, outcome').eq('customer_id', req.params.id).order('id', { ascending: false }).limit(1).single();
 
-    await dbRun('DELETE FROM feedback WHERE customer_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM calls WHERE customer_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM customers WHERE id = ?', [req.params.id]);
+    await supabase.from('customers').delete().eq('id', req.params.id);
 
     logger.warn('USER_DELETED_CALL', baseCustomerLogDetails(existing, {
       callId: latestCall?.id,

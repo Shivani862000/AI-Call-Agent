@@ -1,4 +1,4 @@
-
+const supabase = require('../src/supabase');
 
 async function postJson(url, payload) {
   const response = await fetch(url, {
@@ -53,25 +53,25 @@ function buildCrmPayload({ customer, call, feedback }) {
   };
 }
 
-async function syncCallToCrm({ dbGet, dbRun, callId }) {
+async function syncCallToCrm({ callId }) {
   if (!process.env.CRM_WEBHOOK_URL) {
     return { skipped: true, reason: 'missing_crm_webhook_url' };
   }
 
-  const call = await dbGet('SELECT * FROM calls WHERE id = ?', [callId]);
+  const { data: call } = await supabase.from('calls').select('*').eq('id', callId).single();
   if (!call) {
     return { skipped: true, reason: 'call_not_found' };
   }
 
-  const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [call.customer_id]);
-  const feedback = await dbGet('SELECT * FROM feedback WHERE call_id = ?', [call.id]);
+  const { data: customer } = await supabase.from('customers').select('*').eq('id', call.customer_id).single();
+  const { data: feedback } = await supabase.from('feedback').select('*').eq('call_id', call.id).single();
 
   try {
     await postJson(process.env.CRM_WEBHOOK_URL, buildCrmPayload({ customer, call, feedback }));
-    await dbRun('UPDATE calls SET crm_sync_status = ? WHERE id = ?', ['completed', call.id]);
+    await supabase.from('calls').update({ crm_sync_status: 'completed' }).eq('id', call.id);
     return { ok: true };
   } catch (error) {
-    await dbRun('UPDATE calls SET crm_sync_status = ? WHERE id = ?', ['failed', call.id]);
+    await supabase.from('calls').update({ crm_sync_status: 'failed' }).eq('id', call.id);
     throw error;
   }
 }

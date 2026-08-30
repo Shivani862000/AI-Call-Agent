@@ -1,4 +1,4 @@
-const { dbRun, dbGet } = require('../db');
+const supabase = require('../src/supabase');
 const { extractCallFeedback } = require('./call-feedback');
 const { categorizeFeedback, generateGeminiReply } = require('./gemini');
 const { buildAgentSystemPrompt, buildOpeningPrompt } = require('../src/prompt-builder');
@@ -40,13 +40,8 @@ function applyAgentTemplate(template, values) {
 }
 
 async function getOutboundPrompt() {
-  const agent = await dbGet(
-    `SELECT *
-       FROM agents
-      WHERE is_active = 1
-      ORDER BY is_default DESC, id ASC
-      LIMIT 1`
-  );
+  const { data: agents } = await supabase.from('agents').select('*').eq('is_active', 1).order('is_default', { ascending: false }).order('id', { ascending: true }).limit(1);
+  const agent = agents && agents.length > 0 ? agents[0] : null;
   const clientName = agent?.client_name || DEFAULT_CLIENT_NAME;
 
   const systemPrompt = buildAgentSystemPrompt(clientName, BROWSER_TEST_CALLER, agent, 'review_call');
@@ -101,12 +96,14 @@ function scriptedReply(session) {
 
 async function getOrCreateBrowserTestCustomer() {
   const phone = `browser-test-${Date.now()}`;
-  const result = await dbRun(
-    `INSERT INTO customers (name, phone, preferred_slot, status, created_at)
-     VALUES (?, ?, ?, ?, ?)`,
-    [BROWSER_TEST_CALLER, phone, 'browser', 'completed', new Date().toISOString()]
-  );
-  return result.lastID;
+  const { data: result } = await supabase.from('customers').insert([{
+    name: BROWSER_TEST_CALLER,
+    phone: phone,
+    preferred_slot: 'browser',
+    status: 'completed',
+    created_at: new Date().toISOString()
+  }]).select('id').single();
+  return result.id;
 }
 
 function buildSummary(transcript) {
@@ -133,29 +130,23 @@ async function startBrowserTestCall() {
   const providerCallId = `test-ai-call-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const now = new Date().toISOString();
 
-  const callResult = await dbRun(
-    `INSERT INTO calls (
-       customer_id, called_at, outcome, provider_call_id, call_direction, call_source,
-       transcript_status, analysis_status, call_script_version, agent_id, notes
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      customerId,
-      now,
-      'answered',
-      providerCallId,
-      'outbound',
-      SOURCE,
-      'in_progress',
-      'pending',
-      'browser-voice-test-v1',
-      promptConfig.agentId,
-      `Browser Test AI Call; prompt_source=${promptConfig.promptSource}`
-    ]
-  );
+  const { data: callResult } = await supabase.from('calls').insert([{
+    customer_id: customerId,
+    called_at: now,
+    outcome: 'answered',
+    provider_call_id: providerCallId,
+    call_direction: 'outbound',
+    call_source: SOURCE,
+    transcript_status: 'in_progress',
+    analysis_status: 'pending',
+    call_script_version: 'browser-voice-test-v1',
+    agent_id: promptConfig.agentId,
+    notes: `Browser Test AI Call; prompt_source=${promptConfig.promptSource}`
+  }]).select('id').single();
 
   const session = {
     id: providerCallId,
-    callId: callResult.lastID,
+    callId: callResult.id,
     customerId,
     status: 'live',
     step: 0,
@@ -206,14 +197,11 @@ async function handleUserMessage({ sessionId, message }) {
 
   session.transcript.push({ role: 'AGENT', text: aiResponse, at: new Date().toISOString() });
 
-  await dbRun(
-    `UPDATE calls
-        SET transcript_text = ?,
-            transcript_status = ?,
-            outcome = ?
-      WHERE id = ?`,
-    [toPlainTranscript(session.transcript), 'in_progress', 'answered', session.callId]
-  );
+  await supabase.from('calls').update({
+    transcript_text: toPlainTranscript(session.transcript),
+    transcript_status: 'in_progress',
+    outcome: 'answered'
+  }).eq('id', session.callId);
 
   return serialize(session, { aiResponse, llmFallback });
 }
@@ -232,41 +220,32 @@ async function endBrowserTestCall({ sessionId }) {
   const categorization = await categorizeFeedback(session.summary.reviewText, stars);
   const now = new Date().toISOString();
 
-  await dbRun(
-    `UPDATE calls
-        SET transcript_text = ?,
-            transcript_status = ?,
-            analysis_status = ?,
-            extracted_rating = ?,
-            extracted_review_text = ?,
-            feedback_saved_at = ?,
-            outcome = ?,
-            ended_at = ?
-      WHERE id = ?`,
-    [
-      toPlainTranscript(session.transcript),
-      'completed',
-      'completed',
-      stars,
-      session.summary.reviewText,
-      now,
-      'completed',
-      now,
-      session.callId
-    ]
-  );
+  await supabase.from('calls').update({
+    transcript_text: toPlainTranscript(session.transcript),
+    transcript_status: 'completed',
+    analysis_status: 'completed',
+    extracted_rating: stars,
+    extracted_review_text: session.summary.reviewText,
+    feedback_saved_at: now,
+    outcome: 'completed',
+    ended_at: now
+  }).eq('id', session.callId);
 
-  const feedbackResult = await dbRun(
-    `INSERT INTO feedback (customer_id, call_id, review_text, category, stars, submitted_at, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [session.customerId, session.callId, session.summary.reviewText, categorization.category, stars, now, SOURCE]
-  );
+  const { data: feedbackResult } = await supabase.from('feedback').insert([{
+    customer_id: session.customerId,
+    call_id: session.callId,
+    review_text: session.summary.reviewText,
+    category: categorization.category,
+    stars: stars,
+    submitted_at: now,
+    source: SOURCE
+  }]).select('id').single();
 
   sessions.delete(session.id);
-  console.log(`[TEST AI CALL] completed session=${session.id} feedbackId=${feedbackResult.lastID}`);
+  console.log(`[TEST AI CALL] completed session=${session.id} feedbackId=${feedbackResult.id}`);
 
   return serialize(session, {
-    feedbackId: feedbackResult.lastID,
+    feedbackId: feedbackResult.id,
     saved: true
   });
 }

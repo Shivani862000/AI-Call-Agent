@@ -1,3 +1,4 @@
+const supabase = require('../src/supabase');
 const { categorizeFeedback } = require('./gemini');
 
 const NUMBER_WORDS = new Map([
@@ -385,54 +386,59 @@ function extractCallFeedback(transcript = []) {
   };
 }
 
-async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, callId, customerId, transcript, overwriteExisting = false }) {
+async function saveCallFeedbackFromTranscript({ callSid, callId, customerId, transcript, overwriteExisting = false }) {
   if ((!callSid && !callId) || !Array.isArray(transcript) || transcript.length === 0) {
     return { saved: false, reason: 'missing_call_or_transcript' };
   }
 
-  const callRecord = await dbGet(
-    `SELECT *
-       FROM calls
-      WHERE ${callId ? 'id = ?' : 'provider_call_id = ?'}
-      ORDER BY
-        CASE WHEN COALESCE(transcript_text, '') != '' THEN 0 ELSE 1 END,
-        CASE WHEN outcome = 'completed' THEN 0 ELSE 1 END,
-        id DESC
-      LIMIT 1`,
-    [callId || callSid]
-  );
+  let query = supabase.from('calls').select('*');
+  if (callId) {
+    query = query.eq('id', callId);
+  } else {
+    query = query.eq('provider_call_id', callSid);
+  }
+  
+  const { data: calls } = await query;
+  if (!calls || calls.length === 0) {
+    return { saved: false, reason: 'call_record_not_found' };
+  }
+  
+  // Replicate ORDER BY logic from original SQL
+  const sortedCalls = calls.sort((a, b) => {
+    const aHasTranscript = (a.transcript_text || '') !== '' ? 0 : 1;
+    const bHasTranscript = (b.transcript_text || '') !== '' ? 0 : 1;
+    if (aHasTranscript !== bHasTranscript) return aHasTranscript - bHasTranscript;
+    
+    const aCompleted = a.outcome === 'completed' ? 0 : 1;
+    const bCompleted = b.outcome === 'completed' ? 0 : 1;
+    if (aCompleted !== bCompleted) return aCompleted - bCompleted;
+    
+    return b.id - a.id;
+  });
+  
+  const callRecord = sortedCalls[0];
   const resolvedCustomerId = customerId || callRecord?.customer_id;
 
-  if (!callRecord || !resolvedCustomerId) {
+  if (!resolvedCustomerId) {
     return { saved: false, reason: 'call_record_not_found' };
   }
 
   const extraction = extractCallFeedback(transcript);
   const transcriptText = transcript.map((turn) => `${turn.role}: ${turn.text}`).join('\n');
 
-  await dbRun(
-    `UPDATE calls
-        SET transcript_text = ?,
-            consent_detected = ?,
-            language = ?,
-            extracted_rating = ?,
-            extracted_review_text = ?
-      WHERE id = ?`,
-    [
-      transcriptText,
-      extraction.consentDetected ? 1 : 0,
-      extraction.language,
-      extraction.stars,
-      extraction.reviewText || null,
-      callRecord.id
-    ]
-  );
+  await supabase.from('calls').update({
+    transcript_text: transcriptText,
+    consent_detected: extraction.consentDetected ? 1 : 0,
+    language: extraction.language,
+    extracted_rating: extraction.stars,
+    extracted_review_text: extraction.reviewText || null
+  }).eq('id', callRecord.id);
 
   if (!extraction.hasFeedback) {
     return { saved: false, reason: 'no_feedback_detected', extraction };
   }
 
-  const existingFeedback = await dbGet('SELECT id FROM feedback WHERE call_id = ?', [callRecord.id]);
+  const { data: existingFeedback } = await supabase.from('feedback').select('id').eq('call_id', callRecord.id).single();
   if (existingFeedback) {
     if (!overwriteExisting) {
       return { saved: false, reason: 'already_saved', extraction };
@@ -442,28 +448,19 @@ async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, callId, c
     const stars = Number.isInteger(extraction.stars) ? extraction.stars : 3;
     const categorization = await categorizeFeedback(reviewText, stars);
 
-    await dbRun(
-      `UPDATE feedback
-          SET review_text = ?,
-              category = ?,
-              stars = ?,
-              submitted_at = ?,
-              source = ?
-        WHERE id = ?`,
-      [
-        reviewText,
-        categorization.category,
-        stars,
-        new Date().toISOString(),
-        'call',
-        existingFeedback.id
-      ]
-    );
+    await supabase.from('feedback').update({
+      review_text: reviewText,
+      category: categorization.category,
+      stars: stars,
+      submitted_at: new Date().toISOString(),
+      source: 'call'
+    }).eq('id', existingFeedback.id);
 
-    await dbRun(
-      'UPDATE calls SET feedback_saved_at = ?, outcome = COALESCE(outcome, ?) WHERE id = ?',
-      [new Date().toISOString(), 'completed', callRecord.id]
-    );
+    const { data: cData } = await supabase.from('calls').select('outcome').eq('id', callRecord.id).single();
+    await supabase.from('calls').update({
+      feedback_saved_at: new Date().toISOString(),
+      outcome: cData?.outcome || 'completed'
+    }).eq('id', callRecord.id);
 
     return {
       saved: true,
@@ -478,28 +475,25 @@ async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, callId, c
   const stars = Number.isInteger(extraction.stars) ? extraction.stars : 3;
   const categorization = await categorizeFeedback(reviewText, stars);
 
-  const result = await dbRun(
-    `INSERT INTO feedback (customer_id, call_id, review_text, category, stars, submitted_at, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      resolvedCustomerId,
-      callRecord.id,
-      reviewText,
-      categorization.category,
-      stars,
-      new Date().toISOString(),
-      'call'
-    ]
-  );
+  const { data: result } = await supabase.from('feedback').insert([{
+    customer_id: resolvedCustomerId,
+    call_id: callRecord.id,
+    review_text: reviewText,
+    category: categorization.category,
+    stars: stars,
+    submitted_at: new Date().toISOString(),
+    source: 'call'
+  }]).select('id').single();
 
-  await dbRun(
-    'UPDATE calls SET feedback_saved_at = ?, outcome = COALESCE(outcome, ?) WHERE id = ?',
-    [new Date().toISOString(), 'completed', callRecord.id]
-  );
+  const { data: cData2 } = await supabase.from('calls').select('outcome').eq('id', callRecord.id).single();
+  await supabase.from('calls').update({
+    feedback_saved_at: new Date().toISOString(),
+    outcome: cData2?.outcome || 'completed'
+  }).eq('id', callRecord.id);
 
   return {
     saved: true,
-    feedbackId: result.lastID,
+    feedbackId: result.id,
     extraction,
     category: categorization.category
   };

@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { dbRun, dbGet, dbAll } = require('../db');
+const supabase = require('../src/supabase');
 const { initiateCall } = require('../services/icallmate');
 const { buildIcallMateCallbackUrl } = require('../src/icallmate-webhook');
 const logger = require('../services/system-logger');
@@ -11,7 +11,13 @@ router.post('/initiate/:customerId', async (req, res) => {
     const { customerId } = req.params;
 
     // Fetch customer
-    const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [customerId]);
+    const { data: customer, error: fetchError } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('id', customerId)
+      .single();
+    
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' });
     }
@@ -31,17 +37,23 @@ router.post('/initiate/:customerId', async (req, res) => {
     );
 
     // Save call record
-    const result = await dbRun(
-      'INSERT INTO calls (customer_id, outcome, provider_call_id, called_at, call_direction, call_source, call_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [customerId, 'initiated', call.sid, new Date().toISOString(), 'outbound', 'icallmate', customer.call_type || 'REVIEW_CALL']
-    );
+    const { data: result, error: insertError } = await supabase.from('calls').insert([{
+      customer_id: customerId,
+      outcome: 'initiated',
+      provider_call_id: call.sid,
+      called_at: new Date().toISOString(),
+      call_direction: 'outbound',
+      call_source: 'icallmate',
+      call_type: customer.call_type || 'REVIEW_CALL'
+    }]).select('id').single();
+    if (insertError) throw insertError;
 
     // Update customer status
-    await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['initiated', customerId]);
+    await supabase.from('customers').update({ status: 'initiated' }).eq('id', customerId);
 
     res.json({
       message: 'Call initiated',
-      callId: result.lastID,
+      callId: result.id,
       sid: call.sid
     });
   } catch (error) {
@@ -59,9 +71,13 @@ router.post('/status', async (req, res) => {
 
     console.log(`Call status update: ${callSid} -> ${callStatus}`);
 
-    const call = await dbGet('SELECT * FROM calls WHERE provider_call_id = ?', [callSid]);
+    const { data: call, error: fetchError } = await supabase
+      .from('calls')
+      .select('*')
+      .eq('provider_call_id', callSid)
+      .single();
 
-    if (call) {
+    if (call && !fetchError) {
       const statusMap = {
         'queued': 'queued',
         'initiated': 'initiated',
@@ -76,31 +92,38 @@ router.post('/status', async (req, res) => {
       };
       
       const mappedStatus = statusMap[callStatus] || callStatus;
+      const isFailedState = ['completed', 'failed', 'busy', 'no_answer', 'cancelled'].includes(mappedStatus);
       
       // Update call table
-      await dbRun('UPDATE calls SET outcome = ?, status = ?, last_event = ? WHERE id = ?', [
-        ['completed', 'failed', 'busy', 'no_answer', 'cancelled'].includes(mappedStatus) ? mappedStatus : call.outcome,
-        mappedStatus,
-        callStatus,
-        call.id
-      ]);
+      await supabase.from('calls').update({
+        outcome: isFailedState ? mappedStatus : call.outcome,
+        status: mappedStatus,
+        last_event: callStatus
+      }).eq('id', call.id);
       
       // Update customer table with the current state of the call
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', [mappedStatus, call.customer_id]);
+      await supabase.from('customers').update({ status: mappedStatus }).eq('id', call.customer_id);
       
       // Retry Logic
       if (['failed', 'busy', 'no_answer'].includes(mappedStatus)) {
-        const customer = await dbGet('SELECT * FROM customers WHERE id = ?', [call.customer_id]);
+        const { data: customer } = await supabase.from('customers').select('*').eq('id', call.customer_id).single();
         if (customer && customer.auto_retry_enabled !== 0) {
           const attemptCount = (customer.attempt_count || 0);
           if (attemptCount < 3) {
             // Schedule Retry
             const nextRetry = new Date(Date.now() + 3 * 60 * 60 * 1000);
-            await dbRun('UPDATE customers SET status = ?, next_retry_at = ?, retry_count = COALESCE(retry_count, 0) + 1 WHERE id = ?', ['retry_scheduled', nextRetry.toISOString(), customer.id]);
+            await supabase.from('customers').update({
+              status: 'retry_scheduled',
+              next_retry_at: nextRetry.toISOString(),
+              retry_count: (customer.retry_count || 0) + 1
+            }).eq('id', customer.id);
             console.log(`Call retry scheduled for customerId=${customer.id} (Attempt ${attemptCount + 1})`);
           } else {
             // Max Retries Reached
-            await dbRun('UPDATE customers SET status = ?, failed_reason = ? WHERE id = ?', ['failed', 'Max retries reached', customer.id]);
+            await supabase.from('customers').update({
+              status: 'failed',
+              failed_reason: 'Max retries reached'
+            }).eq('id', customer.id);
             console.log(`Max retries reached for customerId=${customer.id}`);
           }
         }

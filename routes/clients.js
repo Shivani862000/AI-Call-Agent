@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { dbRun, dbGet, dbAll } = require('../db');
+const supabase = require('../src/supabase');
 
 const PHONE_PATTERN = /^\+\d{10,15}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -109,7 +109,7 @@ function buildReminderFields(payload, existing = null) {
 }
 
 function handleSqliteError(error, res) {
-  if (error.message && error.message.includes('UNIQUE constraint failed: clients.phone')) {
+  if (error.code === '23505' || (error.message && error.message.includes('unique constraint'))) {
     return res.status(409).json({
       error: 'A client with this phone number already exists',
       fieldErrors: { phone: 'Phone number already exists' }
@@ -122,14 +122,14 @@ function handleSqliteError(error, res) {
 
 router.get('/', async (_req, res) => {
   try {
-    const clients = await dbAll(
-      `SELECT *
-       FROM clients
-       ORDER BY
-         CASE WHEN status = 'active' THEN 0 ELSE 1 END,
-         COALESCE(next_annual_reminder_date, '9999-12-31') ASC,
-         created_at DESC`
-    );
+    const { data: clients, error } = await supabase
+      .from('clients')
+      .select('*')
+      .order('status', { ascending: true }) // Not exactly CASE, but 'active' comes before 'paused'
+      .order('next_annual_reminder_date', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
     res.json(clients);
   } catch (error) {
     console.error('Error fetching clients:', error);
@@ -139,7 +139,13 @@ router.get('/', async (_req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const client = await dbGet('SELECT * FROM clients WHERE id = ?', [req.params.id]);
+    const { data: client, error } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error && error.code !== 'PGRST116') throw error;
     if (!client) {
       return res.status(404).json({ error: 'Client not found' });
     }
@@ -159,28 +165,22 @@ router.post('/', async (req, res) => {
     }
 
     const reminderFields = buildReminderFields(payload);
-    const result = await dbRun(
-      `INSERT INTO clients (
-        name, phone, date_of_birth, last_visit_date, treatment_type,
-        annual_reminder_enabled, annual_reminder_slot, next_annual_reminder_date,
-        notes, status, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        payload.name,
-        payload.phone,
-        payload.date_of_birth || null,
-        payload.last_visit_date,
-        payload.treatment_type,
-        payload.annual_reminder_enabled,
-        payload.annual_reminder_slot,
-        reminderFields.next_annual_reminder_date,
-        payload.notes || null,
-        payload.status,
-        new Date().toISOString()
-      ]
-    );
+    const { data: result, error } = await supabase.from('clients').insert([{
+      name: payload.name,
+      phone: payload.phone,
+      date_of_birth: payload.date_of_birth || null,
+      last_visit_date: payload.last_visit_date,
+      treatment_type: payload.treatment_type,
+      annual_reminder_enabled: payload.annual_reminder_enabled,
+      annual_reminder_slot: payload.annual_reminder_slot,
+      next_annual_reminder_date: reminderFields.next_annual_reminder_date,
+      notes: payload.notes || null,
+      status: payload.status,
+      updated_at: new Date().toISOString()
+    }]).select('id').single();
 
-    res.json({ id: result.lastID, message: 'Client added successfully' });
+    if (error) throw error;
+    res.json({ id: result.id, message: 'Client added successfully' });
   } catch (error) {
     return handleSqliteError(error, res);
   }
@@ -188,7 +188,13 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT * FROM clients WHERE id = ?', [req.params.id]);
+    const { data: existing, error: fetchError } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
     if (!existing) {
       return res.status(404).json({ error: 'Client not found' });
     }
@@ -201,36 +207,21 @@ router.put('/:id', async (req, res) => {
 
     const reminderFields = buildReminderFields(payload, existing);
 
-    await dbRun(
-      `UPDATE clients
-          SET name = ?,
-              phone = ?,
-              date_of_birth = ?,
-              last_visit_date = ?,
-              treatment_type = ?,
-              annual_reminder_enabled = ?,
-              annual_reminder_slot = ?,
-              next_annual_reminder_date = ?,
-              notes = ?,
-              status = ?,
-              updated_at = ?
-        WHERE id = ?`,
-      [
-        payload.name,
-        payload.phone,
-        payload.date_of_birth || null,
-        payload.last_visit_date,
-        payload.treatment_type,
-        payload.annual_reminder_enabled,
-        payload.annual_reminder_slot,
-        reminderFields.next_annual_reminder_date,
-        payload.notes || null,
-        payload.status,
-        new Date().toISOString(),
-        req.params.id
-      ]
-    );
+    const { error: updateError } = await supabase.from('clients').update({
+      name: payload.name,
+      phone: payload.phone,
+      date_of_birth: payload.date_of_birth || null,
+      last_visit_date: payload.last_visit_date,
+      treatment_type: payload.treatment_type,
+      annual_reminder_enabled: payload.annual_reminder_enabled,
+      annual_reminder_slot: payload.annual_reminder_slot,
+      next_annual_reminder_date: reminderFields.next_annual_reminder_date,
+      notes: payload.notes || null,
+      status: payload.status,
+      updated_at: new Date().toISOString()
+    }).eq('id', req.params.id);
 
+    if (updateError) throw updateError;
     res.json({ message: 'Client updated successfully' });
   } catch (error) {
     return handleSqliteError(error, res);
@@ -239,12 +230,20 @@ router.put('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const existing = await dbGet('SELECT id FROM clients WHERE id = ?', [req.params.id]);
+    const { data: existing, error: fetchError } = await supabase
+      .from('clients')
+      .select('id')
+      .eq('id', req.params.id)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
     if (!existing) {
       return res.status(404).json({ error: 'Client not found' });
     }
 
-    await dbRun('DELETE FROM clients WHERE id = ?', [req.params.id]);
+    const { error: deleteError } = await supabase.from('clients').delete().eq('id', req.params.id);
+    if (deleteError) throw deleteError;
+
     res.json({ message: 'Client deleted successfully' });
   } catch (error) {
     console.error('Error deleting client:', error);

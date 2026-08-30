@@ -330,18 +330,34 @@ async function verifyCredentials(username, password) {
     return { success: false };
   }
 
-  const { dbGet } = require('../db');
+  const supabaseAdmin = require('./supabase');
+  const bcrypt = require('bcrypt');
+
   try {
-    const user = await dbGet(
-      'SELECT username, password_hash, role FROM users WHERE username = ?',
-      [normalizedUsername]
-    );
-    const role = normalizeRole(user?.role);
-    if (user?.password_hash && role && await bcrypt.compare(String(password), user.password_hash)) {
-      return { success: true, username: user.username, role };
+    // 1. Fetch user from custom users table
+    const { data: user, error } = await supabaseAdmin
+      .from('users')
+      .select('username, password_hash, role')
+      .eq('username', normalizedUsername)
+      .single();
+
+    if (error || !user) {
+      console.error('[AUTH] User not found or query failed:', error?.message || 'Unknown error');
+      return { success: false };
     }
-    return { success: false };
+
+    // 2. Verify password with bcrypt
+    const isValid = await bcrypt.compare(password, user.password_hash);
+    
+    if (!isValid) {
+      console.error('[AUTH] Invalid password for user:', normalizedUsername);
+      return { success: false };
+    }
+
+    const role = normalizeRole(user.role) || 'AGENT';
+    return { success: true, username: user.username, role };
   } catch (error) {
+    console.error('[AUTH ERROR]', error);
     return { success: false };
   }
 }
