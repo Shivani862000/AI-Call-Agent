@@ -28,6 +28,11 @@
     .pill.agent { background: #edf4ff; color: #1d4ed8; }
     .pill.inactive { background: #f4e7e3; color: #b23a2c; }
     .pill.you { background: #f1f3f6; color: #52606d; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 16px; }
+    .toolbar button { background: #fff; color: #1d4ed8; }
+    .toolbar button[aria-expanded="true"] { background: #1d4ed8; color: #fff; }
+    .toolbar button .chev { display: inline-block; margin-left: 6px; font-size: 11px; }
+    .panel[hidden] { display: none; }
     .banner { padding: 11px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 14px; display: none; }
     .banner.ok { background: #e1f0e8; color: #23694e; display: block; }
     .banner.bad { background: #fae7e3; color: #b23a2c; display: block; }
@@ -65,8 +70,16 @@
 
         <div id="banner" class="banner"></div>
 
-        <div class="card">
-          <h3>Change your password</h3>
+        <div class="toolbar">
+          <button type="button" id="toggleAddUser" aria-expanded="false" aria-controls="addUserPanel">
+            Add a user<span class="chev" aria-hidden="true">▾</span>
+          </button>
+          <button type="button" id="toggleChangePassword" aria-expanded="false" aria-controls="changePasswordPanel">
+            Change password<span class="chev" aria-hidden="true">▾</span>
+          </button>
+        </div>
+
+        <div class="card panel" id="changePasswordPanel" hidden>
           <p class="hint">You will stay signed in on this device.</p>
           <div class="row">
             <div class="field">
@@ -83,8 +96,7 @@
           <button id="changePasswordBtn">Change password</button>
         </div>
 
-        <div class="card">
-          <h3>Add a user</h3>
+        <div class="card panel" id="addUserPanel" hidden>
           <p class="hint">Minimum 12 characters. Leave the password blank to generate a strong one.</p>
           <div class="row">
             <div class="field">
@@ -293,6 +305,7 @@
         document.getElementById('newUsername').value = '';
         document.getElementById('newUserPassword').value = '';
         showBanner(`${username} created`, true);
+        addUserPanel.setOpen(false);
         loadUsers();
       } catch (error) {
         applyFieldErrors(error);
@@ -317,12 +330,41 @@
         document.getElementById('currentPassword').value = '';
         document.getElementById('newPassword').value = '';
         showBanner('Password changed', true);
+        changePasswordPanel.setOpen(false);
       } catch (error) {
         applyFieldErrors(error);
       } finally {
         button.disabled = false;
       }
     };
+
+    function wireTogglePanel(buttonId, panelId, firstFieldId) {
+      const button = document.getElementById(buttonId);
+      const panel = document.getElementById(panelId);
+
+      function setOpen(open) {
+        panel.hidden = !open;
+        button.setAttribute('aria-expanded', String(open));
+        button.querySelector('.chev').textContent = open ? '▴' : '▾';
+        if (open) document.getElementById(firstFieldId).focus();
+      }
+
+      button.addEventListener('click', () => setOpen(panel.hidden));
+
+      // Escape closes the panel and returns focus to the button that opened it,
+      // so keyboard users are not stranded inside a collapsed section.
+      panel.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          setOpen(false);
+          button.focus();
+        }
+      });
+
+      return { setOpen };
+    }
+
+    const addUserPanel = wireTogglePanel('toggleAddUser', 'addUserPanel', 'newUsername');
+    const changePasswordPanel = wireTogglePanel('toggleChangePassword', 'changePasswordPanel', 'currentPassword');
 
     AppShell.ensureAuthenticatedSession().then(loadUsers).catch(() => {});
   </script>
