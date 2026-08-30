@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "seed:admin": "node scripts/seed-admin.js"
   },
   "dependencies": {
     "@google/genai": "^1.36.0",
@@ -18,7 +19,7 @@
     "helmet": "^8.0.0",
     "multer": "^2.2.0",
     "pdfkit": "^0.13.0",
-    "sqlite3": "^6.0.1",
+    "pg": "^8.23.0",
     "ws": "^8.21.3"
   }
 }

@@ -140,8 +140,28 @@ function logConfigSnapshot(scope = 'CONFIG') {
   console.log(`[${scope}] ${JSON.stringify(snapshot)}`);
 }
 
+/**
+ * Returns null when the value is a usable Postgres connection string,
+ * or a human-readable problem description otherwise.
+ */
+function validateDatabaseUrl(value) {
+  const url = String(value || '').trim();
+  if (!url) return 'DATABASE_URL is required (Supabase Postgres connection string)';
+  if (!/^postgres(ql)?:\/\//i.test(url)) {
+    return 'DATABASE_URL must be a postgres:// connection string. It now points at '
+      + 'Supabase, not a SQLite file \u2014 a leftover path such as /app/data/feedback.db '
+      + 'will not work.';
+  }
+  return null;
+}
+
 function validateConfig() {
   const missing = [];
+
+  const databaseUrlIssue = validateDatabaseUrl(process.env.DATABASE_URL);
+  if (databaseUrlIssue) {
+    missing.push(databaseUrlIssue);
+  }
 
   if (AI_PROVIDER.startsWith('gemini') && !process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
     missing.push('GEMINI_API_KEY or GOOGLE_API_KEY');
@@ -227,5 +247,6 @@ module.exports = {
   redactSecret,
   describeEnvValue,
   logConfigSnapshot,
-  validateConfig
+  validateConfig,
+  validateDatabaseUrl
 };

@@ -17,7 +17,7 @@ const {
   logConfigSnapshot
 } = require('./config');
 
-const { initializeDatabase, startDatabaseBackupSchedule } = require('../db');
+const { initializeDatabase } = require('../db');
 const { runSchedulerTick, runOwnerDigestTick } = require('./scheduler');
 const { pruneLiveCallState } = require('./helpers');
 const { validateAuthConfig } = require('./auth');
@@ -28,7 +28,6 @@ module.exports = function startServer(server) {
     validateConfig();
     validateAuthConfig();
     await initializeDatabase();
-    startDatabaseBackupSchedule();
     logConfigSnapshot('SERVER');
 
     if (!DISABLE_SCHEDULER) {
