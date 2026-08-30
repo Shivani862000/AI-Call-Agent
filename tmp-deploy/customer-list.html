@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Customer Directory - Path Lab</title>
+  <link rel="stylesheet" href="/app-shell.css">
+  <style>
+    .import-btn {
+      background-color: var(--primary);
+      color: white;
+    }
+    .import-btn:hover {
+      background-color: var(--primary-hover);
+    }
+    .file-input-wrapper {
+      margin-top: 15px;
+      margin-bottom: 15px;
+    }
+    #csvFileInput {
+      width: 100%;
+      padding: 10px;
+      border: 1px dashed var(--border-light);
+      border-radius: var(--radius-md);
+      background: var(--bg-secondary);
+    }
+    .customer-table-wrap {
+      overflow-x: auto;
+    }
+    .status-badge {
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+    .status-badge.pending { background-color: #fff3cd; color: #856404; }
+    .status-badge.scheduled { background-color: #d1ecf1; color: #0c5460; }
+    .status-badge.completed { background-color: #d4edda; color: #155724; }
+    .status-badge.failed, .status-badge.busy, .status-badge.no_answer { background-color: #f8d7da; color: #721c24; }
+    .status-badge.retry_scheduled { background-color: #e2e3e5; color: #383d41; }
+  </style>
+</head>
+
+<body class="poc-page customers-page">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-mark">PL</div>
+          <div class="brand-copy">
+            <h1>Path Lab Console</h1>
+            <p>Patient follow-up operations</p>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <a href="/admin.html" class="nav-link">Overview</a>
+          <a href="/customer-list.html" class="nav-link active">Customer List</a>
+          <a href="/customers.html" class="nav-link">Outbound Calls</a>
+          <a href="/feedback.html" class="nav-link">Feedback</a>
+          <a href="/support-tickets.html" class="nav-link">Support Tickets</a>
+        </nav>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <section class="mobile-ops-header mobile-only">
+        <div class="mobile-ops-bar">
+          <div class="mobile-ops-title">Customer List</div>
+          <div class="mobile-ops-actions">
+            <button id="mobileHeaderMenuButton" class="mobile-icon-button" type="button" aria-label="Open menu">...</button>
+          </div>
+        </div>
+      </section>
+
+      <header class="page-header desktop-page-header">
+        <div class="page-title-wrap">
+          <h2>Customer Directory</h2>
+          <div class="page-subtitle">Manage patient records and bulk import customers via CSV.</div>
+        </div>
+        <div class="header-actions">
+          <button id="addCustomerButton" class="primary" type="button">Add Customer</button>
+          <button id="importCsvButton" class="primary admin-only-control" type="button">Bulk Import CSV</button>
+          <button id="refreshDataButton" class="secondary desktop-only" type="button">Refresh List</button>
+          <button id="logoutButton" class="secondary" type="button">Logout</button>
+        </div>
+      </header>
+
+      <div id="alertContainer" class="alert-stack"></div>
+
+      <section class="poc-metrics-grid">
+        <article class="metric-card">
+          <div class="metric-label">Total Customers</div>
+          <div class="metric-value" id="totalCustomersMetric">0</div>
+          <div class="metric-note">All patient records in the system.</div>
+        </article>
+      </section>
+
+      <section class="table-card">
+        <div class="poc-card-header">
+          <div>
+            <h3 class="poc-card-title">Patient Records</h3>
+            <div class="poc-card-subtitle" id="tableMeta">Loading customers...</div>
+          </div>
+        </div>
+
+        <div class="search-row">
+          <input id="customerSearch" class="search-input" type="search" placeholder="Search patient or phone..." style="width: 100%; max-width: 400px;">
+        </div>
+
+        <div class="table-wrap customer-table-wrap">
+          <table class="saas-table">
+            <thead>
+              <tr>
+                <th>Patient Name</th>
+                <th>Phone Number</th>
+                <th>Preferred Slot</th>
+                <th>Language</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="customersTableBody">
+              <!-- Customer rows will be dynamically injected here -->
+            </tbody>
+          </table>
+        </div>
+        <div id="customerPagination"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="addCustomerModal" class="modal-backdrop" aria-hidden="true">
+    <div class="saas-modal-panel schedule-modal" role="dialog" aria-modal="true" aria-labelledby="addCustomerModalTitle">
+      <div class="saas-modal-header">
+        <div>
+          <h3 id="addCustomerModalTitle" class="saas-modal-title">Add Customer</h3>
+          <div id="addCustomerModalSubtitle" class="saas-modal-subtitle">Create a patient record manually.</div>
+        </div>
+        <button id="addCustomerModalClose" class="saas-modal-close" type="button" aria-label="Close">
+          <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <form id="addCustomerForm" class="saas-modal-body">
+        <div class="saas-field">
+          <label for="addCustomerName">Patient name</label>
+          <input id="addCustomerName" name="name" required minlength="2" maxlength="100" autocomplete="name">
+        </div>
+        <div class="saas-field">
+          <label for="addCustomerPhone">Mobile number</label>
+          <input id="addCustomerPhone" name="phone" required inputmode="tel" placeholder="+91 98765 43210" autocomplete="tel">
+        </div>
+        <div class="saas-field">
+          <label for="addCustomerPreferredSlot">Preferred slot <span class="text-muted">(optional)</span></label>
+          <input id="addCustomerPreferredSlot" name="preferred_slot" type="time" min="07:00" max="20:59">
+          <small class="form-help">When selected, the first follow-up is scheduled for the next occurrence of this time.</small>
+        </div>
+        <div class="saas-field">
+          <label for="addCustomerPreferredLanguage">Preferred language</label>
+          <select id="addCustomerPreferredLanguage" name="preferred_language">
+            <option value="hi" selected>Hindi</option>
+            <option value="en">English</option>
+            <option value="mixed">Mixed</option>
+            <option value="hinglish">Hinglish</option>
+          </select>
+        </div>
+        <div class="saas-modal-footer" style="padding: 24px 0 0; border-top: none;">
+          <button type="button" class="btn-ghost-saas" id="cancelAddCustomerBtn">Cancel</button>
+          <button type="submit" class="btn-primary-saas" id="submitAddCustomerBtn">Add Customer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Mobile Footer Navigation -->
+  <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
+    <a href="/admin.html" class="mobile-dock-link">Overview</a>
+    <a href="/customer-list.html" class="mobile-dock-link active">Customers</a>
+    <a href="/customers.html" class="mobile-dock-link">Calls</a>
+    <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
+  </nav>
+
+  <!-- Bulk Import Modal -->
+  <div id="bulkImportModal" class="modal-backdrop" aria-hidden="true">
+    <div class="saas-modal-panel schedule-modal" role="dialog" aria-modal="true" aria-labelledby="bulkImportModalTitle">
+      <div class="saas-modal-header">
+        <div>
+          <h3 id="bulkImportModalTitle" class="saas-modal-title">Bulk Import CSV</h3>
+          <div class="saas-modal-subtitle">Upload multiple patients at once.</div>
+        </div>
+        <button id="bulkImportModalClose" class="saas-modal-close" type="button" aria-label="Close">
+          <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+
+      <div class="saas-modal-body">
+        
+        <div style="margin-bottom: 24px; text-align: center;">
+          <p style="margin: 0 0 12px 0; font-size: 15px; color: var(--text-main);">
+            Upload a CSV file to add multiple patient records at once. Ensure your file contains headers for <code>name</code>, <code>phone</code>, <code>preferred_slot</code>, and <code>preferred_language</code>.
+          </p>
+          <a href="/sample-customers.csv" download="sample-customers.csv" style="color: var(--color-primary); font-weight: 500; font-size: 14px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            Download Sample CSV
+          </a>
+        </div>
+            
+        <form id="bulkImportForm">
+          <div class="saas-field">
+            <div style="border: 1px dashed var(--border-strong); border-radius: 8px; padding: 24px; text-align: center; background: #fafafa;">
+              <input type="file" id="csvFileInput" accept=".csv" required style="font-size: 14px; max-width: 100%;">
+            </div>
+          </div>
+          
+          <div id="importResults" style="display: none; margin-top: 16px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;">
+            <div id="importStats" style="font-size: 14px; margin-bottom: 8px; font-weight: 500;"></div>
+            <div id="importErrors" style="font-size: 13px; color: var(--color-danger); max-height: 120px; overflow-y: auto;"></div>
+          </div>
+
+          <div class="saas-modal-footer" style="padding: 24px 0 0 0; border-top: none;">
+            <button type="button" class="btn-ghost-saas" id="cancelImportBtn">Cancel</button>
+            <button type="submit" class="btn-primary-saas" id="submitImportBtn">Upload & Import</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="mobileMenuSheet" class="modal-backdrop mobile-sheet-backdrop" aria-hidden="true">
+    <div class="modal-panel mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="mobileMenuTitle">
+      <div class="mobile-sheet-handle"></div>
+      <div class="mobile-sheet-title-row">
+        <button id="mobileMenuLogoutAction" class="mobile-sheet-action" type="button">Logout</button>
+        <button id="closeMobileMenuSheet" class="secondary modal-close modal-close-icon" type="button" aria-label="Close">&times;</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app-shell.js"></script>
+  <script src="/customer-archival.js"></script>
+  <script src="/customer-list.js"></script>
+</body>
+</html>
