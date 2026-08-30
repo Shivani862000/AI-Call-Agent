@@ -43,6 +43,7 @@ const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, message: { error: '
 const webhookLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, message: { error: 'Too many webhook requests' } });
 
 app.use('/api/auth/login', loginLimiter);
+app.use('/api/auth/change-password', loginLimiter);
 app.use('/call/start', apiLimiter);
 app.use('/api/test-call', apiLimiter);
 app.use('/api/test-ai-call', apiLimiter);
@@ -63,8 +64,17 @@ app.use((req, res, next) => {
   next();
 });
 
+// Only these three may be reached without a session. Everything else under
+// /api/auth/ is authenticated: a blanket `startsWith('/api/auth/')` exemption
+// silently un-authenticates every endpoint added there later.
+const PUBLIC_AUTH_PATHS = new Set([
+  '/api/auth/login',
+  '/api/auth/logout',
+  '/api/auth/session'
+]);
+
 app.use((req, res, next) => {
-  if (req.path === '/login.html' || req.path.startsWith('/api/auth/')) {
+  if (req.path === '/login.html' || PUBLIC_AUTH_PATHS.has(req.path)) {
     return next();
   }
 

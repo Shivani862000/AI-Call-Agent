@@ -13,6 +13,7 @@ const bcrypt = require('bcrypt');
 const PROTECTED_HTML_PATHS = new Set([
   '/admin.html',
   '/support-tickets.html',
+  '/users.html',
   '/incoming-calls.html',
   '/customers.html',
   '/clients.html',
@@ -22,7 +23,6 @@ const PROTECTED_HTML_PATHS = new Set([
 ]);
 
 const VALID_ROLES = new Set(['ADMIN', 'AGENT']);
-const ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || 'admin').trim();
 const AUTH_COOKIE_NAME = 'feedback_admin_session';
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const AUTH_CLOCK_SKEW_MS = 60 * 1000;
@@ -33,18 +33,12 @@ const AUTH_SIGNING_SECRET = CONFIGURED_AUTH_SIGNING_SECRET
 
 function getAuthConfigurationIssues(env = process.env) {
   const isProduction = String(env.NODE_ENV || '').toLowerCase() === 'production';
-  const username = String(env.ADMIN_USERNAME || '').trim();
-  const passwordHash = String(env.ADMIN_PASSWORD_HASH || '').trim();
   const signingSecret = String(env.AUTH_SIGNING_SECRET || '').trim();
   const issues = [];
 
-  if (isProduction && !username) {
-    issues.push('ADMIN_USERNAME is required in production');
-  }
-
-  if (isProduction && !/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(passwordHash)) {
-    issues.push('ADMIN_PASSWORD_HASH must be a valid bcrypt hash in production');
-  }
+  // Login credentials deliberately are NOT validated here. They live in the
+  // users table and are managed through /api/users; assertAdminAccountExists()
+  // checks the database at boot instead.
 
   if (isProduction && !signingSecret) {
     issues.push('AUTH_SIGNING_SECRET is required in production');
@@ -68,6 +62,24 @@ function getAuthConfigurationIssues(env = process.env) {
   }
 
   return issues;
+}
+
+/**
+ * Boot guard replacing the old ADMIN_USERNAME / ADMIN_PASSWORD_HASH check.
+ * An app with no active admin cannot be administered, and silently starting in
+ * that state is how you discover it during an incident.
+ */
+async function assertAdminAccountExists() {
+  const { dbGet } = require('../db');
+  const row = await dbGet(
+    "SELECT COUNT(*) AS count FROM users WHERE role = 'ADMIN' AND is_active = 1"
+  );
+  if (Number(row?.count || 0) === 0) {
+    throw new Error(
+      'No active ADMIN account exists. Create one with:\n'
+      + '  node scripts/manage-users.js create --username <email> --role ADMIN'
+    );
+  }
 }
 
 function validateAuthConfig() {
@@ -295,10 +307,66 @@ function validateMediaToken(token) {
   return false;
 }
 
-function requireAdminAuth(req, res, next) {
+// ── Account-state cache ────────────────────────────────────────────────────────
+//
+// Session tokens are stateless: signature + expiry only. Without this check a
+// deleted or deactivated user keeps full access until their 12h token expires,
+// which would make the Deactivate and Delete controls in the users screen
+// misleading rather than protective.
+//
+// Cached briefly so this costs one Supabase round-trip per user per window
+// rather than one per request. Revocation performed through the app invalidates
+// the entry immediately; a change made directly in SQL takes effect within the
+// window.
+const ACCOUNT_CACHE_TTL_MS = 30 * 1000;
+const accountCache = new Map();
+
+function invalidateAccountCache(username) {
+  if (username) accountCache.delete(String(username).toLowerCase());
+  else accountCache.clear();
+}
+
+async function loadAccountState(username) {
+  const key = String(username || '').toLowerCase();
+  const cached = accountCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.state;
+
+  const { dbGet } = require('../db');
+  const row = await dbGet(
+    'SELECT username, role, is_active FROM users WHERE lower(username) = lower(?)',
+    [key]
+  );
+  const state = row && Number(row.is_active) === 1
+    ? { active: true, role: normalizeRole(row.role), username: row.username }
+    : { active: false };
+
+  accountCache.set(key, { state, expiresAt: Date.now() + ACCOUNT_CACHE_TTL_MS });
+  return state;
+}
+
+async function requireAdminAuth(req, res, next) {
   const session = readAuthSession(req);
   if (session) {
-    req.adminSession = session;
+    let account;
+    try {
+      account = await loadAccountState(session.username);
+    } catch (error) {
+      // Fail closed: an unreachable database must not become an auth bypass.
+      console.error('[AUTH] account state lookup failed:', error.message);
+      return res.status(503).json({ error: 'Authentication temporarily unavailable' });
+    }
+
+    if (!account.active) {
+      clearAuthCookie(req, res);
+      if (req.path.startsWith('/api/') || req.path === '/call/start') {
+        return res.status(401).json({ error: 'Account is no longer active' });
+      }
+      return res.redirect('/login.html');
+    }
+
+    // Role comes from the database, not the token, so a demotion takes effect
+    // without waiting for the token to expire.
+    req.adminSession = { username: account.username, role: account.role };
     return next();
   }
 
@@ -334,11 +402,16 @@ async function verifyCredentials(username, password) {
   const { dbGet } = require('../db');
   try {
     const user = await dbGet(
-      'SELECT username, password_hash, role FROM users WHERE username = ?',
+      'SELECT id, username, password_hash, role, is_active FROM users WHERE lower(username) = lower(?)',
       [normalizedUsername]
     );
     const role = normalizeRole(user?.role);
     if (user?.password_hash && role && await bcrypt.compare(String(password), user.password_hash)) {
+      // Checked after bcrypt so a deactivated account takes the same time as an
+      // active one, rather than answering instantly and leaking its existence.
+      if (Number(user.is_active) !== 1) return { success: false, reason: 'inactive' };
+      const { dbRun } = require('../db');
+      dbRun('UPDATE users SET last_login_at = now() WHERE id = ?', [user.id]).catch(() => {});
       return { success: true, username: user.username, role };
     }
     return { success: false };
@@ -375,11 +448,12 @@ async function basicAuth(req, res, next) {
 module.exports = {
   PROTECTED_HTML_PATHS,
   VALID_ROLES,
-  ADMIN_USERNAME,
   AUTH_COOKIE_NAME,
   AUTH_SESSION_TTL_MS,
   getAuthConfigurationIssues,
   validateAuthConfig,
+  invalidateAccountCache,
+  assertAdminAccountExists,
   parseCookies,
   createAuthToken,
   readAuthSession,

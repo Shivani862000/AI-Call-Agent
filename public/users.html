@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Users</title>
+  <link rel="stylesheet" href="/app-shell.css">
+  <style>
+    .users { padding: 24px; max-width: 1100px; margin: 0 auto; }
+    .card { padding: 16px; border: 1px solid #d9e1e8; border-radius: 10px; margin: 0 0 16px; background: #fff; }
+    .card h3 { margin: 0 0 4px; }
+    .card p.hint { margin: 0 0 12px; color: #52606d; font-size: 13px; }
+    .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .field label { font-size: 13px; font-weight: 700; color: #52606d; }
+    .field input, .field select { padding: 9px; border: 1px solid #d9e1e8; border-radius: 8px; font: inherit; }
+    .field .err { color: #b23a2c; font-size: 12px; min-height: 15px; }
+    .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 14px; }
+    button { padding: 9px 14px; border-radius: 8px; border: 1px solid #1d4ed8; background: #1d4ed8; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #fff; color: #1d4ed8; }
+    button.danger { background: #fff; color: #b23a2c; border-color: #e3b5ae; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #eef2f6; vertical-align: middle; }
+    th { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #52606d; }
+    td.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pill { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; padding: 3px 8px; border-radius: 5px; font-weight: 700; }
+    .pill.admin { background: #e2f0f0; color: #0e6e75; }
+    .pill.agent { background: #edf4ff; color: #1d4ed8; }
+    .pill.inactive { background: #f4e7e3; color: #b23a2c; }
+    .pill.you { background: #f1f3f6; color: #52606d; }
+    .banner { padding: 11px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 14px; display: none; }
+    .banner.ok { background: #e1f0e8; color: #23694e; display: block; }
+    .banner.bad { background: #fae7e3; color: #b23a2c; display: block; }
+    .tablewrap { overflow-x: auto; }
+    @media (max-width: 640px) { .users { padding: 14px; } th:nth-child(4), td:nth-child(4) { display: none; } }
+  </style>
+</head>
+<body class="poc-page users-page">
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div>
+        <div class="brand">
+          <div class="brand-mark">PL</div>
+          <div class="brand-copy">
+            <h1>Path Lab Console</h1>
+            <p>Patient follow-up operations</p>
+          </div>
+        </div>
+        <nav class="nav-list">
+          <a href="/admin.html" class="nav-link">Overview</a>
+          <a href="/customers.html" class="nav-link">Outbound Calls</a>
+          <a href="/feedback.html" class="nav-link">Feedback</a>
+        </nav>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <section class="users">
+        <header class="page-header desktop-page-header">
+          <div class="page-title-wrap">
+            <h2>Users</h2>
+            <div class="page-subtitle">Manage who can sign in, and what they can do.</div>
+          </div>
+        </header>
+
+        <div id="banner" class="banner"></div>
+
+        <div class="card">
+          <h3>Change your password</h3>
+          <p class="hint">You will stay signed in on this device.</p>
+          <div class="row">
+            <div class="field">
+              <label for="currentPassword">Current password</label>
+              <input id="currentPassword" type="password" autocomplete="current-password">
+              <span class="err" id="err-currentPassword"></span>
+            </div>
+            <div class="field">
+              <label for="newPassword">New password</label>
+              <input id="newPassword" type="password" autocomplete="new-password">
+              <span class="err" id="err-newPassword"></span>
+            </div>
+          </div>
+          <button id="changePasswordBtn">Change password</button>
+        </div>
+
+        <div class="card">
+          <h3>Add a user</h3>
+          <p class="hint">Minimum 12 characters. Leave the password blank to generate a strong one.</p>
+          <div class="row">
+            <div class="field">
+              <label for="newUsername">Username or email</label>
+              <input id="newUsername" type="text" autocomplete="off">
+              <span class="err" id="err-username"></span>
+            </div>
+            <div class="field">
+              <label for="newRole">Role</label>
+              <select id="newRole"><option value="AGENT">Agent</option><option value="ADMIN">Admin</option></select>
+              <span class="err" id="err-role"></span>
+            </div>
+            <div class="field">
+              <label for="newUserPassword">Password</label>
+              <input id="newUserPassword" type="text" autocomplete="off" placeholder="blank = generate">
+              <span class="err" id="err-password"></span>
+            </div>
+          </div>
+          <button id="createUserBtn">Create user</button>
+        </div>
+
+        <div class="card">
+          <h3>All users</h3>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>User</th><th>Role</th><th>Status</th><th>Last login</th><th>Actions</th></tr></thead>
+              <tbody id="userRows"><tr><td colspan="5">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
+    <a href="/admin.html" class="mobile-dock-link">Overview</a>
+    <a href="/customers.html" class="mobile-dock-link">Outbound</a>
+    <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
+  </nav>
+
+  <script src="/app-shell.js"></script>
+  <script>
+    const ALPHABET = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#%^&*-_=+';
+
+    function generatePassword(length = 24) {
+      const bytes = new Uint8Array(length * 2);
+      crypto.getRandomValues(bytes);
+      let out = '';
+      for (const b of bytes) {
+        if (out.length === length) break;
+        if (b < 256 - (256 % ALPHABET.length)) out += ALPHABET[b % ALPHABET.length];
+      }
+      return out.length === length ? out : generatePassword(length);
+    }
+
+    function showBanner(message, ok) {
+      const banner = document.getElementById('banner');
+      banner.textContent = message;
+      banner.className = 'banner ' + (ok ? 'ok' : 'bad');
+    }
+
+    function clearFieldErrors() {
+      document.querySelectorAll('.err').forEach((node) => { node.textContent = ''; });
+    }
+
+    function applyFieldErrors(error) {
+      clearFieldErrors();
+      const fieldErrors = error.fieldErrors || {};
+      Object.entries(fieldErrors).forEach(([field, message]) => {
+        const node = document.getElementById('err-' + field);
+        if (node) node.textContent = message;
+      });
+      showBanner(error.message || 'Something went wrong', false);
+    }
+
+    function formatDate(value) {
+      if (!value) return 'Never';
+      return new Date(value).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function loadUsers() {
+      const { users } = await AppShell.fetchJson('/api/users');
+      const me = (AppShell.session && AppShell.session.username || '').toLowerCase();
+      const body = document.getElementById('userRows');
+      body.replaceChildren();
+
+      users.forEach((user) => {
+        const isSelf = user.username.toLowerCase() === me;
+        const active = Number(user.is_active) === 1;
+        const row = document.createElement('tr');
+
+        const nameCell = document.createElement('td');
+        nameCell.textContent = user.username + ' ';
+        if (isSelf) {
+          const you = document.createElement('span');
+          you.className = 'pill you';
+          you.textContent = 'You';
+          nameCell.appendChild(you);
+        }
+
+        const roleCell = document.createElement('td');
+        const rolePill = document.createElement('span');
+        rolePill.className = 'pill ' + user.role.toLowerCase();
+        rolePill.textContent = user.role;
+        roleCell.appendChild(rolePill);
+
+        const statusCell = document.createElement('td');
+        if (active) {
+          statusCell.textContent = 'Active';
+        } else {
+          const pill = document.createElement('span');
+          pill.className = 'pill inactive';
+          pill.textContent = 'Inactive';
+          statusCell.appendChild(pill);
+        }
+
+        const loginCell = document.createElement('td');
+        loginCell.textContent = formatDate(user.last_login_at);
+
+        const actions = document.createElement('td');
+        actions.className = 'actions';
+
+        // Self-destructive controls are omitted rather than shown-and-rejected:
+        // the server blocks them either way, but an absent button is clearer
+        // than an error after the click.
+        if (!isSelf) {
+          const toggle = document.createElement('button');
+          toggle.className = 'secondary';
+          toggle.textContent = active ? 'Deactivate' : 'Activate';
+          toggle.onclick = () => patchUser(user.id, { isActive: !active }, `${user.username} ${active ? 'deactivated' : 'activated'}`);
+          actions.appendChild(toggle);
+
+          const swap = document.createElement('button');
+          swap.className = 'secondary';
+          swap.textContent = user.role === 'ADMIN' ? 'Make agent' : 'Make admin';
+          swap.onclick = () => patchUser(user.id, { role: user.role === 'ADMIN' ? 'AGENT' : 'ADMIN' }, `${user.username} role updated`);
+          actions.appendChild(swap);
+
+          const remove = document.createElement('button');
+          remove.className = 'danger';
+          remove.textContent = 'Delete';
+          remove.onclick = async () => {
+            if (!confirm(`Delete ${user.username}? This cannot be undone.`)) return;
+            try {
+              await AppShell.fetchJson('/api/users/' + user.id, { method: 'DELETE' });
+              showBanner(`${user.username} deleted`, true);
+              loadUsers();
+            } catch (error) { showBanner(error.message, false); }
+          };
+          actions.appendChild(remove);
+        }
+
+        const reset = document.createElement('button');
+        reset.className = 'secondary';
+        reset.textContent = 'Reset password';
+        reset.onclick = async () => {
+          const password = generatePassword();
+          if (!confirm(`Reset the password for ${user.username}?`)) return;
+          try {
+            await AppShell.fetchJson('/api/users/' + user.id, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ password })
+            });
+            window.prompt(`New password for ${user.username} — copy it now, it is not stored anywhere:`, password);
+            showBanner(`Password reset for ${user.username}`, true);
+          } catch (error) { showBanner(error.message, false); }
+        };
+        actions.appendChild(reset);
+
+        row.append(nameCell, roleCell, statusCell, loginCell, actions);
+        body.appendChild(row);
+      });
+    }
+
+    async function patchUser(id, body, successMessage) {
+      try {
+        await AppShell.fetchJson('/api/users/' + id, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        showBanner(successMessage, true);
+        loadUsers();
+      } catch (error) { showBanner(error.message, false); }
+    }
+
+    document.getElementById('createUserBtn').onclick = async function createUser() {
+      clearFieldErrors();
+      const button = this;
+      const username = document.getElementById('newUsername').value.trim();
+      const role = document.getElementById('newRole').value;
+      const typed = document.getElementById('newUserPassword').value;
+      const password = typed || generatePassword();
+
+      button.disabled = true;
+      try {
+        await AppShell.fetchJson('/api/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, role, password })
+        });
+        if (!typed) {
+          window.prompt(`Password for ${username} — copy it now, it is not stored anywhere:`, password);
+        }
+        document.getElementById('newUsername').value = '';
+        document.getElementById('newUserPassword').value = '';
+        showBanner(`${username} created`, true);
+        loadUsers();
+      } catch (error) {
+        applyFieldErrors(error);
+      } finally {
+        button.disabled = false;
+      }
+    };
+
+    document.getElementById('changePasswordBtn').onclick = async function changePassword() {
+      clearFieldErrors();
+      const button = this;
+      button.disabled = true;
+      try {
+        await AppShell.fetchJson('/api/auth/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            currentPassword: document.getElementById('currentPassword').value,
+            newPassword: document.getElementById('newPassword').value
+          })
+        });
+        document.getElementById('currentPassword').value = '';
+        document.getElementById('newPassword').value = '';
+        showBanner('Password changed', true);
+      } catch (error) {
+        applyFieldErrors(error);
+      } finally {
+        button.disabled = false;
+      }
+    };
+
+    AppShell.ensureAuthenticatedSession().then(loadUsers).catch(() => {});
+  </script>
+</body>
+</html>

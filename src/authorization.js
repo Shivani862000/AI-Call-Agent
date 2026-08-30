@@ -8,6 +8,7 @@
 const ADMIN_ONLY_PREFIXES = [
   '/api/support-tickets',
   '/api/agents',
+  '/api/users',
   '/api/feedback',
   '/api/reports',
   '/api/logs',
@@ -18,6 +19,7 @@ const ADMIN_ONLY_PREFIXES = [
 
 const ADMIN_ONLY_HTML = new Set([
   '/support-tickets.html',
+  '/users.html',
   '/feedback.html',
   '/feedback-analysis.html',
   '/reports.html'

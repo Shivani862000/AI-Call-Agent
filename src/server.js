@@ -20,7 +20,7 @@ const {
 const { initializeDatabase } = require('../db');
 const { runSchedulerTick, runOwnerDigestTick } = require('./scheduler');
 const { pruneLiveCallState } = require('./helpers');
-const { validateAuthConfig } = require('./auth');
+const { validateAuthConfig, assertAdminAccountExists } = require('./auth');
 
 module.exports = function startServer(server) {
   (async () => {
@@ -28,6 +28,7 @@ module.exports = function startServer(server) {
     validateConfig();
     validateAuthConfig();
     await initializeDatabase();
+    await assertAdminAccountExists();
     logConfigSnapshot('SERVER');
 
     if (!DISABLE_SCHEDULER) {

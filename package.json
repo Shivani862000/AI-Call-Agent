@@ -7,7 +7,7 @@
     "start": "node index.js",
     "dev": "node index.js",
     "test": "node --test test/*.test.js",
-    "seed:admin": "node scripts/seed-admin.js"
+    "users": "node scripts/manage-users.js"
   },
   "dependencies": {
     "@google/genai": "^1.36.0",

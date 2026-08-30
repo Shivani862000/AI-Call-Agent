@@ -40,29 +40,38 @@ test('signed sessions preserve a valid role and reject payload tampering', () =>
   assert.notEqual(createAuthToken('agent1', 'AGENT'), token);
 });
 
-test('production auth configuration requires dedicated strong values', () => {
+test('production auth configuration requires a dedicated signing secret', () => {
   const missingIssues = getAuthConfigurationIssues({ NODE_ENV: 'production' });
-  assert.ok(missingIssues.some((issue) => issue.includes('ADMIN_USERNAME')));
-  assert.ok(missingIssues.some((issue) => issue.includes('ADMIN_PASSWORD_HASH')));
   assert.ok(missingIssues.some((issue) => issue.includes('AUTH_SIGNING_SECRET')));
+
+  // Login credentials are deliberately NOT validated from the environment any
+  // more: they live in the users table and are managed through /api/users.
+  // assertAdminAccountExists() checks the database at boot instead.
+  assert.ok(!missingIssues.some((issue) => issue.includes('ADMIN_USERNAME')));
+  assert.ok(!missingIssues.some((issue) => issue.includes('ADMIN_PASSWORD_HASH')));
 
   const reusedSecret = 'provider-secret-that-is-definitely-longer-than-thirty-two-bytes';
   const reusedIssues = getAuthConfigurationIssues({
     NODE_ENV: 'production',
-    ADMIN_USERNAME: 'admin',
-    ADMIN_PASSWORD_HASH: '$2b$12$Q20g.BM7iK9FvqrVI4U/H.EcP9UeJpUyPnvve7PjU76G4bdE6wd4e',
     AUTH_SIGNING_SECRET: reusedSecret,
     GEMINI_API_KEY: reusedSecret
   });
   assert.ok(reusedIssues.some((issue) => issue.includes('must not reuse')));
 
+  const shortIssues = getAuthConfigurationIssues({
+    NODE_ENV: 'production',
+    AUTH_SIGNING_SECRET: 'too-short'
+  });
+  assert.ok(shortIssues.some((issue) => issue.includes('at least 32 bytes')));
+
   const validIssues = getAuthConfigurationIssues({
     NODE_ENV: 'production',
-    ADMIN_USERNAME: 'admin',
-    ADMIN_PASSWORD_HASH: '$2b$12$Q20g.BM7iK9FvqrVI4U/H.EcP9UeJpUyPnvve7PjU76G4bdE6wd4e',
     AUTH_SIGNING_SECRET: 'independent-signing-secret-with-at-least-32-bytes'
   });
   assert.deepEqual(validIssues, []);
+
+  // An empty environment must not be enough to boot production either way.
+  assert.ok(getAuthConfigurationIssues({ NODE_ENV: 'production' }).length > 0);
 });
 
 test('admin role middleware denies agents and permits admins', () => {

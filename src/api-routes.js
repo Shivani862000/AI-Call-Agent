@@ -37,7 +37,6 @@ const {
   clearAuthCookie,
   createAuthToken,
   createMediaToken,
-  ADMIN_USERNAME,
   verifyCredentials
 } = require('./auth');
 
@@ -142,6 +141,41 @@ module.exports = function mountApiRoutes(app) {
     });
   });
 
+  app.post('/api/auth/change-password', async (req, res, next) => {
+    try {
+      const bcrypt = require('bcrypt');
+      const { validatePassword } = require('./user-rules');
+      const session = req.adminSession || {};
+
+      const current = String(req.body.currentPassword || '');
+      const next_ = String(req.body.newPassword || '');
+
+      const issue = validatePassword(next_);
+      if (issue) return res.status(400).json({ error: issue, fieldErrors: { newPassword: issue } });
+      if (current === next_) {
+        return res.status(400).json({ error: 'New password must differ from the current one', fieldErrors: { newPassword: 'Must be different' } });
+      }
+
+      const user = await dbGet(
+        'SELECT id, username, password_hash FROM users WHERE lower(username) = lower(?)',
+        [String(session.username || '')]
+      );
+      // Requiring the current password is what stops a stolen session from
+      // being upgraded into permanent account takeover.
+      if (!user || !await bcrypt.compare(current, user.password_hash)) {
+        logger.warn('PASSWORD_CHANGE_REJECTED', { user: session.username });
+        return res.status(403).json({ error: 'Current password is incorrect', fieldErrors: { currentPassword: 'Incorrect' } });
+      }
+
+      await dbRun(
+        'UPDATE users SET password_hash = ?, updated_at = now() WHERE id = ?',
+        [await bcrypt.hash(next_, 12), user.id]
+      );
+      logger.info('PASSWORD_CHANGED', { user: user.username });
+      res.json({ success: true });
+    } catch (error) { next(error); }
+  });
+
   app.post('/api/auth/logout', (req, res) => {
     const session = readAuthSession(req);
     clearAuthCookie(req, res);
@@ -156,6 +190,7 @@ module.exports = function mountApiRoutes(app) {
   app.use('/api/support-tickets', createSupportTicketsRouter({ dbRun, dbGet, dbAll, dbTx, notifyNewTicket: createSlackSupportNotifier({ webhookUrl: process.env.SLACK_SUPPORT_WEBHOOK_URL }) }));
   app.use('/api/reports', reportsRouter);
   app.use('/api/agents', agentsRouter);
+  app.use('/api/users', require('../routes/users'));
   app.use('/api/test-call', testCallRouter);
   app.use('/api/test-ai-call', testAiCallRouter);
 

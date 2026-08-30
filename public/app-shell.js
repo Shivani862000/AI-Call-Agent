@@ -76,6 +76,22 @@
     document.body.classList.add('admin-support-navigation');
   }
 
+  function addAdminNavLink(href, label) {
+    const currentPath = window.location.pathname || '/admin.html';
+    const navigation = document.querySelector('.nav-list');
+    if (!navigation || navigation.querySelector('a[href="' + href + '"]')) return;
+
+    const link = document.createElement('a');
+    link.href = href;
+    link.className = 'nav-link';
+    link.textContent = label;
+    if (currentPath === href) {
+      link.classList.add('active');
+      link.setAttribute('aria-current', 'page');
+    }
+    navigation.appendChild(link);
+  }
+
   async function ensureAuthenticatedSession() {
     const session = await fetchJson('/api/auth/session');
     if (session.role === 'AGENT') {
@@ -88,6 +104,7 @@
         buildMobileTabbar();
       }
       addAdminSupportNavigation();
+      addAdminNavLink('/users.html', 'Users');
     }
     return session;
   }
