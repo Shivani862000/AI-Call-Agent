@@ -83,10 +83,14 @@ async function ensureCustomerForCall({ customerId, customerName, customerPhone }
   }
 
   const result = await dbRun(
-    'INSERT INTO customers (name, phone, preferred_slot, status, created_at) VALUES (?, ?, ?, ?, ?)',
+    `INSERT INTO customers (name, phone, normalized_phone, preferred_slot, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (normalized_phone) WHERE normalized_phone IS NOT NULL
+     DO UPDATE SET name = excluded.name`,
     [
       customerName || 'Customer',
       customerPhone,
+      normalizePhoneLookupValue(customerPhone),
       '10:00',
       'pending',
       new Date().toISOString()
@@ -156,11 +160,14 @@ async function ensureCustomerForClientReminder(client) {
 
   const result = await dbRun(
     `INSERT INTO customers (
-      name, phone, preferred_slot, status, created_at, service_interest
-    ) VALUES (?, ?, ?, ?, ?, ?)`,
+      name, phone, normalized_phone, preferred_slot, status, created_at, service_interest
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (normalized_phone) WHERE normalized_phone IS NOT NULL
+     DO UPDATE SET name = excluded.name`,
     [
       client.name,
       client.phone,
+      normalizePhoneLookupValue(client.phone),
       client.annual_reminder_slot || '10:00',
       'pending',
       new Date().toISOString(),
@@ -180,8 +187,11 @@ async function findCustomerByPhone(phoneValue) {
   const normalized = normalizePhoneLookupValue(phoneValue);
   if (!normalized) return null;
 
-  const customers = await dbAll('SELECT * FROM customers ORDER BY id DESC LIMIT 200');
-  return customers.find((customer) => normalizePhoneLookupValue(customer.phone) === normalized) || null;
+  const customer = await dbGet(
+    'SELECT * FROM customers WHERE normalized_phone = ? LIMIT 1',
+    [normalized]
+  );
+  return customer || null;
 }
 
 async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incoming caller') {
@@ -192,10 +202,14 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
   }
 
   const result = await dbRun(
-    'INSERT INTO customers (name, phone, preferred_slot, status, created_at) VALUES (?, ?, ?, ?, ?)',
+    `INSERT INTO customers (name, phone, normalized_phone, preferred_slot, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (normalized_phone) WHERE normalized_phone IS NOT NULL
+     DO UPDATE SET name = excluded.name`,
     [
       fallbackName || 'Incoming caller',
       normalizedPhone,
+      normalizePhoneLookupValue(normalizedPhone),
       getCurrentSlotLabel(new Date()),
       'incoming',
       new Date().toISOString()

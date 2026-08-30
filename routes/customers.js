@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { dbRun, dbGet, dbAll } = require('../db');
+const { normalizePhoneLookupValue } = require('../src/helpers');
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const logger = require('../services/system-logger');
@@ -241,10 +242,12 @@ function validateCustomerPayload(payload) {
 }
 
 function handleSqliteError(error, res) {
-  if (error.message && error.message.includes('UNIQUE constraint failed: customers.phone')) {
+  // 23505 = unique_violation. The only unique index on customers is
+  // normalized_phone, so this always means the patient already exists.
+  if (error.code === '23505') {
     return res.status(409).json({
-      error: 'The database still has an old unique phone constraint. Restart the server so migrations can remove it.',
-      fieldErrors: { phone: 'Phone number can be reused after the database migration runs' }
+      error: 'A patient with this phone number already exists.',
+      fieldErrors: { phone: 'This number is already on file — open the existing patient instead' }
     });
   }
 
@@ -256,14 +259,16 @@ async function saveCustomer(payload, isManual = false) {
   const initialStatus = payload.preferred_slot ? 'scheduled' : 'pending';
   return dbRun(
     `INSERT INTO customers (
-      name, phone, preferred_slot, scheduled_datetime, status, customer_value, urgency_level,
+      name, phone, normalized_phone, preferred_slot, scheduled_datetime, status,
+      customer_value, urgency_level,
       preferred_language, preferred_dialect, do_not_call, consent_status,
       outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
       campaign_name, service_interest, call_type, is_manual
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       payload.name,
       payload.phone,
+      normalizePhoneLookupValue(payload.phone),
       payload.preferred_slot,
       payload.scheduled_datetime,
       initialStatus,

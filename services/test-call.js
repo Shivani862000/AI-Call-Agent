@@ -1,4 +1,5 @@
 const { dbRun, dbGet } = require('../db');
+const { normalizePhoneLookupValue } = require('../src/helpers');
 const { extractCallFeedback } = require('./call-feedback');
 const { categorizeFeedback, generateGeminiReply } = require('./gemini');
 
@@ -147,9 +148,11 @@ async function createCustomerForTestCall(name, phone) {
   }
 
   const result = await dbRun(
-    `INSERT INTO customers (name, phone, preferred_slot, status, created_at)
-     VALUES (?, ?, ?, ?, ?)`,
-    [name, normalizedPhone, 'test', 'completed', new Date().toISOString()]
+    `INSERT INTO customers (name, phone, normalized_phone, preferred_slot, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (normalized_phone) WHERE normalized_phone IS NOT NULL
+     DO UPDATE SET name = excluded.name`,
+    [name, normalizedPhone, normalizePhoneLookupValue(normalizedPhone), 'test', 'completed', new Date().toISOString()]
   );
 
   return result.lastID;
