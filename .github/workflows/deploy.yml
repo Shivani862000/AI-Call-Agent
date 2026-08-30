@@ -1,0 +1,100 @@
+name: Deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which environment to deploy
+        type: choice
+        options: [uat, prod]
+        default: uat
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20.x', cache: npm }
+      - run: npm ci
+      - run: npm test
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        # Tagged by commit, so a rollback is "re-run against the previous SHA".
+        run: echo "image=ghcr.io/${{ github.repository }}:${{ github.sha }}" | tr '[:upper:]' '[:lower:]' >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'uat' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20.x', cache: npm }
+      - run: npm ci --omit=dev
+
+      # Migrations run here, before the container restarts. The app refuses to
+      # boot on a schema mismatch, so a failure stops the deploy with the
+      # previous version still serving.
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: node scripts/migrate.js
+
+      - name: Pull and restart
+        uses: appleboy/ssh-action@v1
+        env:
+          TARGET: ${{ inputs.environment || 'uat' }}
+          IMAGE: ${{ needs.build.outputs.image }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: deploy
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          envs: TARGET,IMAGE,REGISTRY_USER,REGISTRY_TOKEN
+          script: |
+            set -euo pipefail
+            cd /opt/app
+            echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "$REGISTRY_USER" --password-stdin
+            export APP_IMAGE="$IMAGE"
+            docker compose -f docker-compose.prod.yml pull "$TARGET"
+            docker compose -f docker-compose.prod.yml up -d "$TARGET" caddy
+            docker image prune -f
+
+      - name: Verify it came back
+        run: |
+          if [ "${{ inputs.environment || 'uat' }}" = "prod" ]; then HOST=app; else HOST=uat; fi
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://$HOST.vikitechsolutions.in/login.html" || true)
+            if [ "$code" = "200" ]; then echo "healthy"; exit 0; fi
+            echo "  attempt $i: $code"
+            sleep 5
+          done
+          echo "did not become healthy"; exit 1

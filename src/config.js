@@ -47,6 +47,10 @@ const PUBLIC_BASE_URL = CONFIGURED_PUBLIC_BASE_URL || `http://localhost:${PORT}`
 const VOICE_PIPELINE = process.env.VOICE_PIPELINE || 'legacy';
 const USE_ORCHESTRATED_PIPELINE = VOICE_PIPELINE === 'orchestrated';
 const DISABLE_SCHEDULER = String(process.env.DISABLE_SCHEDULER || '').toLowerCase() === 'true';
+// UAT shares one telephony DID with production, so it must never answer an
+// inbound call: a patient ringing the number would otherwise reach a test
+// build. Enforced here rather than by remembering not to point the DID at it.
+const DISABLE_INBOUND_CALLS = /^(1|true|yes|on)$/i.test(String(process.env.DISABLE_INBOUND_CALLS || ''));
 const DISABLE_OWNER_DIGEST = String(process.env.DISABLE_OWNER_DIGEST || '').toLowerCase() === 'true';
 const MAX_CALL_DURATION_SECONDS = Math.max(Number(process.env.MAX_CALL_DURATION_SECONDS || 60) || 60, 10);
 const MIN_RETRY_GAP_MINUTES = Math.max(Number(process.env.MIN_RETRY_GAP_MINUTES || 180) || 180, 1);
@@ -288,6 +292,7 @@ module.exports = {
   VOICE_PIPELINE,
   USE_ORCHESTRATED_PIPELINE,
   DISABLE_SCHEDULER,
+  DISABLE_INBOUND_CALLS,
   DISABLE_OWNER_DIGEST,
   MAX_CALL_DURATION_SECONDS,
   MIN_RETRY_GAP_MINUTES,

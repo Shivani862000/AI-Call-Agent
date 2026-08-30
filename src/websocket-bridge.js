@@ -1259,6 +1259,8 @@ module.exports = function setupWebSocketBridge(server) {
       forwardedFor: req.headers['x-forwarded-for'] || ''
     });
 
+    // Outbound-only deployments accept the socket only once it identifies
+    // itself as one of our own outbound calls; see the media handler below.
     const session = {
       streamId: '',
       callerId: '',

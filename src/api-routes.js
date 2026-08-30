@@ -26,7 +26,8 @@ const {
   liveCallState,
   incomingCallState,
   validateConfig,
-  describeEnvValue
+  describeEnvValue,
+  DISABLE_INBOUND_CALLS
 } = require('./config');
 
 const {
@@ -762,6 +763,13 @@ module.exports = function mountApiRoutes(app) {
   });
 
   app.post('/api/icallmate/callback', async (req, res) => {
+    // An outbound-only deployment (UAT) shares the DID with production and must
+    // not process inbound call events for it.
+    if (DISABLE_INBOUND_CALLS && String(req.body?.event || '').toLowerCase().includes('incoming')) {
+      logger.warn('INBOUND_REJECTED', { reason: 'inbound calls are disabled on this deployment' });
+      return res.status(403).json({ error: 'Inbound calls are not handled by this deployment' });
+    }
+
     try {
       if (!hasValidIcallMateWebhookSecret(req)) {
         return res.status(401).json({ error: 'Invalid webhook secret' });

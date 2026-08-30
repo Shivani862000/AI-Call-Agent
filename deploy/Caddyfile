@@ -1,0 +1,27 @@
+# Two hostnames, two containers, one droplet.
+#
+# Caddy obtains and renews TLS from Let's Encrypt automatically, and
+# reverse_proxy passes WebSocket upgrades through on its own — the media
+# bridge holds a socket open for a whole call and needs no special handling.
+
+{
+	email {$ACME_EMAIL}
+}
+
+app.vikitechsolutions.in {
+	reverse_proxy prod:3000
+	encode gzip
+	log {
+		output file /var/log/caddy/prod.log
+		format json
+	}
+}
+
+uat.vikitechsolutions.in {
+	reverse_proxy uat:3000
+	encode gzip
+	log {
+		output file /var/log/caddy/uat.log
+		format json
+	}
+}
