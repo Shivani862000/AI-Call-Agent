@@ -3,6 +3,9 @@ const router = express.Router();
 const { dbRun, dbGet, dbAll } = require('../db');
 const { normalizePhoneLookupValue } = require('../src/helpers');
 const { resolvePatientId } = require('../src/patient-link');
+const { serializeQueueRow } = require('../src/patient-rules');
+
+const roleOf = (req) => String(req.adminSession?.role || '').toUpperCase();
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const logger = require('../services/system-logger');
@@ -414,7 +417,7 @@ router.get('/search', async (req, res) => {
        LIMIT 20`,
       [pattern, pattern]
     );
-    res.json(customers);
+    res.json(customers.map((row) => serializeQueueRow(row, roleOf(req))));
   } catch (error) {
     console.error('Error searching customers:', error);
     res.status(500).json({ error: error.message });
@@ -425,7 +428,7 @@ router.get('/search', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const customers = await dbAll('SELECT * FROM customer_queue ORDER BY COALESCE(priority_score, 0) DESC, created_at DESC');
-    res.json(customers);
+    res.json(customers.map((row) => serializeQueueRow(row, roleOf(req))));
   } catch (error) {
     console.error('Error fetching customers:', error);
     res.status(500).json({ error: error.message });
@@ -440,7 +443,7 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Customer not found' });
     }
 
-    res.json(customer);
+    res.json(serializeQueueRow(customer, roleOf(req)));
   } catch (error) {
     console.error('Error fetching customer:', error);
     res.status(500).json({ error: error.message });

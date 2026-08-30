@@ -148,7 +148,27 @@ function validatePatientPayload(payload) {
   return errors;
 }
 
+/**
+ * Queue rows come from customer_queue and carry the same person fields, so an
+ * agent-facing customers endpoint leaks exactly what the patients endpoint
+ * would without this.
+ */
+function serializeQueueRow(row, role) {
+  if (!row) return row;
+  const isAdmin = String(role || '').toUpperCase() === 'ADMIN';
+  const out = { ...row };
+  out.phone_masked = maskPhone(row.normalized_phone || row.phone);
+  out.email_masked = maskEmail(row.email);
+  if (!isAdmin) {
+    delete out.phone;
+    delete out.normalized_phone;
+    delete out.email;
+  }
+  return out;
+}
+
 module.exports = {
+  serializeQueueRow,
   LANGUAGES,
   GENDERS,
   BLOOD_GROUPS,
