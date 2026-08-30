@@ -157,11 +157,20 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     phone: callRecord.customer_phone
   });
 
-  let recordingLocalPath = callRecord.recording_local_path || null;
-  if (!recordingLocalPath && callRecord.recording_url) {
+  let recordingLocalPath = null;
+  if (!callRecord.recording_object_key && callRecord.recording_url) {
     try {
       recordingLocalPath = await downloadRecording(callRecord.recording_url, callRecord.provider_call_id);
-      await dbRun('UPDATE calls SET recording_local_path = ? WHERE id = ?', [recordingLocalPath, callRecord.id]);
+      const objectKey = `calls/${callRecord.id}/${path.basename(recordingLocalPath)}`;
+      const { uploadObject, isStorageConfigured } = require('./supabase-storage');
+      if (isStorageConfigured()) {
+        await uploadObject(objectKey, fs.readFileSync(recordingLocalPath), 'audio/mpeg');
+        await dbRun(
+          "UPDATE calls SET recording_object_key = ?, recording_status = 'stored' WHERE id = ?",
+          [objectKey, callRecord.id]
+        );
+        fs.promises.unlink(recordingLocalPath).catch(() => {});
+      }
     } catch (error) {
       await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['download_failed', 'blocked', callRecord.id]);
       throw error;

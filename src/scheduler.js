@@ -5,6 +5,8 @@
 
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const { dbGet, dbRun, dbAll } = require('../db');
 const { CLIENT_NAME, CALL_TYPES } = require('./config');
 const {
@@ -619,6 +621,45 @@ async function triggerAnnualClientReminderCalls() {
   }
 }
 
+/**
+ * Retries recordings whose upload failed at call teardown.
+ *
+ * The local file is kept on failure, so this is a straight retry. A row whose
+ * file is gone (container recreated before the retry ran) is marked
+ * upload_lost rather than retried forever.
+ */
+async function retryPendingRecordingUploads() {
+  const { uploadObject, isStorageConfigured } = require('../services/supabase-storage');
+  if (!isStorageConfigured()) return;
+
+  const pending = await dbAll(
+    "SELECT id, recording_object_key FROM calls WHERE recording_status = 'pending_upload' LIMIT 10"
+  );
+
+  for (const call of pending) {
+    const objectKey = call.recording_object_key;
+    const localPath = path.join(
+      process.env.RECORDINGS_DIR || path.join(process.cwd(), 'recordings'),
+      path.basename(objectKey || '')
+    );
+
+    if (!objectKey || !fs.existsSync(localPath)) {
+      await dbRun("UPDATE calls SET recording_status = 'upload_lost' WHERE id = ?", [call.id]);
+      logger.warn('RECORDING_UPLOAD_LOST', { callId: call.id });
+      continue;
+    }
+
+    try {
+      await uploadObject(objectKey, fs.readFileSync(localPath), 'audio/wav');
+      await dbRun("UPDATE calls SET recording_status = 'stored' WHERE id = ?", [call.id]);
+      fs.promises.unlink(localPath).catch(() => {});
+      logger.info('RECORDING_UPLOAD_RETRIED', { callId: call.id });
+    } catch (error) {
+      logger.warn('RECORDING_UPLOAD_RETRY_FAILED', { callId: call.id, reason: error.message });
+    }
+  }
+}
+
 async function runSchedulerTick() {
   if (schedulerRunning) {
     return;
@@ -628,6 +669,7 @@ async function runSchedulerTick() {
   try {
     await triggerAnnualClientReminderCalls();
     await triggerScheduledCalls();
+    await retryPendingRecordingUploads();
   } finally {
     schedulerRunning = false;
   }
@@ -635,6 +677,7 @@ async function runSchedulerTick() {
 
 module.exports = {
   markSubmittedCallsWithoutMediaFailed,
+  retryPendingRecordingUploads,
   runOwnerDigestTick,
   triggerScheduledCalls,
   triggerAnnualClientReminderCalls,

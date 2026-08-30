@@ -82,6 +82,43 @@ function debugLog(message, details = {}) {
   logger.debug('MEDIA_DEBUG', { message, ...details });
 }
 
+
+/**
+ * Uploads a finished recording without blocking socket teardown.
+ *
+ * On failure the local file is deliberately kept and the call is marked
+ * pending_upload, so the scheduler sweep can retry. A Supabase outage then
+ * degrades to the old on-disk behaviour instead of losing the audio.
+ */
+function uploadRecordingInBackground(localPath, objectKey, callId) {
+  const fs = require('fs');
+  const { uploadObject, isStorageConfigured } = require('../services/supabase-storage');
+  const { dbRun } = require('../db');
+
+  if (!isStorageConfigured()) {
+    console.warn('[RECORDING UPLOAD] Storage not configured; keeping local file only');
+    return;
+  }
+
+  runInBackground('RECORDING UPLOAD', async () => {
+    try {
+      await uploadObject(objectKey, fs.readFileSync(localPath), 'audio/wav');
+      await dbRun(
+        "UPDATE calls SET recording_object_key = ?, recording_status = 'stored' WHERE id = ?",
+        [objectKey, callId]
+      );
+      fs.promises.unlink(localPath).catch(() => {});
+      console.log(`[RECORDING UPLOAD] Stored ${objectKey}`);
+    } catch (error) {
+      await dbRun(
+        "UPDATE calls SET recording_status = 'pending_upload', notes = COALESCE(notes, '') WHERE id = ?",
+        [callId]
+      ).catch(() => {});
+      console.error('[RECORDING UPLOAD ERROR]', error.message);
+    }
+  });
+}
+
 module.exports = function setupWebSocketBridge(server) {
   const icallMateWss = new WebSocket.Server({ noServer: true });
 
@@ -1513,9 +1550,11 @@ module.exports = function setupWebSocketBridge(server) {
               require('fs').mkdirSync(recordingsDir, { recursive: true });
             }
             const recordingPath = require('path').join(recordingsDir, recordingFilename);
+            const objectKey = `calls/${session.callId}/${recordingFilename}`;
             try {
                await session.audioRecorder.saveToFile(recordingPath);
                console.log(`[AUDIO RECORDER] Saved recording for callId=${session.callId}`);
+               uploadRecordingInBackground(recordingPath, objectKey, session.callId);
             } catch (err) {
                console.error('[AUDIO RECORDER ERROR]', err.message);
             }
@@ -1523,16 +1562,16 @@ module.exports = function setupWebSocketBridge(server) {
             if (transcriptText) {
               try {
                 await dbRun(
-                  `UPDATE calls SET outcome = 'completed', transcript_text = COALESCE(NULLIF(?, ''), transcript_text), transcript_status = COALESCE(NULLIF(transcript_status, 'pending'), 'completed'), ended_at = COALESCE(ended_at, ?), recording_local_path = ? WHERE id = ?`,
-                  [transcriptText, closeTimestamp, recordingPath, session.callId]
+                  `UPDATE calls SET outcome = 'completed', transcript_text = COALESCE(NULLIF(?, ''), transcript_text), transcript_status = COALESCE(NULLIF(transcript_status, 'pending'), 'completed'), ended_at = COALESCE(ended_at, ?), recording_object_key = ? WHERE id = ?`,
+                  [transcriptText, closeTimestamp, objectKey, session.callId]
                 );
                 console.log(`[TRANSCRIPT] Saved from ws close (callId=${session.callId}, length=${transcriptText.length})`);
               } catch (e) { console.error('[TRANSCRIPT SAVE ERROR ws close]', e.message); }
             } else {
               try {
                 await dbRun(
-                  `UPDATE calls SET outcome = 'completed', ended_at = COALESCE(ended_at, ?), recording_local_path = ? WHERE id = ?`,
-                  [closeTimestamp, recordingPath, session.callId]
+                  `UPDATE calls SET outcome = 'completed', ended_at = COALESCE(ended_at, ?), recording_object_key = ? WHERE id = ?`,
+                  [closeTimestamp, objectKey, session.callId]
                 );
               } catch (e) { console.error('[CALL UPDATE ERROR ws close]', e.message); }
             }

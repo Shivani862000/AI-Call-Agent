@@ -158,6 +158,34 @@ function resolveDatabaseUrl(env = process.env) {
   return String(env[key] || '').trim();
 }
 
+/** Service-role key for the current environment. Server-side only, never sent to a browser. */
+function resolveServiceRoleKey(env = process.env) {
+  const isProduction = String(env.NODE_ENV || '').toLowerCase() === 'production';
+  const scoped = isProduction ? env.SUPABASE_SERVICE_ROLE_KEY : env.SUPABASE_SERVICE_ROLE_KEY_DEV;
+  return String(scoped || env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+}
+
+/**
+ * Storage REST base, derived from the Postgres connection string rather than a
+ * separate API-URL variable, so the two can never point at different projects.
+ * Handles both the pooler form (user `postgres.<ref>`) and the direct form
+ * (host `db.<ref>.supabase.co`).
+ */
+function resolveStorageUrl(env = process.env) {
+  const explicit = String(env.SUPABASE_API_URL || '').trim();
+  if (explicit) return `${explicit.replace(/\/$/, '')}/storage/v1`;
+
+  const connection = resolveDatabaseUrl(env);
+  if (!connection) return '';
+  let parsed;
+  try { parsed = new URL(connection); } catch { return ''; }
+
+  const fromUser = parsed.username.includes('.') ? parsed.username.split('.').pop() : '';
+  const fromHost = /^db\.([a-z0-9]+)\.supabase\.co$/i.exec(parsed.hostname)?.[1] || '';
+  const ref = fromUser || fromHost;
+  return ref ? `https://${ref}.supabase.co/storage/v1` : '';
+}
+
 /** Names the variable resolveDatabaseUrl would have read, for error messages. */
 function databaseUrlVarName(env = process.env) {
   if (String(env.DATABASE_URL || '').trim()) return 'DATABASE_URL';
@@ -279,5 +307,7 @@ module.exports = {
   validateConfig,
   validateDatabaseUrl,
   resolveDatabaseUrl,
-  databaseUrlVarName
+  databaseUrlVarName,
+  resolveServiceRoleKey,
+  resolveStorageUrl
 };

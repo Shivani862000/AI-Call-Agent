@@ -1125,7 +1125,7 @@ module.exports = function mountApiRoutes(app) {
          calls.recording_sid,
          calls.recording_url,
          calls.recording_status,
-         calls.recording_local_path,
+         calls.recording_object_key,
          calls.transcript_text,
          calls.transcript_status,
          calls.transcript_source,
@@ -1197,7 +1197,7 @@ module.exports = function mountApiRoutes(app) {
          calls.recording_sid,
          calls.recording_url,
          calls.recording_status,
-         calls.recording_local_path,
+         calls.recording_object_key,
          calls.transcript_text,
          calls.transcript_status,
          calls.transcript_source,
@@ -1468,15 +1468,13 @@ module.exports = function mountApiRoutes(app) {
 
   app.get('/api/calls/:callId/recording', async (req, res) => {
     try {
-      const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status, recording_local_path FROM calls WHERE id = ?', [req.params.callId]);
+      const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status, recording_object_key FROM calls WHERE id = ?', [req.params.callId]);
 
-      if (call?.recording_local_path) {
-        const fs = require('fs');
-        if (fs.existsSync(call.recording_local_path)) {
-          res.setHeader('Content-Type', 'audio/wav');
-          res.setHeader('Cache-Control', 'private, max-age=300');
-          return res.sendFile(call.recording_local_path);
-        }
+      // Stored in Supabase: hand back a short-lived signed URL rather than
+      // proxying the audio through this process.
+      if (call?.recording_object_key && call.recording_status === 'stored') {
+        const { createSignedUrl } = require('../services/supabase-storage');
+        return res.redirect(await createSignedUrl(call.recording_object_key, 60));
       }
 
       if (!call?.recording_url && !call?.provider_call_id) {
