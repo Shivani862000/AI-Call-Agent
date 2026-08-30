@@ -9,6 +9,8 @@ const fs = require('fs');
 const path = require('path');
 const { dbGet, dbRun, dbAll } = require('../db');
 const { CLIENT_NAME, CALL_TYPES } = require('./config');
+const { createSettingsStore } = require('./app-settings');
+const { selectPatientsToQueue } = require('./queue-rules');
 const {
   shouldTriggerOwnerDigest,
   getLocalDateKey,
@@ -488,146 +490,6 @@ async function triggerScheduledCalls() {
   }
 }
 
-async function triggerAnnualClientReminderCalls() {
-  const now = new Date();
-  const currentSlot = getCurrentSlotLabel(now);
-  const currentYear = now.getUTCFullYear();
-
-  const dueClients = await dbAll(
-    `SELECT client.*
-     FROM clients client
-     LEFT JOIN calls recent_call
-       ON recent_call.customer_id = client.linked_customer_id
-      AND recent_call.called_at >= (now() - interval '45 minutes')
-     WHERE COALESCE(client.annual_reminder_enabled, 1) = 1
-       AND COALESCE(client.status, 'active') = 'active'
-       AND client.next_annual_reminder_date IS NOT NULL
-       AND DATE(client.next_annual_reminder_date) <= DATE('now')
-       AND COALESCE(client.annual_reminder_slot, '10:00') <= ?
-       AND COALESCE(client.last_annual_reminder_year, 0) < ?
-       AND recent_call.id IS NULL
-     ORDER BY client.next_annual_reminder_date ASC, client.annual_reminder_slot ASC`,
-    [currentSlot, currentYear]
-  );
-
-  if (!dueClients.length) {
-    return;
-  }
-
-  console.log(`[CLIENT REMINDER] Found ${dueClients.length} annual reminder client(s) due at ${currentSlot}`);
-
-  for (const client of dueClients) {
-    try {
-      const customer = await ensureCustomerForClientReminder(client);
-      const hydratedCustomer = await hydratePreCallIntelligence(customer);
-      const blockedReason = await shouldBlockCustomerCall(hydratedCustomer);
-      if (blockedReason) {
-        console.log(`[CLIENT REMINDER] Skipping clientId=${client.id}: ${blockedReason.reason}`);
-        if (blockedReason.code === 'CALL_SKIPPED_QUIET_HOURS') {
-          const nextRetry = new Date();
-          nextRetry.setHours(7, 0, 0, 0);
-          if (nextRetry < new Date()) {
-            nextRetry.setDate(nextRetry.getDate() + 1);
-          }
-          logger.warn('CALL_SKIPPED_QUIET_HOURS', { phone: hydratedCustomer.phone, scheduledTime: 'Annual Reminder', reason: blockedReason.reason });
-          await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', nextRetry.toISOString(), hydratedCustomer.id]);
-        } else if (blockedReason.code === 'CALL_FAILED_MAX_ATTEMPTS' || blockedReason.code === 'CALL_BLOCKED_DAILY_LIMIT') {
-          logger.error('CALL_FAILED_MAX_ATTEMPTS', { phone: hydratedCustomer.phone, attempts: 3, reason: blockedReason.reason });
-          await dbRun(`UPDATE customers SET status = ?, failed_reason = ? WHERE id = ?`, ['failed', blockedReason.reason, hydratedCustomer.id]);
-        } else if (blockedReason.code === 'CALL_BLOCKED_THREE_HOUR_GAP') {
-          logger.warn('CALL_BLOCKED_THREE_HOUR_GAP', { phone: hydratedCustomer.phone, lastAttemptAt: logger.formatHumanDateTime(blockedReason.lastAttemptAt), nextAllowedAt: logger.formatHumanDateTime(blockedReason.nextAllowedAt) });
-          await dbRun(`UPDATE customers SET status = ?, next_retry_at = ? WHERE id = ?`, ['retry_scheduled', blockedReason.nextAllowedAt, hydratedCustomer.id]);
-        }
-        continue;
-      }
-
-      const agentConfig = hydratedCustomer.default_agent_id
-        ? await getAgentConfigById(hydratedCustomer.default_agent_id)
-        : await getDefaultAgentConfig();
-
-      const claimResult = await dbRun(
-        `UPDATE customers
-            SET status = ?,
-                last_called_at = ?
-          WHERE id = ?
-            AND COALESCE(status, 'pending') IN ('pending', 'retry_scheduled', 'callback_scheduled', 'called', 'completed')`,
-        ['calling', new Date().toISOString(), hydratedCustomer.id]
-      );
-
-      if (!claimResult.changes) {
-        console.log(`[CLIENT REMINDER] Skipping clientId=${client.id}: customer row is already in use`);
-        continue;
-      }
-
-      const call = await placeRealtimeCall({
-        customerPhone: hydratedCustomer.phone,
-        customerName: hydratedCustomer.name,
-        customerId: hydratedCustomer.id,
-        clientName: agentConfig?.client_name || CLIENT_NAME,
-        agentId: agentConfig?.id || null,
-        callType: CALL_TYPES.THREE_MONTH_FOLLOWUP
-      });
-
-      await dbRun(
-        `INSERT INTO calls (
-          customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
-          consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          hydratedCustomer.id,
-          agentConfig?.id || null,
-          'scheduled_initiated',
-          call.sid,
-          new Date().toISOString(),
-          hydratedCustomer.priority_score || computePriorityScore(hydratedCustomer),
-          1,
-          `annual-reminder:${client.treatment_type || 'client-care'}`,
-          'normal',
-          'outbound',
-          'icallmate',
-          CALL_TYPES.THREE_MONTH_FOLLOWUP
-        ]
-      );
-
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', hydratedCustomer.id]);
-
-      const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND DATE(c.called_at, 'localtime') = DATE('now', 'localtime') AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
-        [hydratedCustomer.id]
-      );
-      const attempt = callsTodayRow ? callsTodayRow.count : 1;
-      logger.info('CALL_ATTEMPT_STARTED', { phone: hydratedCustomer.phone, attempt });
-
-      await dbRun(
-        `UPDATE clients
-            SET last_annual_reminder_at = ?,
-                last_annual_reminder_year = ?,
-                next_annual_reminder_date = ?,
-                updated_at = ?
-          WHERE id = ?`,
-        [
-          new Date().toISOString(),
-          currentYear,
-          computeNextAnnualReminderDate(client.last_visit_date, new Date(Date.UTC(currentYear + 1, 0, 1))),
-          new Date().toISOString(),
-          client.id
-        ]
-      );
-
-      console.log(`[CLIENT REMINDER] Annual reminder call started for clientId=${client.id} (${call.sid})`);
-    } catch (error) {
-      console.error(`[CLIENT REMINDER ERROR] clientId=${client.id}: ${error.message}`);
-    }
-  }
-}
-
-/**
- * Retries recordings whose upload failed at call teardown.
- *
- * The local file is kept on failure, so this is a straight retry. A row whose
- * file is gone (container recreated before the retry ran) is marked
- * upload_lost rather than retried forever.
- */
 async function retryPendingRecordingUploads() {
   const { uploadObject, isStorageConfigured } = require('../services/supabase-storage');
   if (!isStorageConfigured()) return;
@@ -660,6 +522,68 @@ async function retryPendingRecordingUploads() {
   }
 }
 
+const settings = createSettingsStore({ dbGet, dbRun });
+
+/**
+ * Queues patients matching the configured rules.
+ *
+ * Off unless someone switches it on, because this is the path where the system
+ * decides by itself to phone somebody. The blocking checks live in
+ * queue-rules.js and are shared with the manual path, so a do-not-call patient
+ * cannot be reached through either door.
+ */
+async function queuePatientsFromRules() {
+  const config = await settings.get('auto_queue');
+  if (!config.enabled) return;
+
+  const rules = (config.rules || []).filter((rule) => rule.enabled !== false);
+  if (rules.length === 0) return;
+
+  const patients = await dbAll(
+    `SELECT p.id, p.status, p.do_not_call, p.consent_status, p.normalized_phone,
+            p.last_donation_date, p.last_test_date
+       FROM patients p
+      WHERE p.status = 'active'
+        AND COALESCE(p.do_not_call, 0) = 0
+        AND COALESCE(p.consent_status, 'unknown') <> 'refused'
+        AND p.normalized_phone IS NOT NULL
+      LIMIT 2000`
+  );
+  if (patients.length === 0) return;
+
+  const openEntries = await dbAll(
+    `SELECT patient_id FROM customers
+      WHERE status IN ('pending','scheduled','calling','retry_scheduled','callback_scheduled')`
+  );
+  const alreadyQueued = new Set(openEntries.map((row) => Number(row.patient_id)));
+
+  const selected = selectPatientsToQueue({
+    patients, rules, today: new Date().toISOString(), alreadyQueued
+  });
+
+  for (const entry of selected) {
+    try {
+      await dbRun(
+        `INSERT INTO customers (patient_id, scheduled_datetime, status, call_type, is_manual, created_at)
+         VALUES (?, now(), 'scheduled', ?, 0, now())
+         ON CONFLICT (patient_id) DO UPDATE SET
+           scheduled_datetime = now(), status = 'scheduled',
+           call_type = excluded.call_type, attempt_count = 0, updated_at = now()`,
+        [entry.patientId, entry.rule.call_type || 'REVIEW_CALL']
+      );
+      logger.info('CALL_AUTO_QUEUED', {
+        patientId: entry.patientId, rule: entry.rule.id, daysSince: entry.daysSince
+      });
+    } catch (error) {
+      logger.warn('CALL_AUTO_QUEUE_FAILED', { patientId: entry.patientId, reason: error.message });
+    }
+  }
+
+  if (selected.length > 0) {
+    logger.info('AUTO_QUEUE_TICK', { queued: selected.length, considered: patients.length });
+  }
+}
+
 async function runSchedulerTick() {
   if (schedulerRunning) {
     return;
@@ -667,7 +591,7 @@ async function runSchedulerTick() {
 
   schedulerRunning = true;
   try {
-    await triggerAnnualClientReminderCalls();
+    await queuePatientsFromRules();
     await triggerScheduledCalls();
     await retryPendingRecordingUploads();
   } finally {
@@ -678,8 +602,8 @@ async function runSchedulerTick() {
 module.exports = {
   markSubmittedCallsWithoutMediaFailed,
   retryPendingRecordingUploads,
+  queuePatientsFromRules,
   runOwnerDigestTick,
   triggerScheduledCalls,
-  triggerAnnualClientReminderCalls,
   runSchedulerTick
 };

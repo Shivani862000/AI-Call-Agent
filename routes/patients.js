@@ -13,6 +13,7 @@ const {
   validatePatientPayload
 } = require('../src/patient-rules');
 const { mapHeaders, buildImportPlan, COLUMN_ALIASES } = require('../src/patient-import');
+const { blockingReason } = require('../src/queue-rules');
 
 const MAX_IMPORT_ROWS = 5000;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -230,6 +231,83 @@ router.delete('/:id(\\d+)', async (req, res, next) => {
     await dbRun('DELETE FROM patients WHERE id = ?', [req.params.id]);
     logger.warn('PATIENT_DELETED', { patientId: Number(req.params.id), by: req.adminSession?.username });
     res.json({ success: true });
+  } catch (error) { next(error); }
+});
+
+// ── Scheduling a call ──────────────────────────────────────────────────────────
+
+/**
+ * Opens a queue entry for one patient. Shared by the single and bulk routes so
+ * the guards cannot diverge between them.
+ */
+async function scheduleOne(patientId, { scheduledAt, callType, username }) {
+  const patient = await dbGet(
+    `SELECT id, first_name, last_name, do_not_call, consent_status, status, normalized_phone,
+            preferred_call_slot
+       FROM patients WHERE id = ?`, [patientId]
+  );
+
+  const blocked = blockingReason(patient);
+  if (blocked) return { ok: false, patientId, reason: blocked };
+
+  const existing = await dbGet(
+    `SELECT id FROM customers
+      WHERE patient_id = ?
+        AND status IN ('pending','scheduled','calling','retry_scheduled','callback_scheduled')`,
+    [patientId]
+  );
+  if (existing) return { ok: false, patientId, reason: 'Already waiting to be called' };
+
+  await dbRun(
+    `INSERT INTO customers (patient_id, scheduled_datetime, status, call_type, is_manual, created_at)
+     VALUES (?, ?, 'scheduled', ?, 1, now())
+     ON CONFLICT (patient_id) DO UPDATE SET
+       scheduled_datetime = excluded.scheduled_datetime,
+       status = 'scheduled',
+       call_type = excluded.call_type,
+       attempt_count = 0,
+       updated_at = now()`,
+    [patientId, scheduledAt || new Date().toISOString(), callType || 'REVIEW_CALL']
+  );
+
+  logger.info('CALL_SCHEDULED', { patientId, by: username });
+  return { ok: true, patientId };
+}
+
+router.post('/:id(\\d+)/schedule-call', async (req, res, next) => {
+  try {
+    const result = await scheduleOne(Number(req.params.id), {
+      scheduledAt: req.body.scheduled_at,
+      callType: req.body.call_type,
+      username: req.adminSession?.username
+    });
+    if (!result.ok) return res.status(409).json({ error: result.reason });
+    res.json({ success: true });
+  } catch (error) { next(error); }
+});
+
+router.post('/schedule-calls', async (req, res, next) => {
+  try {
+    const ids = Array.isArray(req.body.patient_ids) ? req.body.patient_ids.map(Number).filter(Boolean) : [];
+    if (ids.length === 0) return res.status(400).json({ error: 'Select at least one patient' });
+    if (ids.length > 500) return res.status(400).json({ error: 'At most 500 patients at a time' });
+
+    const results = [];
+    for (const id of ids) {
+      results.push(await scheduleOne(id, {
+        scheduledAt: req.body.scheduled_at,
+        callType: req.body.call_type,
+        username: req.adminSession?.username
+      }));
+    }
+
+    const scheduled = results.filter((r) => r.ok).length;
+    // Skips are reported rather than silently dropped: "12 of 20 scheduled"
+    // with reasons is honest, "done" is not.
+    res.json({
+      scheduled,
+      skipped: results.filter((r) => !r.ok).map((r) => ({ patientId: r.patientId, reason: r.reason }))
+    });
   } catch (error) { next(error); }
 });
 

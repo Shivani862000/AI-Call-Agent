@@ -17,7 +17,6 @@ const PROTECTED_HTML_PATHS = new Set([
   '/patients.html',
   '/incoming-calls.html',
   '/customers.html',
-  '/clients.html',
   '/feedback.html',
   '/feedback-analysis.html',
   '/reports.html'

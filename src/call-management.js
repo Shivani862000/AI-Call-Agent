@@ -117,65 +117,6 @@ async function releaseCustomerOutboundClaim(customerId, fallbackStatus = 'pendin
   );
 }
 
-async function ensureCustomerForClientReminder(client) {
-  let customer = null;
-
-  if (client.linked_customer_id) {
-    customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [client.linked_customer_id]);
-  }
-
-  if (!customer) {
-    customer = await dbGet('SELECT * FROM customer_queue WHERE phone = ?', [client.phone]);
-  }
-
-  if (customer) {
-    await dbRun(
-      `UPDATE customers
-          SET name = ?,
-              phone = ?,
-              preferred_slot = ?,
-              service_interest = ?,
-              status = CASE WHEN status = 'completed' THEN 'pending' ELSE status END
-        WHERE id = ?`,
-      [
-        client.name,
-        client.phone,
-        client.annual_reminder_slot || '10:00',
-        client.treatment_type || null,
-        customer.id
-      ]
-    );
-    await dbRun(
-      'UPDATE clients SET linked_customer_id = ?, updated_at = ? WHERE id = ?',
-      [customer.id, new Date().toISOString(), client.id]
-    );
-    return dbGet('SELECT * FROM customer_queue WHERE id = ?', [customer.id]);
-  }
-
-  const clientPatientId = await resolvePatientId({
-    name: client.name, phone: client.phone,
-    preferredSlot: client.annual_reminder_slot, serviceInterest: client.treatment_type
-  });
-  const result = await dbRun(
-    `INSERT INTO customers (patient_id, status, created_at, service_interest)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT (patient_id) DO UPDATE SET updated_at = now()`,
-    [
-      clientPatientId,
-      'pending',
-      new Date().toISOString(),
-      client.treatment_type || null
-    ]
-  );
-
-  await dbRun(
-    'UPDATE clients SET linked_customer_id = ?, updated_at = ? WHERE id = ?',
-    [result.lastID, new Date().toISOString(), client.id]
-  );
-
-  return dbGet('SELECT * FROM customer_queue WHERE id = ?', [result.lastID]);
-}
-
 async function findCustomerByPhone(phoneValue) {
   const normalized = normalizePhoneLookupValue(phoneValue);
   if (!normalized) return null;
@@ -615,7 +556,6 @@ module.exports = {
   ensureCustomerForCall,
   claimCustomerForOutboundCall,
   releaseCustomerOutboundClaim,
-  ensureCustomerForClientReminder,
   findCustomerByPhone,
   ensureIncomingCustomerForCall,
   findRecentOutboundCallContextByPhone,
