@@ -1,11 +1,4 @@
-const fs = require('fs');
-const path = require('path');
-
-const LOG_DIR = process.env.SYSTEM_LOG_DIR || path.join(process.cwd(), 'logs');
-const LOG_FILE = path.join(LOG_DIR, 'system.log');
 const DEBUG_ENABLED = /^(1|true|yes|on)$/i.test(String(process.env.DEBUG_LOGS || process.env.LOG_DEBUG || ''));
-const MAX_LOG_BYTES = Math.max(Number(process.env.SYSTEM_LOG_MAX_BYTES || 10 * 1024 * 1024) || 10 * 1024 * 1024, 1024);
-const MAX_LOG_FILES = Math.max(Number(process.env.SYSTEM_LOG_MAX_FILES || 5) || 5, 1);
 const LEVELS = new Set(['INFO', 'WARN', 'ERROR', 'DEBUG']);
 
 function pad(value) {
@@ -75,29 +68,30 @@ function formatDetails(details = {}) {
     .join(' ');
 }
 
-function rotateLogIfNeeded(incomingBytes) {
-  if (!fs.existsSync(LOG_FILE)) return;
-  const currentBytes = fs.statSync(LOG_FILE).size;
-  if (currentBytes + incomingBytes < MAX_LOG_BYTES) return;
+let sink = null;
 
-  const oldestFile = `${LOG_FILE}.${MAX_LOG_FILES}`;
-  if (fs.existsSync(oldestFile)) fs.rmSync(oldestFile);
-  for (let index = MAX_LOG_FILES - 1; index >= 1; index -= 1) {
-    const source = `${LOG_FILE}.${index}`;
-    if (fs.existsSync(source)) fs.renameSync(source, `${LOG_FILE}.${index + 1}`);
+/**
+ * Lazy so that requiring this module does not require the database pool -
+ * system-logger is imported by modules that load before initializeDatabase().
+ */
+function getSink() {
+  if (!sink) {
+    const { createLogSink } = require('./log-sink');
+    const { dbRun } = require('../db');
+    sink = createLogSink({
+      write: async (rows) => {
+        const values = rows
+          .map((_, i) => `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`)
+          .join(', ');
+        const params = rows.flatMap((r) => [
+          r.ts || new Date(), r.level, r.event, JSON.stringify(r.details || {})
+        ]);
+        // Already $n form; dbRun's ? translation leaves it untouched.
+        await dbRun(`INSERT INTO system_logs (ts, level, event, details) VALUES ${values}`, params);
+      }
+    });
   }
-  fs.renameSync(LOG_FILE, `${LOG_FILE}.1`);
-}
-
-function writeLine(line) {
-  try {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
-    const output = `${line}\n`;
-    rotateLogIfNeeded(Buffer.byteLength(output));
-    fs.appendFileSync(LOG_FILE, output);
-  } catch (error) {
-    console.error('[LOGGER_ERROR]', error.message);
-  }
+  return sink;
 }
 
 function log(level, event, details = {}) {
@@ -118,7 +112,11 @@ function log(level, event, details = {}) {
   } else {
     console.log(line);
   }
-  writeLine(line);
+  getSink().push({
+    level: normalizedLevel,
+    event: normalizeEvent(event),
+    details: sanitizeLogDetails(details)
+  });
 }
 
 function info(event, details) {
@@ -164,7 +162,7 @@ function formatDuration(seconds) {
 }
 
 module.exports = {
-  LOG_FILE,
+  getSink,
   debug,
   error,
   formatCallType,

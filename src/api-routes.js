@@ -163,28 +163,33 @@ module.exports = function mountApiRoutes(app) {
     try {
       const filter = String(req.query.filter || 'all').toLowerCase();
       const max = Math.min(Math.max(Number(req.query.limit || 200), 1), 1000);
-      if (!fs.existsSync(logger.LOG_FILE)) {
-        return res.json({ logs: [] });
-      }
 
-      const text = await fs.promises.readFile(logger.LOG_FILE, 'utf8');
-      const filters = {
-        calls: /\[(CALL_[A-Z_]+)\]/,
-        users: /\[(USER_[A-Z_]+)\]/,
-        feedback: /\[(FEEDBACK_[A-Z_]+)\]/,
-        errors: /\[ERROR\]/
+      // These mirror the regexes the file-based reader used.
+      const clauses = {
+        calls: "event LIKE 'CALL\\_%'",
+        users: "event LIKE 'USER\\_%'",
+        feedback: "event LIKE 'FEEDBACK\\_%'",
+        errors: "level = 'ERROR'"
       };
-      const matcher = filters[filter] || null;
-      const logs = text
-        .split('\n')
-        .filter(Boolean)
-        .filter((line) => !matcher || matcher.test(line))
-        .slice(-max)
-        .reverse();
+      const where = clauses[filter] ? `WHERE ${clauses[filter]}` : '';
+
+      const rows = await dbAll(
+        `SELECT ts, level, event, details FROM system_logs ${where}
+          ORDER BY ts DESC LIMIT ?`,
+        [max]
+      );
+
+      // The UI renders plain strings, so keep the original line shape.
+      const logs = rows.map((row) => {
+        const detail = Object.entries(row.details || {})
+          .map(([key, value]) => `${key}="${value}"`)
+          .join(' ');
+        return `[${new Date(row.ts).toISOString()}] [${row.level}] [${row.event}] ${detail}`.trim();
+      });
 
       res.json({ logs });
     } catch (error) {
-      logger.error('LOG_READ_FAILED', { reason: error.message });
+      console.error('[LOG READ FAILED]', error.message);
       res.status(500).json({ error: 'Failed to read logs' });
     }
   });
