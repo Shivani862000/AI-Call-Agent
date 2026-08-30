@@ -141,14 +141,40 @@ function logConfigSnapshot(scope = 'CONFIG') {
 }
 
 /**
+ * Picks the Supabase connection string for the current environment.
+ *
+ * SUPABASE_URL     -> production
+ * SUPABASE_URL_DEV -> everything else (local, dev, UAT)
+ *
+ * DATABASE_URL overrides both when set, which is what one-off scripts and
+ * CI use to target a specific database explicitly.
+ */
+function resolveDatabaseUrl(env = process.env) {
+  const override = String(env.DATABASE_URL || '').trim();
+  if (override) return override;
+
+  const isProduction = String(env.NODE_ENV || '').toLowerCase() === 'production';
+  const key = isProduction ? 'SUPABASE_URL' : 'SUPABASE_URL_DEV';
+  return String(env[key] || '').trim();
+}
+
+/** Names the variable resolveDatabaseUrl would have read, for error messages. */
+function databaseUrlVarName(env = process.env) {
+  if (String(env.DATABASE_URL || '').trim()) return 'DATABASE_URL';
+  return String(env.NODE_ENV || '').toLowerCase() === 'production'
+    ? 'SUPABASE_URL'
+    : 'SUPABASE_URL_DEV';
+}
+
+/**
  * Returns null when the value is a usable Postgres connection string,
  * or a human-readable problem description otherwise.
  */
-function validateDatabaseUrl(value) {
+function validateDatabaseUrl(value, varName = 'DATABASE_URL') {
   const url = String(value || '').trim();
-  if (!url) return 'DATABASE_URL is required (Supabase Postgres connection string)';
+  if (!url) return `${varName} is required (Supabase Postgres connection string)`;
   if (!/^postgres(ql)?:\/\//i.test(url)) {
-    return 'DATABASE_URL must be a postgres:// connection string. It now points at '
+    return `${varName} must be a postgres:// connection string. It now points at `
       + 'Supabase, not a SQLite file \u2014 a leftover path such as /app/data/feedback.db '
       + 'will not work.';
   }
@@ -158,7 +184,10 @@ function validateDatabaseUrl(value) {
 function validateConfig() {
   const missing = [];
 
-  const databaseUrlIssue = validateDatabaseUrl(process.env.DATABASE_URL);
+  const databaseUrlIssue = validateDatabaseUrl(
+    resolveDatabaseUrl(),
+    databaseUrlVarName()
+  );
   if (databaseUrlIssue) {
     missing.push(databaseUrlIssue);
   }
@@ -248,5 +277,7 @@ module.exports = {
   describeEnvValue,
   logConfigSnapshot,
   validateConfig,
-  validateDatabaseUrl
+  validateDatabaseUrl,
+  resolveDatabaseUrl,
+  databaseUrlVarName
 };

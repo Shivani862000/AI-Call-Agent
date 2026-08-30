@@ -1384,7 +1384,7 @@ module.exports = function mountApiRoutes(app) {
        FROM calls
        JOIN customers ON customers.id = calls.customer_id
        LEFT JOIN agents ON agents.id = calls.agent_id
-       WHERE DATETIME(calls.called_at) >= DATETIME('now', '-60 minutes')
+       WHERE calls.called_at >= (now() - interval '60 minutes')
        ORDER BY calls.called_at DESC
        LIMIT 12`
       );

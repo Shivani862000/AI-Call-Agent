@@ -1,6 +1,13 @@
 require('dotenv').config();
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// pg returns int8 (bigint, and COUNT(*)) as a string to avoid precision loss.
+// sqlite3 returned numbers, and callers do arithmetic on ids -- support tickets
+// derive their number from `lastID + 1000`, which silently concatenates on a
+// string. Our ids stay far below Number.MAX_SAFE_INTEGER, so parse them back.
+types.setTypeParser(types.builtins.INT8, (value) => parseInt(value, 10));
 const { toPgPlaceholders, withReturningId } = require('./src/sql-compat');
+const { resolveDatabaseUrl } = require('./src/config');
 
 /** Bump this when a migration is added. Checked against Supabase at boot. */
 const EXPECTED_SCHEMA_VERSION = '0001';
@@ -84,7 +91,7 @@ async function assertSchemaVersion() {
 }
 
 async function initializeDatabase() {
-  const connectionString = process.env.DATABASE_URL;
+  const connectionString = resolveDatabaseUrl();
   pool = new Pool({
     connectionString,
     max: 10,

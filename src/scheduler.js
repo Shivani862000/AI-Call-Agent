@@ -77,15 +77,15 @@ async function markSubmittedCallsWithoutMediaFailed() {
               SELECT 1
                 FROM calls newer_call
                WHERE newer_call.customer_id = calls.customer_id
-                 AND DATETIME(newer_call.called_at) > DATETIME(calls.called_at)
+                 AND newer_call.called_at > calls.called_at
             ) AS has_newer_call
        FROM calls
        LEFT JOIN customers ON customers.id = calls.customer_id
       WHERE calls.call_direction = 'outbound'
         AND calls.outcome IN ('initiated', 'scheduled_initiated')
         AND COALESCE(calls.media_packets, 0) = 0
-        AND DATETIME(calls.called_at) <= DATETIME(?)
-      ORDER BY DATETIME(calls.called_at) ASC`,
+        AND calls.called_at <= ?
+      ORDER BY calls.called_at ASC`,
     [cutoffIso]
   );
 
@@ -237,7 +237,7 @@ async function triggerScheduledCalls() {
        AND COALESCE(c.admin_review_required, 0) = 0
        AND COALESCE(c.consent_status, 'unknown') != 'denied'
        AND c.status IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')
-       AND (c.locked_at IS NULL OR DATETIME(c.locked_at) <= DATETIME('now', '-10 minutes'))
+       AND (c.locked_at IS NULL OR c.locked_at <= (now() - interval '10 minutes'))
        AND (
          COALESCE(c.attempt_count, 0) = 0
          OR COALESCE(c.auto_retry_enabled, 0) = 1
@@ -247,11 +247,11 @@ async function triggerScheduledCalls() {
          (
            c.status IN ('pending', 'scheduled')
            AND (
-             (c.scheduled_datetime IS NOT NULL AND DATETIME(c.scheduled_datetime) <= DATETIME('now'))
+             (c.scheduled_datetime IS NOT NULL AND c.scheduled_datetime <= now())
              OR (c.scheduled_datetime IS NULL AND COALESCE(c.best_call_slot, c.preferred_slot) <= ?)
            )
          )
-         OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND c.next_retry_at IS NOT NULL AND DATETIME(c.next_retry_at) <= DATETIME('now'))
+         OR (c.status IN ('retry_scheduled', 'callback_scheduled') AND c.next_retry_at IS NOT NULL AND c.next_retry_at <= now())
        )
        AND (
          c.status IN ('retry_scheduled', 'callback_scheduled')
@@ -259,10 +259,10 @@ async function triggerScheduledCalls() {
            SELECT 1
            FROM calls recent_call
            WHERE recent_call.customer_id = c.id
-             AND DATETIME(recent_call.called_at) >= DATETIME('now', '-45 minutes')
+             AND recent_call.called_at >= (now() - interval '45 minutes')
              AND (
                c.scheduled_datetime IS NULL
-               OR DATETIME(recent_call.called_at) >= DATETIME(c.scheduled_datetime)
+               OR recent_call.called_at >= c.scheduled_datetime
              )
          )
        )`,
@@ -346,7 +346,7 @@ async function triggerScheduledCalls() {
                 locked_at = CURRENT_TIMESTAMP
           WHERE id = ?
             AND COALESCE(status, 'pending') IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')
-            AND (locked_at IS NULL OR DATETIME(locked_at) <= DATETIME('now', '-10 minutes'))`,
+            AND (locked_at IS NULL OR locked_at <= (now() - interval '10 minutes'))`,
         ['calling', new Date().toISOString(), customer.id]
       );
 
@@ -496,7 +496,7 @@ async function triggerAnnualClientReminderCalls() {
      FROM clients client
      LEFT JOIN calls recent_call
        ON recent_call.customer_id = client.linked_customer_id
-      AND DATETIME(recent_call.called_at) >= DATETIME('now', '-45 minutes')
+      AND recent_call.called_at >= (now() - interval '45 minutes')
      WHERE COALESCE(client.annual_reminder_enabled, 1) = 1
        AND COALESCE(client.status, 'active') = 'active'
        AND client.next_annual_reminder_date IS NOT NULL

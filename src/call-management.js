@@ -233,7 +233,7 @@ async function findRecentOutboundCallContextByPhone(phoneValue) {
        LEFT JOIN agents ON agents.id = calls.agent_id
       WHERE calls.customer_id = ?
         AND COALESCE(calls.call_direction, 'outbound') = 'outbound'
-        AND DATETIME(calls.called_at) >= DATETIME('now', '-30 minutes')
+        AND calls.called_at >= (now() - interval '30 minutes')
       ORDER BY calls.id DESC
       LIMIT 1`,
     [customer.id]

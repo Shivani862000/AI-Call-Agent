@@ -137,10 +137,10 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   `, [range.start, range.end]);
 
   const peakSlots = await dbAll(`
-    SELECT STRFTIME('%H:%M', DATETIME(called_at, 'localtime')) AS slot, COUNT(*) AS total_calls
+    SELECT to_char(called_at, 'HH24:MI') AS slot, COUNT(*) AS total_calls
     FROM calls
     WHERE called_at >= ? AND called_at <= ?
-    GROUP BY STRFTIME('%H:%M', DATETIME(called_at, 'localtime'))
+    GROUP BY to_char(called_at, 'HH24:MI')
     ORDER BY total_calls DESC, slot ASC
     LIMIT 5
   `, [range.start, range.end]);
@@ -398,7 +398,7 @@ async function buildOwnerDashboardData() {
       c.revenue_estimate
     FROM calls
     JOIN customers c ON c.id = calls.customer_id
-    WHERE calls.called_at >= DATETIME('now', '-7 days')
+    WHERE calls.called_at >= (now() - interval '7 days')
     ORDER BY calls.called_at DESC
     LIMIT 40
   `);

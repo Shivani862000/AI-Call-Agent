@@ -2,9 +2,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const HAS_DB = /^postgres/i.test(String(process.env.DATABASE_URL || ''));
+require('dotenv').config();
+const { resolveDatabaseUrl } = require('../src/config');
+const HAS_DB = /^postgres/i.test(resolveDatabaseUrl());
 
-test('calls.status mirrors calls.outcome via trigger', { skip: !HAS_DB && 'DATABASE_URL not set' }, async () => {
+test('calls.status mirrors calls.outcome via trigger', { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
   const { initializeDatabase, dbRun, dbGet, closeDatabase } = require('../db');
   await initializeDatabase();
 
@@ -34,7 +36,7 @@ test('calls.status mirrors calls.outcome via trigger', { skip: !HAS_DB && 'DATAB
   }
 });
 
-test('deleting a customer cascades to calls and feedback', { skip: !HAS_DB && 'DATABASE_URL not set' }, async () => {
+test('deleting a customer cascades to calls and feedback', { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
   const { initializeDatabase, dbRun, dbGet, closeDatabase } = require('../db');
   await initializeDatabase();
 
