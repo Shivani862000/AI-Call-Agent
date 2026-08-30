@@ -1,0 +1,793 @@
+<title>Where the Call Data Lands</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --bg:        #F4F6F8;
+    --surface:   #FFFFFF;
+    --surface-2: #EDF0F4;
+    --ink:       #12161C;
+    --ink-2:     #414A57;
+    --muted:     #6B7583;
+    --line:      #DDE2E9;
+    --line-2:    #C6CDD7;
+    --accent:    #0E6E75;
+    --accent-bg: #E2F0F0;
+    --crit:      #B23A2C;
+    --crit-bg:   #FAE7E3;
+    --warn:      #8A6003;
+    --warn-bg:   #F8EEDA;
+    --ok:        #23694E;
+    --ok-bg:     #E1F0E8;
+    --shadow:    0 1px 2px rgba(18,22,28,.05), 0 8px 24px -14px rgba(18,22,28,.18);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #0E1216;
+      --surface:   #161B21;
+      --surface-2: #1D242C;
+      --ink:       #E7ECF2;
+      --ink-2:     #B4BECB;
+      --muted:     #8B96A5;
+      --line:      #262D36;
+      --line-2:    #38424E;
+      --accent:    #4FB9BC;
+      --accent-bg: #10302F;
+      --crit:      #EE8776;
+      --crit-bg:   #38201B;
+      --warn:      #D6A745;
+      --warn-bg:   #33280F;
+      --ok:        #5FC095;
+      --ok-bg:     #14301F;
+      --shadow:    0 1px 2px rgba(0,0,0,.4), 0 10px 28px -16px rgba(0,0,0,.7);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg:        #0E1216;
+    --surface:   #161B21;
+    --surface-2: #1D242C;
+    --ink:       #E7ECF2;
+    --ink-2:     #B4BECB;
+    --muted:     #8B96A5;
+    --line:      #262D36;
+    --line-2:    #38424E;
+    --accent:    #4FB9BC;
+    --accent-bg: #10302F;
+    --crit:      #EE8776;
+    --crit-bg:   #38201B;
+    --warn:      #D6A745;
+    --warn-bg:   #33280F;
+    --ok:        #5FC095;
+    --ok-bg:     #14301F;
+    --shadow:    0 1px 2px rgba(0,0,0,.4), 0 10px 28px -16px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0 20px 100px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1060px; margin: 0 auto; }
+
+  h1, h2, h3 {
+    font-family: Archivo, ui-sans-serif, system-ui, sans-serif;
+    text-wrap: balance;
+    margin: 0;
+    letter-spacing: -0.018em;
+  }
+  h1 { font-size: clamp(2rem, 5vw, 2.9rem); font-weight: 700; line-height: 1.06; }
+  h2 { font-size: 1.42rem; font-weight: 650; line-height: 1.2; }
+  h3 { font-size: 1.02rem; font-weight: 600; letter-spacing: -0.008em; }
+
+  p { margin: 0; max-width: 68ch; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+
+  code, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .855em;
+  }
+  code {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: .07em .34em;
+    white-space: nowrap;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .715rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  /* ── masthead ─────────────────────────────────────── */
+  header.masthead {
+    display: flex; flex-direction: column; gap: 18px;
+    padding: 56px 0 34px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 40px;
+  }
+  .lede { font-size: 1.09rem; color: var(--ink-2); max-width: 62ch; }
+
+  .countstrip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 8px;
+  }
+  .countstrip div { background: var(--surface); padding: 13px 16px; }
+  .countstrip .n {
+    font-family: Archivo, sans-serif;
+    font-size: 1.62rem; font-weight: 700; line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+    display: block;
+  }
+  .countstrip .l {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); margin-top: 5px; display: block;
+  }
+
+  /* ── sections ─────────────────────────────────────── */
+  section { margin-bottom: 56px; display: flex; flex-direction: column; gap: 20px; }
+  .sechead { display: flex; flex-direction: column; gap: 7px; }
+
+  /* ── figure ───────────────────────────────────────── */
+  figure { margin: 0; display: flex; flex-direction: column; gap: 14px; }
+  .figbox {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px 16px;
+    overflow-x: auto;
+    box-shadow: var(--shadow);
+  }
+  .figbox svg { display: block; width: 100%; min-width: 760px; height: auto; }
+  figcaption { font-size: .88rem; color: var(--muted); max-width: 72ch; }
+
+  /* ── store cards ──────────────────────────────────── */
+  .stores { display: flex; flex-direction: column; gap: 14px; }
+  .store {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--line-2);
+    border-radius: 8px;
+    padding: 17px 20px;
+    display: flex; flex-direction: column; gap: 10px;
+    box-shadow: var(--shadow);
+  }
+  .store.durable  { border-left-color: var(--ok); }
+  .store.fragile  { border-left-color: var(--warn); }
+  .store.volatile { border-left-color: var(--crit); }
+  .store-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+  .store-top h3 { flex: 1 1 auto; }
+  .store dl {
+    margin: 0; display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 5px 16px;
+    font-size: .89rem;
+  }
+  .store dt {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .72rem; letter-spacing: .085em; text-transform: uppercase;
+    color: var(--muted); padding-top: .22em;
+  }
+  .store dd { margin: 0; color: var(--ink-2); }
+
+  .pill {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .67rem; letter-spacing: .07em; text-transform: uppercase;
+    padding: .27em .6em; border-radius: 4px; white-space: nowrap;
+    font-weight: 500;
+  }
+  .pill.ok   { background: var(--ok-bg);   color: var(--ok); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.crit { background: var(--crit-bg); color: var(--crit); }
+  .pill.neutral { background: var(--surface-2); color: var(--muted); }
+
+  /* ── tables ───────────────────────────────────────── */
+  .tablewrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: 10px 15px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); font-weight: 500;
+    background: var(--surface-2);
+    position: sticky; top: 0;
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; font-family: "IBM Plex Mono", monospace; }
+  td .tbl { font-family: "IBM Plex Mono", monospace; font-weight: 500; color: var(--ink); white-space: nowrap; }
+  td small { display: block; color: var(--muted); font-size: .84em; margin-top: 2px; }
+
+  /* ── findings ─────────────────────────────────────── */
+  .findings { display: flex; flex-direction: column; gap: 10px; counter-reset: f; }
+  details.finding {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+  }
+  details.finding > summary {
+    list-style: none; cursor: pointer;
+    padding: 14px 18px;
+    display: flex; align-items: baseline; gap: 12px;
+    font-weight: 500;
+  }
+  details.finding > summary::-webkit-details-marker { display: none; }
+  details.finding > summary::after {
+    content: "+"; margin-left: auto; color: var(--muted);
+    font-family: "IBM Plex Mono", monospace; font-size: 1.05rem; line-height: 1;
+  }
+  details.finding[open] > summary::after { content: "\2212"; }
+  details.finding[open] > summary { border-bottom: 1px solid var(--line); }
+  .fnum {
+    counter-increment: f;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .74rem; color: var(--muted);
+    font-variant-numeric: tabular-nums; padding-top: .2em;
+  }
+  .fnum::before { content: counter(f, decimal-leading-zero); }
+  .fbody { padding: 15px 18px 18px 46px; display: flex; flex-direction: column; gap: 11px; font-size: .93rem; color: var(--ink-2); }
+  .fbody .ev {
+    background: var(--surface-2);
+    border-left: 2px solid var(--line-2);
+    padding: 9px 13px; border-radius: 0 5px 5px 0;
+    font-family: "IBM Plex Mono", monospace; font-size: .8rem;
+    color: var(--ink-2); white-space: pre-wrap; overflow-x: auto;
+  }
+  .fix { color: var(--ink); }
+  .fix strong { font-weight: 600; }
+
+  ul.plain { margin: 0; padding-left: 1.15em; display: flex; flex-direction: column; gap: 7px; color: var(--ink-2); }
+  ul.plain li { max-width: 68ch; }
+
+  .note {
+    background: var(--accent-bg);
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: .92rem;
+    color: var(--ink-2);
+  }
+  .note strong { color: var(--ink); }
+
+  footer.foot {
+    border-top: 1px solid var(--line);
+    padding-top: 22px; margin-top: 12px;
+    font-size: .86rem; color: var(--muted);
+    display: flex; flex-direction: column; gap: 9px;
+  }
+
+  @media (max-width: 620px) {
+    body { font-size: 15px; padding: 0 15px 70px; }
+    .store dl { grid-template-columns: 1fr; gap: 2px 0; }
+    .store dt { padding-top: .5em; }
+    .fbody { padding-left: 18px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <span class="eyebrow">AI-Call-Agent &middot; storage assessment &middot; branch vikrant-enhancements</span>
+  <h1>Where the call data lands</h1>
+  <p class="lede">Every completed call fans out into five stores with five different durability guarantees. One of them is the database everyone thinks about. The other four hold audio, transcripts, audit logs and live session state &mdash; and three of them do not survive a container restart.</p>
+  <div class="countstrip">
+    <div><span class="n">1</span><span class="l">SQLite file</span></div>
+    <div><span class="n">10</span><span class="l">tables</span></div>
+    <div><span class="n">74</span><span class="l">cols in <span class="mono">calls</span></span></div>
+    <div><span class="n">1</span><span class="l">non-key index</span></div>
+    <div><span class="n">0</span><span class="l">FKs enforced</span></div>
+    <div><span class="n">4</span><span class="l">off-box recipients</span></div>
+  </div>
+</header>
+
+<!-- ══════════════ TOPOLOGY ══════════════ -->
+<section>
+  <div class="sechead">
+    <span class="eyebrow">01 &middot; Topology</span>
+    <h2>One call, five destinations</h2>
+  </div>
+  <p>The write path is driven by three components, in order: the WebSocket media bridge while the caller is on the line, the post-call pipeline after hangup, and the scheduler that decides on retries. Each one writes to SQLite, and each one also writes somewhere SQLite does not reach.</p>
+
+  <figure>
+    <div class="figbox">
+      <svg viewBox="0 0 960 610" role="img" aria-label="Diagram: a live call flows through the media bridge, post-call pipeline and scheduler; each stage writes to SQLite plus a separate filesystem or in-memory store, while audio and transcripts also leave the network to Gemini, Deepgram and outbound webhooks.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+          </marker>
+          <marker id="arM" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--muted)"/>
+          </marker>
+        </defs>
+
+        <!-- external providers band -->
+        <rect x="212" y="20" width="588" height="52" rx="6" fill="none" stroke="var(--muted)" stroke-width="1.2" stroke-dasharray="5 4"/>
+        <line x1="408" y1="20" x2="408" y2="72" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>
+        <line x1="604" y1="20" x2="604" y2="72" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>
+        <text x="310" y="42" text-anchor="middle" font-size="12.5" font-weight="600" fill="currentColor">Gemini Live</text>
+        <text x="310" y="59" text-anchor="middle" font-size="10.5" fill="var(--muted)">audio + turns</text>
+        <text x="506" y="42" text-anchor="middle" font-size="12.5" font-weight="600" fill="currentColor">Deepgram</text>
+        <text x="506" y="59" text-anchor="middle" font-size="10.5" fill="var(--muted)">STT / TTS stream</text>
+        <text x="702" y="42" text-anchor="middle" font-size="12.5" font-weight="600" fill="currentColor">Slack / CRM hooks</text>
+        <text x="702" y="59" text-anchor="middle" font-size="10.5" fill="var(--muted)">name, phone, summary</text>
+        <text x="806" y="50" font-size="10.5" fill="var(--muted)">leaves the</text>
+        <text x="806" y="64" font-size="10.5" fill="var(--muted)">network</text>
+
+        <!-- caller -->
+        <rect x="16" y="216" width="146" height="72" rx="6" fill="var(--surface-2)" stroke="var(--line-2)" stroke-width="1.4"/>
+        <text x="89" y="245" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">Live call</text>
+        <text x="89" y="263" text-anchor="middle" font-size="10.5" fill="var(--muted)">iCallMate PSTN</text>
+        <text x="89" y="277" text-anchor="middle" font-size="10.5" fill="var(--muted)">&mu;-law 8 kHz, WS</text>
+
+        <!-- stages -->
+        <rect x="212" y="216" width="196" height="72" rx="6" fill="var(--surface)" stroke="currentColor" stroke-width="1.6"/>
+        <text x="310" y="246" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">Media bridge</text>
+        <text x="310" y="266" text-anchor="middle" font-size="10.5" fill="var(--muted)">during the call</text>
+
+        <rect x="212" y="356" width="196" height="72" rx="6" fill="var(--surface)" stroke="currentColor" stroke-width="1.6"/>
+        <text x="310" y="386" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">Post-call pipeline</text>
+        <text x="310" y="406" text-anchor="middle" font-size="10.5" fill="var(--muted)">after hangup</text>
+
+        <rect x="212" y="496" width="196" height="72" rx="6" fill="var(--surface)" stroke="currentColor" stroke-width="1.6"/>
+        <text x="310" y="526" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">Scheduler &amp; API</text>
+        <text x="310" y="546" text-anchor="middle" font-size="10.5" fill="var(--muted)">retries, admin edits</text>
+
+        <!-- caller to bridge -->
+        <line x1="162" y1="252" x2="204" y2="252" stroke="currentColor" stroke-width="1.6" marker-end="url(#ar)"/>
+
+        <!-- stage to stage -->
+        <line x1="310" y1="288" x2="310" y2="348" stroke="currentColor" stroke-width="1.6" marker-end="url(#ar)"/>
+        <text x="320" y="322" font-size="10.5" fill="var(--muted)">on hangup</text>
+        <line x1="310" y1="428" x2="310" y2="488" stroke="currentColor" stroke-width="1.6" marker-end="url(#ar)"/>
+        <text x="320" y="462" font-size="10.5" fill="var(--muted)">outcome workflow</text>
+
+        <!-- egress dashed -->
+        <line x1="270" y1="216" x2="270" y2="80" stroke="var(--muted)" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#arM)"/>
+        <polyline points="212,392 182,392 182,80" fill="none" stroke="var(--muted)" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#arM)"/>
+        <polyline points="408,392 448,392 448,80" fill="none" stroke="var(--muted)" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#arM)"/>
+
+        <!-- stores -->
+        <rect x="596" y="96" width="316" height="60" rx="6" fill="var(--surface)" stroke="var(--line-2)" stroke-width="1.4"/>
+        <text x="614" y="122" font-size="12.5" font-weight="600" fill="currentColor">In-process Maps</text>
+        <text x="614" y="140" font-size="10.5" fill="var(--crit)">gone on restart</text>
+
+        <rect x="596" y="176" width="316" height="60" rx="6" fill="var(--surface)" stroke="var(--line-2)" stroke-width="1.4"/>
+        <text x="614" y="202" font-size="12.5" font-weight="600" fill="currentColor">recordings/*.wav</text>
+        <text x="614" y="220" font-size="10.5" fill="var(--crit)">unmounted under compose</text>
+
+        <rect x="596" y="256" width="316" height="76" rx="6" fill="var(--accent-bg)" stroke="var(--accent)" stroke-width="2"/>
+        <text x="614" y="282" font-size="13.5" font-weight="700" fill="currentColor">SQLite &middot; feedback.db</text>
+        <text x="614" y="300" font-size="10.5" fill="var(--ink-2)">10 tables &middot; the only structured store</text>
+        <text x="614" y="318" font-size="10.5" fill="var(--ok)">on the persistent volume</text>
+
+        <rect x="596" y="352" width="316" height="60" rx="6" fill="var(--surface)" stroke="var(--line-2)" stroke-width="1.4"/>
+        <text x="614" y="378" font-size="12.5" font-weight="600" fill="currentColor">/tmp/&hellip;-recordings/*.mp3</text>
+        <text x="614" y="396" font-size="10.5" fill="var(--warn)">volume-backed, never pruned</text>
+
+        <rect x="596" y="432" width="316" height="60" rx="6" fill="var(--surface)" stroke="var(--line-2)" stroke-width="1.4"/>
+        <text x="614" y="458" font-size="12.5" font-weight="600" fill="currentColor">logs/system.log</text>
+        <text x="614" y="476" font-size="10.5" fill="var(--crit)">never mounted anywhere</text>
+
+        <!-- bridge writes -->
+        <polyline points="408,238 502,238 502,126 588,126" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+        <text x="512" y="176" font-size="10.5" fill="var(--muted)">live state</text>
+        <polyline points="408,252 532,252 532,206 588,206" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+        <text x="542" y="228" font-size="10.5" fill="var(--muted)">mixed WAV</text>
+        <polyline points="408,272 560,272 560,284 588,284" fill="none" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#arA)"/>
+        <text x="416" y="266" font-size="10.5" fill="var(--muted)">transcript, status</text>
+
+        <!-- pipeline writes -->
+        <polyline points="408,372 560,372 560,300 588,300" fill="none" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#arA)"/>
+        <text x="416" y="366" font-size="10.5" fill="var(--muted)">analysis, feedback row</text>
+        <polyline points="408,412 502,412 502,382 588,382" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+        <text x="416" y="426" font-size="10.5" fill="var(--muted)">downloaded recording</text>
+
+        <!-- scheduler writes -->
+        <polyline points="408,516 560,516 560,316 588,316" fill="none" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#arA)"/>
+        <text x="416" y="510" font-size="10.5" fill="var(--muted)">retry state, app_state</text>
+        <polyline points="408,540 532,540 532,462 588,462" fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+        <text x="416" y="556" font-size="10.5" fill="var(--muted)">audit events (all stages)</text>
+      </svg>
+    </div>
+    <figcaption>Solid teal arrows are writes to SQLite; every stage converges there, which is why the file is the whole system's single point of failure. Solid grey arrows are writes that SQLite only records a <em>path</em> to &mdash; the bytes live elsewhere and are not covered by the database backup. Dashed arrows leave the machine entirely.</figcaption>
+  </figure>
+</section>
+
+<!-- ══════════════ TIER 1: SQLITE ══════════════ -->
+<section>
+  <div class="sechead">
+    <span class="eyebrow">02 &middot; Primary store</span>
+    <h2>SQLite is the whole database</h2>
+  </div>
+  <p>There is no Postgres and no Redis in the running system, despite <code>POSTGRES_URL</code> and <code>REDIS_URL</code> sitting in <code>.env.example</code>. Nothing in the codebase reads either variable. Everything structured lives in one file &mdash; <code>DATABASE_URL</code>, defaulting to <code>./feedback.db</code>, set to <code>/app/data/feedback.db</code> in production.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>Table</th><th class="num">Cols</th><th>Holds</th><th>Written by</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="tbl">customers</span></td><td class="num">51</td>
+          <td>Patient identity plus the entire outbound calling state machine<small>name, phone, consent, retry counters, sentiment, revenue estimates</small></td>
+          <td>scheduler, call-management, customers API, CSV import</td>
+        </tr>
+        <tr>
+          <td><span class="tbl">calls</span></td><td class="num">74</td>
+          <td>One row per call attempt, and the richest PHI in the system<small>full <span class="mono">transcript_text</span>, AI analysis JSON, recording paths, sentiment, provider payload</small></td>
+          <td>media bridge, post-call pipeline, scheduler, API</td>
+        </tr>
+        <tr>
+          <td><span class="tbl">clients</span></td><td class="num">16</td>
+          <td>Longer-lived patient records for annual reminders<small>date of birth, last visit, treatment type &mdash; the most sensitive table by content</small></td>
+          <td>clients API, call-management, scheduler</td>
+        </tr>
+        <tr>
+          <td><span class="tbl">feedback</span></td><td class="num">8</td>
+          <td>Extracted or manually entered reviews with a star rating</td>
+          <td>post-call pipeline, feedback API, call-feedback</td>
+        </tr>
+        <tr>
+          <td><span class="tbl">agents</span></td><td class="num">18</td>
+          <td>Voice-agent configuration: prompts, model, voice, providers</td>
+          <td>agents API, bootstrap seed in <code>db.js</code></td>
+        </tr>
+        <tr>
+          <td><span class="tbl">support_tickets</span></td><td class="num">15</td>
+          <td>In-app bug and idea reports, redacted before insert</td>
+          <td>support-tickets API only</td>
+        </tr>
+        <tr>
+          <td><span class="tbl">campaign_configs</span></td><td class="num">6</td>
+          <td>Campaign names and monthly spend, used for ROI figures</td>
+          <td>campaigns API</td>
+        </tr>
+        <tr>
+          <td><span class="tbl">call_supervisor_events</span></td><td class="num">6</td>
+          <td>Escalation and alert events attached to a call</td>
+          <td>call-orchestration, customers API</td>
+        </tr>
+        <tr>
+          <td><span class="tbl">users</span></td><td class="num">5</td>
+          <td>Login accounts and bcrypt hashes</td>
+          <td><code>db.js</code> bootstrap &mdash; and nothing else</td>
+        </tr>
+        <tr>
+          <td><span class="tbl">app_state</span></td><td class="num">3</td>
+          <td>A single key-value row marking the last owner digest date</td>
+          <td>scheduler</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <strong>Two triggers, one index.</strong> The only non-primary-key index in the entire database is <code>support_tickets_status_updated_idx</code>, added with the newest feature. Two triggers keep <code>calls.status</code> mirrored to <code>calls.outcome</code>, which is the schema quietly admitting those two columns are the same field.
+  </div>
+</section>
+
+<!-- ══════════════ TIER 2: EVERYTHING ELSE ══════════════ -->
+<section>
+  <div class="sechead">
+    <span class="eyebrow">03 &middot; The other four stores</span>
+    <h2>What SQLite only keeps a pointer to</h2>
+  </div>
+  <p>Each card below is a real store holding real call content. The badge is what actually happens to that data when the container is recreated &mdash; read from the compose files, the k8s manifests, and the code paths that write them.</p>
+
+  <div class="stores">
+
+    <div class="store fragile">
+      <div class="store-top">
+        <h3>Call audio &mdash; mixed WAV</h3>
+        <span class="pill crit">lost under compose</span>
+      </div>
+      <dl>
+        <dt>Path</dt><dd><code>RECORDINGS_DIR</code> or <code>&lt;cwd&gt;/recordings/&lt;streamId&gt;.wav</code></dd>
+        <dt>Written</dt><dd>By the media bridge on socket close &mdash; 8 kHz mono PCM, caller and AI mixed into one track</dd>
+        <dt>Referenced</dt><dd><code>calls.recording_local_path</code>, served back through <code>/api/calls/:id/recording</code></dd>
+        <dt>Durability</dt><dd>Kubernetes sets <code>RECORDINGS_DIR</code> to the mounted volume. <strong>Neither compose file does</strong>, so under Docker Compose these land in <code>/app/recordings</code>, which is not a volume. The DB keeps the path; the audio is gone.</dd>
+      </dl>
+    </div>
+
+    <div class="store fragile">
+      <div class="store-top">
+        <h3>Provider recordings &mdash; downloaded MP3</h3>
+        <span class="pill warn">never pruned</span>
+      </div>
+      <dl>
+        <dt>Path</dt><dd><code>/tmp/feedback-call-recordings/&lt;callSid&gt;.mp3</code>, hardcoded</dd>
+        <dt>Written</dt><dd>Post-call pipeline, when a provider recording URL is available</dd>
+        <dt>Durability</dt><dd>Volume-mounted in both compose and k8s, so the bytes survive. But this path ignores <code>RECORDINGS_DIR</code> entirely, so the two recording stores can never be pointed at the same place. Nothing ever deletes from here.</dd>
+      </dl>
+    </div>
+
+    <div class="store volatile">
+      <div class="store-top">
+        <h3>Audit log</h3>
+        <span class="pill crit">lost on every restart</span>
+      </div>
+      <dl>
+        <dt>Path</dt><dd><code>SYSTEM_LOG_DIR</code> or <code>&lt;cwd&gt;/logs/system.log</code>, rotated at 10 MB &times; 5</dd>
+        <dt>Holds</dt><dd>Logins, call outcomes, and the <code>ALL_RECORDS_DELETED</code> event &mdash; the only record that a bulk delete happened</dd>
+        <dt>Redaction</dt><dd>Good: phones are masked to last four digits, and transcripts, prompts, payloads and patient names are dropped before write</dd>
+        <dt>Durability</dt><dd><strong>No compose volume and no k8s mount points at this directory.</strong> Read back through <code>/api/logs</code>, so the admin UI shows an audit trail that silently empties on redeploy.</dd>
+      </dl>
+    </div>
+
+    <div class="store volatile">
+      <div class="store-top">
+        <h3>Live session state &mdash; in-process</h3>
+        <span class="pill neutral">by design, but load-bearing</span>
+      </div>
+      <dl>
+        <dt>Where</dt><dd><code>liveCallState</code>, <code>incomingCallState</code>, <code>pendingCallDiagnostics</code> Maps in <code>src/config.js</code>; <code>validMediaTokens</code> in <code>src/auth.js</code>; per-session audio mix buffers</dd>
+        <dt>Durability</dt><dd>Lost on restart. Safe only because the deployment is pinned to <code>replicas: 1</code> with a <code>Recreate</code> strategy &mdash; a second replica would break media-token validation and live call tracking, not just lose cache.</dd>
+      </dl>
+    </div>
+
+    <div class="store fragile">
+      <div class="store-top">
+        <h3>Database backups</h3>
+        <span class="pill warn">same volume as the original</span>
+      </div>
+      <dl>
+        <dt>Path</dt><dd><code>DATABASE_BACKUP_DIR</code>, production value <code>/app/data/backups</code></dd>
+        <dt>Written</dt><dd>Daily via SQLite's online backup API, keeping 7 &mdash; a correct implementation</dd>
+        <dt>Durability</dt><dd>Written to the same PVC that holds <code>feedback.db</code>. Protects against a bad migration or an accidental bulk delete; does not protect against losing the volume. Nothing copies them off-node.</dd>
+      </dl>
+    </div>
+
+    <div class="store durable">
+      <div class="store-top">
+        <h3>Browser</h3>
+        <span class="pill ok">clean</span>
+      </div>
+      <dl>
+        <dt>Stored</dt><dd>One cookie, <code>feedback_admin_session</code> &mdash; HttpOnly, SameSite=Lax, HMAC-signed, 12-hour TTL</dd>
+        <dt>Not stored</dt><dd>Zero uses of <code>localStorage</code>, <code>sessionStorage</code> or IndexedDB anywhere in <code>public/</code>. No patient data reaches the browser's disk.</dd>
+        <dt>Server side</dt><dd>Sessions are stateless signed tokens, so there is no session store to scale or expire. Note the signing key is regenerated at boot when <code>AUTH_SIGNING_SECRET</code> is unset, logging every admin out on restart.</dd>
+      </dl>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════ EGRESS ══════════════ -->
+<section>
+  <div class="sechead">
+    <span class="eyebrow">04 &middot; Egress</span>
+    <h2>Where patient data leaves the box</h2>
+  </div>
+  <p>Storage is not only what you keep. Four external destinations receive data from this system, and only one of them is optional in practice.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Destination</th><th>Receives</th><th>Trigger</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="tbl">Gemini Live</span><small>generativelanguage.googleapis.com</small></td>
+          <td>Live call audio, every conversation turn, and the full transcript again at analysis time</td>
+          <td>Every call</td>
+        </tr>
+        <tr>
+          <td><span class="tbl">Deepgram</span><small>api.deepgram.com</small></td>
+          <td>Raw call audio for transcription; generated speech streamed back</td>
+          <td>Every call</td>
+        </tr>
+        <tr>
+          <td><span class="tbl">iCallMate</span><small>crm.icallmate.in, ecp1.icallmate.in</small></td>
+          <td>Patient phone numbers, campaign and lead IDs, call control</td>
+          <td>Every call</td>
+        </tr>
+        <tr>
+          <td><span class="tbl">CRM webhook</span><small><code>CRM_WEBHOOK_URL</code>, unset by default</small></td>
+          <td>Name, phone, consent status, call outcome, sentiment, analysis summary, extracted review, recording URL</td>
+          <td>Call completion, when configured</td>
+        </tr>
+        <tr>
+          <td><span class="tbl">Slack webhook</span><small><code>SLACK_SUPPORT_WEBHOOK_URL</code>, unset by default</small></td>
+          <td>Support ticket text only, after redaction of emails, phones and named patient fields</td>
+          <td>New support ticket</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <strong>The support-ticket path is the one that got privacy right.</strong> <code>src/support-ticket.js</code> strips emails, Indian mobile numbers, patient/DOB/diagnosis fields and API keys from the description, replaces the page title with a fixed route name, and drops query strings from the URL before anything is stored or sent. That discipline is not applied to the CRM webhook, which forwards name and phone in the clear.
+  </div>
+</section>
+
+<!-- ══════════════ FINDINGS ══════════════ -->
+<section>
+  <div class="sechead">
+    <span class="eyebrow">05 &middot; Findings</span>
+    <h2>What I would fix, in order</h2>
+  </div>
+  <p>Ranked by what breaks first at real volume. Each one was verified against the running database or the code path, not inferred from the schema.</p>
+
+  <div class="findings">
+
+    <details class="finding" open>
+      <summary><span class="fnum"></span> Repeat callers silently become duplicate patient records</summary>
+      <div class="fbody">
+        <p><code>findCustomerByPhone()</code> normalises the incoming number in JavaScript, then compares it against only the 200 most recently created customers. Past 200 records, an existing patient who calls back is not found, and <code>ensureIncomingCustomerForCall()</code> inserts a second row for them &mdash; splitting their call history and feedback across two IDs.</p>
+        <div class="ev">src/call-management.js:180
+  const customers = await dbAll('SELECT * FROM customers ORDER BY id DESC LIMIT 200');
+  return customers.find((c) =&gt; normalizePhoneLookupValue(c.phone) === normalized) || null;</div>
+        <p>This is not guarded by the schema either: <code>migration_script.js</code> deliberately rebuilt <code>customers</code> to <em>drop</em> the UNIQUE constraint on <code>phone</code>. And <code>customers.normalized_phone</code> exists as a column but is never written or read &mdash; the fix the schema was reaching for was never wired up.</p>
+        <p class="fix"><strong>Fix:</strong> populate <code>normalized_phone</code> on write, add a unique index on it, and make the lookup a single indexed query.</p>
+      </div>
+    </details>
+
+    <details class="finding">
+      <summary><span class="fnum"></span> Every hot query is a full table scan</summary>
+      <div class="fbody">
+        <p>The database has exactly one non-key index, and it is on <code>support_tickets</code>. Meanwhile <code>calls.customer_id</code>, <code>calls.provider_call_id</code>, <code>calls.call_id</code> joins, <code>feedback.customer_id</code> and <code>customers.phone</code> are all queried by equality on every call and every dashboard load, unindexed.</p>
+        <div class="ev">sqlite_master indexes (non-auto): 1
+  support_tickets_status_updated_idx
+
+WHERE provider_call_id = ...   4 sites
+WHERE customer_id     = ...   4 sites
+WHERE call_id         = ...   5 sites
+WHERE phone           = ...   5 sites</div>
+        <p class="fix"><strong>Fix:</strong> four indexes. <code>calls(customer_id)</code>, <code>calls(provider_call_id)</code>, <code>feedback(customer_id)</code>, <code>customers(normalized_phone)</code>.</p>
+      </div>
+    </details>
+
+    <details class="finding">
+      <summary><span class="fnum"></span> Foreign keys are declared but not enforced</summary>
+      <div class="fbody">
+        <p>Five <code>FOREIGN KEY</code> clauses appear across <code>calls</code>, <code>feedback</code>, <code>clients</code> and <code>call_supervisor_events</code>. SQLite ignores all of them unless <code>PRAGMA foreign_keys = ON</code> is set per connection, and it never is. I confirmed this against the live database.</p>
+        <div class="ev">PRAGMA foreign_keys  ->  {"foreign_keys": 0}</div>
+        <p>The deletion routes compensate by hand-ordering deletes &mdash; <code>routes/customers.js</code> deletes feedback, then calls, then the customer &mdash; which works until someone adds a route that forgets. That <code>scripts/check-integrity.js</code> exists specifically to hunt for orphan rows is the tell.</p>
+        <p class="fix"><strong>Fix:</strong> enable the pragma on connect and add <code>ON DELETE CASCADE</code>, or drop the FK clauses so they stop implying a guarantee that isn't there.</p>
+      </div>
+    </details>
+
+    <details class="finding">
+      <summary><span class="fnum"></span> Rollback journal, no busy timeout, concurrent writers</summary>
+      <div class="fbody">
+        <p>The database runs in <code>journal_mode=delete</code> with no <code>busy_timeout</code> configured. Three things write concurrently: the media bridge during a call, the post-call pipeline fired into the background via <code>runInBackground</code>, and the scheduler tick. Under rollback journalling a reader blocks a writer outright, and with no busy timeout the loser gets <code>SQLITE_BUSY</code> immediately rather than waiting.</p>
+        <div class="ev">PRAGMA journal_mode  ->  {"journal_mode": "delete"}
+PRAGMA busy_timeout  ->  never set</div>
+        <p class="fix"><strong>Fix:</strong> two lines at connect &mdash; <code>PRAGMA journal_mode = WAL</code> and <code>PRAGMA busy_timeout = 5000</code>. WAL lets readers and the writer proceed together, which is exactly this workload.</p>
+      </div>
+    </details>
+
+    <details class="finding">
+      <summary><span class="fnum"></span> Call audio is orphaned by the compose deployment</summary>
+      <div class="fbody">
+        <p>The media bridge writes the mixed WAV to <code>process.env.RECORDINGS_DIR</code>, falling back to <code>&lt;cwd&gt;/recordings</code>. The k8s deployment sets that variable to the mounted path. Neither <code>docker-compose.yml</code> nor <code>docker-compose.prod.yml</code> sets it &mdash; they only mount <code>/tmp/feedback-call-recordings</code>, which is the <em>other</em> recording path, used by the download pipeline.</p>
+        <div class="ev">k8s/deployment.yaml:34   RECORDINGS_DIR: /tmp/feedback-call-recordings   ✓
+docker-compose.yml       (not set)  -&gt; writes to /app/recordings  ✗
+docker-compose.prod.yml  (not set)  -&gt; writes to /app/recordings  ✗</div>
+        <p>The path is still stored in <code>calls.recording_local_path</code>, so playback fails only later, when someone tries to listen.</p>
+        <p class="fix"><strong>Fix:</strong> set <code>RECORDINGS_DIR</code> in both compose files, or better, make <code>services/post-call-pipeline.js</code> read the same variable instead of hardcoding <code>/tmp</code>.</p>
+      </div>
+    </details>
+
+    <details class="finding">
+      <summary><span class="fnum"></span> No retention policy exists, on health data</summary>
+      <div class="fbody">
+        <p><code>customers.data_retention_until</code> was added to the schema and has <strong>zero</strong> references anywhere in the codebase &mdash; nothing writes it, nothing reads it, no job acts on it. <code>dnd_checked_at</code> has one. There is no purge path of any kind.</p>
+        <p>What accumulates indefinitely: full call transcripts, AI analysis of those transcripts, sentiment scores, mixed-audio recordings of both parties, patient dates of birth and treatment types in <code>clients</code>. The only deletion available is manual and total &mdash; <code>DELETE /api/customers/bulk</code> and <code>DELETE /api/calls/bulk</code> wipe everything.</p>
+        <p class="fix"><strong>Fix:</strong> decide a retention window, write <code>data_retention_until</code> at customer creation, and add a scheduler tick that deletes expired rows <em>and</em> their recording files. The recording deletion is the part that gets forgotten.</p>
+      </div>
+    </details>
+
+    <details class="finding">
+      <summary><span class="fnum"></span> Credentials are hardcoded in the migration, and one of them deletes yours</summary>
+      <div class="fbody">
+        <p><code>db.js</code> upserts three named accounts with committed bcrypt hashes on every single boot, then runs a cleanup line that deletes any user named <code>admin</code> or <code>agent1</code>.</p>
+        <div class="ev">db.js:247-261
+  INSERT ... ['admin@vikitechsolutions.in', '$2b$10$QlPAd0...']
+  INSERT ... ['agent1@vikitechsolutions.in', '$2b$10$Qy6oQI...']
+  INSERT ... ['PRASHANTGUPTA74@YAHOO.CO.UK', '$2b$10$pMFMyP...']
+  DELETE FROM users WHERE username IN ('admin', 'agent1')</div>
+        <p>Because <code>.env.example</code> ships <code>ADMIN_USERNAME=admin</code>, following the README produces an admin account that is created and then deleted in the same transaction &mdash; which is why local login fails until you rename the user. The upsert also means an operator cannot rotate those three passwords: the next restart resets them.</p>
+        <p>It also breaks the test suite. <code>test/database-safety.test.js</code> asserts on the user table and fails because of these three rows &mdash; 49 of 50 tests pass.</p>
+        <p class="fix"><strong>Fix:</strong> delete the three hardcoded inserts and the cleanup line; bootstrap from <code>ADMIN_USERNAME</code> / <code>ADMIN_PASSWORD_HASH</code> only, and only when the table is empty.</p>
+      </div>
+    </details>
+
+    <details class="finding">
+      <summary><span class="fnum"></span> The audit log has nowhere durable to live</summary>
+      <div class="fbody">
+        <p><code>logs/system.log</code> records logins, call outcomes and bulk deletions, and the redaction in <code>services/system-logger.js</code> is genuinely careful. But no volume or mount in any deployment file points at that directory, so the file is inside the container's writable layer and disappears with the container.</p>
+        <p>The admin UI reads it back through <code>/api/logs</code>, so operators see a log that appears complete and is simply missing everything before the last redeploy.</p>
+        <p class="fix"><strong>Fix:</strong> mount it, or set <code>SYSTEM_LOG_DIR</code> to a path inside <code>/app/data</code> which is already persistent.</p>
+      </div>
+    </details>
+
+    <details class="finding">
+      <summary><span class="fnum"></span> Schema only grows &mdash; 74 columns, many of them dead</summary>
+      <div class="fbody">
+        <p>Migrations are a linear list of <code>addColumnIfMissing()</code> calls with no version table, no down path, and no way to remove a column. <code>calls</code> has reached 74 columns and <code>customers</code> 51. A grep for each column name across <code>src</code>, <code>services</code>, <code>routes</code>, <code>public</code> and <code>scripts</code> finds these referenced nowhere but the migration itself:</p>
+        <div class="ev">customers  data_retention_until, normalized_phone, phone_number,
+           scheduled_at, last_attempt_at, next_attempt_at,
+           last_pickup_slot, provider_request_id
+calls      scheduled_at, uuid, invoice_triggered, proposal_triggered,
+           recording_consent_captured, recording_download_status,
+           supervisor_notes, call_end_reason</div>
+        <p>There are also three overlapping pairs left behind by the growth: <code>status</code>/<code>outcome</code> (kept in sync by a trigger), <code>sentiment</code>/<code>sentiment_label</code>, and <code>analysis_summary</code>/<code>summary</code>.</p>
+        <p class="fix"><strong>Fix:</strong> add a <code>schema_migrations</code> table before the column count makes any cleanup unsafe to attempt.</p>
+      </div>
+    </details>
+
+    <details class="finding">
+      <summary><span class="fnum"></span> Two dead paths worth knowing about</summary>
+      <div class="fbody">
+        <p><strong>The owner digest is never delivered.</strong> <code>runOwnerDigestTick()</code> builds the full digest text into a local <code>lines</code> variable, never sends it anywhere, and then writes <code>owner_morning_digest_last_sent</code> to <code>app_state</code> and logs "Morning digest sent successfully". The only thing <code>app_state</code> stores is a marker for a message nobody receives.</p>
+        <p><strong>The demo seed script is broken.</strong> <code>scripts/seed-demo-reports.js</code> inserts into <code>calls.whatsapp_summary_sent</code>, a column that no longer exists. It fails partway with no transaction wrapping it &mdash; running it on my clean database left 12 customers and 12 clients with zero calls and zero feedback.</p>
+        <div class="ev">$ node scripts/seed-demo-reports.js
+Error: SQLITE_ERROR: table calls has no column named whatsapp_summary_sent
+
+customers  12      calls  0
+clients    12      feedback  0</div>
+        <p class="fix"><strong>Fix:</strong> either send the digest or delete the tick; wrap the seed in a transaction and drop the stale column.</p>
+      </div>
+    </details>
+
+  </div>
+</section>
+
+<!-- ══════════════ METHOD ══════════════ -->
+<section>
+  <div class="sechead">
+    <span class="eyebrow">06 &middot; Method</span>
+    <h2>How this was verified</h2>
+  </div>
+  <ul class="plain">
+    <li>The app was booted locally and driven through the browser: login, dashboard, support tickets. A customer and a manual feedback row were created through the API and read back out of the SQLite file to confirm the write path end to end.</li>
+    <li>Schema facts come from <code>PRAGMA table_info</code> and <code>sqlite_master</code> on the live <code>feedback.db</code>, not from reading the migration &mdash; which matters, because the migration and the actual schema have already diverged.</li>
+    <li><code>PRAGMA foreign_keys</code> and <code>PRAGMA journal_mode</code> were queried at runtime.</li>
+    <li>Dead columns were identified by whole-word grep of every column name across <code>src</code>, <code>services</code>, <code>routes</code>, <code>public</code> and <code>scripts</code>.</li>
+    <li><code>npm test</code> was run: 49 of 50 pass. <code>scripts/check-integrity.js</code> passes all three checks on this dataset, which is expected &mdash; the data is too small for the 200-row lookup window to have caused a duplicate yet.</li>
+  </ul>
+  <div class="note">
+    <strong>One correction to an earlier note.</strong> I flagged <code>/reports.html</code> returning 404 as a possible routing gap. It is not &mdash; <code>index.js:104</code> disables it deliberately, alongside <code>/incoming-calls.html</code>, and <code>routes/reports.js</code> is an intentionally empty router. The dead weight left behind is <code>services/pdf.js</code> and <code>services/reporting.js</code>, which still write PDFs to <code>/tmp</code> that nothing cleans up.
+  </div>
+</section>
+
+<footer class="foot">
+  <div>Assessment of <span class="mono">AI-Call-Agent</span> at <span class="mono">4a0ddd3</span>, branch <span class="mono">vikrant-enhancements</span>.</div>
+  <div>Column counts and index counts read from a live database; deployment claims read from <span class="mono">docker-compose.yml</span>, <span class="mono">docker-compose.prod.yml</span> and <span class="mono">k8s/</span>.</div>
+</footer>
+
+</div>
