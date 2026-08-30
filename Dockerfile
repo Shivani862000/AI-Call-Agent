@@ -11,8 +11,6 @@ COPY . .
 ENV NODE_ENV=production
 ENV PORT=3000
 
-RUN mkdir -p /app/data /tmp/feedback-call-recordings
-
 EXPOSE 3000
 
 CMD ["node", "index.js"]

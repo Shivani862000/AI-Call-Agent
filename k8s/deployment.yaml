@@ -35,12 +35,8 @@ spec:
             - secretRef:
                 name: feedback-agent-env
           volumeMounts:
-            - name: app-storage
-              mountPath: /app/data
-              subPath: data
-            - name: app-storage
+            - name: recording-staging
               mountPath: /tmp/feedback-call-recordings
-              subPath: recordings
           readinessProbe:
             httpGet:
               path: /health
@@ -54,6 +50,7 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 20
       volumes:
-        - name: app-storage
-          persistentVolumeClaim:
-            claimName: feedback-agent-pvc
+        # Scratch space for a recording between saveToFile() and its upload to
+        # Supabase Storage. Nothing here needs to outlive the pod.
+        - name: recording-staging
+          emptyDir: {}
