@@ -154,6 +154,14 @@
         title.textContent = rule.id === 'annual-reminder' ? 'Yearly reminder' : 'Follow up after a donation';
         head.append(toggle, title);
 
+        if (rule.id === 'annual-reminder') {
+          const caution = document.createElement('span');
+          caution.className = 'help';
+          caution.textContent = 'No yearly script exists yet. Switching this on places the three-month '
+            + 'follow-up, which opens by saying three months have passed.';
+          head.appendChild(caution);
+        }
+
         const row = document.createElement('div');
         row.className = 'row';
 
@@ -181,6 +189,22 @@
         help.textContent = 'Counted from their last recorded service';
         daysField.append(days, help);
 
+        // Shown because it was not: the follow-up rule placed a review call for
+        // months, and nothing on this screen said which call a rule made.
+        const typeField = document.createElement('div');
+        typeField.className = 'field';
+        typeField.innerHTML = '<label>Call to place</label>';
+        const callType = document.createElement('select');
+        [['THREE_MONTH_FOLLOWUP', 'Three-month follow up'], ['REVIEW_CALL', 'Feedback on last visit']]
+          .forEach(([value, label]) => {
+            const option = document.createElement('option');
+            option.value = value; option.textContent = label;
+            option.selected = rule.call_type === value;
+            callType.appendChild(option);
+          });
+        callType.onchange = () => { autoQueue.rules[index].call_type = callType.value; };
+        typeField.appendChild(callType);
+
         const slotField = document.createElement('div');
         slotField.className = 'field';
         slotField.innerHTML = '<label>Call at</label>';
@@ -189,7 +213,7 @@
         slot.onchange = () => { autoQueue.rules[index].slot = slot.value; };
         slotField.appendChild(slot);
 
-        row.append(serviceField, daysField, slotField);
+        row.append(serviceField, typeField, daysField, slotField);
         box.append(head, row);
         host.appendChild(box);
       });

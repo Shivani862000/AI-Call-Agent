@@ -9,6 +9,9 @@
  * recipients exist, and automatic calling is off until someone turns it on.
  */
 
+/** The calls a rule may place. There is no prompt for anything else. */
+const CALL_TYPES = Object.freeze(['REVIEW_CALL', 'THREE_MONTH_FOLLOWUP']);
+
 const DEFAULTS = Object.freeze({
   owner_digest: {
     enabled: false,
@@ -20,17 +23,25 @@ const DEFAULTS = Object.freeze({
   auto_queue: {
     enabled: false,
     rules: [
+      // The three-month follow-up: the call that asks whether they have donated
+      // again and when they intend to come in. It was set to REVIEW_CALL, which
+      // asks "aapne kal blood donate kiya tha, experience kaisa raha?" -- a
+      // question about yesterday, put to someone who last donated 90 days ago.
       {
         id: 'donation-followup',
         enabled: true,
         service: 'donation',
         min_days_since: 90,
-        call_type: 'REVIEW_CALL',
+        call_type: 'THREE_MONTH_FOLLOWUP',
         slot: '10:00'
       },
+      // Off by default: there is no yearly prompt. It was set to
+      // THREE_MONTH_FOLLOWUP, which opens "blood donation ke 3 mahine poore ho
+      // gaye hain" -- said to someone a year on. Switching it on places that
+      // call until a prompt written for a yearly reminder exists.
       {
         id: 'annual-reminder',
-        enabled: true,
+        enabled: false,
         service: 'any',
         min_days_since: 365,
         call_type: 'THREE_MONTH_FOLLOWUP',
@@ -87,6 +98,11 @@ function validateSetting(key, value) {
       if (!TIME_PATTERN.test(String(rule.slot))) {
         return `Rule "${rule.id}": call time must be a 24-hour time such as 10:00`;
       }
+      // Unvalidated, an unrecognised call type falls through to REVIEW_CALL, so
+      // a rule would quietly place a different call from the one it names.
+      if (!CALL_TYPES.includes(String(rule.call_type))) {
+        return `Rule "${rule.id}": call type must be one of ${CALL_TYPES.join(', ')}`;
+      }
     }
     return null;
   }
@@ -130,4 +146,5 @@ function createSettingsStore({ dbGet, dbRun }) {
   };
 }
 
-module.exports = { DEFAULTS, defaultsFor, withDefaults, validateSetting, createSettingsStore };
+module.exports = {
+  CALL_TYPES, DEFAULTS, defaultsFor, withDefaults, validateSetting, createSettingsStore };
