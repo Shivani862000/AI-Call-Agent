@@ -453,8 +453,10 @@
       return String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP' ? '3 Month Follow-up' : 'Review Call';
     }
     function formatRating(value) {
+      // Null means the patient never said how the experience was. It used to be
+      // stored as 3, so "no answer" and "it was fine" looked identical.
       const rating = Number(value || 0);
-      return rating ? `${rating}/5` : '--';
+      return rating ? `${rating}/5` : 'Not given';
     }
     function sourceLabel(item) {
       if (String(item.source || '').toLowerCase() === 'manual') return 'Manual entry';

@@ -70,8 +70,14 @@ async function upsertFeedbackFromAnalysis({ dbGet, dbRun, callRecord, reviewText
   }
 
   const effectiveReviewText = hasReviewText ? reviewText : '';
-  const effectiveStars = hasStars ? stars : 3;
-  const categorization = await categorizeFeedback(effectiveReviewText, effectiveStars);
+  // A patient who never rated their experience is stored as unrated. This used
+  // to default to 3, which meant an unanswered question and a deliberate
+  // "theek tha" were indistinguishable, and every silent call pulled the
+  // average toward the middle. feedback.stars is nullable.
+  const effectiveStars = hasStars ? stars : null;
+  // Categorisation still needs a number to work with; the midpoint is only used
+  // to pick a category, never stored as a rating.
+  const categorization = await categorizeFeedback(effectiveReviewText, hasStars ? stars : 3);
   const existingFeedback = await dbGet('SELECT id FROM feedback WHERE call_id = ?', [callRecord.id]);
 
   if (existingFeedback) {
