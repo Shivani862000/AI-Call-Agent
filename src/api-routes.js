@@ -1498,8 +1498,10 @@ module.exports = function mountApiRoutes(app) {
   app.post('/api/calls/:callId/escalate', async (req, res) => {
     try {
       await dbRun(
-        'UPDATE calls SET human_escalation_requested = ?, supervisor_alert_level = ?, supervisor_notes = ? WHERE id = ?',
-        [1, 'critical', String(req.body.note || 'Manual escalation requested').trim(), req.params.callId]
+        // The note itself is persisted by createSupervisorEvent below, in
+        // call_supervisor_events.payload_json.
+        'UPDATE calls SET human_escalation_requested = ?, supervisor_alert_level = ? WHERE id = ?',
+        [1, 'critical', req.params.callId]
       );
       await createSupervisorEvent({
         dbRun,

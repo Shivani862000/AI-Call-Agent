@@ -262,7 +262,6 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
             objections_json = ?,
             callback_requested = ?,
             interest_detected = ?,
-            recording_consent_captured = ?,
             language = COALESCE(?, language),
             consent_detected = ?,
             analysis_completed_at = ?
@@ -293,7 +292,6 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
       JSON.stringify(objections),
       outcome === 'callback' ? 1 : 0,
       outcome === 'interested' ? 1 : 0,
-      analysis.consent === false ? 0 : 1,
       analysis.language || heuristicExtraction.language,
       analysis.consent === null ? (heuristicExtraction.consentDetected ? 1 : 0) : (analysis.consent ? 1 : 0),
       new Date().toISOString(),
@@ -415,8 +413,8 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
 
   if (String(updatedCall.outcome || '').toLowerCase() === 'interested') {
     await dbRun(
-      'UPDATE calls SET proposal_triggered = ?, invoice_triggered = ?, revenue_attribution_status = ? WHERE id = ?',
-      [1, 1, 'qualified_pipeline', updatedCall.id]
+      'UPDATE calls SET revenue_attribution_status = ? WHERE id = ?',
+      ['qualified_pipeline', updatedCall.id]
     );
   }
 
