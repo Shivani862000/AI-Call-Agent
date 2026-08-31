@@ -103,6 +103,8 @@ test('three-month follow-up flow completes with the shared closing line', () => 
   const state = newConversationState();
   buildThreeMonthFollowupTurnInstruction('haan', state);
   buildThreeMonthFollowupTurnInstruction('nahi', state);
+  // A willing donor is now offered a slot before the call closes.
+  buildThreeMonthFollowupTurnInstruction('haan', state);
   const closingInstruction = buildThreeMonthFollowupTurnInstruction('haan', state);
 
   assert.equal(state.conversationState, 'COMPLETED');

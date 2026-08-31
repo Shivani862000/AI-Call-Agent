@@ -115,6 +115,58 @@ test('future-donation interest is recorded in the same field the review call use
   assert.equal(unsure.redonationInterest, 'unclear');
 });
 
+// The review call asks every donor about booking; the follow-up asked only
+// whether they were interested, so a willing donor was never offered a slot.
+test('a willing donor is asked to book a slot', () => {
+  const state = { step: 'intro', lastVisitDate: '2026-05-15' };
+  buildThreeMonthFollowupTurnInstruction('haan ji', state, 'Apna Blood Centre', 'Rajesh');
+  buildThreeMonthFollowupTurnInstruction('nahi', state, 'Apna Blood Centre', 'Rajesh');
+
+  const offer = buildThreeMonthFollowupTurnInstruction('haan zaroor', state, 'Apna Blood Centre', 'Rajesh');
+  assert.match(offer, /slot book karna chahenge/);
+  assert.equal(state.step, 'appointment');
+
+  const booked = buildThreeMonthFollowupTurnInstruction('haan, book kar dijiye', state, 'Apna Blood Centre', 'Rajesh');
+  assert.match(booked, /Hamari team aapko call karke slot confirm kar degi/);
+  assert.equal(state.redonationInterest, 'yes');
+  assert.equal(state.conversationState, 'COMPLETED');
+});
+
+test('a donor who has already donated again is asked about the next one', () => {
+  const state = { step: 'intro', lastVisitDate: '2026-05-15' };
+  buildThreeMonthFollowupTurnInstruction('haan ji', state, 'Apna Blood Centre', 'Rajesh');
+  buildThreeMonthFollowupTurnInstruction('haan kiya tha', state, 'Apna Blood Centre', 'Rajesh');
+  buildThreeMonthFollowupTurnInstruction('pichle mahine', state, 'Apna Blood Centre', 'Rajesh');
+
+  const offer = buildThreeMonthFollowupTurnInstruction('Delhi mein', state, 'Apna Blood Centre', 'Rajesh');
+  assert.match(offer, /slot book karna chahenge/);
+  assert.equal(state.reportedDonationDate, 'pichle mahine');
+  assert.equal(state.reportedDonationPlace, 'Delhi mein');
+});
+
+// Pushing a booking on someone who just declined is how a service call becomes
+// a nuisance call.
+test('a donor who says they are not interested is not asked to book', () => {
+  const state = { step: 'intro', lastVisitDate: '2026-05-15' };
+  buildThreeMonthFollowupTurnInstruction('haan ji', state, 'Apna Blood Centre', 'Rajesh');
+  buildThreeMonthFollowupTurnInstruction('nahi', state, 'Apna Blood Centre', 'Rajesh');
+
+  const declined = buildThreeMonthFollowupTurnInstruction('nahi, interested nahi', state, 'Apna Blood Centre', 'Rajesh');
+  assert.doesNotMatch(declined, /slot book karna chahenge/);
+  assert.equal(state.redonationInterest, 'no');
+  assert.equal(state.conversationState, 'COMPLETED');
+});
+
+// Willing to donate but not ready to pick a date is still a lead worth keeping.
+test('declining the slot does not erase a stated willingness to donate', () => {
+  const state = { step: 'plan_to_donate' };
+  buildThreeMonthFollowupTurnInstruction('haan zaroor', state, 'Apna Blood Centre', 'Rajesh');
+  assert.equal(state.redonationInterest, 'yes');
+
+  buildThreeMonthFollowupTurnInstruction('abhi nahi', state, 'Apna Blood Centre', 'Rajesh');
+  assert.equal(state.redonationInterest, 'yes');
+});
+
 test('a reported donation date and place are lifted out of the transcript', () => {
   const turns = [
     { role: 'AI', text: 'Bahut achha. Kab donate kiya tha?' },

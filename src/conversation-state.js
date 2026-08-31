@@ -218,6 +218,7 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName
   const name = String(customerName || '').trim();
   const closing = buildClosingLine(name);
   const centre = clientName || 'Apna Blood Centre';
+  const slotQuestion = 'Kya aap abhi se appointment ka slot book karna chahenge?';
   const markCompletedAfterReply = () => {
     state.step = 'completed';
     state.conversationState = 'COMPLETED';
@@ -262,7 +263,10 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName
   if (state.step === 'donation_place') {
     markCompletedAfterReply();
     state.reportedDonationPlace = String(customerReply || '').trim().slice(0, 200);
-    return `Capture the donation place. Say exactly: "Bahut achha kaam kiya. ${closing}" Then end the call.`;
+    state.step = 'appointment';
+    // Eligibility runs from the donation they just reported, which is free text
+    // rather than a date, so the interval is named without a specific day.
+    return `Capture the donation place. Say exactly: "Bahut achha kaam kiya. Uske teen mahine baad aap dobara donate kar sakte hain. ${slotQuestion}"`;
   }
 
   if (state.step === 'plan_to_donate') {
@@ -271,7 +275,8 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName
       // Recorded in the same field the review call uses, so both call types
       // land in one working list instead of two.
       state.redonationInterest = 'yes';
-      return `Say exactly: "Bahut achhi baat hai. Aapka yogdaan kisi ki jaan bacha sakta hai. Yadi sambhav ho to nashta karne ke baad subah 9 baje se shaam 5 baje ke beech ${centre} aa sakte hain. ${closing}" Then end the call.`;
+      state.step = 'appointment';
+      return `Say exactly: "Bahut achhi baat hai. Aapka yogdaan kisi ki jaan bacha sakta hai. Yadi sambhav ho to nashta karne ke baad subah 9 baje se shaam 5 baje ke beech ${centre} aa sakte hain. ${slotQuestion}"`;
     }
     if (isUncertainReply(customerReply)) {
       state.redonationInterest = 'unclear';
@@ -285,8 +290,28 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName
     return `Acknowledge the donor's response briefly. Then say exactly: "${closing}" Then end the call.`;
   }
 
+  if (state.step === 'appointment') {
+    markCompletedAfterReply();
+    if (isUncertainReply(customerReply)) {
+      state.redonationInterest = 'unclear';
+      return `The donor is undecided. Say exactly: "Koi baat nahi, aap jab chahein hamse sampark kar sakte hain. ${closing}" Then end the call.`;
+    }
+    if (isAffirmativeReply(customerReply)) {
+      state.redonationInterest = 'yes';
+      return `The donor wants a slot. Say exactly: "Bahut achha. Hamari team aapko call karke slot confirm kar degi. ${closing}" Then end the call.`;
+    }
+    if (isNoReply(customerReply) || isNegativeOrBusyReply(customerReply)) {
+      // A donor willing in principle but not ready to book is still a lead;
+      // the earlier interest answer stands rather than being overwritten.
+      if (state.redonationInterest !== 'yes') state.redonationInterest = 'no';
+      return `The donor declined a slot. Say exactly: "Koi baat nahi, aap jab chahein hamse sampark kar sakte hain. ${closing}" Then end the call.`;
+    }
+    state.redonationInterest = state.redonationInterest || 'unclear';
+    return `Acknowledge the answer briefly without confirming any appointment. Then say exactly: "${closing}" Then end the call.`;
+  }
+
   markCompletedAfterReply();
-  return `Say exactly: "${FINAL_CLOSING_LINE}" Then end the call.`;
+  return `Say exactly: "${closing}" Then end the call.`;
 }
 
 // ── Composite turn instruction builder ─────────────────────────────────────────
