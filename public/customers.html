@@ -164,6 +164,7 @@
                 <th>Call Date</th>
                 <th>Call Time</th>
                 <th>Status</th>
+                <th>Next Appointment</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -377,6 +378,37 @@
       const date = getScheduledDate(customer);
       if (!date || Number.isNaN(date.getTime())) return '--';
       return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    /**
+     * What the donor said when the review call asked about booking a slot for
+     * their next eligible donation, and the date they become eligible.
+     *
+     * Blank until a call has actually asked; the column is a work queue, so a
+     * donor who has not been asked must not look like one who declined.
+     */
+    function formatNextAppointment(customer) {
+      const interest = String(customer.redonation_interest || '').toLowerCase();
+      if (!interest) return '<span class="muted">--</span>';
+
+      const note = customer.redonation_note
+        ? `<div class="row-subtitle">${AppShell.escapeHtml(customer.redonation_note)}</div>`
+        : '';
+
+      if (interest === 'yes') {
+        // A date-only string; splitting avoids the timezone shift that parsing
+        // it as a timestamp would cause.
+        const raw = String(customer.next_appointment_date || '').slice(0, 10);
+        const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+        const label = parts
+          ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]))
+            .toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+          : 'Requested';
+        return `<span class="status-badge completed">${AppShell.escapeHtml(label)}</span>${note}`;
+      }
+
+      const label = interest === 'no' ? 'Declined' : 'Undecided';
+      return `<span class="muted">${label}</span>${note}`;
     }
 
     function formatScheduledTime(customer) {
@@ -844,6 +876,7 @@
               <span class="status-badge ${activeCustomerMetricFilter === 'failed' ? 'failed' : AppShell.escapeHtml(getComputedCustomerStatus(customer))}">${activeCustomerMetricFilter === 'failed' ? 'Failed' : AppShell.formatStatusLabel(getComputedCustomerStatus(customer))}</span>
               ${customer.last_contact_outcome && customer.last_contact_outcome !== 'completed' ? `<div style="font-size: 11px; color: var(--error); margin-top: 4px; font-weight: 600; text-transform: capitalize;">${AppShell.escapeHtml(customer.last_contact_outcome).replace('_', ' ')}</div>` : ''}
             </td>
+            <td>${formatNextAppointment(customer)}</td>
             <td>
               <div class="table-actions">
                 <!-- <button class="primary desktop-action-button" type="button" onclick="triggerCallNow(${customer.id})">Call Now</button> -->
