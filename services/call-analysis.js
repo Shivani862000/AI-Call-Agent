@@ -6,7 +6,11 @@ const CALL_TYPES = Object.freeze({
 function normalizeText(value) {
   return String(value || '')
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s:]/gu, ' ')
+    // \p{M} keeps Devanagari vowel signs. Without it every matra is stripped
+    // as punctuation and Hindi words shatter -- "बुरा" becomes "ब र" -- so no
+    // Hindi keyword in this file could ever match. This is a Hindi-first
+    // product; the analyser was effectively blind to most of what it heard.
+    .replace(/[^\p{L}\p{N}\p{M}\s:]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -69,7 +73,7 @@ function findPatientAfter(turns, patterns) {
     if (turn.role !== 'AI') continue;
     const normalized = normalizeText(turn.text);
     if (!patternList.some((pattern) => pattern.test(normalized))) continue;
-    const nextPatient = turns.slice(index + 1).find((candidate) => candidate.role === 'PATIENT');
+    const nextPatient = turns.slice(index + 1).find(isPatientTurn);
     if (nextPatient) return nextPatient.text;
   }
   return '';
@@ -123,21 +127,46 @@ function donatedDateValue(value) {
   return text || '';
 }
 
+/**
+ * The media bridge labels the caller's turns CUSTOMER; older code and the
+ * analyser's own formatter use PATIENT. Treating only one as the patient made
+ * every patient turn invisible here, which pinned sentiment to its default.
+ */
+const PATIENT_ROLES = new Set(['PATIENT', 'CUSTOMER']);
+
+function isPatientTurn(turn) {
+  return PATIENT_ROLES.has(String(turn?.role || '').toUpperCase());
+}
+
 function detectSentiment(turns, entities, callType) {
-  const patientText = normalizeText(turns.filter((turn) => turn.role === 'PATIENT').map((turn) => turn.text).join(' '));
+  const patientText = normalizeText(turns.filter(isPatientTurn).map((turn) => turn.text).join(' '));
   const allText = normalizeText(formatTranscriptText(turns));
   let label = 'neutral';
   let confidence = 0.76;
 
-  const negativeSignals = /(problem|dikkat|issue|pain|chakkar|weak|bad|complaint|nahi hua|नहीं ठीक|दिक्कत)/.test(patientText);
-  const positiveSignals = /(theek|achha|accha|good|haan ji|thank|dhanyavaad|koi dikkat nahi|no problem|ठीक|अच्छा)/.test(patientText);
+  // "koi dikkat nahi hui" means the opposite of "dikkat". Negated complaints
+  // are removed before looking for complaint words, or a satisfied patient
+  // reads as an unhappy one. Not /g: a global regex keeps lastIndex between
+  // .test() calls and would report false on alternate invocations.
+  const NEGATED_COMPLAINT = /(?:koi |kuch |any )?(?:dikkat|problem|pareshani|takleef|shikayat|issue)\w*\s*(?:nahi|nahin|nhi|nai)\b|(?:कोई |कुछ )?(?:दिक्कत|परेशानी|समस्या|तकलीफ|शिकायत)\s*(?:नहीं|नही)/;
+  const complaintText = patientText.replace(new RegExp(NEGATED_COMPLAINT, 'g'), ' ');
 
-  if (callType === CALL_TYPES.REVIEW_CALL && entities.problem_reported === false) {
-    label = 'positive';
-    confidence = 0.9;
-  } else if (negativeSignals || entities.problem_reported === true) {
+  // "bura" and "kharab" are the words a Hindi speaker reaches for first, and
+  // neither appeared here — so the clearest possible complaint scored neutral.
+  const negativeSignals = /(problem|dikkat|issue|pain|chakkar|weak|bad|complaint|nahi hua|bura|buri|kharab|kharaab|ganda|pareshani|takleef|slow|late|rude|नहीं ठीक|दिक्कत|बुरा|बुरी|ख़राब|खराब|परेशानी|तकलीफ|गंदा|दर्द)/.test(complaintText);
+  // A negated complaint is itself a positive signal.
+  const positiveSignals = NEGATED_COMPLAINT.test(patientText)
+    || /(theek|achha|accha|acha|badhiya|good|great|haan ji|thank|dhanyavaad|no problem|ठीक|अच्छा|अच्छी|बढ़िया|धन्यवाद)/.test(patientText);
+
+  // Checked before the positive branch: "koi dikkat nahi" contains "dikkat",
+  // and "bahut achha" alongside a complaint should not cancel it out.
+
+  if (negativeSignals || entities.problem_reported === true) {
     label = 'negative';
     confidence = 0.86;
+  } else if (callType === CALL_TYPES.REVIEW_CALL && entities.problem_reported === false) {
+    label = 'positive';
+    confidence = 0.9;
   } else if (positiveSignals || /bahut achhi baat|bahut achha/.test(allText)) {
     label = 'positive';
     confidence = 0.82;
@@ -227,7 +256,7 @@ function buildTimeline(call, turns, summaryGenerated) {
   if (turns.some((turn) => turn.role === 'AI' && /\?/.test(turn.text))) {
     timeline.push({ at: offsetTime(start, 18), label: 'Question Asked', status: 'completed' });
   }
-  if (turns.some((turn) => turn.role === 'PATIENT')) {
+  if (turns.some(isPatientTurn)) {
     timeline.push({ at: offsetTime(start, 28), label: 'Patient Response Captured', status: 'completed' });
   }
   if (summaryGenerated) {
@@ -245,7 +274,7 @@ function buildMetrics(call, turns, responseTimes = []) {
   const patientTalkTime = Number(call.patient_talk_time || 0) || estimateTalkSeconds(turns, 'PATIENT');
   const silenceDuration = Math.max(0, duration - aiTalkTime - patientTalkTime);
   const questionsAsked = turns.filter((turn) => turn.role === 'AI' && /\?/.test(turn.text)).length;
-  const questionsAnswered = turns.filter((turn) => turn.role === 'PATIENT').length;
+  const questionsAnswered = turns.filter(isPatientTurn).length;
   const averageResponseTime = responseTimes.length
     ? Math.round(responseTimes.reduce((sum, value) => sum + Number(value || 0), 0) / responseTimes.length)
     : null;
@@ -297,7 +326,10 @@ function buildCallAnalysis(call = {}) {
     call_type: callType,
     call_type_label: formatCallType(callType),
     sentiment: sentiment.label,
-    sentiment_score: sentiment.confidence,
+    // Signed, so a negative call does not store a positive-looking number.
+    // Magnitude is the classifier's confidence.
+    sentiment_score: sentiment.label === 'negative' ? -sentiment.confidence
+      : sentiment.label === 'positive' ? sentiment.confidence : 0,
     entities,
     outcome_cards: buildOutcomeCards(callType, entities),
     timeline_events: timeline,
