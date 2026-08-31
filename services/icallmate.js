@@ -312,6 +312,17 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
 }
 
 async function initiateCall(customerPhone, customerId, options = {}) {
+  // Refuse before dialling if we cannot speak. Every outbound path — the
+  // scheduler, the API and the call routes — funnels through here, so this is
+  // the one place that has to hold.
+  const { unusableCredentials, describeCallBlock } = require('../src/call-capability');
+  const unusable = unusableCredentials();
+  if (unusable.length > 0) {
+    const message = describeCallBlock(unusable);
+    logger.error('CALL_BLOCKED_NO_VOICE', { missing: unusable.join(','), customerId });
+    throw new Error(message);
+  }
+
   const authenticatedOptions = {
     ...options,
     wsurl: ensureAuthenticatedMediaUrl(options.wsurl),
