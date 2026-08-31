@@ -2,9 +2,6 @@
 
 const crypto = require('node:crypto');
 
-const METADATA_PROJECTION = Object.freeze({ _id: 0, updated_at: 1, updatedBy: 1 });
-const ENVELOPE_SELECTION = '+ciphertext +iv +authTag +encryptionVersion';
-
 function secretError(code, message) {
   const error = new Error(message);
   error.code = code;
@@ -53,17 +50,6 @@ function actorAccessLevel(actor) {
   return level === 'OWNER' || level === 'ADMIN' ? level : 'SYSTEM';
 }
 
-async function executeLean(query) {
-  if (query && typeof query.lean === 'function') return query.lean();
-  return query;
-}
-
-async function findSelected(Model, filter, selection) {
-  let query = Model.findOne(filter);
-  if (query && typeof query.select === 'function') query = query.select(selection);
-  return executeLean(query);
-}
-
 function metadataForDatabase(record) {
   return {
     configured: true,
@@ -83,15 +69,13 @@ function metadataForEnvironment(configured) {
 }
 
 function createSecretService({
-  IntegrationSecretModel,
+  supabase,
   env = process.env,
   randomBytes = crypto.randomBytes,
   environmentKeyFor = defaultEnvironmentKeyFor
 }) {
-  if (!IntegrationSecretModel
-    || typeof IntegrationSecretModel.findOne !== 'function'
-    || typeof IntegrationSecretModel.findOneAndUpdate !== 'function') {
-    throw new TypeError('IntegrationSecretModel with findOne() and findOneAndUpdate() is required');
+  if (!supabase) {
+    throw new TypeError('supabase client is required');
   }
   if (typeof randomBytes !== 'function' || typeof environmentKeyFor !== 'function') {
     throw new TypeError('randomBytes and environmentKeyFor must be functions');
@@ -113,7 +97,12 @@ function createSecretService({
 
   async function getMetadata(integration, key) {
     const filter = lookup(integration, key);
-    const record = await findSelected(IntegrationSecretModel, filter, METADATA_PROJECTION);
+    const { data: record } = await supabase.from('integration_secrets')
+      .select('updated_at')
+      .eq('integration', filter.integration)
+      .eq('key', filter.key)
+      .maybeSingle();
+      
     if (record) return metadataForDatabase(record);
     return metadataForEnvironment(environmentValue(filter.integration, filter.key) !== null);
   }
@@ -134,35 +123,37 @@ function createSecretService({
     const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey, iv);
     const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
     const authTag = cipher.getAuthTag();
-    const updatedBy = stableActorId(actor);
-    const updatedByAccessLevel = actorAccessLevel(actor);
-    const record = await IntegrationSecretModel.findOneAndUpdate(
-      filter,
-      {
-        $set: {
-          ciphertext: ciphertext.toString('base64'),
-          iv: iv.toString('base64'),
-          authTag: authTag.toString('base64'),
-          encryptionVersion: 1,
-          updatedBy,
-          updatedByAccessLevel
-        }
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true }
-    );
+    
+    // In our schema, we don't have updatedBy or updatedByAccessLevel directly on integration_secrets.
+    // They are tracked in audit logs.
+    const { data: record, error } = await supabase.from('integration_secrets').upsert({
+      integration: filter.integration,
+      key: filter.key,
+      ciphertext: ciphertext.toString('base64'),
+      iv: iv.toString('base64'),
+      auth_tag: authTag.toString('base64'),
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'integration,key' }).select().single();
+    
+    if (error) throw secretError('SECRET_SAVE_FAILED', 'Unable to save the integration secret');
+
     return metadataForDatabase(record);
   }
 
   async function resolveSecret(integration, key) {
     const filter = lookup(integration, key);
-    const record = await findSelected(IntegrationSecretModel, filter, ENVELOPE_SELECTION);
+    const { data: record } = await supabase.from('integration_secrets')
+      .select('ciphertext, iv, auth_tag')
+      .eq('integration', filter.integration)
+      .eq('key', filter.key)
+      .maybeSingle();
+
     if (!record) return environmentValue(filter.integration, filter.key);
 
     try {
-      if (record.encryptionVersion !== 1) throw new Error('Unsupported envelope version');
       const encryptionKey = decodeEncryptionKey(env.WEBMASTER_SECRETS_KEY);
       const iv = Buffer.from(String(record.iv || ''), 'base64');
-      const authTag = Buffer.from(String(record.authTag || ''), 'base64');
+      const authTag = Buffer.from(String(record.auth_tag || ''), 'base64');
       const ciphertext = Buffer.from(String(record.ciphertext || ''), 'base64');
       if (iv.length !== 12 || authTag.length !== 16 || ciphertext.length === 0) {
         throw new Error('Invalid envelope');

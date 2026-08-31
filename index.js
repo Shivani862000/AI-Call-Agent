@@ -114,11 +114,50 @@ app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 
 const { createWebmasterRouter } = require('./routes/webmaster/index');
+const { createWebmasterAuthorization } = require('./src/webmaster/authorization');
 const auth = require('./src/auth');
+
+const webmasterAuth = createWebmasterAuthorization({ 
+  resolveActor: async (session, req) => {
+    try {
+      const actualSession = session || (req && auth.readAuthSession ? auth.readAuthSession(req) : null);
+      if (!actualSession) throw new Error('Not authenticated');
+
+      if (!actualSession.id) {
+        console.error('[AUTH DEBUG] actualSession is missing id!', actualSession);
+        throw new Error('No user ID in session');
+      }
+
+      const supabase = require('./src/supabase');
+      const { data: userProfile, error: dbErr } = await supabase
+        .from('users')
+        .select('role, platform_access_level, username')
+        .eq('id', actualSession.id)
+        .single();
+
+      if (dbErr) {
+        console.error('[AUTH DEBUG] resolveActor DB error:', dbErr.message);
+        throw dbErr;
+      }
+      if (!userProfile) throw new Error('User profile not found');
+
+      return { 
+        id: actualSession.id, 
+        username: userProfile.username || actualSession.email, 
+        role: userProfile.role, 
+        platformAccessLevel: userProfile.platform_access_level, 
+        source: 'session' 
+      };
+    } catch (e) {
+      console.error('[AUTH DEBUG] resolveActor failed:', e.message);
+      throw e;
+    }
+  }
+});
 
 // Mount Application Routes
 mountApiRoutes(app);
-app.use('/api/webmaster', createWebmasterRouter({ authorization: auth }));
+app.use('/api/webmaster', createWebmasterRouter({ authorization: webmasterAuth }));
 
 // Error Handling
 app.use((req, res, next) => {

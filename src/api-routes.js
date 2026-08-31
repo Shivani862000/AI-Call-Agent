@@ -120,8 +120,8 @@ module.exports = function mountApiRoutes(app) {
     let username = null;
     let role = session.role || 'AGENT';
     
-    // Supabase JWT stores the user ID in `sub`
-    const userId = session.sub;
+    // readAuthSession returns an object with `id`, not `sub`
+    const userId = session.id;
 
     if (userId) {
       const { data: userProfile, error: profileErr } = await supabaseAdmin

@@ -318,15 +318,15 @@ async function verifyCredentials(login, password) {
   try {
     let email = normalizedLogin;
     if (!email.includes('@')) {
-      const { data: userRow, error: uErr } = await freshSupabaseAdmin
+      const { data: userRows, error: uErr } = await freshSupabaseAdmin
         .from('users')
         .select('email')
         .eq('username', normalizedLogin)
-        .single();
+        .limit(1);
       if (uErr) {
         console.error('[AUTH DEBUG] Error fetching email for username:', normalizedLogin, uErr.message);
-      } else if (userRow && userRow.email) {
-        email = userRow.email;
+      } else if (userRows && userRows.length > 0 && userRows[0].email) {
+        email = userRows[0].email;
         console.log('[AUTH DEBUG] Resolved username to email:', email);
       } else {
         console.log('[AUTH DEBUG] Username not found in public.users:', normalizedLogin);

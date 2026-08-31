@@ -19,12 +19,12 @@ function sendError(res, error) {
   return res.status(safeError.status).json(safeError.toResponse());
 }
 
-function createWebmasterAuthorization({ UserModel, TenantModel, env = process.env }) {
-  if (!UserModel) {
-    throw new Error('UserModel is required to authorize Webmaster access');
+function createWebmasterAuthorization({ UserModel, TenantModel, resolveActor: customResolveActor, env = process.env }) {
+  if (!customResolveActor && !UserModel) {
+    throw new Error('UserModel is required to authorize Webmaster access unless a custom resolveActor is provided');
   }
 
-  async function resolveActor(session) {
+  const resolveActor = customResolveActor || async function defaultResolveActor(session) {
     if (session?.role !== 'WEBMASTER') {
       throw forbidden('WEBMASTER_FORBIDDEN');
     }
@@ -55,10 +55,10 @@ function createWebmasterAuthorization({ UserModel, TenantModel, env = process.en
       platformAccessLevel: user.platformAccessLevel,
       source: 'database'
     };
-  }
+  };
 
   function requireWebmaster(req, res, next) {
-    return resolveActor(req.adminSession)
+    return resolveActor(req.adminSession, req)
       .then((actor) => {
         req.webmasterActor = actor;
         next();
@@ -67,7 +67,7 @@ function createWebmasterAuthorization({ UserModel, TenantModel, env = process.en
   }
 
   function requireOwner(req, res, next) {
-    return resolveActor(req.adminSession)
+    return resolveActor(req.adminSession, req)
       .then((actor) => {
         if (actor.platformAccessLevel !== 'OWNER') {
           throw forbidden('WEBMASTER_OWNER_REQUIRED');

@@ -62,15 +62,9 @@ function safeOutcome(value) {
   return value;
 }
 
-function createdValue(document) {
-  return document && typeof document.toObject === 'function'
-    ? document.toObject()
-    : document;
-}
-
-function createAuditService({ AuditEventModel }) {
-  if (!AuditEventModel || typeof AuditEventModel.create !== 'function') {
-    throw new TypeError('AuditEventModel with create() is required');
+function createAuditService({ supabase }) {
+  if (!supabase) {
+    throw new TypeError('supabase client is required');
   }
 
   async function record(input = {}, options = {}) {
@@ -90,22 +84,38 @@ function createAuditService({ AuditEventModel }) {
 
     const payload = {
       actor: stableActorId(actorDescriptors),
-      actorAccessLevel: actorAccessLevel(actorDescriptors),
+      actor_access_level: actorAccessLevel(actorDescriptors),
       action,
-      targetType,
-      targetId,
-      tenantId,
-      before: sanitizeForAudit(field(inputDescriptors, 'before', null)),
-      after: sanitizeForAudit(field(inputDescriptors, 'after', null)),
-      requestId,
+      target_type: targetType,
+      target_id: targetId,
+      tenant_id: tenantId,
+      before_state: sanitizeForAudit(field(inputDescriptors, 'before', null)),
+      after_state: sanitizeForAudit(field(inputDescriptors, 'after', null)),
+      request_id: requestId,
       outcome,
-      failureCode
+      failure_code: failureCode
     };
 
-    const event = options.session
-      ? (await AuditEventModel.create([payload], { session: options.session }))[0]
-      : await AuditEventModel.create(payload);
-    return sanitizeForAudit(createdValue(event));
+    const { data, error } = await supabase.from('audit_events').insert(payload).select().single();
+    if (error) {
+      console.error('[AUDIT ERROR]', error);
+      return sanitizeForAudit(payload); // Best effort, don't throw on audit failure
+    }
+    
+    // Convert snake_case back to camelCase for the app
+    const event = {
+        ...data,
+        targetType: data.target_type,
+        targetId: data.target_id,
+        tenantId: data.tenant_id,
+        before: data.before_state,
+        after: data.after_state,
+        requestId: data.request_id,
+        failureCode: data.failure_code,
+        actorAccessLevel: data.actor_access_level
+    };
+
+    return sanitizeForAudit(event);
   }
 
   return { record };

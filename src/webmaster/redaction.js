@@ -1,10 +1,8 @@
 'use strict';
 
-const mongoose = require('mongoose');
 const { types: utilTypes } = require('node:util');
 const {
-  isInvalidRetainedValue,
-  normalizeNullableObjectId
+  isInvalidRetainedValue
 } = require('./value-safe-validation');
 
 const REDACTED = '[redacted]';
@@ -555,13 +553,7 @@ function sanitizeIntegrationMap(value, seen) {
 }
 
 function safeObjectIdHex(value) {
-  const normalized = normalizeNullableObjectId(value, mongoose.Types.ObjectId);
-  if (normalized == null || isInvalidRetainedValue(normalized)) return null;
-  try {
-    return mongoose.Types.ObjectId.prototype.toHexString.call(normalized).toLowerCase();
-  } catch (_error) {
-    return null;
-  }
+  return null;
 }
 
 function binaryByteLength(value) {
