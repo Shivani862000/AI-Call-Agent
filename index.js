@@ -12,7 +12,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
 // Import modular components
-const { PORT } = require('./src/config');
+const { PORT, PUBLIC_BASE_URL } = require('./src/config');
 const { PROTECTED_HTML_PATHS, requireAdminAuth, requireRole, basicAuth } = require('./src/auth');
 const { isAdminOnlyRequest } = require('./src/authorization');
 const mountApiRoutes = require('./src/api-routes');
@@ -23,6 +23,13 @@ const app = express();
 app.set('trust proxy', 1);
 
 app.disable('x-powered-by');
+// Helmet emits `upgrade-insecure-requests` by default, which tells the browser
+// to rewrite every subresource and fetch to https://. On a deployment served
+// over plain HTTP that upgrades requests to a port nothing listens on, so the
+// page loads but its scripts and API calls fail with "Failed to fetch".
+// Emitted only when we are actually served over TLS.
+const SERVES_OVER_HTTPS = /^https:/i.test(String(PUBLIC_BASE_URL || ''));
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -32,9 +39,13 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "blob:"],
       connectSrc: ["'self'", "ws:", "wss:"],
-      mediaSrc: ["'self'", "data:", "blob:"]
+      mediaSrc: ["'self'", "data:", "blob:"],
+      ...(SERVES_OVER_HTTPS ? {} : { upgradeInsecureRequests: null })
     }
   },
+  // HSTS on a plain-HTTP deployment would pin the browser to https for a year
+  // against a host that cannot serve it.
+  hsts: SERVES_OVER_HTTPS,
   crossOriginEmbedderPolicy: false
 }));
 
