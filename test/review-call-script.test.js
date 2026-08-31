@@ -17,7 +17,7 @@ const {
 // 'intro' is now the identity check; the experience question comes after it.
 const freshState = () => ({ step: 'experience' });
 const verifiedState = () => {
-  const state = { step: 'intro' };
+  const state = { step: 'intro', lastVisitDate: '2026-08-30' };
   buildReviewCallTurnInstruction('haan ji', state, 'Client', 'Ankita');
   return state;
 };
@@ -44,10 +44,6 @@ function everySpokenLine() {
     buildReviewCallTurnInstruction('abhi busy hoon', freshState(), 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('hmm', freshState(), 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('staff rude tha', { step: 'issue_detail' }, 'Client', 'Ankita'),
-    buildReviewCallTurnInstruction('haan', { step: 'redonation' }, 'Client', 'Ankita'),
-    buildReviewCallTurnInstruction('5 tareekh ko subah', { step: 'visit_time' }, 'Client', 'Ankita'),
-    buildReviewCallTurnInstruction('nahi', { step: 'redonation' }, 'Client', 'Ankita'),
-    buildReviewCallTurnInstruction('pata nahi', { step: 'redonation' }, 'Client', 'Ankita')
   ];
 }
 
@@ -105,34 +101,34 @@ test('a named closing still triggers the auto hangup', () => {
 });
 
 test('both the positive and the complaint path reach the closing', () => {
-  const positive = verifiedState();
-  assert.match(buildReviewCallTurnInstruction('bahut achha tha', positive, 'Client', 'Ankita'), /agli baar aane ka samay abhi bata sakte hain/);
-  assert.match(buildReviewCallTurnInstruction('haan', positive, 'Client', 'Ankita'), /kis din aur kis samay aana chahenge/);
-  assert.match(buildReviewCallTurnInstruction('5 tareekh ko', positive, 'Client', 'Ankita'), /Aapka din shubh ho/);
-  assert.equal(positive.intendedVisitNote, '5 tareekh ko');
+  const positive = buildReviewCallTurnInstruction('bahut achha tha', verifiedState(), 'Client', 'Ankita');
+  assert.match(positive, /Bahut achhi baat hai/);
+  assert.match(positive, /Aapka din shubh ho/);
 
   const complaint = verifiedState();
   assert.match(buildReviewCallTurnInstruction('bahut bura tha', complaint, 'Client', 'Ankita'), /Kripya batayein aapko kya pareshani hui thi/);
   const afterIssue = buildReviewCallTurnInstruction('staff rude tha', complaint, 'Client', 'Ankita');
   assert.match(afterIssue, /sambandhit adhikari tak pahucha dungi/);
-  assert.match(afterIssue, /agli baar aane ka samay abhi bata sakte hain/);
-  assert.match(buildReviewCallTurnInstruction('nahi', complaint, 'Client', 'Ankita'), /Aapka din shubh ho/);
+  assert.match(afterIssue, /Aapka din shubh ho/);
 });
 
-// Every donor is asked, and the answer is recorded for the team to act on.
-test('the slot answer is recorded as yes, no or unclear', () => {
-  const yes = { step: 'redonation' };
-  buildReviewCallTurnInstruction('haan bilkul', yes, 'Client', 'Ankita');
-  assert.equal(yes.redonationInterest, 'yes');
+// The review call runs the day after a donation, when the donor cannot give
+// blood for another three months. It says when they can and stops there;
+// arranging a visit belongs to the follow-up call, which is placed when it is
+// actually actionable.
+test('the review call tells the donor when they are eligible but arranges nothing', () => {
+  const closing = buildReviewCallTurnInstruction('bahut achha tha', verifiedState(), 'Client', 'Ankita');
 
-  const no = { step: 'redonation' };
-  buildReviewCallTurnInstruction('nahi, abhi nahi', no, 'Client', 'Ankita');
-  assert.equal(no.redonationInterest, 'no');
-
-  const unclear = { step: 'redonation' };
-  buildReviewCallTurnInstruction('pata nahi, dekhta hoon', unclear, 'Client', 'Ankita');
-  assert.equal(unclear.redonationInterest, 'unclear');
+  assert.match(closing, /28 November ke baad aap dobara blood donate kar sakte hain, aapka swagat hai/);
+  assert.doesNotMatch(closing, /kab aana|kis din|samay|abhi bata/i);
 });
+
+test('the review call never asks a donor to arrange a visit', () => {
+  for (const line of everySpokenLine()) {
+    assert.equal(/kis din aur kis samay|aane ka samay abhi bata/i.test(line), false, `visit arrangement in:\n${line}`);
+  }
+});
+
 
 // The agent has no calendar; promising a confirmed booking would be a lie.
 // The centre has no appointment system and nobody calls back.
@@ -142,22 +138,6 @@ test('the agent never claims an appointment is confirmed or promises a callback'
   }
 });
 
-// The centre takes walk-ins and books nothing, so the useful outcome is when
-// the donor said they would come -- not a yes that nobody can act on.
-test('a willing donor is asked when they intend to visit, and it is kept', () => {
-  const state = { step: 'redonation', lastVisitDate: '2026-08-30' };
-
-  const askWhen = buildReviewCallTurnInstruction('haan', state, 'Client', 'Ankita');
-  assert.match(askWhen, /kis din aur kis samay aana chahenge/);
-  assert.equal(state.step, 'visit_time');
-  assert.equal(state.conversationCompleted, undefined);
-
-  const noted = buildReviewCallTurnInstruction('agle mahine ki 5 tareekh, subah 10 baje', state, 'Client', 'Ankita');
-  assert.equal(state.intendedVisitNote, 'agle mahine ki 5 tareekh, subah 10 baje');
-  assert.match(noted, /humne note kar liya hai/);
-  assert.match(noted, /alag se confirm karne ki zarurat nahi/);
-  assert.equal(state.conversationState, 'COMPLETED');
-});
 
 test('the intended visit is lifted out of the transcript', () => {
   const { detectIntendedVisit } = require('../services/call-analysis');

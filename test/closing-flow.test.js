@@ -47,17 +47,10 @@ test('review flow completes with the shared closing line', () => {
   // Positive feedback no longer ends the call: the donor is still asked about
   // booking a slot for their next eligible donation.
   buildReviewCallTurnInstruction('haan ji, main hi bol raha hoon', state);
-  const slotQuestion = buildReviewCallTurnInstruction('experience bahut achha tha', state);
-  assert.equal(state.step, 'redonation');
-  assert.equal(state.endCallAfterNextReply, false);
-  assert.match(slotQuestion, /agli baar aane ka samay abhi bata sakte hain/i);
-  assert.equal(countClosingLines(slotQuestion), 0);
+  const closingInstruction = buildReviewCallTurnInstruction('experience bahut achha tha', state);
 
-  buildReviewCallTurnInstruction('haan', state);
-  const closingInstruction = buildReviewCallTurnInstruction('5 tareekh ko', state);
   assert.equal(state.conversationState, 'COMPLETED');
   assert.equal(state.endCallAfterNextReply, true);
-  assert.equal(state.redonationInterest, 'yes');
   assert.equal(countClosingLines(closingInstruction), 1);
 });
 
@@ -70,14 +63,9 @@ test('review flow asks for issue details before closing a negative experience', 
   assert.match(issueInstruction, /pareshani hui/i);
   assert.equal(state.endCallAfterNextReply, false);
 
-  const slotQuestion = buildReviewCallTurnInstruction('staff ka behaviour rude tha', state);
-  assert.equal(state.step, 'redonation');
-  assert.match(slotQuestion, /agli baar aane ka samay abhi bata sakte hain/i);
-
-  const closingInstruction = buildReviewCallTurnInstruction('nahi, abhi nahi', state);
+  const closingInstruction = buildReviewCallTurnInstruction('staff ka behaviour rude tha', state);
   assert.equal(state.conversationState, 'COMPLETED');
   assert.equal(state.endCallAfterNextReply, true);
-  assert.equal(state.redonationInterest, 'no');
   assert.equal(countClosingLines(closingInstruction), 1);
 });
 
@@ -86,7 +74,7 @@ test('review flow does not interpret a positive yes response as a problem', () =
   buildReviewCallTurnInstruction('haan ji, main hi bol raha hoon', state);
   const instruction = buildReviewCallTurnInstruction('haan ji, bahut achha tha', state);
 
-  assert.equal(state.step, 'redonation');
+  assert.equal(state.conversationState, 'COMPLETED');
   assert.doesNotMatch(instruction, /kya problem|kya pareshani hui/i);
 });
 
@@ -95,9 +83,9 @@ test('review flow recognizes badhiya as positive feedback', () => {
   buildReviewCallTurnInstruction('haan ji, main hi bol raha hoon', state);
   const instruction = buildReviewCallTurnInstruction('sab badhiya tha', state);
 
-  assert.equal(state.step, 'redonation');
+  assert.equal(state.conversationState, 'COMPLETED');
   assert.doesNotMatch(instruction, /pareshani hui/i);
-  assert.equal(countClosingLines(instruction), 0);
+  assert.equal(countClosingLines(instruction), 1);
 });
 
 test('three-month follow-up flow completes with the shared closing line', () => {

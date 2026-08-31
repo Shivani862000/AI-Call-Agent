@@ -155,8 +155,11 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
   const name = String(customerName || '').trim();
   const address = name ? `${name} ji, ` : '';
   const closing = buildClosingLine(name);
-  const redonationQuestion = `${describeEligibility(state.lastVisitDate)} aap dobara blood donate kar sakte hain. `
-    + 'Kya aap agli baar aane ka samay abhi bata sakte hain?';
+  // Said once, on the way out. The review call runs the day after a donation,
+  // when the donor cannot give blood for another three months, so it tells them
+  // when they can and leaves it there. Arranging a visit belongs to the
+  // three-month follow-up, which is placed when it is actually actionable.
+  const invitation = `${describeEligibility(state.lastVisitDate)} aap dobara blood donate kar sakte hain, aapka swagat hai.`;
   const markCompletedAfterReply = () => {
     state.step = 'completed';
     state.conversationState = 'COMPLETED';
@@ -191,42 +194,16 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
     }
 
     if (isPositiveExperienceReply(customerReply)) {
-      state.step = 'redonation';
-      return `Say exactly: "Bahut achhi baat hai, sunkar khushi hui. ${redonationQuestion}"`;
+      markCompletedAfterReply();
+      return `Say exactly: "Bahut achhi baat hai, sunkar khushi hui. ${invitation} ${closing}" Then end the call.`;
     }
 
     return `The experience answer was unclear. Say exactly: "${address}blood donate karne ka aapka experience achha tha ya koi pareshani hui thi?"`;
   }
 
   if (state.step === 'issue_detail') {
-    state.step = 'redonation';
-    return `Capture the issue. Then say exactly: "Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge. ${redonationQuestion}"`;
-  }
-
-  // The donor's answer to the appointment question. Recorded on the call by the
-  // post-call analysis; the agent cannot confirm a slot itself.
-  if (state.step === 'redonation') {
-    if (isAffirmativeReply(customerReply)) {
-      state.redonationInterest = 'yes';
-      state.step = 'visit_time';
-      return `The donor wants to come in. Say exactly: "Bahut achha. ${VISIT_TIME_QUESTION}"`;
-    }
     markCompletedAfterReply();
-    if (isUncertainReply(customerReply)) {
-      state.redonationInterest = 'unclear';
-      return `The donor is undecided. Say exactly: "Koi baat nahi, aap jab chahein hamse sampark kar sakte hain. ${closing}" Then end the call.`;
-    }
-    if (isNoReply(customerReply) || isNegativeOrBusyReply(customerReply)) {
-      state.redonationInterest = 'no';
-      return `The donor declined a slot. Say exactly: "Koi baat nahi, aap jab chahein hamse sampark kar sakte hain. ${closing}" Then end the call.`;
-    }
-    state.redonationInterest = 'unclear';
-    return `Acknowledge the donor's answer briefly without confirming any appointment. Then say exactly: "${closing}" Then end the call.`;
-  }
-
-  if (state.step === 'visit_time') {
-    markCompletedAfterReply();
-    return captureIntendedVisit(customerReply, state, closing);
+    return `Capture the issue. Then say exactly: "Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge. ${invitation} ${closing}" Then end the call.`;
   }
 
   markCompletedAfterReply();
