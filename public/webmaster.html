@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VikiTech Platform Console</title><link rel="stylesheet" href="/webmaster.css">
+  <style>
+    .success{padding:12px;border-radius:8px;background:#e8f7ef;color:#027a48}.toolbar,.card-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}.toolbar button,.form-grid button,.secrets button{border:0;border-radius:8px;padding:10px 14px;background:#155eef;color:#fff;cursor:pointer}.table-wrap{overflow:auto;background:#fff;border:1px solid #dbe3ef;border-radius:12px}table{width:100%;border-collapse:collapse;min-width:680px}th,td{text-align:left;padding:13px 14px;border-bottom:1px solid #dbe3ef;vertical-align:top}th{color:#64748b;font-size:13px}.actions{display:flex;gap:6px;flex-wrap:wrap}.small{padding:6px 9px;border:1px solid #dbe3ef;border-radius:7px;background:#fff;cursor:pointer}.small.danger{color:#b42318}dialog{border:0;border-radius:14px;box-shadow:0 24px 60px #10182840;max-width:620px;width:calc(100% - 28px)}dialog::backdrop{background:#10182899}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.form-grid h2,.form-grid h3,.form-grid menu,.form-grid .wide{grid-column:1/-1}.form-grid label,.secrets label{display:grid;gap:5px;color:#64748b}input,select,textarea{width:100%;padding:10px;border:1px solid #dbe3ef;border-radius:8px;background:#fff;color:#182235;font:inherit}.form-grid menu{display:flex;justify-content:flex-end;gap:8px;padding:0}.lower{margin-top:16px}.span-2{grid-column:span 2}.integrations{grid-template-columns:repeat(2,minmax(0,1fr))}.secrets{display:grid;gap:12px;margin-top:18px}.secrets form{display:flex;align-items:end;gap:8px}.secrets label{flex:1}.settings-json{max-height:460px;overflow:auto;background:#101828;color:#d0d5dd;padding:14px;border-radius:8px;font-size:12px}.card+.card{margin-top:16px}
+    @media(max-width:640px){.form-grid{grid-template-columns:1fr}.span-2{grid-column:auto}.integrations{grid-template-columns:1fr}.toolbar{align-items:stretch;flex-direction:column}}
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Platform navigation">
+      <div class="brand">VikiTech <span>Platform</span></div>
+      <nav>
+        <a href="#overview" data-section="overview">Overview</a>
+        <a href="#tenants" data-section="tenants">Tenants</a>
+        <a href="#users" data-section="users">Tenant users</a>
+        <a href="#platform-team" data-section="platform-team" data-owner-only>Platform team</a>
+        <a href="#integrations" data-section="integrations">Integrations</a>
+        <a href="#policies" data-section="policies">Policies</a>
+        <a href="#audit" data-section="audit">Audit history</a>
+      </nav>
+      <button type="button" id="logout">Sign out</button>
+    </aside>
+    <main id="main" tabindex="-1">
+      <header><div><p class="eyebrow">Platform administration</p><h1 id="page-title">Overview</h1></div><p id="actor" class="actor" aria-live="polite"></p></header>
+      <div id="alert" role="status" aria-live="polite"></div>
+      <section id="view" aria-live="polite"><p class="loading">Loading secure platform data…</p></section>
+    </main>
+  </div>
+  <dialog id="confirm-dialog"><form method="dialog"><h2 id="confirm-title">Confirm action</h2><p id="confirm-message"></p><menu><button value="cancel">Cancel</button><button id="confirm-action" value="confirm">Continue</button></menu></form></dialog>
+  <script type="module" src="/webmaster.js"></script>
+</body>
+</html>

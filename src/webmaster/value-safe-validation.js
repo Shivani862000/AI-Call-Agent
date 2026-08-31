@@ -1,0 +1,433 @@
+'use strict';
+
+const { types: utilTypes } = require('node:util');
+
+const INVALID_RETAINED_VALUE = Symbol('invalid-retained-value');
+const TYPED_ARRAY_LENGTH = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  'length'
+).get;
+
+function valueSafeError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function ownDataDescriptors(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || utilTypes.isProxy(value)) {
+    return null;
+  }
+  let prototype;
+  let descriptors;
+  try {
+    prototype = Object.getPrototypeOf(value);
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch (_error) {
+    return null;
+  }
+  if (prototype !== Object.prototype && prototype !== null) return null;
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== 'string') return null;
+    const descriptor = descriptors[key];
+    if (!Object.hasOwn(descriptor, 'value')) return null;
+  }
+  return descriptors;
+}
+
+function canonicalizeHydratedInsertOptions(options, {
+  unsafeCode,
+  unsafeMessage,
+  leanCode,
+  leanMessage
+}) {
+  if (options == null) return;
+  const descriptors = ownDataDescriptors(options);
+  if (!descriptors) throw valueSafeError(unsafeCode, unsafeMessage);
+
+  const leanDescriptor = descriptors.lean;
+  if (leanDescriptor?.value) throw valueSafeError(leanCode, leanMessage);
+  if (!leanDescriptor && !Object.isExtensible(options)) {
+    throw valueSafeError(unsafeCode, unsafeMessage);
+  }
+  if (leanDescriptor && leanDescriptor.configurable === false && leanDescriptor.writable === false) return;
+  try {
+    Object.defineProperty(options, 'lean', {
+      configurable: false,
+      enumerable: leanDescriptor?.enumerable === true,
+      value: false,
+      writable: false
+    });
+  } catch (_error) {
+    throw valueSafeError(unsafeCode, unsafeMessage);
+  }
+}
+
+function dataEntries(value) {
+  const descriptors = ownDataDescriptors(value);
+  if (!descriptors) return null;
+  return Object.keys(descriptors).map((key) => [key, descriptors[key].value]);
+}
+
+function dataArrayValues(value) {
+  if (!Array.isArray(value) || utilTypes.isProxy(value)) return null;
+  let descriptors;
+  try {
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch (_error) {
+    return null;
+  }
+  const values = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = descriptors[index];
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return null;
+    values.push(descriptor.value);
+  }
+  return values;
+}
+
+function normalizeBoundedString(value, {
+  maxLength = 128,
+  pattern = null,
+  trim = true
+} = {}) {
+  if (typeof value !== 'string') return INVALID_RETAINED_VALUE;
+  const normalized = trim ? value.trim() : value;
+  if (!normalized || normalized.length > maxLength) return INVALID_RETAINED_VALUE;
+  if (pattern && !pattern.test(normalized)) return INVALID_RETAINED_VALUE;
+  return normalized;
+}
+
+function normalizeNullableBoundedString(value, options) {
+  if (value == null) return null;
+  return normalizeBoundedString(value, options);
+}
+
+function normalizeEnum(value, allowedValues, { nullable = false } = {}) {
+  if (nullable && value == null) return null;
+  return typeof value === 'string' && allowedValues.has(value)
+    ? value
+    : INVALID_RETAINED_VALUE;
+}
+
+function normalizeNonNegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0 ? value : INVALID_RETAINED_VALUE;
+}
+
+function normalizeNullableDate(value) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) {
+      return INVALID_RETAINED_VALUE;
+    }
+    const timestamp = Date.parse(value);
+    return Number.isNaN(timestamp) ? INVALID_RETAINED_VALUE : new Date(timestamp);
+  }
+  if (typeof value !== 'object' || utilTypes.isProxy(value)) return INVALID_RETAINED_VALUE;
+  let prototype;
+  try {
+    prototype = Object.getPrototypeOf(value);
+  } catch (_error) {
+    return INVALID_RETAINED_VALUE;
+  }
+  if (prototype !== Date.prototype) return INVALID_RETAINED_VALUE;
+  try {
+    const timestamp = Date.prototype.getTime.call(value);
+    return Number.isNaN(timestamp) ? INVALID_RETAINED_VALUE : new Date(timestamp);
+  } catch (_error) {
+    return INVALID_RETAINED_VALUE;
+  }
+}
+
+function normalizeNullableObjectId(value, ObjectId) {
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    return /^[a-f0-9]{24}$/i.test(value) ? new ObjectId(value) : INVALID_RETAINED_VALUE;
+  }
+  if (typeof value !== 'object' || utilTypes.isProxy(value)) return INVALID_RETAINED_VALUE;
+  let prototype;
+  let descriptors;
+  try {
+    prototype = Object.getPrototypeOf(value);
+    descriptors = Object.getOwnPropertyDescriptors(value);
+  } catch (_error) {
+    return INVALID_RETAINED_VALUE;
+  }
+  if (prototype !== ObjectId.prototype) return INVALID_RETAINED_VALUE;
+
+  const bufferDescriptor = descriptors.buffer;
+  if (!bufferDescriptor
+    || !Object.hasOwn(bufferDescriptor, 'value')
+    || !Buffer.isBuffer(bufferDescriptor.value)
+    || !utilTypes.isUint8Array(bufferDescriptor.value)
+    || utilTypes.isProxy(bufferDescriptor.value)
+    || TYPED_ARRAY_LENGTH.call(bufferDescriptor.value) !== 12) {
+    return INVALID_RETAINED_VALUE;
+  }
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== 'string' || !Object.hasOwn(descriptors[key], 'value')) {
+      return INVALID_RETAINED_VALUE;
+    }
+  }
+
+  try {
+    const bytes = Buffer.allocUnsafe(12);
+    Buffer.prototype.copy.call(bufferDescriptor.value, bytes, 0, 0, 12);
+    return new ObjectId(bytes);
+  } catch (_error) {
+    return INVALID_RETAINED_VALUE;
+  }
+}
+
+function isInvalidRetainedValue(value) {
+  return value === INVALID_RETAINED_VALUE;
+}
+
+const QUERY_MUTATION_METHODS = Object.freeze([
+  'allowDiskUse',
+  'and',
+  'box',
+  'center',
+  'centerSphere',
+  'collation',
+  'count',
+  'countDocuments',
+  'cursor',
+  'deleteMany',
+  'deleteOne',
+  'distinct',
+  'error',
+  'estimatedDocumentCount',
+  'explain',
+  'find',
+  'findById',
+  'findByIdAndDelete',
+  'findByIdAndUpdate',
+  'findOne',
+  'findOneAndDelete',
+  'findOneAndRemove',
+  'findOneAndReplace',
+  'findOneAndUpdate',
+  'j',
+  'lean',
+  'limit',
+  'maxTimeMS',
+  'merge',
+  'mod',
+  'near',
+  'nearSphere',
+  'nor',
+  'or',
+  'orFail',
+  'populate',
+  'post',
+  'pre',
+  'read',
+  'replaceOne',
+  'sanitizeProjection',
+  'schemaLevelProjections',
+  'select',
+  'session',
+  'set',
+  'setOptions',
+  'setQuery',
+  'setUpdate',
+  'skip',
+  'slice',
+  'sort',
+  'tailable',
+  'toConstructor',
+  'transform',
+  'updateMany',
+  'updateOne',
+  'w',
+  'where',
+  'writeConcern',
+  'wtimeout'
+]);
+
+function snapshotQueryValue(value, ObjectId, mutationError, seen = new WeakMap()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (utilTypes.isProxy(value)) throw mutationError();
+  if (seen.has(value)) return seen.get(value);
+
+  let prototype;
+  try {
+    prototype = Object.getPrototypeOf(value);
+  } catch (_error) {
+    throw mutationError();
+  }
+
+  if (prototype === Date.prototype) {
+    try {
+      return new Date(Date.prototype.getTime.call(value));
+    } catch (_error) {
+      throw mutationError();
+    }
+  }
+
+  if (ObjectId && prototype === ObjectId.prototype) {
+    const normalized = normalizeNullableObjectId(value, ObjectId);
+    if (isInvalidRetainedValue(normalized)) throw mutationError();
+    return normalized;
+  }
+
+  if (Buffer.isBuffer(value)) {
+    try {
+      if (!utilTypes.isUint8Array(value)) throw mutationError();
+      const clone = Buffer.allocUnsafe(TYPED_ARRAY_LENGTH.call(value));
+      Buffer.prototype.copy.call(value, clone);
+      return clone;
+    } catch (error) {
+      if (error?.code) throw error;
+      throw mutationError();
+    }
+  }
+
+  if (Array.isArray(value)) {
+    const values = dataArrayValues(value);
+    if (!values || prototype !== Array.prototype) throw mutationError();
+    const clone = [];
+    seen.set(value, clone);
+    for (const entry of values) clone.push(snapshotQueryValue(entry, ObjectId, mutationError, seen));
+    return clone;
+  }
+
+  if (prototype === Map.prototype) {
+    const clone = new Map();
+    seen.set(value, clone);
+    let entries;
+    try {
+      entries = Map.prototype.entries.call(value);
+    } catch (_error) {
+      throw mutationError();
+    }
+    for (const [key, entry] of entries) {
+      clone.set(
+        snapshotQueryValue(key, ObjectId, mutationError, seen),
+        snapshotQueryValue(entry, ObjectId, mutationError, seen)
+      );
+    }
+    return clone;
+  }
+
+  const descriptors = ownDataDescriptors(value);
+  if (!descriptors) throw mutationError();
+  const clone = Object.create(prototype);
+  seen.set(value, clone);
+  for (const key of Object.keys(descriptors)) {
+    Object.defineProperty(clone, key, {
+      configurable: true,
+      enumerable: descriptors[key].enumerable,
+      value: snapshotQueryValue(descriptors[key].value, ObjectId, mutationError, seen),
+      writable: true
+    });
+  }
+  return clone;
+}
+
+function createSealedQueryFacade(query, mutationError, ObjectId) {
+  const facade = Object.create(null);
+  const rejectMutation = () => {
+    throw mutationError();
+  };
+  const clonedQuery = () => query.clone();
+
+  Object.defineProperties(facade, {
+    exec: {
+      enumerable: true,
+      value(...args) {
+        if (args.length !== 0) throw mutationError();
+        return query.exec();
+      }
+    },
+    then: {
+      enumerable: true,
+      value(onFulfilled, onRejected) {
+        return query.then(onFulfilled, onRejected);
+      }
+    },
+    catch: {
+      enumerable: true,
+      value(onRejected) {
+        return query.catch(onRejected);
+      }
+    },
+    finally: {
+      enumerable: true,
+      value(onFinally) {
+        return query.finally(onFinally);
+      }
+    },
+    clone: {
+      enumerable: true,
+      value() {
+        return createSealedQueryFacade(query.clone(), mutationError, ObjectId);
+      }
+    },
+    getFilter: {
+      enumerable: true,
+      value() {
+        return snapshotQueryValue(clonedQuery().getFilter(), ObjectId, mutationError);
+      }
+    },
+    getQuery: {
+      enumerable: true,
+      value() {
+        return snapshotQueryValue(clonedQuery().getQuery(), ObjectId, mutationError);
+      }
+    },
+    getUpdate: {
+      enumerable: true,
+      value() {
+        return snapshotQueryValue(clonedQuery().getUpdate(), ObjectId, mutationError);
+      }
+    },
+    getOptions: {
+      enumerable: true,
+      value() {
+        return snapshotQueryValue(clonedQuery().getOptions(), ObjectId, mutationError);
+      }
+    },
+    mongooseOptions: {
+      enumerable: true,
+      value(...args) {
+        if (args.length !== 0) throw mutationError();
+        return snapshotQueryValue(clonedQuery().mongooseOptions(), ObjectId, mutationError);
+      }
+    },
+    projection: {
+      enumerable: true,
+      value(...args) {
+        if (args.length !== 0) throw mutationError();
+        return snapshotQueryValue(clonedQuery().projection(), ObjectId, mutationError);
+      }
+    }
+  });
+
+  for (const method of QUERY_MUTATION_METHODS) {
+    if (Object.hasOwn(facade, method)) continue;
+    Object.defineProperty(facade, method, {
+      enumerable: true,
+      value: rejectMutation
+    });
+  }
+  return Object.freeze(facade);
+}
+
+module.exports = {
+  INVALID_RETAINED_VALUE,
+  canonicalizeHydratedInsertOptions,
+  createSealedQueryFacade,
+  dataArrayValues,
+  dataEntries,
+  isInvalidRetainedValue,
+  normalizeBoundedString,
+  normalizeEnum,
+  normalizeNonNegativeInteger,
+  normalizeNullableBoundedString,
+  normalizeNullableDate,
+  normalizeNullableObjectId,
+  ownDataDescriptors,
+  valueSafeError
+};

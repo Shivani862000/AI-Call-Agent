@@ -108,3 +108,112 @@ CREATE TABLE IF NOT EXISTS public.clients (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- =========================================================================
+-- MULTITENANT MIGRATION ADDITIONS
+-- =========================================================================
+
+-- 1. Create Tenants Table
+CREATE TABLE IF NOT EXISTS public.tenants (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL UNIQUE,
+    primary_contact JSONB DEFAULT '{}'::jsonb,
+    address TEXT DEFAULT '',
+    timezone VARCHAR(80) DEFAULT 'Asia/Kolkata',
+    daily_report_time VARCHAR(5) DEFAULT '19:00',
+    branding JSONB DEFAULT '{"displayName": "", "primaryColor": "#155eef"}'::jsonb,
+    plan VARCHAR(64) DEFAULT 'standard',
+    limits JSONB DEFAULT '{"users": 25, "monthlyCalls": 10000}'::jsonb,
+    billing_contact VARCHAR(254) DEFAULT '',
+    internal_notes TEXT DEFAULT '',
+    tags JSONB DEFAULT '[]'::jsonb,
+    settings_overrides JSONB DEFAULT '{}'::jsonb,
+    status VARCHAR(50) DEFAULT 'active',
+    archived_at TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+    archived_by VARCHAR(255) DEFAULT NULL,
+    archive_reason TEXT DEFAULT NULL,
+    pre_archive_status VARCHAR(50) DEFAULT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 2. Modify Users Table
+ALTER TABLE public.users ALTER COLUMN password_hash DROP NOT NULL;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES public.tenants(id) ON DELETE SET NULL;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS platform_access_level VARCHAR(50) DEFAULT NULL;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'active';
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE DEFAULT NULL;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS archived_by VARCHAR(255) DEFAULT NULL;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS archive_reason TEXT DEFAULT NULL;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS pre_archive_status VARCHAR(50) DEFAULT NULL;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS email VARCHAR(255) UNIQUE;
+
+-- 3. Add tenant_id to existing resource tables
+ALTER TABLE public.customers ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE;
+ALTER TABLE public.calls ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE;
+ALTER TABLE public.feedback ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE;
+
+DO $$ 
+BEGIN
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'support_tickets') THEN
+        ALTER TABLE public.support_tickets ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES public.tenants(id) ON DELETE CASCADE;
+    END IF;
+END $$;
+
+-- 4. Create AuditEvents Table
+CREATE TABLE IF NOT EXISTS public.audit_events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    actor VARCHAR(255) NOT NULL,
+    actor_access_level VARCHAR(50),
+    action VARCHAR(255) NOT NULL,
+    target_type VARCHAR(255),
+    target_id VARCHAR(255),
+    tenant_id UUID REFERENCES public.tenants(id) ON DELETE SET NULL,
+    request_id VARCHAR(255),
+    outcome VARCHAR(50),
+    failure_code VARCHAR(255),
+    before_state JSONB DEFAULT NULL,
+    after_state JSONB DEFAULT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON public.audit_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_events_tenant_id ON public.audit_events(tenant_id, created_at DESC);
+
+-- 5. Create IntegrationSecrets Table
+CREATE TABLE IF NOT EXISTS public.integration_secrets (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    integration VARCHAR(128) NOT NULL,
+    key VARCHAR(128) NOT NULL,
+    ciphertext TEXT NOT NULL,
+    iv TEXT NOT NULL,
+    auth_tag TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(integration, key)
+);
+
+-- 6. Create PlatformSettings Table
+CREATE TABLE IF NOT EXISTS public.platform_settings (
+    singleton_key VARCHAR(50) PRIMARY KEY DEFAULT 'platform',
+    schema_version INTEGER DEFAULT 1,
+    application JSONB DEFAULT '{}'::jsonb,
+    defaults JSONB DEFAULT '{}'::jsonb,
+    feature_flags JSONB DEFAULT '{}'::jsonb,
+    policies JSONB DEFAULT '{}'::jsonb,
+    providers JSONB DEFAULT '{}'::jsonb,
+    notification_templates JSONB DEFAULT '{}'::jsonb,
+    retention JSONB DEFAULT '{}'::jsonb,
+    maintenance JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 7. Add RLS Policies
+ALTER TABLE public.tenants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.calls ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.feedback ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.integration_secrets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.platform_settings ENABLE ROW LEVEL SECURITY;

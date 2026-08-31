@@ -107,16 +107,45 @@ module.exports = function mountApiRoutes(app) {
     return res.redirect('/login.html');
   });
 
-  app.get('/api/auth/session', (req, res) => {
+  app.get('/api/auth/session', async (req, res) => {
     const session = readAuthSession(req);
     if (!session) {
       return res.status(401).json({ authenticated: false });
     }
 
+    // Optionally fetch full profile if needed
+    const supabaseAdmin = require('./supabase');
+    let platformAccessLevel = null;
+    let tenantId = null;
+    let username = null;
+    let role = session.role || 'AGENT';
+    
+    // Supabase JWT stores the user ID in `sub`
+    const userId = session.sub;
+
+    if (userId) {
+      const { data: userProfile, error: profileErr } = await supabaseAdmin
+        .from('users')
+        .select('platform_access_level, tenant_id, username, role')
+        .eq('id', userId)
+        .single();
+      
+      if (userProfile) {
+        platformAccessLevel = userProfile.platform_access_level;
+        tenantId = userProfile.tenant_id;
+        username = userProfile.username;
+        if (userProfile.role) role = userProfile.role;
+      } else if (profileErr) {
+        logger.error('Error fetching userProfile in session:', profileErr);
+      }
+    }
+
     return res.json({
       authenticated: true,
-      username: session.username,
-      role: session.role
+      username: username || session.email,
+      role: role,
+      tenantId,
+      platformAccessLevel
     });
   });
 
@@ -134,13 +163,12 @@ module.exports = function mountApiRoutes(app) {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const token = createAuthToken(username, authResult.role);
-    setAuthCookie(req, res, token);
+    setAuthCookie(req, res, authResult.accessToken);
 
     logger.info('AUTH_LOGIN_SUCCESS', { userId: username, role: authResult.role });
     return res.json({
       success: true,
-      username,
+      username: authResult.username,
       role: authResult.role
     });
   });

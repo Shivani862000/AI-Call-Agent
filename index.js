@@ -91,7 +91,7 @@ app.use((req, res, next) => {
 // Phase 1 RBAC: agents can work with patient records, schedules, and read-only
 // call history. Configuration, feedback, real calls, and destructive actions
 // remain admin-only.
-const requireAdminRole = requireRole('ADMIN');
+const requireAdminRole = requireRole('ADMIN', 'WEBMASTER', 'SUPPORT_TEAM');
 app.use((req, res, next) => {
   if (isAdminOnlyRequest(req)) {
     return requireAdminRole(req, res, next);
@@ -113,8 +113,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Create Server
 const server = http.createServer(app);
 
+const { createWebmasterRouter } = require('./routes/webmaster/index');
+const auth = require('./src/auth');
+
 // Mount Application Routes
 mountApiRoutes(app);
+app.use('/api/webmaster', createWebmasterRouter({ authorization: auth }));
 
 // Error Handling
 app.use((req, res, next) => {

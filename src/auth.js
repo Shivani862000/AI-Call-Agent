@@ -20,9 +20,9 @@ const PROTECTED_HTML_PATHS = new Set([
   '/reports.html'
 ]);
 
-const VALID_ROLES = new Set(['ADMIN', 'AGENT']);
+const VALID_ROLES = new Set(['ADMIN', 'AGENT', 'WEBMASTER', 'CLIENT_ADMIN', 'SUPPORT_TEAM']);
 const ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || 'admin').trim();
-const AUTH_COOKIE_NAME = 'feedback_admin_session';
+const AUTH_COOKIE_NAME = 'sb-access-token';
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const AUTH_CLOCK_SKEW_MS = 60 * 1000;
 const CONFIGURED_AUTH_SIGNING_SECRET = String(process.env.AUTH_SIGNING_SECRET || '').trim();
@@ -147,50 +147,30 @@ function readAuthSession(req) {
     return null;
   }
 
-  const tokenParts = token.split('.');
-  if (tokenParts.length !== 2) {
-    return null;
-  }
-
-  const [payload, signature] = tokenParts;
-  if (!/^[A-Za-z0-9_-]+$/.test(payload) || !/^[A-Za-z0-9_-]+$/.test(signature)) {
-    return null;
-  }
-
-  const suppliedSignature = Buffer.from(signature, 'base64url');
-  const expectedSignature = signAuthValue(payload);
-  if (
-    suppliedSignature.length !== expectedSignature.length
-    || !crypto.timingSafeEqual(suppliedSignature, expectedSignature)
-  ) {
-    return null;
-  }
-
   try {
-    const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    const now = Date.now();
-    const role = normalizeRole(session?.role);
-    const username = String(session?.username || '').trim();
-    const issuedAt = Number(session?.issuedAt);
-    const expiresAt = Number(session?.exp);
-    const validLifetime = expiresAt > issuedAt && expiresAt - issuedAt <= AUTH_SESSION_TTL_MS;
-
-    if (
-      session?.version !== 1
-      || !username
-      || username.length > 100
-      || !role
-      || !Number.isFinite(issuedAt)
-      || !Number.isFinite(expiresAt)
-      || issuedAt > now + AUTH_CLOCK_SKEW_MS
-      || expiresAt <= now
-      || !validLifetime
-      || !/^[A-Za-z0-9_-]{20,}$/.test(String(session?.nonce || ''))
-    ) {
+    const tokenParts = token.split('.');
+    if (tokenParts.length !== 3) {
       return null;
     }
 
-    return { username, role, issuedAt, exp: expiresAt };
+    const payload = tokenParts[1];
+    const base64Url = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = Buffer.from(base64Url, 'base64').toString('utf8');
+    const session = JSON.parse(jsonPayload);
+    
+    if (session.exp && session.exp < Math.floor(Date.now() / 1000)) {
+      return null;
+    }
+
+    // Attempt to parse out username and role. Note that standard Supabase 
+    // doesn't have username, but we can default to email.
+    return { 
+      id: session.sub,
+      role: normalizeRole(session.user_role || session.app_metadata?.role || session.user_metadata?.role) || 'AGENT',
+      username: session.email || session.sub,
+      tenantId: session.app_metadata?.tenant_id,
+      exp: session.exp
+    };
   } catch (error) {
     return null;
   }
@@ -324,38 +304,71 @@ function requireRole(...allowedRoles) {
   };
 }
 
-async function verifyCredentials(username, password) {
-  const normalizedUsername = String(username || '').trim();
-  if (!normalizedUsername || !password) {
+async function verifyCredentials(login, password) {
+  const normalizedLogin = String(login || '').trim();
+  if (!normalizedLogin || !password) {
     return { success: false };
   }
 
-  const supabaseAdmin = require('./supabase');
-  const bcrypt = require('bcrypt');
+  const { createClient } = require('@supabase/supabase-js');
+  const freshSupabaseAdmin = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  });
 
   try {
-    // 1. Fetch user from custom users table
-    const { data: user, error } = await supabaseAdmin
+    let email = normalizedLogin;
+    if (!email.includes('@')) {
+      const { data: userRow, error: uErr } = await freshSupabaseAdmin
+        .from('users')
+        .select('email')
+        .eq('username', normalizedLogin)
+        .single();
+      if (uErr) {
+        console.error('[AUTH DEBUG] Error fetching email for username:', normalizedLogin, uErr.message);
+      } else if (userRow && userRow.email) {
+        email = userRow.email;
+        console.log('[AUTH DEBUG] Resolved username to email:', email);
+      } else {
+        console.log('[AUTH DEBUG] Username not found in public.users:', normalizedLogin);
+      }
+    }
+
+    const loginClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false }
+    });
+
+    const { data, error } = await loginClient.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (error || !data.user) {
+      console.error('[AUTH] Supabase signIn failed:', error?.message);
+      return { success: false };
+    }
+
+    const { data: userProfile, error: profileErr } = await freshSupabaseAdmin
       .from('users')
-      .select('username, password_hash, role')
-      .eq('username', normalizedUsername)
+      .select('username, role, tenant_id, platform_access_level')
+      .eq('id', data.user.id)
       .single();
 
-    if (error || !user) {
-      console.error('[AUTH] User not found or query failed:', error?.message || 'Unknown error');
-      return { success: false };
+    if (profileErr) {
+      console.error('[AUTH DEBUG] Error fetching userProfile for id', data.user.id, profileErr.message);
+    } else {
+      console.log('[AUTH DEBUG] Fetched userProfile:', userProfile);
     }
 
-    // 2. Verify password with bcrypt
-    const isValid = await bcrypt.compare(password, user.password_hash);
-    
-    if (!isValid) {
-      console.error('[AUTH] Invalid password for user:', normalizedUsername);
-      return { success: false };
-    }
-
-    const role = normalizeRole(user.role) || 'AGENT';
-    return { success: true, username: user.username, role };
+    return {
+      success: true,
+      username: userProfile?.username || email,
+      role: userProfile?.role || 'AGENT',
+      tenantId: userProfile?.tenant_id,
+      platformAccessLevel: userProfile?.platform_access_level,
+      accessToken: data.session.access_token,
+      refreshToken: data.session.refresh_token,
+      expiresAt: data.session.expires_at
+    };
   } catch (error) {
     console.error('[AUTH ERROR]', error);
     return { success: false };
@@ -405,5 +418,7 @@ module.exports = {
   basicAuth,
   verifyCredentials,
   createMediaToken,
-  validateMediaToken
+  validateMediaToken,
+  requireWebmaster: requireRole('WEBMASTER', 'SUPPORT_TEAM', 'ADMIN'),
+  requireOwner: requireRole('WEBMASTER')
 };
