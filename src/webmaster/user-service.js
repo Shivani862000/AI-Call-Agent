@@ -89,7 +89,8 @@ function createUserService({ supabase, auditService, passwordPolicy = async () =
       const { data: authUser, error: aErr } = await supabase.auth.admin.createUser({
         email: input.email.trim().toLowerCase(),
         password: input.password,
-        email_confirm: true
+        email_confirm: true,
+        user_metadata: { role: role }
       });
       if (aErr) throw problem(409, 'USER_IDENTITY_CONFLICT', 'Email is already used', duplicateIdentityFieldErrors(aErr));
 
@@ -133,8 +134,12 @@ function createUserService({ supabase, auditService, passwordPolicy = async () =
     }
     
     // Auth sync
-    if (patch.email) {
-       await supabase.auth.admin.updateUserById(filter.id, { email: set.email });
+    const authUpdatePayload = {};
+    if (patch.email) authUpdatePayload.email = set.email;
+    if (patch.role != null) authUpdatePayload.user_metadata = { role: set.role };
+    
+    if (Object.keys(authUpdatePayload).length > 0) {
+       await supabase.auth.admin.updateUserById(filter.id, authUpdatePayload);
     }
 
     const { data: user, error } = await supabase.from('users').update(set).match(filter).select().maybeSingle();
