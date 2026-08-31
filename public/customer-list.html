@@ -2,6 +2,12 @@
 <html lang="en">
 
 <head>
+  <script>
+    if (localStorage.getItem('userRole') === 'AGENT' || localStorage.getItem('userRole') === 'CLIENT_AGENT') {
+      document.documentElement.classList.add('role-agent');
+    }
+  </script>
+
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Customer Directory - Path Lab</title>
@@ -55,16 +61,14 @@
           </div>
         </div>
 
-        <nav class="nav-list">
+        <nav class="nav-list" aria-label="Primary navigation">
           <a href="/admin.html" class="nav-link">Overview</a>
           <a href="/customer-list.html" class="nav-link active">Customer List</a>
           <a href="/customers.html" class="nav-link">Outbound Calls</a>
-          <a href="/feedback.html" class="nav-link">Feedback</a>
-          <div style="margin: 20px 0 8px; padding: 0 16px; font-size: 11px; font-weight: 700; color: #52606d; text-transform: uppercase; letter-spacing: 0.5px;">SETTINGS</div>
-          <a href="/support-tickets.html" class="nav-link">Support Tickets</a>
-          <a href="/users.html" class="nav-link">Users</a>
-
-          <a href="/support-tickets.html" class="nav-link">Support Tickets</a>
+          <a href="/feedback.html" class="nav-link admin-only-control">Feedback</a>
+          <div class="nav-group-label admin-only-control" style="margin: 20px 0 8px; padding: 0 16px; font-size: 11px; font-weight: 700; color: #52606d; text-transform: uppercase; letter-spacing: 0.5px;">SETTINGS</div>
+          <a href="/support-tickets.html" class="nav-link admin-only-control">Support Tickets</a>
+          <a href="/users.html" class="nav-link admin-only-control">Users</a>
         </nav>
       </div>
     </aside>
@@ -184,13 +188,10 @@
   <!-- Mobile Footer Navigation -->
   <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
     <a href="/admin.html" class="mobile-dock-link">Overview</a>
-    <a href="/customer-list.html" class="mobile-dock-link active">Customers</a>
-    <a href="/customers.html" class="mobile-dock-link">Calls</a>
-    <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
-          <div style="margin: 20px 0 8px; padding: 0 16px; font-size: 11px; font-weight: 700; color: #52606d; text-transform: uppercase; letter-spacing: 0.5px;">SETTINGS</div>
-          <a href="/support-tickets.html" class="nav-link">Support Tickets</a>
-          <a href="/users.html" class="nav-link">Users</a>
-
+    <a href="/customers.html" class="mobile-dock-link">Outbound</a>
+    <a href="/feedback.html" class="mobile-dock-link admin-only-control">Feedback</a>
+    <a href="/support-tickets.html" class="mobile-dock-link admin-only-control">Support</a>
+    <a href="/users.html" class="mobile-dock-link admin-only-control">Users</a>
   </nav>
 
   <!-- Bulk Import Modal -->

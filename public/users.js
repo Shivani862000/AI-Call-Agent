@@ -362,7 +362,7 @@
   async function initialize() {
     try {
       const session = await window.AppShell.ensureAuthenticatedSession();
-      if (session.role !== 'ADMIN') {
+      if (!['ADMIN', 'CLIENT_ADMIN', 'WEBMASTER'].includes(session.role)) {
         window.location.replace('/admin.html');
         return;
       }

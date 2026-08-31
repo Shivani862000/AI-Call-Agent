@@ -39,11 +39,11 @@ body {
     linear-gradient(180deg, #f9fbff 0%, #f1f6ff 44%, #eef4ff 100%);
 }
 
-body.role-agent [href="/feedback.html"],
-body.role-agent [href="/reports.html"],
-body.role-agent [data-overview-filter="feedback"],
-body.role-agent .analysis-cta-button,
-body.role-agent .admin-only-control {
+.role-agent [href="/feedback.html"],
+.role-agent [href="/reports.html"],
+.role-agent [data-overview-filter="feedback"],
+.role-agent .analysis-cta-button,
+.role-agent .admin-only-control {
   display: none !important;
 }
 
@@ -479,11 +479,11 @@ body.poc-page .header-actions .button-link {
   margin-bottom: 20px;
 }
 
-body.role-agent .metric-card:nth-child(4) {
+.role-agent .metric-card:nth-child(4) {
   display: none !important;
 }
 
-body.role-agent .poc-metrics-grid {
+.role-agent .poc-metrics-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
 }
 

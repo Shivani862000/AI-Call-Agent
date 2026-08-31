@@ -53,8 +53,13 @@
 
   async function ensureAuthenticatedSession() {
     const session = await fetchJson('/api/auth/session');
-    if (session.role === 'AGENT') {
+    localStorage.setItem('userRole', session.role);
+    if (session.role === 'AGENT' || session.role === 'CLIENT_AGENT') {
       document.body.classList.add('role-agent');
+      document.documentElement.classList.add('role-agent');
+    } else {
+      document.body.classList.remove('role-agent');
+      document.documentElement.classList.remove('role-agent');
     }
     window.AppShell.session = session;
     return session;

@@ -2,6 +2,12 @@
 <html lang="en">
 
 <head>
+  <script>
+    if (localStorage.getItem('userRole') === 'AGENT' || localStorage.getItem('userRole') === 'CLIENT_AGENT') {
+      document.documentElement.classList.add('role-agent');
+    }
+  </script>
+
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Call Analysis</title>
