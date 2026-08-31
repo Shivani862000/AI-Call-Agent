@@ -123,12 +123,16 @@ test('a willing donor is asked to book a slot', () => {
   buildThreeMonthFollowupTurnInstruction('nahi', state, 'Apna Blood Centre', 'Rajesh');
 
   const offer = buildThreeMonthFollowupTurnInstruction('haan zaroor', state, 'Apna Blood Centre', 'Rajesh');
-  assert.match(offer, /slot book karna chahenge/);
+  assert.match(offer, /agli baar aane ka samay abhi bata sakte hain/);
   assert.equal(state.step, 'appointment');
 
-  const booked = buildThreeMonthFollowupTurnInstruction('haan, book kar dijiye', state, 'Apna Blood Centre', 'Rajesh');
-  assert.match(booked, /Hamari team aapko call karke slot confirm kar degi/);
+  const askWhen = buildThreeMonthFollowupTurnInstruction('haan', state, 'Apna Blood Centre', 'Rajesh');
+  assert.match(askWhen, /kis din aur kis samay aana chahenge/);
   assert.equal(state.redonationInterest, 'yes');
+
+  const noted = buildThreeMonthFollowupTurnInstruction('15 December ko shaam ko', state, 'Apna Blood Centre', 'Rajesh');
+  assert.match(noted, /humne note kar liya hai/);
+  assert.equal(state.intendedVisitNote, '15 December ko shaam ko');
   assert.equal(state.conversationState, 'COMPLETED');
 });
 
@@ -139,7 +143,7 @@ test('a donor who has already donated again is asked about the next one', () => 
   buildThreeMonthFollowupTurnInstruction('pichle mahine', state, 'Apna Blood Centre', 'Rajesh');
 
   const offer = buildThreeMonthFollowupTurnInstruction('Delhi mein', state, 'Apna Blood Centre', 'Rajesh');
-  assert.match(offer, /slot book karna chahenge/);
+  assert.match(offer, /agli baar aane ka samay abhi bata sakte hain/);
   assert.equal(state.reportedDonationDate, 'pichle mahine');
   assert.equal(state.reportedDonationPlace, 'Delhi mein');
 });
@@ -152,7 +156,7 @@ test('a donor who says they are not interested is not asked to book', () => {
   buildThreeMonthFollowupTurnInstruction('nahi', state, 'Apna Blood Centre', 'Rajesh');
 
   const declined = buildThreeMonthFollowupTurnInstruction('nahi, interested nahi', state, 'Apna Blood Centre', 'Rajesh');
-  assert.doesNotMatch(declined, /slot book karna chahenge/);
+  assert.doesNotMatch(declined, /agli baar aane ka samay/);
   assert.equal(state.redonationInterest, 'no');
   assert.equal(state.conversationState, 'COMPLETED');
 });
@@ -165,6 +169,14 @@ test('declining the slot does not erase a stated willingness to donate', () => {
 
   buildThreeMonthFollowupTurnInstruction('abhi nahi', state, 'Apna Blood Centre', 'Rajesh');
   assert.equal(state.redonationInterest, 'yes');
+});
+
+// The centre has no appointment system and nobody calls back, so promising
+// either would be a lie the donor acts on.
+test('no call promises a booking or a callback', () => {
+  for (const line of everySpokenLine()) {
+    assert.equal(/slot confirm|call karke|book ho gay|appointment confirm/i.test(line), false, `false promise in:\n${line}`);
+  }
 });
 
 test('a reported donation date and place are lifted out of the transcript', () => {

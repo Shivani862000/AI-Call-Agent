@@ -134,6 +134,21 @@ function isUncertainReply(text) {
     || /पता नहीं|शायद|देखते हैं|सोच/.test(text);
 }
 
+/**
+ * The centre takes walk-ins during opening hours and has no appointment system,
+ * so nobody calls the donor back and no slot is ever confirmed. The call
+ * records when the donor intends to come and says so plainly, rather than
+ * promising a confirmation that would never arrive.
+ */
+const VISIT_TIME_QUESTION = 'Aap kis din aur kis samay aana chahenge?';
+
+function captureIntendedVisit(customerReply, state, closing) {
+  state.intendedVisitNote = String(customerReply || '').trim().slice(0, 200);
+  return `Capture when the donor intends to visit and repeat it back once. Then say exactly: `
+    + `"Theek hai, humne note kar liya hai. Aapko alag se confirm karne ki zarurat nahi, `
+    + `aap us din subah 9 baje se shaam 5 baje ke beech aa sakte hain. ${closing}" Then end the call.`;
+}
+
 // ── Review Call turn instruction builder ───────────────────────────────────────
 
 function buildReviewCallTurnInstruction(customerReply, state, clientName, customerName) {
@@ -141,7 +156,7 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
   const address = name ? `${name} ji, ` : '';
   const closing = buildClosingLine(name);
   const redonationQuestion = `${describeEligibility(state.lastVisitDate)} aap dobara blood donate kar sakte hain. `
-    + 'Kya aap abhi se appointment ka slot book karna chahenge?';
+    + 'Kya aap agli baar aane ka samay abhi bata sakte hain?';
   const markCompletedAfterReply = () => {
     state.step = 'completed';
     state.conversationState = 'COMPLETED';
@@ -191,11 +206,12 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
   // The donor's answer to the appointment question. Recorded on the call by the
   // post-call analysis; the agent cannot confirm a slot itself.
   if (state.step === 'redonation') {
-    markCompletedAfterReply();
     if (isAffirmativeReply(customerReply)) {
       state.redonationInterest = 'yes';
-      return `The donor wants a slot. Say exactly: "Bahut achha. Hamari team aapko call karke slot confirm kar degi. ${closing}" Then end the call.`;
+      state.step = 'visit_time';
+      return `The donor wants to come in. Say exactly: "Bahut achha. ${VISIT_TIME_QUESTION}"`;
     }
+    markCompletedAfterReply();
     if (isUncertainReply(customerReply)) {
       state.redonationInterest = 'unclear';
       return `The donor is undecided. Say exactly: "Koi baat nahi, aap jab chahein hamse sampark kar sakte hain. ${closing}" Then end the call.`;
@@ -208,6 +224,11 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
     return `Acknowledge the donor's answer briefly without confirming any appointment. Then say exactly: "${closing}" Then end the call.`;
   }
 
+  if (state.step === 'visit_time') {
+    markCompletedAfterReply();
+    return captureIntendedVisit(customerReply, state, closing);
+  }
+
   markCompletedAfterReply();
   return `Say exactly: "${FINAL_CLOSING_LINE}" Then end the call.`;
 }
@@ -218,7 +239,7 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName
   const name = String(customerName || '').trim();
   const closing = buildClosingLine(name);
   const centre = clientName || 'Apna Blood Centre';
-  const slotQuestion = 'Kya aap abhi se appointment ka slot book karna chahenge?';
+  const slotQuestion = 'Kya aap agli baar aane ka samay abhi bata sakte hain?';
   const markCompletedAfterReply = () => {
     state.step = 'completed';
     state.conversationState = 'COMPLETED';
@@ -291,14 +312,15 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName
   }
 
   if (state.step === 'appointment') {
+    if (isAffirmativeReply(customerReply) && !isUncertainReply(customerReply)) {
+      state.redonationInterest = 'yes';
+      state.step = 'visit_time';
+      return `The donor wants to come in. Say exactly: "Bahut achha. ${VISIT_TIME_QUESTION}"`;
+    }
     markCompletedAfterReply();
     if (isUncertainReply(customerReply)) {
       state.redonationInterest = 'unclear';
       return `The donor is undecided. Say exactly: "Koi baat nahi, aap jab chahein hamse sampark kar sakte hain. ${closing}" Then end the call.`;
-    }
-    if (isAffirmativeReply(customerReply)) {
-      state.redonationInterest = 'yes';
-      return `The donor wants a slot. Say exactly: "Bahut achha. Hamari team aapko call karke slot confirm kar degi. ${closing}" Then end the call.`;
     }
     if (isNoReply(customerReply) || isNegativeOrBusyReply(customerReply)) {
       // A donor willing in principle but not ready to book is still a lead;
@@ -308,6 +330,11 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName
     }
     state.redonationInterest = state.redonationInterest || 'unclear';
     return `Acknowledge the answer briefly without confirming any appointment. Then say exactly: "${closing}" Then end the call.`;
+  }
+
+  if (state.step === 'visit_time') {
+    markCompletedAfterReply();
+    return captureIntendedVisit(customerReply, state, closing);
   }
 
   markCompletedAfterReply();

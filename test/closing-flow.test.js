@@ -50,10 +50,11 @@ test('review flow completes with the shared closing line', () => {
   const slotQuestion = buildReviewCallTurnInstruction('experience bahut achha tha', state);
   assert.equal(state.step, 'redonation');
   assert.equal(state.endCallAfterNextReply, false);
-  assert.match(slotQuestion, /slot book karna chahenge/i);
+  assert.match(slotQuestion, /agli baar aane ka samay abhi bata sakte hain/i);
   assert.equal(countClosingLines(slotQuestion), 0);
 
-  const closingInstruction = buildReviewCallTurnInstruction('haan, book kar dijiye', state);
+  buildReviewCallTurnInstruction('haan', state);
+  const closingInstruction = buildReviewCallTurnInstruction('5 tareekh ko', state);
   assert.equal(state.conversationState, 'COMPLETED');
   assert.equal(state.endCallAfterNextReply, true);
   assert.equal(state.redonationInterest, 'yes');
@@ -71,7 +72,7 @@ test('review flow asks for issue details before closing a negative experience', 
 
   const slotQuestion = buildReviewCallTurnInstruction('staff ka behaviour rude tha', state);
   assert.equal(state.step, 'redonation');
-  assert.match(slotQuestion, /slot book karna chahenge/i);
+  assert.match(slotQuestion, /agli baar aane ka samay abhi bata sakte hain/i);
 
   const closingInstruction = buildReviewCallTurnInstruction('nahi, abhi nahi', state);
   assert.equal(state.conversationState, 'COMPLETED');
@@ -103,9 +104,10 @@ test('three-month follow-up flow completes with the shared closing line', () => 
   const state = newConversationState();
   buildThreeMonthFollowupTurnInstruction('haan', state);
   buildThreeMonthFollowupTurnInstruction('nahi', state);
-  // A willing donor is now offered a slot before the call closes.
+  // A willing donor is now asked when they intend to come before the call ends.
   buildThreeMonthFollowupTurnInstruction('haan', state);
-  const closingInstruction = buildThreeMonthFollowupTurnInstruction('haan', state);
+  buildThreeMonthFollowupTurnInstruction('haan', state);
+  const closingInstruction = buildThreeMonthFollowupTurnInstruction('5 tareekh ko', state);
 
   assert.equal(state.conversationState, 'COMPLETED');
   assert.equal(state.endCallAfterNextReply, true);

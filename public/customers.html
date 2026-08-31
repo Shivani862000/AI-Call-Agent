@@ -396,6 +396,11 @@
         : '';
 
       if (interest === 'yes') {
+        // What the donor actually said beats the derived eligibility date: the
+        // centre books nothing, so their own words are what the team works from.
+        const stated = String(customer.intended_visit_note || '').trim();
+        if (stated) return `<span class="status-badge completed">${AppShell.escapeHtml(stated)}</span>`;
+
         // A date-only string; splitting avoids the timezone shift that parsing
         // it as a timestamp would cause.
         const raw = String(customer.next_appointment_date || '').slice(0, 10);

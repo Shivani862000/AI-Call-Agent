@@ -181,9 +181,47 @@ async function markSubmittedCallsWithoutMediaFailed() {
  * data in the clear, so recipients are an allow-list held in the database
  * rather than anything supplied at send time.
  */
+/**
+ * Donors who said on a call that they intend to come in.
+ *
+ * The centre has no appointment system, so this list is the only thing that
+ * tells anyone to expect them. Yesterday's calls, because the digest goes out
+ * each morning and a visit named on a call is usually days away.
+ */
+async function buildExpectedVisitors() {
+  return dbAll(
+    `SELECT p.first_name, p.last_name, c.intended_visit_note, c.redonation_note, cl.called_at
+       FROM calls cl
+       JOIN customers c ON c.id = cl.customer_id
+       JOIN patients p ON p.id = c.patient_id
+      WHERE cl.redonation_interest = 'yes'
+        AND cl.called_at >= now() - interval '1 day'
+      ORDER BY cl.called_at DESC
+      LIMIT 50`
+  ).catch(() => []);
+}
+
+function formatExpectedVisitors(rows) {
+  if (!rows.length) return 'Donors expecting to visit: none recorded in the last day';
+
+  const lines = rows.map((row) => {
+    const name = `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Unnamed patient';
+    // The donor's own words. They say "agle mahine ki 5 tareekh", not a date.
+    const when = String(row.intended_visit_note || row.redonation_note || '').trim();
+    return `- ${name}: ${when || 'said yes but gave no time'}`;
+  });
+
+  return [
+    `Donors expecting to visit (${rows.length}):`,
+    ...lines,
+    'No appointment is booked and nobody is calling them back. Expect them as walk-ins.'
+  ].join('\n');
+}
+
 async function buildDigestBody() {
   const digest = await buildOwnerDashboardData();
   const rupees = (value) => `Rs ${Number(value || 0).toFixed(0)}`;
+  const expectedVisitors = formatExpectedVisitors(await buildExpectedVisitors());
 
   const alerts = digest.alerts?.length
     ? `Priority alerts:\n- ${digest.alerts.map((item) => `${item.customer_name}: ${item.headline}`).join('\n- ')}`
@@ -197,6 +235,8 @@ async function buildDigestBody() {
     `Estimated staff saving: ${rupees(digest.roi_snapshot?.estimated_saving_vs_staff)}`,
     '',
     alerts,
+    '',
+    expectedVisitors,
     '',
     'This message contains patient information. Handle accordingly.'
   ].join('\n');
@@ -641,6 +681,7 @@ async function runSchedulerTick() {
 }
 
 module.exports = {
+  formatExpectedVisitors,
   markSubmittedCallsWithoutMediaFailed,
   buildDigestBody,
   digestIsDue,

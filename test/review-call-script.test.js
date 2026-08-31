@@ -45,6 +45,7 @@ function everySpokenLine() {
     buildReviewCallTurnInstruction('hmm', freshState(), 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('staff rude tha', { step: 'issue_detail' }, 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('haan', { step: 'redonation' }, 'Client', 'Ankita'),
+    buildReviewCallTurnInstruction('5 tareekh ko subah', { step: 'visit_time' }, 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('nahi', { step: 'redonation' }, 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('pata nahi', { step: 'redonation' }, 'Client', 'Ankita')
   ];
@@ -105,14 +106,16 @@ test('a named closing still triggers the auto hangup', () => {
 
 test('both the positive and the complaint path reach the closing', () => {
   const positive = verifiedState();
-  assert.match(buildReviewCallTurnInstruction('bahut achha tha', positive, 'Client', 'Ankita'), /slot book karna chahenge/);
-  assert.match(buildReviewCallTurnInstruction('haan', positive, 'Client', 'Ankita'), /Aapka din shubh ho/);
+  assert.match(buildReviewCallTurnInstruction('bahut achha tha', positive, 'Client', 'Ankita'), /agli baar aane ka samay abhi bata sakte hain/);
+  assert.match(buildReviewCallTurnInstruction('haan', positive, 'Client', 'Ankita'), /kis din aur kis samay aana chahenge/);
+  assert.match(buildReviewCallTurnInstruction('5 tareekh ko', positive, 'Client', 'Ankita'), /Aapka din shubh ho/);
+  assert.equal(positive.intendedVisitNote, '5 tareekh ko');
 
   const complaint = verifiedState();
   assert.match(buildReviewCallTurnInstruction('bahut bura tha', complaint, 'Client', 'Ankita'), /Kripya batayein aapko kya pareshani hui thi/);
   const afterIssue = buildReviewCallTurnInstruction('staff rude tha', complaint, 'Client', 'Ankita');
   assert.match(afterIssue, /sambandhit adhikari tak pahucha dungi/);
-  assert.match(afterIssue, /slot book karna chahenge/);
+  assert.match(afterIssue, /agli baar aane ka samay abhi bata sakte hain/);
   assert.match(buildReviewCallTurnInstruction('nahi', complaint, 'Client', 'Ankita'), /Aapka din shubh ho/);
 });
 
@@ -132,8 +135,50 @@ test('the slot answer is recorded as yes, no or unclear', () => {
 });
 
 // The agent has no calendar; promising a confirmed booking would be a lie.
-test('the agent never claims an appointment is confirmed', () => {
+// The centre has no appointment system and nobody calls back.
+test('the agent never claims an appointment is confirmed or promises a callback', () => {
   for (const line of everySpokenLine()) {
-    assert.equal(/slot confirm ho gaya|appointment confirm ho gay|book ho gaya/i.test(line), false, `false confirmation in:\n${line}`);
+    assert.equal(/slot confirm|call karke|book ho gaya|appointment confirm/i.test(line), false, `false promise in:\n${line}`);
   }
+});
+
+// The centre takes walk-ins and books nothing, so the useful outcome is when
+// the donor said they would come -- not a yes that nobody can act on.
+test('a willing donor is asked when they intend to visit, and it is kept', () => {
+  const state = { step: 'redonation', lastVisitDate: '2026-08-30' };
+
+  const askWhen = buildReviewCallTurnInstruction('haan', state, 'Client', 'Ankita');
+  assert.match(askWhen, /kis din aur kis samay aana chahenge/);
+  assert.equal(state.step, 'visit_time');
+  assert.equal(state.conversationCompleted, undefined);
+
+  const noted = buildReviewCallTurnInstruction('agle mahine ki 5 tareekh, subah 10 baje', state, 'Client', 'Ankita');
+  assert.equal(state.intendedVisitNote, 'agle mahine ki 5 tareekh, subah 10 baje');
+  assert.match(noted, /humne note kar liya hai/);
+  assert.match(noted, /alag se confirm karne ki zarurat nahi/);
+  assert.equal(state.conversationState, 'COMPLETED');
+});
+
+test('the intended visit is lifted out of the transcript', () => {
+  const { detectIntendedVisit } = require('../services/call-analysis');
+  assert.equal(detectIntendedVisit([
+    { role: 'AI', text: 'Bahut achha. Aap kis din aur kis samay aana chahenge?' },
+    { role: 'PATIENT', text: 'agle mahine ki 5 tareekh, subah 10 baje' }
+  ]), 'agle mahine ki 5 tareekh, subah 10 baje');
+  assert.equal(detectIntendedVisit([]), '');
+});
+
+test('the digest lists who to expect, and says nothing was booked', () => {
+  const { formatExpectedVisitors } = require('../src/scheduler');
+
+  assert.match(formatExpectedVisitors([]), /none recorded/);
+
+  const body = formatExpectedVisitors([
+    { first_name: 'Ankita', last_name: '', intended_visit_note: 'agle mahine ki 5 tareekh' },
+    { first_name: 'Sunita', last_name: 'Devi', intended_visit_note: '', redonation_note: 'haan zaroor' }
+  ]);
+  assert.match(body, /Donors expecting to visit \(2\)/);
+  assert.match(body, /- Ankita: agle mahine ki 5 tareekh/);
+  assert.match(body, /- Sunita Devi: haan zaroor/);
+  assert.match(body, /No appointment is booked and nobody is calling them back/);
 });

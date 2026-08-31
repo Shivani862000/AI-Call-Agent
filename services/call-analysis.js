@@ -330,6 +330,7 @@ function buildCallAnalysis(call = {}) {
   const quality = buildQuality(call, entities, metrics, summary);
   const redonation = detectRedonationInterest(turns);
   const reportedDonation = detectReportedDonation(turns);
+  const intendedVisit = detectIntendedVisit(turns);
   const timeline = buildTimeline(call, turns, Boolean(summary));
 
   return {
@@ -351,6 +352,7 @@ function buildCallAnalysis(call = {}) {
     redonation_note: redonation.note,
     reported_donation_date: reportedDonation.date || null,
     reported_donation_place: reportedDonation.place || null,
+    intended_visit_note: intendedVisit || null,
     transcript_turns: turns
   };
 }
@@ -365,8 +367,8 @@ function buildCallAnalysis(call = {}) {
  */
 function detectRedonationInterest(turns) {
   const answer = findPatientAfter(turns, [
-    /slot book karna chahenge/i,
-    /appointment ka slot/i,
+    /agli baar aane ka samay abhi bata sakte hain/i,
+    /kis din aur kis samay aana chahenge/i,
     /dobara blood donate kar sakte hain/i,
     // The follow-up call asks the same thing in its own words; both belong in
     // one working list, not two.
@@ -397,6 +399,17 @@ function detectReportedDonation(turns) {
   };
 }
 
+/**
+ * When the donor said they intend to visit.
+ *
+ * The centre has no appointment system, so this is the whole outcome of asking:
+ * nothing is booked, nobody calls back, and the team simply expects them.
+ */
+function detectIntendedVisit(turns) {
+  return String(findPatientAfter(turns, [/kis din aur kis samay aana chahenge/i]) || '')
+    .trim().slice(0, 200);
+}
+
 async function storeCallAnalysis({ dbRun, callId, analysis }) {
   await dbRun(
     `UPDATE calls
@@ -417,7 +430,8 @@ async function storeCallAnalysis({ dbRun, callId, analysis }) {
             redonation_interest = ?,
             redonation_note = ?,
             reported_donation_date = ?,
-            reported_donation_place = ?
+            reported_donation_place = ?,
+            intended_visit_note = ?
       WHERE id = ?`,
     [
       analysis.summary,
@@ -438,6 +452,7 @@ async function storeCallAnalysis({ dbRun, callId, analysis }) {
       analysis.redonation_note,
       analysis.reported_donation_date,
       analysis.reported_donation_place,
+      analysis.intended_visit_note,
       callId
     ]
   );
@@ -451,5 +466,6 @@ module.exports = {
   parseTranscriptTurns,
   detectRedonationInterest,
   detectReportedDonation,
+  detectIntendedVisit,
   storeCallAnalysis
 };
