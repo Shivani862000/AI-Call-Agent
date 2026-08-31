@@ -8,7 +8,7 @@
 const { CALL_TYPES, LIVE_MAX_RESPONSE_TOKENS } = require('./config');
 const { normalizeOutboundCallType, formatOutboundCallTypeLabel } = require('./helpers');
 const { FINAL_CLOSING_LINE, buildClosingLine } = require('../prompts/closing.ts');
-const { describeEligibility } = require('../prompts/review-calling.ts');
+const { describeEligibility, describeVisit } = require('../prompts/review-calling.ts');
 
 // ── Sentiment evaluation ───────────────────────────────────────────────────────
 
@@ -97,6 +97,19 @@ function isNoReply(text) {
     || /नहीं|नही/.test(text);
 }
 
+/**
+ * Someone saying they are not the person the call is for.
+ *
+ * "galat number" contains no "nahi" and no busy word, so neither existing
+ * classifier caught it and the call read a wrong number as a confirmed
+ * identity -- then told them this person had donated blood.
+ */
+function isWrongPersonReply(text) {
+  const normalized = normalizeHindiEnglishText(text);
+  return /(galat number|galat no|wrong number|wrong no|koi aur|kaun bol|kaun hai|aap kaun|main nahi hoon|main nahin hoon|yahan nahi|ghar par nahi|available nahi|aisa koi nahi|is naam ka koi|not here|not available|speaking to)/i.test(normalized)
+    || /गलत नंबर|कोई और|कौन बोल/.test(text);
+}
+
 function isPositiveExperienceReply(text) {
   const normalized = normalizeHindiEnglishText(text);
   return /(ach+h?a|ac+h?a|badhiya|badiya|good|great|fine|excellent|smooth|sahi|satisfied|positive|bahut achhi)/i.test(normalized)
@@ -137,7 +150,21 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
     state.endCallAfterNextReply = true;
   };
 
+  // The opening only asks who picked up. Nothing about the donation is said
+  // until they confirm, so a wrong number never learns that this person donated.
   if (state.step === 'intro') {
+    if (isWrongPersonReply(customerReply) || isNegativeOrBusyReply(customerReply) || isNoReply(customerReply)) {
+      markCompletedAfterReply();
+      // Deliberately the unnamed closing: saying "Dhanyavaad Ankita ji" to
+      // someone who just said they are not Ankita confirms whose number it is.
+      return `Wrong person, or the donor cannot talk. Say exactly: "Koi baat nahi. ${FINAL_CLOSING_LINE}" Then end the call. Do not mention the donation or the patient's name.`;
+    }
+
+    state.step = 'experience';
+    return `Identity confirmed. Say exactly: "Aapne ${describeVisit(state.lastVisitDate)} blood donate kiya tha, uske liye dhanyavaad. Aapka experience kaisa raha?"`;
+  }
+
+  if (state.step === 'experience') {
     if (isNegativeOrBusyReply(customerReply)) {
       markCompletedAfterReply();
       return `Donor wants to stop or is busy. Say exactly: "Koi baat nahi. ${closing}" Then end the call.`;
@@ -187,7 +214,10 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
 
 // ── Three Month Follow-up turn instruction builder ─────────────────────────────
 
-function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
+function buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName, customerName) {
+  const name = String(customerName || '').trim();
+  const closing = buildClosingLine(name);
+  const centre = clientName || 'Apna Blood Centre';
   const markCompletedAfterReply = () => {
     state.step = 'completed';
     state.conversationState = 'COMPLETED';
@@ -197,19 +227,22 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
   };
 
   if (state.step === 'intro') {
-    if (isNegativeOrBusyReply(customerReply) || isNoReply(customerReply)) {
+    if (isWrongPersonReply(customerReply) || isNegativeOrBusyReply(customerReply) || isNoReply(customerReply)) {
       markCompletedAfterReply();
-      return `Wrong person or donor declined. Say exactly: "Koi baat nahi sir. ${FINAL_CLOSING_LINE}" Then end the call.`;
+      // The unnamed closing: naming the donor to someone who just said they
+      // are not them confirms whose number this is.
+      return `Wrong person or donor declined. Say exactly: "Koi baat nahi. ${FINAL_CLOSING_LINE}" Then end the call. Do not mention the donation or the donor's name.`;
     }
 
     state.step = 'donated_again';
-    return 'Donor confirmed identity. Say exactly: "Aapne kuch mahine pehle blood donate kiya tha. Sir, blood donation ke 3 mahine poore ho gaye hain. Kya aapne uske baad dobara blood donate kiya hai?"';
+    return `Donor confirmed identity. Say exactly: "Aapne ${describeVisit(state.lastVisitDate)} blood donate kiya tha, uske liye dhanyavaad. Blood donation ke 3 mahine poore ho gaye hain. Kya aapne uske baad dobara blood donate kiya hai?"`;
   }
 
   if (state.step === 'donated_again') {
     if (isAffirmativeReply(customerReply)) {
       state.step = 'donation_date';
-      return 'Donor donated again. Say exactly: "Bahut achha sir. Kab donate kiya tha?"';
+      state.donatedAgain = true;
+      return 'Donor donated again. Say exactly: "Bahut achha. Kab donate kiya tha?"';
     }
 
     if (isNoReply(customerReply)) {
@@ -222,23 +255,34 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state) {
 
   if (state.step === 'donation_date') {
     state.step = 'donation_place';
+    state.reportedDonationDate = String(customerReply || '').trim().slice(0, 200);
     return 'Capture the donation date. Say exactly: "Kahan donate kiya tha?"';
   }
 
   if (state.step === 'donation_place') {
     markCompletedAfterReply();
-    return `Capture the donation place. Say exactly: "Bahut achha kaam kiya sir. ${FINAL_CLOSING_LINE}" Then end the call.`;
+    state.reportedDonationPlace = String(customerReply || '').trim().slice(0, 200);
+    return `Capture the donation place. Say exactly: "Bahut achha kaam kiya. ${closing}" Then end the call.`;
   }
 
   if (state.step === 'plan_to_donate') {
     markCompletedAfterReply();
     if (isAffirmativeReply(customerReply)) {
-      return `Say exactly: "Bahut achhi baat hai Sir. Aapka yogdaan kisi ki jaan bacha sakta hai. Yadi sambhav ho to nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain. ${FINAL_CLOSING_LINE}" Then end the call.`;
+      // Recorded in the same field the review call uses, so both call types
+      // land in one working list instead of two.
+      state.redonationInterest = 'yes';
+      return `Say exactly: "Bahut achhi baat hai. Aapka yogdaan kisi ki jaan bacha sakta hai. Yadi sambhav ho to nashta karne ke baad subah 9 baje se shaam 5 baje ke beech ${centre} aa sakte hain. ${closing}" Then end the call.`;
+    }
+    if (isUncertainReply(customerReply)) {
+      state.redonationInterest = 'unclear';
+      return `Say exactly: "Theek hai. Yadi sambhav ho to nashta karne ke baad subah 9 baje se shaam 5 baje ke beech ${centre} aa sakte hain. ${closing}" Then end the call.`;
     }
     if (isNoReply(customerReply) || isNegativeOrBusyReply(customerReply)) {
-      return `Say exactly: "Theek hai Sir. Yadi sambhav ho to nashta karne ke baad subah 9 baje se shaam 5 baje ke beech Apna Blood Centre aa sakte hain. ${FINAL_CLOSING_LINE}" Then end the call.`;
+      state.redonationInterest = 'no';
+      return `Say exactly: "Theek hai. Yadi sambhav ho to nashta karne ke baad subah 9 baje se shaam 5 baje ke beech ${centre} aa sakte hain. ${closing}" Then end the call.`;
     }
-    return `Acknowledge the donor's response briefly. Then say exactly: "${FINAL_CLOSING_LINE}" Then end the call.`;
+    state.redonationInterest = 'unclear';
+    return `Acknowledge the donor's response briefly. Then say exactly: "${closing}" Then end the call.`;
   }
 
   markCompletedAfterReply();
@@ -283,6 +327,7 @@ module.exports = {
   isPositiveExperienceReply,
   isNegativeExperienceReply,
   isUncertainReply,
+  isWrongPersonReply,
   buildReviewCallTurnInstruction,
   buildThreeMonthFollowupTurnInstruction,
   buildOutboundDemoTurnInstruction

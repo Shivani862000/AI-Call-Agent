@@ -329,6 +329,7 @@ function buildCallAnalysis(call = {}) {
   const metrics = buildMetrics(call, turns);
   const quality = buildQuality(call, entities, metrics, summary);
   const redonation = detectRedonationInterest(turns);
+  const reportedDonation = detectReportedDonation(turns);
   const timeline = buildTimeline(call, turns, Boolean(summary));
 
   return {
@@ -348,6 +349,8 @@ function buildCallAnalysis(call = {}) {
     quality_checks: quality.checks,
     redonation_interest: redonation.interest,
     redonation_note: redonation.note,
+    reported_donation_date: reportedDonation.date || null,
+    reported_donation_place: reportedDonation.place || null,
     transcript_turns: turns
   };
 }
@@ -364,7 +367,10 @@ function detectRedonationInterest(turns) {
   const answer = findPatientAfter(turns, [
     /slot book karna chahenge/i,
     /appointment ka slot/i,
-    /dobara blood donate kar sakte hain/i
+    /dobara blood donate kar sakte hain/i,
+    // The follow-up call asks the same thing in its own words; both belong in
+    // one working list, not two.
+    /bhavishya mein blood donate karne mein ruchi/i
   ]);
   if (!answer.trim()) return { interest: null, note: '' };
 
@@ -373,6 +379,22 @@ function detectRedonationInterest(turns) {
   if (isAffirmativeReply(answer)) return { interest: 'yes', note };
   if (isNoReply(answer) || isNegativeOrBusyReply(answer)) return { interest: 'no', note };
   return { interest: 'unclear', note };
+}
+
+/**
+ * When and where the donor says they last gave blood.
+ *
+ * The follow-up call asks both, and the answers used to live only in the
+ * transcript, so the record was never updated and the next call asked again.
+ * Kept as the donor's own words -- they answer "pichle mahine", not a date --
+ * for a human to reconcile.
+ */
+function detectReportedDonation(turns) {
+  const clean = (value) => String(value || '').trim().slice(0, 200);
+  return {
+    date: clean(findPatientAfter(turns, [/kab donate kiya tha/i])),
+    place: clean(findPatientAfter(turns, [/kahan donate kiya tha/i]))
+  };
 }
 
 async function storeCallAnalysis({ dbRun, callId, analysis }) {
@@ -393,7 +415,9 @@ async function storeCallAnalysis({ dbRun, callId, analysis }) {
             analysis_status = ?,
             analysis_completed_at = ?,
             redonation_interest = ?,
-            redonation_note = ?
+            redonation_note = ?,
+            reported_donation_date = ?,
+            reported_donation_place = ?
       WHERE id = ?`,
     [
       analysis.summary,
@@ -412,6 +436,8 @@ async function storeCallAnalysis({ dbRun, callId, analysis }) {
       new Date().toISOString(),
       analysis.redonation_interest,
       analysis.redonation_note,
+      analysis.reported_donation_date,
+      analysis.reported_donation_place,
       callId
     ]
   );
@@ -424,5 +450,6 @@ module.exports = {
   normalizeCallType,
   parseTranscriptTurns,
   detectRedonationInterest,
+  detectReportedDonation,
   storeCallAnalysis
 };

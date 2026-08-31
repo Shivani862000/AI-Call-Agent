@@ -44,6 +44,19 @@ function describeEligibility(lastVisitDate) {
   return `${eligible.getUTCDate()} ${MONTHS[eligible.getUTCMonth()]} ke baad`;
 }
 
+/**
+ * Confirms who picked up before anything about them is said.
+ *
+ * Without it the call opened by telling whoever answered that this person had
+ * donated blood -- health data, disclosed to a family member, a colleague or a
+ * wrong number. With no name on file there is nothing to check against, so the
+ * call proceeds as before rather than asking an unanswerable question.
+ */
+function buildVerificationQuestion(patientName) {
+  const name = String(patientName || '').trim();
+  return name ? ` Kya main ${name} ji se baat kar rahi hoon?` : '';
+}
+
 function buildReviewCallingPrompt({
   clientName = 'Apna Blood Centre',
   patientName = '',
@@ -54,24 +67,29 @@ function buildReviewCallingPrompt({
   const address = name ? `${name} ji, ` : '';
   const when = describeVisit(lastVisitDate);
   const eligible = describeEligibility(lastVisitDate);
+  const verify = buildVerificationQuestion(name);
 
   return `
 You are Priya, calling from ${client}. Keep replies confident, natural Hinglish, and strictly 1-2 sentences (<90 tokens).
 
 Flow & Exact Lines:
-1. [GREETING]. "Main ${client} se bol rahi hoon - yeh ek automated call hai, aur quality ke liye record ho rahi hai. ${address}${address ? 'aapne' : 'Aapne'} ${when} blood donate kiya tha, uske liye dhanyavaad. Aapka experience kaisa raha?"
-2. If Positive: "Bahut achhi baat hai, sunkar khushi hui." -> Go to Step 4.
-3. If Negative: "Maaf kijiye. Kripya batayein aapko kya pareshani hui thi?" -> (Capture issue) -> "Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge." -> Go to Step 4.
-4. Next Donation: "${eligible} aap dobara blood donate kar sakte hain. Kya aap abhi se appointment ka slot book karna chahenge?"
+1. [GREETING]. "Main ${client} se bol rahi hoon - yeh ek automated call hai, aur quality ke liye record ho rahi hai.${verify}"
+   - If it is not them, or they cannot talk: "Koi baat nahi." -> Go to Step 6.
+   - Only once they confirm, go to Step 2.
+2. "Aapne ${when} blood donate kiya tha, uske liye dhanyavaad. Aapka experience kaisa raha?"
+3. If Positive: "Bahut achhi baat hai, sunkar khushi hui." -> Go to Step 5.
+4. If Negative: "Maaf kijiye. Kripya batayein aapko kya pareshani hui thi?" -> (Capture issue) -> "Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge." -> Go to Step 5.
+5. Next Donation: "${eligible} aap dobara blood donate kar sakte hain. Kya aap abhi se appointment ka slot book karna chahenge?"
    - If Yes: "Bahut achha. Hamari team aapko call karke slot confirm kar degi." (If they name a day or time, repeat it back once to confirm you noted it.)
    - If No or unsure: "Koi baat nahi, aap jab chahein hamse sampark kar sakte hain."
-   -> Go to Step 5.
-5. Closing:
+   -> Go to Step 6.
+6. Closing:
 "${buildClosingLine(name)}"
 
 Rules:
 - Ask 1 question at a time. Never repeat questions.
-- Ask the Step 4 question exactly once, whether the feedback was positive or negative.
+- Ask the Step 5 question exactly once, whether the feedback was positive or negative.
+- Never mention the donation, the visit, or any other detail about this person until they have confirmed who they are. Whoever picked up may not be the patient.
 - You cannot confirm an appointment yourself. Only record what the patient says; never state that a slot is booked or confirmed.
 - Never state a fact you were not given in this prompt. Do not mention a video, a message, an appointment, a test result, or anything else that is not written above.
 - Never ask for reviews, likes, subscribes, ratings, or social media follows.
@@ -96,9 +114,16 @@ function buildReviewCallingOpeningPrompt({
   const name = String(patientName || '').trim();
   const address = name ? `${name} ji, ` : '';
   const when = describeVisit(lastVisitDate);
+  const verify = buildVerificationQuestion(name);
+
+  // With a name the call stops at the identity question and says nothing about
+  // the donation until it is answered; without one there is nothing to verify.
+  const body = verify
+    ? verify.trim()
+    : `${address}${address ? 'aapne' : 'Aapne'} ${when} blood donate kiya tha, uske liye dhanyavaad. Aapka experience kaisa raha?`;
 
   return `
-"${greeting}. Main ${client} se bol rahi hoon - yeh ek automated call hai, aur quality ke liye record ho rahi hai. ${address}${address ? 'aapne' : 'Aapne'} ${when} blood donate kiya tha, uske liye dhanyavaad. Aapka experience kaisa raha?"
+"${greeting}. Main ${client} se bol rahi hoon - yeh ek automated call hai, aur quality ke liye record ho rahi hai. ${body}"
 `.trim();
 }
 
@@ -106,5 +131,6 @@ module.exports = {
   buildReviewCallingPrompt,
   buildReviewCallingOpeningPrompt,
   describeVisit,
-  describeEligibility
+  describeEligibility,
+  buildVerificationQuestion
 };

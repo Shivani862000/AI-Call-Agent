@@ -46,6 +46,7 @@ test('review flow completes with the shared closing line', () => {
 
   // Positive feedback no longer ends the call: the donor is still asked about
   // booking a slot for their next eligible donation.
+  buildReviewCallTurnInstruction('haan ji, main hi bol raha hoon', state);
   const slotQuestion = buildReviewCallTurnInstruction('experience bahut achha tha', state);
   assert.equal(state.step, 'redonation');
   assert.equal(state.endCallAfterNextReply, false);
@@ -61,6 +62,7 @@ test('review flow completes with the shared closing line', () => {
 
 test('review flow asks for issue details before closing a negative experience', () => {
   const state = newConversationState();
+  buildReviewCallTurnInstruction('haan ji, main hi bol raha hoon', state);
   const issueInstruction = buildReviewCallTurnInstruction('experience kharab tha, dikkat hui', state);
 
   assert.equal(state.step, 'issue_detail');
@@ -80,6 +82,7 @@ test('review flow asks for issue details before closing a negative experience', 
 
 test('review flow does not interpret a positive yes response as a problem', () => {
   const state = newConversationState();
+  buildReviewCallTurnInstruction('haan ji, main hi bol raha hoon', state);
   const instruction = buildReviewCallTurnInstruction('haan ji, bahut achha tha', state);
 
   assert.equal(state.step, 'redonation');
@@ -88,6 +91,7 @@ test('review flow does not interpret a positive yes response as a problem', () =
 
 test('review flow recognizes badhiya as positive feedback', () => {
   const state = newConversationState();
+  buildReviewCallTurnInstruction('haan ji, main hi bol raha hoon', state);
   const instruction = buildReviewCallTurnInstruction('sab badhiya tha', state);
 
   assert.equal(state.step, 'redonation');
@@ -126,11 +130,13 @@ test('three-month follow-up no-donation flow waits for interest answer', () => {
 
   const closingInstruction = buildThreeMonthFollowupTurnInstruction('nahi, abhi interested nahi', state);
   assert.equal(state.conversationState, 'COMPLETED');
-  assert.match(closingInstruction, /Theek hai Sir/i);
+  assert.match(closingInstruction, /Theek hai\./i);
+  assert.equal(state.redonationInterest, 'no');
   assert.equal(countClosingLines(closingInstruction), 1);
 });
 
 test('auto-hangup recognizes the shared closing line', () => {
   assert.equal(shouldAutoHangupAfterAgentTurn(FINAL_CLOSING_LINE), true);
   assert.equal(shouldAutoHangupAfterAgentTurn('Dhanyavaad sir.'), false);
+  assert.equal(shouldAutoHangupAfterAgentTurn('Dhanyavaad Ankita ji. Aapka din shubh ho.'), true);
 });

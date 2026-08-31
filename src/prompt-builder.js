@@ -23,6 +23,17 @@ const { dbGet } = require('../db');
  * Written as {{client_name}}, {{patient_name}} and so on; anything unknown
  * resolves to an empty string rather than being left visible to the donor.
  */
+/**
+ * The city named in the follow-up call's opening. It was hardcoded as "Palwal"
+ * in a line that otherwise used the client name, so a second client would have
+ * announced the wrong city. Set CALL_PROMPT_CLIENT_CITY to '' to drop it.
+ */
+function promptClientCity() {
+  return process.env.CALL_PROMPT_CLIENT_CITY === undefined
+    ? 'Palwal'
+    : process.env.CALL_PROMPT_CLIENT_CITY;
+}
+
 function agentTemplateValues({ clientName, customerName, greeting, lastVisitDate }) {
   return {
     client_name: clientName,
@@ -63,7 +74,9 @@ function buildCallTypeSystemPrompt(callType, clientName, customerName, extraOpti
   if (normalizedCallType === CALL_TYPES.THREE_MONTH_FOLLOWUP) {
     return buildThreeMonthFollowupPrompt({
       clientName: promptClientName,
-      donorName: customerName || 'Donor'
+      clientCity: promptClientCity(),
+      donorName: customerName,
+      lastVisitDate: extraOptions.lastVisitDate
     }).replace(/\[GREETING\]/g, greeting);
   }
 
@@ -87,7 +100,8 @@ function buildCallTypeOpeningPrompt(callType, clientName, customerName, extraOpt
   if (normalizedCallType === CALL_TYPES.THREE_MONTH_FOLLOWUP) {
     return buildThreeMonthFollowupOpeningPrompt({
       clientName: promptClientName,
-      donorName: customerName || 'Donor',
+      clientCity: promptClientCity(),
+      donorName: customerName,
       greeting
     });
   }

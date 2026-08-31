@@ -14,7 +14,13 @@ const {
   shouldAutoHangupAfterAgentTurn
 } = require('../src/conversation-state');
 
-const freshState = () => ({ step: 'intro' });
+// 'intro' is now the identity check; the experience question comes after it.
+const freshState = () => ({ step: 'experience' });
+const verifiedState = () => {
+  const state = { step: 'intro' };
+  buildReviewCallTurnInstruction('haan ji', state, 'Client', 'Ankita');
+  return state;
+};
 
 /**
  * Everything the agent can be told to say on a review call.
@@ -31,6 +37,8 @@ function everySpokenLine() {
   return [
     spokenPartOnly(buildReviewCallingPrompt({ patientName: 'Ankita', lastVisitDate: '2026-08-30' })),
     buildReviewCallingOpeningPrompt({ patientName: 'Ankita', lastVisitDate: '2026-08-30' }),
+    buildReviewCallTurnInstruction('haan ji', { step: 'intro' }, 'Client', 'Ankita'),
+    buildReviewCallTurnInstruction('galat number', { step: 'intro' }, 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('bahut achha tha', freshState(), 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('bahut bura tha', freshState(), 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('abhi busy hoon', freshState(), 'Client', 'Ankita'),
@@ -96,11 +104,11 @@ test('a named closing still triggers the auto hangup', () => {
 });
 
 test('both the positive and the complaint path reach the closing', () => {
-  const positive = freshState();
+  const positive = verifiedState();
   assert.match(buildReviewCallTurnInstruction('bahut achha tha', positive, 'Client', 'Ankita'), /slot book karna chahenge/);
   assert.match(buildReviewCallTurnInstruction('haan', positive, 'Client', 'Ankita'), /Aapka din shubh ho/);
 
-  const complaint = freshState();
+  const complaint = verifiedState();
   assert.match(buildReviewCallTurnInstruction('bahut bura tha', complaint, 'Client', 'Ankita'), /Kripya batayein aapko kya pareshani hui thi/);
   const afterIssue = buildReviewCallTurnInstruction('staff rude tha', complaint, 'Client', 'Ankita');
   assert.match(afterIssue, /sambandhit adhikari tak pahucha dungi/);
