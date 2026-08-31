@@ -1,3 +1,12 @@
+// The same reply classifiers the live call used to decide what to say, so the
+// stored answer matches what the agent acted on during the conversation.
+const {
+  isAffirmativeReply,
+  isNoReply,
+  isNegativeOrBusyReply,
+  isUncertainReply
+} = require('../src/conversation-state');
+
 const CALL_TYPES = Object.freeze({
   REVIEW_CALL: 'REVIEW_CALL',
   THREE_MONTH_FOLLOWUP: 'THREE_MONTH_FOLLOWUP'
@@ -319,6 +328,7 @@ function buildCallAnalysis(call = {}) {
   const summary = buildSummary(callType, entities, String(call.outcome || '').toLowerCase());
   const metrics = buildMetrics(call, turns);
   const quality = buildQuality(call, entities, metrics, summary);
+  const redonation = detectRedonationInterest(turns);
   const timeline = buildTimeline(call, turns, Boolean(summary));
 
   return {
@@ -336,8 +346,33 @@ function buildCallAnalysis(call = {}) {
     metrics,
     quality_score: quality.score,
     quality_checks: quality.checks,
+    redonation_interest: redonation.interest,
+    redonation_note: redonation.note,
     transcript_turns: turns
   };
+}
+
+/**
+ * What the donor said when asked whether to book a slot for their next
+ * eligible donation.
+ *
+ * Every review call now ends with that question, and the answer is the reason
+ * the call was worth placing, so it is lifted out of the transcript and stored
+ * on the call rather than left for someone to read back.
+ */
+function detectRedonationInterest(turns) {
+  const answer = findPatientAfter(turns, [
+    /slot book karna chahenge/i,
+    /appointment ka slot/i,
+    /dobara blood donate kar sakte hain/i
+  ]);
+  if (!answer.trim()) return { interest: null, note: '' };
+
+  const note = answer.trim().slice(0, 300);
+  if (isUncertainReply(answer)) return { interest: 'unclear', note };
+  if (isAffirmativeReply(answer)) return { interest: 'yes', note };
+  if (isNoReply(answer) || isNegativeOrBusyReply(answer)) return { interest: 'no', note };
+  return { interest: 'unclear', note };
 }
 
 async function storeCallAnalysis({ dbRun, callId, analysis }) {
@@ -356,7 +391,9 @@ async function storeCallAnalysis({ dbRun, callId, analysis }) {
             extracted_entities = ?,
             analysis_json = ?,
             analysis_status = ?,
-            analysis_completed_at = ?
+            analysis_completed_at = ?,
+            redonation_interest = ?,
+            redonation_note = ?
       WHERE id = ?`,
     [
       analysis.summary,
@@ -373,6 +410,8 @@ async function storeCallAnalysis({ dbRun, callId, analysis }) {
       JSON.stringify(analysis),
       'completed',
       new Date().toISOString(),
+      analysis.redonation_interest,
+      analysis.redonation_note,
       callId
     ]
   );
@@ -384,5 +423,6 @@ module.exports = {
   formatCallType,
   normalizeCallType,
   parseTranscriptTurns,
+  detectRedonationInterest,
   storeCallAnalysis
 };

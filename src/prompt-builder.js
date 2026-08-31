@@ -25,7 +25,7 @@ function buildCallTypeSystemPrompt(callType, clientName, customerName, extraOpti
 
   return buildReviewCallingPrompt({
     clientName: promptClientName,
-    videoSent: extraOptions.videoSent,
+    patientName: customerName,
     lastVisitDate: extraOptions.lastVisitDate
   }).replace(/\[GREETING\]/g, greeting);
 }
@@ -45,6 +45,7 @@ function buildCallTypeOpeningPrompt(callType, clientName, customerName, extraOpt
   return buildReviewCallingOpeningPrompt({
     clientName: promptClientName,
     greeting,
+    patientName: customerName,
     lastVisitDate: extraOptions.lastVisitDate
   });
 }

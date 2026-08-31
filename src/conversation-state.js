@@ -7,7 +7,8 @@
 
 const { CALL_TYPES, LIVE_MAX_RESPONSE_TOKENS } = require('./config');
 const { normalizeOutboundCallType, formatOutboundCallTypeLabel } = require('./helpers');
-const { FINAL_CLOSING_LINE } = require('../prompts/closing.ts');
+const { FINAL_CLOSING_LINE, buildClosingLine } = require('../prompts/closing.ts');
+const { describeEligibility } = require('../prompts/review-calling.ts');
 
 // ── Sentiment evaluation ───────────────────────────────────────────────────────
 
@@ -108,9 +109,26 @@ function isNegativeExperienceReply(text) {
     || /खराब|बुरा|बेकार|समस्या|दिक्कत|परेशानी|शिकायत/.test(text);
 }
 
+/**
+ * "pata nahi" and "dekhta hoon" contain "nahi", so isNoReply reads them as a
+ * firm decline. On the appointment question that would report a donor who was
+ * merely undecided to the team as having refused, so uncertainty is checked
+ * first and recorded as its own answer.
+ */
+function isUncertainReply(text) {
+  const normalized = normalizeHindiEnglishText(text);
+  return /(pata nahi|nahi pata|dekhte hain|dekhta hoon|dekhti hoon|dekh kar|shayad|maybe|not sure|pakka nahi|confirm nahi|baad mein bat|soch kar|sochta hoon|sochti hoon)/i.test(normalized)
+    || /पता नहीं|शायद|देखते हैं|सोच/.test(text);
+}
+
 // ── Review Call turn instruction builder ───────────────────────────────────────
 
-function buildReviewCallTurnInstruction(customerReply, state) {
+function buildReviewCallTurnInstruction(customerReply, state, clientName, customerName) {
+  const name = String(customerName || '').trim();
+  const address = name ? `${name} ji, ` : '';
+  const closing = buildClosingLine(name);
+  const redonationQuestion = `${describeEligibility(state.lastVisitDate)} aap dobara blood donate kar sakte hain. `
+    + 'Kya aap abhi se appointment ka slot book karna chahenge?';
   const markCompletedAfterReply = () => {
     state.step = 'completed';
     state.conversationState = 'COMPLETED';
@@ -122,25 +140,45 @@ function buildReviewCallTurnInstruction(customerReply, state) {
   if (state.step === 'intro') {
     if (isNegativeOrBusyReply(customerReply)) {
       markCompletedAfterReply();
-      return `Donor wants to stop or is busy. Say exactly: "Koi baat nahi sir. ${FINAL_CLOSING_LINE}" Then end the call.`;
+      return `Donor wants to stop or is busy. Say exactly: "Koi baat nahi. ${closing}" Then end the call.`;
     }
 
     if (isNegativeExperienceReply(customerReply)) {
       state.step = 'issue_detail';
-      return 'The donor reported a negative experience. Say exactly: "Maaf kijiye Sir. Kripya batayein aapko kya pareshani hui thi?"';
+      return 'The donor reported a negative experience. Say exactly: "Maaf kijiye. Kripya batayein aapko kya pareshani hui thi?"';
     }
 
     if (isPositiveExperienceReply(customerReply)) {
-      markCompletedAfterReply();
-      return `Acknowledge the positive experience briefly. Then say exactly: "Hamne aapke registered number par ek video bheja hai, usko Like karein aur channel ko Subscribe karein. Hamare Facebook aur Google page par review zarur karein. ${FINAL_CLOSING_LINE}" Then end the call.`;
+      state.step = 'redonation';
+      return `Say exactly: "Bahut achhi baat hai, sunkar khushi hui. ${redonationQuestion}"`;
     }
 
-    return 'The experience answer was unclear. Say exactly: "Sir, blood donate karne ka aapka experience achha tha ya koi pareshani hui thi?"';
+    return `The experience answer was unclear. Say exactly: "${address}blood donate karne ka aapka experience achha tha ya koi pareshani hui thi?"`;
   }
 
   if (state.step === 'issue_detail') {
+    state.step = 'redonation';
+    return `Capture the issue. Then say exactly: "Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge. ${redonationQuestion}"`;
+  }
+
+  // The donor's answer to the appointment question. Recorded on the call by the
+  // post-call analysis; the agent cannot confirm a slot itself.
+  if (state.step === 'redonation') {
     markCompletedAfterReply();
-    return `Capture the issue. Then say exactly: "Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge. Hamne aapke registered number par ek video bheja hai, usko Like karein aur channel ko Subscribe karein. Hamare Facebook aur Google page par review zarur karein. ${FINAL_CLOSING_LINE}" Then end the call.`;
+    if (isAffirmativeReply(customerReply)) {
+      state.redonationInterest = 'yes';
+      return `The donor wants a slot. Say exactly: "Bahut achha. Hamari team aapko call karke slot confirm kar degi. ${closing}" Then end the call.`;
+    }
+    if (isUncertainReply(customerReply)) {
+      state.redonationInterest = 'unclear';
+      return `The donor is undecided. Say exactly: "Koi baat nahi, aap jab chahein hamse sampark kar sakte hain. ${closing}" Then end the call.`;
+    }
+    if (isNoReply(customerReply) || isNegativeOrBusyReply(customerReply)) {
+      state.redonationInterest = 'no';
+      return `The donor declined a slot. Say exactly: "Koi baat nahi, aap jab chahein hamse sampark kar sakte hain. ${closing}" Then end the call.`;
+    }
+    state.redonationInterest = 'unclear';
+    return `Acknowledge the donor's answer briefly without confirming any appointment. Then say exactly: "${closing}" Then end the call.`;
   }
 
   markCompletedAfterReply();
@@ -244,6 +282,7 @@ module.exports = {
   isNoReply,
   isPositiveExperienceReply,
   isNegativeExperienceReply,
+  isUncertainReply,
   buildReviewCallTurnInstruction,
   buildThreeMonthFollowupTurnInstruction,
   buildOutboundDemoTurnInstruction

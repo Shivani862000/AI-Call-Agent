@@ -342,6 +342,9 @@ module.exports = function setupWebSocketBridge(server) {
     const transcript = [];
     const outboundDemoState = {
       step: 'intro',
+      // Set from the hydrated session so the next-donation date is the donor's,
+      // not a generic "teen mahine baad".
+      get lastVisitDate() { return session.lastVisitDate; },
       conversationState: 'IN_PROGRESS',
       conversationCompleted: false,
       endCall: false,
@@ -359,9 +362,13 @@ module.exports = function setupWebSocketBridge(server) {
     const isOutboundSession = () => normalizeCallDirection(session.callDirection) === 'outbound';
     const getSessionClientName = () => session.clientName || CLIENT_NAME;
     const getSessionCustomerName = () => session.customerName || process.env.CUSTOMER_NAME || 'sir/maam';
+    // The prompts address the patient by name, so an unknown name must stay
+    // empty rather than becoming the literal words "sir/maam".
+    const getSessionPatientName = () => String(session.customerName || '').trim();
+    const getPromptOptions = () => ({ lastVisitDate: session.lastVisitDate });
     const getSessionCallType = () => normalizeOutboundCallType(session.callType);
-    const getSystemPrompt = () => buildAgentSystemPrompt(getSessionClientName(), getSessionCustomerName(), null, getSessionCallType());
-    const getOpeningPrompt = () => buildOpeningPrompt(getSessionClientName(), getSessionCustomerName(), null, getSessionCallType());
+    const getSystemPrompt = () => buildAgentSystemPrompt(getSessionClientName(), getSessionPatientName(), null, getSessionCallType(), getPromptOptions());
+    const getOpeningPrompt = () => buildOpeningPrompt(getSessionClientName(), getSessionPatientName(), null, getSessionCallType(), getPromptOptions());
     const openingInstruction = `System Instruction: This is an active voice call over WebSockets. Please start the conversation immediately by speaking this opening text naturally:\n"${getOpeningPrompt()}"`;
     const useGemini = () => AI_PROVIDER === 'gemini';
     const useGeminiLive = () => AI_PROVIDER === 'gemini-live';
@@ -1017,7 +1024,7 @@ module.exports = function setupWebSocketBridge(server) {
           merged,
           outboundDemoState,
           getSessionClientName(),
-          getSessionCustomerName(),
+          getSessionPatientName(),
           getSessionCallType()
         )
         : `Caller said: ${merged}\nDo not greet again. Continue this inbound support call naturally in Hindi/Hinglish and help with the caller's request.`;

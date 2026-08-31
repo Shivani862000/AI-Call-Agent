@@ -1,23 +1,84 @@
-const { FINAL_CLOSING_LINE } = require('./closing.ts');
+const { buildClosingLine } = require('./closing.ts');
 
-function buildReviewCallingPrompt({ clientName = 'Apna Blood Centre' } = {}) {
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+
+/**
+ * How the agent should refer to when the donation happened.
+ *
+ * The script used to hardcode "kal" (yesterday) for everyone, so a donor from
+ * three weeks ago was told they had donated yesterday. lastVisitDate was
+ * already being passed in and silently dropped.
+ */
+function describeVisit(lastVisitDate, now = new Date()) {
+  const raw = String(lastVisitDate || '').trim();
+  if (!raw) return 'haal hi mein';
+  // Anything that isn't an ISO date is already a phrase ("kal"); pass it through.
+  if (!/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw;
+
+  const [year, month, day] = raw.slice(0, 10).split('-').map(Number);
+  const days = Math.round(
+    (Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(year, month - 1, day)) / 86400000
+  );
+
+  if (days === 0) return 'aaj';
+  if (days === 1) return 'kal';
+  // A future date means bad data; stay vague rather than assert something wrong.
+  if (days < 0) return 'haal hi mein';
+  return `${day} ${MONTHS[month - 1]} ko`;
+}
+
+/**
+ * When the donor becomes eligible again. Whole blood donation has a 90-day
+ * deferral, so the review call (placed the day after donating) can only invite
+ * them back for a future date, never today.
+ */
+const DONATION_DEFERRAL_DAYS = 90;
+
+function describeEligibility(lastVisitDate) {
+  const raw = String(lastVisitDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}/.test(raw)) return 'teen mahine baad';
+
+  const [year, month, day] = raw.slice(0, 10).split('-').map(Number);
+  const eligible = new Date(Date.UTC(year, month - 1, day + DONATION_DEFERRAL_DAYS));
+  return `${eligible.getUTCDate()} ${MONTHS[eligible.getUTCMonth()]} ke baad`;
+}
+
+function buildReviewCallingPrompt({
+  clientName = 'Apna Blood Centre',
+  patientName = '',
+  lastVisitDate = ''
+} = {}) {
   const client = clientName || 'Apna Blood Centre';
+  const name = String(patientName || '').trim();
+  const address = name ? `${name} ji, ` : '';
+  const when = describeVisit(lastVisitDate);
+  const eligible = describeEligibility(lastVisitDate);
+
   return `
 You are Priya, calling from ${client}. Keep replies confident, natural Hinglish, and strictly 1-2 sentences (<90 tokens).
 
 Flow & Exact Lines:
-1. [GREETING]."Main Apna Blood Centre se baat kar rahi hoon. Aapne kal blood donate kiya tha. Iske liye aapka dhanyavaad.Blood donate karne ka aapka experience kaisa raha?"
-2. If Positive: "Bahut achhi baat hai." -> Go to Step 4.
-3. If Negative: "Maaf kijiye. Kripya batayein aapko kya pareshani hui thi?" -> (Capture issue) -> "Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge."
-4. Social Media: "Hamne aapke registered number par ek video bheja hai,usko like aur subscribe karein.
-Hamare Facebook aur Google page Ko review zarur karein."
+1. [GREETING]. "Main ${client} se bol rahi hoon - yeh ek automated call hai, aur quality ke liye record ho rahi hai. ${address}${address ? 'aapne' : 'Aapne'} ${when} blood donate kiya tha, uske liye dhanyavaad. Aapka experience kaisa raha?"
+2. If Positive: "Bahut achhi baat hai, sunkar khushi hui." -> Go to Step 4.
+3. If Negative: "Maaf kijiye. Kripya batayein aapko kya pareshani hui thi?" -> (Capture issue) -> "Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge." -> Go to Step 4.
+4. Next Donation: "${eligible} aap dobara blood donate kar sakte hain. Kya aap abhi se appointment ka slot book karna chahenge?"
+   - If Yes: "Bahut achha. Hamari team aapko call karke slot confirm kar degi." (If they name a day or time, repeat it back once to confirm you noted it.)
+   - If No or unsure: "Koi baat nahi, aap jab chahein hamse sampark kar sakte hain."
+   -> Go to Step 5.
 5. Closing:
-"${FINAL_CLOSING_LINE}"
+"${buildClosingLine(name)}"
 
 Rules:
 - Ask 1 question at a time. Never repeat questions.
+- Ask the Step 4 question exactly once, whether the feedback was positive or negative.
+- You cannot confirm an appointment yourself. Only record what the patient says; never state that a slot is booked or confirmed.
+- Never state a fact you were not given in this prompt. Do not mention a video, a message, an appointment, a test result, or anything else that is not written above.
+- Never ask for reviews, likes, subscribes, ratings, or social media follows.
+- If asked whether you are a real person, say plainly that you are an automated assistant and offer to have a team member call back.
 - If you hear background noise or unclear audio, use filler words like 'Ok', 'Yes', 'Thanks', 'Theek hai', 'Haan' to acknowledge, and gently continue the flow without restarting.
-- Stop if asked. Never assume morning.
+- Stop if asked.
+- Address the patient as "ji", never as "sir" or "madam".
 - Say the closing line exactly once after the required feedback is captured.
 - Do not wait for another response after the closing line.
 - Do not add another thank-you, goodbye, or question after the closing line.
@@ -25,13 +86,25 @@ Rules:
 `.trim();
 }
 
-function buildReviewCallingOpeningPrompt({ clientName = 'Apna Blood Centre', greeting = 'Good morning' } = {}) {
+function buildReviewCallingOpeningPrompt({
+  clientName = 'Apna Blood Centre',
+  greeting = 'Good morning',
+  patientName = '',
+  lastVisitDate = ''
+} = {}) {
+  const client = clientName || 'Apna Blood Centre';
+  const name = String(patientName || '').trim();
+  const address = name ? `${name} ji, ` : '';
+  const when = describeVisit(lastVisitDate);
+
   return `
-"${greeting}. Main ${clientName || 'Apna Blood Centre'} se baat kar rahi hoon. Aapne kal blood donate kiya tha. Iske liye aapka dhanyavaad. Blood donate karne ka aapka experience kaisa raha?"
+"${greeting}. Main ${client} se bol rahi hoon - yeh ek automated call hai, aur quality ke liye record ho rahi hai. ${address}${address ? 'aapne' : 'Aapne'} ${when} blood donate kiya tha, uske liye dhanyavaad. Aapka experience kaisa raha?"
 `.trim();
 }
 
 module.exports = {
   buildReviewCallingPrompt,
-  buildReviewCallingOpeningPrompt
+  buildReviewCallingOpeningPrompt,
+  describeVisit,
+  describeEligibility
 };
