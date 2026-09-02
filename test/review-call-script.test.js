@@ -13,11 +13,12 @@ const {
   buildReviewCallTurnInstruction,
   shouldAutoHangupAfterAgentTurn
 } = require('../src/conversation-state');
+const { YESTERDAY, eligibilityLabel } = require('./support/call-dates');
 
 // 'intro' is now the identity check; the experience question comes after it.
 const freshState = () => ({ step: 'experience' });
 const verifiedState = () => {
-  const state = { step: 'intro', lastVisitDate: '2026-08-30' };
+  const state = { step: 'intro', lastVisitDate: YESTERDAY };
   buildReviewCallTurnInstruction('haan ji', state, 'Client', 'Ankita');
   return state;
 };
@@ -35,8 +36,8 @@ function spokenPartOnly(prompt) {
 
 function everySpokenLine() {
   return [
-    spokenPartOnly(buildReviewCallingPrompt({ patientName: 'Ankita', lastVisitDate: '2026-08-30' })),
-    buildReviewCallingOpeningPrompt({ patientName: 'Ankita', lastVisitDate: '2026-08-30' }),
+    spokenPartOnly(buildReviewCallingPrompt({ patientName: 'Ankita', lastVisitDate: YESTERDAY })),
+    buildReviewCallingOpeningPrompt({ patientName: 'Ankita', lastVisitDate: YESTERDAY }),
     buildReviewCallTurnInstruction('haan ji', { step: 'intro' }, 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('galat number', { step: 'intro' }, 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('bahut achha tha', freshState(), 'Client', 'Ankita'),
@@ -119,7 +120,7 @@ test('both the positive and the complaint path reach the closing', () => {
 test('the review call tells the donor when they are eligible but arranges nothing', () => {
   const closing = buildReviewCallTurnInstruction('bahut achha tha', verifiedState(), 'Client', 'Ankita');
 
-  assert.match(closing, /28 November ke baad aap dobara blood donate kar sakte hain, aapka swagat hai/);
+  assert.match(closing, new RegExp(`${eligibilityLabel(YESTERDAY)} aap dobara blood donate kar sakte hain, aapka swagat hai`));
   assert.doesNotMatch(closing, /kab aana|kis din|samay|abhi bata/i);
 });
 

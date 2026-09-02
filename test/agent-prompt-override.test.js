@@ -4,8 +4,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { buildAgentSystemPrompt, buildOpeningPrompt } = require('../src/prompt-builder');
+const { YESTERDAY, eligibilityLabel } = require('./support/call-dates');
 
-const options = { lastVisitDate: '2026-08-30' };
+// Relative to today: the prompts say "kal" or name a date by comparing to now,
+// so a fixed date passes on the day it is written and fails the day after.
+const options = { lastVisitDate: YESTERDAY };
 
 // agents.system_prompt and agents.opening_prompt have existed since the first
 // migration and the Agents screen edits them, but nothing read them: every call
@@ -33,7 +36,7 @@ test('a saved opening prompt is used and its placeholders filled', () => {
   }, 'review_call', options);
 
   assert.match(opening, /Ankita ji, aapne kal donate kiya\./);
-  assert.match(opening, /Agli baar 28 November ke baad\./);
+  assert.match(opening, new RegExp(`Agli baar ${eligibilityLabel(YESTERDAY)}\\.`));
   assert.doesNotMatch(opening, /\{\{|\[GREETING\]/);
 });
 
