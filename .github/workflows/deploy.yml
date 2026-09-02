@@ -88,13 +88,37 @@ jobs:
             docker compose -f docker-compose.prod.yml up -d "$TARGET" caddy
             docker image prune -f
 
+      # Checked at whatever address the environment is actually reachable on.
+      # Set the repository variable UAT_BASE_URL / PROD_BASE_URL while an
+      # environment is served from the droplet IP over plain HTTP; delete it
+      # once the hostname resolves and the check falls back to HTTPS on its own.
       - name: Verify it came back
+        env:
+          TARGET: ${{ inputs.environment || 'uat' }}
+          UAT_BASE_URL: ${{ vars.UAT_BASE_URL }}
+          PROD_BASE_URL: ${{ vars.PROD_BASE_URL }}
         run: |
-          if [ "${{ inputs.environment || 'uat' }}" = "prod" ]; then HOST=app; else HOST=uat; fi
+          set -uo pipefail
+          if [ "$TARGET" = "prod" ]; then
+            BASE="${PROD_BASE_URL:-https://app.vikitechsolutions.in}"
+          else
+            BASE="${UAT_BASE_URL:-https://uat.vikitechsolutions.in}"
+          fi
+          BASE="${BASE%/}"
+          echo "Checking $BASE/login.html"
+
+          case "$BASE" in
+            http://*)
+              echo "::warning::$TARGET is being checked over plain HTTP ($BASE)."
+              echo "::warning::Sign-in passwords and patient data are unencrypted in transit."
+              echo "::warning::Point the hostname at the droplet and switch to deploy/Caddyfile."
+              ;;
+          esac
+
           for i in $(seq 1 12); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "https://$HOST.vikitechsolutions.in/login.html" || true)
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/login.html" || true)
             if [ "$code" = "200" ]; then echo "healthy"; exit 0; fi
             echo "  attempt $i: $code"
             sleep 5
           done
-          echo "did not become healthy"; exit 1
+          echo "did not become healthy at $BASE"; exit 1
