@@ -365,7 +365,10 @@ module.exports = function setupWebSocketBridge(server) {
     // The prompts address the patient by name, so an unknown name must stay
     // empty rather than becoming the literal words "sir/maam".
     const getSessionPatientName = () => String(session.customerName || '').trim();
-    const getPromptOptions = () => ({ lastVisitDate: session.lastVisitDate });
+    const getPromptOptions = () => ({
+      lastVisitDate: session.lastVisitDate,
+      callScripts: session.callScripts
+    });
     const getSessionCallType = () => normalizeOutboundCallType(session.callType);
     const getSystemPrompt = () => buildAgentSystemPrompt(getSessionClientName(), getSessionPatientName(), session.agentConfig, getSessionCallType(), getPromptOptions());
     const getOpeningPrompt = () => buildOpeningPrompt(getSessionClientName(), getSessionPatientName(), session.agentConfig, getSessionCallType(), getPromptOptions());

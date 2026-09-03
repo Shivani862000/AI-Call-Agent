@@ -9,6 +9,11 @@
  * recipients exist, and automatic calling is off until someone turns it on.
  */
 
+const { SCRIPT_PLACEHOLDERS } = require('../prompts/safety-rules.ts');
+
+/** Longest a custom script may be. A prompt this size already reads as a wall. */
+const MAX_SCRIPT_LENGTH = 4000;
+
 /** The calls a rule may place. There is no prompt for anything else. */
 const CALL_TYPES = Object.freeze(['REVIEW_CALL', 'THREE_MONTH_FOLLOWUP']);
 
@@ -19,6 +24,12 @@ const DEFAULTS = Object.freeze({
     send_at: '08:00',
     timezone: 'Asia/Kolkata',
     last_sent_date: null
+  },
+  // Empty means "use the built-in script". The safety rules are appended to
+  // whatever is written here and cannot be edited away.
+  call_scripts: {
+    review_call: { system_prompt: '', opening_prompt: '' },
+    three_month_followup: { system_prompt: '', opening_prompt: '' }
   },
   auto_queue: {
     enabled: false,
@@ -80,6 +91,37 @@ function validateSetting(key, value) {
     if (!TIME_PATTERN.test(String(value.send_at))) return 'Send time must be a 24-hour time such as 08:00';
     if (value.enabled && value.recipients.length === 0) {
       return 'Add at least one recipient before switching the digest on';
+    }
+    return null;
+  }
+
+  if (key === 'call_scripts') {
+    for (const callType of ['review_call', 'three_month_followup']) {
+      const script = value[callType];
+      if (script === undefined) continue;
+      if (!script || typeof script !== 'object') return `${callType} must be an object`;
+
+      for (const field of ['system_prompt', 'opening_prompt']) {
+        const text = String(script[field] ?? '');
+        if (text.length > MAX_SCRIPT_LENGTH) {
+          return `${callType} ${field} is longer than ${MAX_SCRIPT_LENGTH} characters`;
+        }
+        // A misspelled placeholder resolves to nothing and is read out as a gap
+        // in the sentence, which is only discovered on a live call.
+        const unknown = [...text.matchAll(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi)]
+          .map((match) => match[1].toLowerCase())
+          .filter((name) => !SCRIPT_PLACEHOLDERS.includes(name));
+        if (unknown.length) {
+          return `${callType} ${field}: unknown placeholder {{${unknown[0]}}}. `
+            + `Available: ${SCRIPT_PLACEHOLDERS.map((p) => `{{${p}}}`).join(', ')}`;
+        }
+      }
+
+      // An opening with no script behind it would greet the patient and then
+      // fall back to the built-in flow mid-call.
+      if (String(script.opening_prompt || '').trim() && !String(script.system_prompt || '').trim()) {
+        return `${callType}: an opening line needs a script to go with it`;
+      }
     }
     return null;
   }
@@ -147,4 +189,5 @@ function createSettingsStore({ dbGet, dbRun }) {
 }
 
 module.exports = {
-  CALL_TYPES, DEFAULTS, defaultsFor, withDefaults, validateSetting, createSettingsStore };
+  CALL_TYPES,
+  MAX_SCRIPT_LENGTH, DEFAULTS, defaultsFor, withDefaults, validateSetting, createSettingsStore };

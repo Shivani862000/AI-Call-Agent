@@ -26,8 +26,33 @@ test('a saved system prompt replaces the built-in script', () => {
     system_prompt: 'You are Meera from {{client_name}}. Speak to {{patient_name}}.'
   }, 'review_call', options);
 
-  assert.equal(prompt, 'You are Meera from Apna Blood Centre. Speak to Ankita.');
+  assert.match(prompt, /^You are Meera from Apna Blood Centre\. Speak to Ankita\./);
   assert.doesNotMatch(prompt, /You are Priya/);
+});
+
+// A custom script used to replace the built-in prompt outright, so an edit that
+// dropped the disclosure or the identity check went out on a live health call.
+test('the safety rules survive a saved prompt that omits them', () => {
+  const prompt = buildAgentSystemPrompt('Client', 'Ankita', {
+    system_prompt: 'You are Meera. Ask how their visit was.'
+  }, 'review_call', options);
+
+  assert.match(prompt, /Rules that always apply/);
+  assert.match(prompt, /automated call/i);
+  assert.match(prompt, /Confirm you are speaking to the right person/i);
+  assert.match(prompt, /Never state a fact you were not given/i);
+  assert.match(prompt, /never promise a callback/i);
+  assert.match(prompt, /Never say "sir" or "madam"/i);
+});
+
+// The opening is one spoken sentence, not instructions; appending rules to it
+// would have the agent read them aloud.
+test('the opening line is not given a rules block', () => {
+  const opening = buildOpeningPrompt('Client', 'Ankita', {
+    opening_prompt: 'Namaste, Meera bol rahi hoon.'
+  }, 'review_call', options);
+
+  assert.equal(opening, 'Namaste, Meera bol rahi hoon.');
 });
 
 test('a saved opening prompt is used and its placeholders filled', () => {
@@ -46,7 +71,8 @@ test('an unknown placeholder resolves to nothing rather than leaking', () => {
     system_prompt: 'Hello {{not_a_real_field}}.'
   }, 'review_call', options);
 
-  assert.equal(prompt, 'Hello .');
+  assert.match(prompt, /^Hello \./);
+  assert.doesNotMatch(prompt, /\{\{/);
 });
 
 test('the follow-up call honours a saved prompt too', () => {
@@ -54,5 +80,6 @@ test('the follow-up call honours a saved prompt too', () => {
     system_prompt: 'Custom follow-up for {{patient_name}}.'
   }, 'three_month_followup', options);
 
-  assert.equal(prompt, 'Custom follow-up for Rajesh.');
+  assert.match(prompt, /^Custom follow-up for Rajesh\./);
+  assert.match(prompt, /Rules that always apply/);
 });

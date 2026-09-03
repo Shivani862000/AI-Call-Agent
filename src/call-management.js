@@ -215,6 +215,12 @@ async function hydrateIcallMateSessionContext(session, message = {}, extraParams
       session.agentConfig = context.call.agent_id
         ? await require('./prompt-builder').getAgentConfigById(context.call.agent_id)
         : null;
+      // Read once per call rather than per turn: the prompt is rebuilt on every
+      // turn and must not hit the database each time.
+      session.callScripts = await require('./app-settings')
+        .createSettingsStore({ dbGet, dbRun })
+        .get('call_scripts')
+        .catch(() => null);
       session.videoSent = context.customer.video_sent === 1;
       session.lastVisitDate = context.customer.last_visit_date || 'kal';
 

@@ -103,6 +103,43 @@
         </div>
 
         <div class="card">
+          <h3>What the agent says</h3>
+          <p class="hint">
+            Leave a box empty to use the built-in script. Anything you write here replaces it
+            for that call type.
+          </p>
+          <div class="warn">
+            These words are spoken to patients on live calls. Read yours back before saving, and
+            test on UAT first.
+          </div>
+
+          <div class="field">
+            <label for="scriptCallType">Which call</label>
+            <select id="scriptCallType">
+              <option value="review_call">Feedback on last visit</option>
+              <option value="three_month_followup">Three-month follow up</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="openingPrompt">Opening line</label>
+            <textarea id="openingPrompt" rows="3" placeholder="Leave empty to use the built-in opening"></textarea>
+            <span class="help">The first thing the agent says, word for word.</span>
+          </div>
+
+          <div class="field">
+            <label for="systemPrompt">Script</label>
+            <textarea id="systemPrompt" rows="14" placeholder="Leave empty to use the built-in script"></textarea>
+            <span class="help" id="scriptPlaceholders"></span>
+          </div>
+
+          <button id="saveScripts">Save</button>
+          <button id="showBuiltIn" class="secondary">Show the built-in script</button>
+          <button id="showRules" class="secondary">Show the rules that always apply</button>
+          <pre id="scriptPreview" hidden></pre>
+        </div>
+
+        <div class="card">
           <h3>Automatic calling</h3>
           <p class="hint">
             When this is on, the system decides by itself which patients to call, using the
@@ -219,6 +256,32 @@
       });
     }
 
+    let callScripts = { review_call: {}, three_month_followup: {} };
+    let scriptHelp = { placeholders: [], safety_rules: '' };
+
+    const currentCallType = () => $('scriptCallType').value;
+
+    /** Keeps the edits for the call type on screen before switching away. */
+    function captureScriptEdits(callType) {
+      callScripts[callType] = {
+        system_prompt: $('systemPrompt').value,
+        opening_prompt: $('openingPrompt').value
+      };
+    }
+
+    function showScript(callType) {
+      const script = callScripts[callType] || {};
+      $('systemPrompt').value = script.system_prompt || '';
+      $('openingPrompt').value = script.opening_prompt || '';
+      $('scriptPreview').hidden = true;
+    }
+
+    $('scriptCallType').onchange = function switchCallType() {
+      captureScriptEdits(this.dataset.showing || 'review_call');
+      this.dataset.showing = this.value;
+      showScript(this.value);
+    };
+
     async function load() {
       const data = await AppShell.fetchJson('/api/settings');
       $('digestEnabled').checked = data.owner_digest.enabled;
@@ -229,7 +292,43 @@
       autoQueue = data.auto_queue;
       $('autoEnabled').checked = autoQueue.enabled;
       renderRules();
+
+      callScripts = data.call_scripts || callScripts;
+      scriptHelp = data.call_script_help || scriptHelp;
+      $('scriptPlaceholders').textContent = scriptHelp.placeholders.length
+        ? `You can use ${scriptHelp.placeholders.map((name) => `{{${name}}}`).join(', ')}.`
+        : '';
+      $('scriptCallType').dataset.showing = currentCallType();
+      showScript(currentCallType());
     }
+
+    $('saveScripts').onclick = async function save() {
+      this.disabled = true;
+      captureScriptEdits(currentCallType());
+      try {
+        await AppShell.fetchJson('/api/settings/call_scripts', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(callScripts)
+        });
+        const custom = String(callScripts[currentCallType()].system_prompt || '').trim();
+        banner(custom ? 'Saved — this wording will be used on the next call' : 'Saved — back to the built-in script', true);
+      } catch (error) { banner(error.message, false); } finally { this.disabled = false; }
+    };
+
+    $('showBuiltIn').onclick = async function show() {
+      this.disabled = true;
+      try {
+        const built = await AppShell.fetchJson(`/api/settings/scripts/builtin?call_type=${encodeURIComponent(currentCallType())}`);
+        $('scriptPreview').textContent = `OPENING LINE\n${built.opening_prompt}\n\nSCRIPT\n${built.system_prompt}`;
+        $('scriptPreview').hidden = false;
+      } catch (error) { banner(error.message, false); } finally { this.disabled = false; }
+    };
+
+    $('showRules').onclick = function show() {
+      $('scriptPreview').textContent = scriptHelp.safety_rules
+        || 'Could not load the rules. Reload the page.';
+      $('scriptPreview').hidden = false;
+    };
 
     $('saveDigest').onclick = async function save() {
       this.disabled = true;

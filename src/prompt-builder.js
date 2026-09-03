@@ -14,6 +14,7 @@ const {
 } = require('../prompts/review-calling.ts');
 const { buildThreeMonthFollowupPrompt, buildThreeMonthFollowupOpeningPrompt } = require('../prompts/three-month-followup.ts');
 const { CALL_TYPES } = require('./config');
+const { withSafetyRules } = require('../prompts/safety-rules.ts');
 const { normalizeOutboundCallType, applyAgentTemplate } = require('./helpers');
 const { dbGet } = require('../db');
 
@@ -37,11 +38,29 @@ function promptClientCity() {
 function agentTemplateValues({ clientName, customerName, greeting, lastVisitDate }) {
   return {
     client_name: clientName,
+    client_city: promptClientCity(),
     patient_name: String(customerName || '').trim(),
     greeting,
     last_visit: describeVisit(lastVisitDate),
     next_eligible: describeEligibility(lastVisitDate)
   };
+}
+
+/**
+ * A script written on the settings screen, or '' when none is set.
+ *
+ * The safety rules are appended to the system prompt rather than left to the
+ * author: an edit that dropped the automated-call disclosure or the identity
+ * check would otherwise go out on a live health call. The opening line gets no
+ * rules -- it is a single spoken sentence, not instructions.
+ */
+function customScript(scripts, callType, field, values) {
+  const key = callType === CALL_TYPES.THREE_MONTH_FOLLOWUP ? 'three_month_followup' : 'review_call';
+  const template = scripts && scripts[key] && String(scripts[key][field] || '').trim();
+  if (!template) return '';
+
+  const filled = applyAgentTemplate(template, values).replace(/\[GREETING\]/g, values.greeting);
+  return field === 'system_prompt' ? withSafetyRules(filled) : filled;
 }
 
 /**
@@ -58,7 +77,8 @@ function agentTemplateValues({ clientName, customerName, greeting, lastVisitDate
 function agentPromptOverride(agentConfig, field, values) {
   const template = agentConfig && String(agentConfig[field] || '').trim();
   if (!template) return '';
-  return applyAgentTemplate(template, values).replace(/\[GREETING\]/g, values.greeting);
+  const filled = applyAgentTemplate(template, values).replace(/\[GREETING\]/g, values.greeting);
+  return field === 'system_prompt' ? withSafetyRules(filled) : filled;
 }
 
 function buildCallTypeSystemPrompt(callType, clientName, customerName, extraOptions = {}, agentConfig = null) {
@@ -66,9 +86,15 @@ function buildCallTypeSystemPrompt(callType, clientName, customerName, extraOpti
   const promptClientName = process.env.CALL_PROMPT_CLIENT_NAME || 'Apna Blood Centre';
   const greeting = getGreeting();
 
-  const override = agentPromptOverride(agentConfig, 'system_prompt', agentTemplateValues({
+  const values = agentTemplateValues({
     clientName: promptClientName, customerName, greeting, lastVisitDate: extraOptions.lastVisitDate
-  }));
+  });
+
+  // The settings screen wins over an agent row: it is the one an admin edits.
+  const fromSettings = customScript(extraOptions.callScripts, normalizedCallType, 'system_prompt', values);
+  if (fromSettings) return fromSettings;
+
+  const override = agentPromptOverride(agentConfig, 'system_prompt', values);
   if (override) return override;
 
   if (normalizedCallType === CALL_TYPES.THREE_MONTH_FOLLOWUP) {
@@ -92,9 +118,14 @@ function buildCallTypeOpeningPrompt(callType, clientName, customerName, extraOpt
   const promptClientName = process.env.CALL_PROMPT_CLIENT_NAME || 'Apna Blood Centre';
   const greeting = getGreeting();
 
-  const override = agentPromptOverride(agentConfig, 'opening_prompt', agentTemplateValues({
+  const values = agentTemplateValues({
     clientName: promptClientName, customerName, greeting, lastVisitDate: extraOptions.lastVisitDate
-  }));
+  });
+
+  const fromSettings = customScript(extraOptions.callScripts, normalizedCallType, 'opening_prompt', values);
+  if (fromSettings) return fromSettings;
+
+  const override = agentPromptOverride(agentConfig, 'opening_prompt', values);
   if (override) return override;
 
   if (normalizedCallType === CALL_TYPES.THREE_MONTH_FOLLOWUP) {
