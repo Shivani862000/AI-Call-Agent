@@ -114,3 +114,42 @@ test('the shipped default is no custom script at all', async () => {
     assert.equal(config[callType].opening_prompt, '');
   }
 });
+
+// The built-in prompt is built by filling values in. Showing the rendered form
+// in the editor would put a literal patient name, greeting and date into the
+// box, and saving that would greet every patient as "Ankita" at "Good Afternoon".
+test('the editor is offered the template, not a rendered sample', async () => {
+  const express = require('express');
+  const request = require('node:http');
+  const app = express();
+  app.use((req, _res, next) => { req.user = { role: 'ADMIN' }; next(); });
+  app.use('/api/settings', require('../routes/settings'));
+
+  const server = app.listen(0);
+  const { port } = server.address();
+
+  const get = (path) => new Promise((resolve, reject) => {
+    request.get({ port, path }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => resolve(JSON.parse(body)));
+    }).on('error', reject);
+  });
+
+  try {
+    for (const callType of ['review_call', 'three_month_followup']) {
+      const built = await get(`/api/settings/scripts/builtin?call_type=${callType}`);
+      const both = `${built.opening_prompt}\n${built.system_prompt}`;
+
+      assert.match(both, /\{\{patient_name\}\}/, `${callType} lost the patient placeholder`);
+      assert.match(both, /\{\{greeting\}\}/, `${callType} lost the greeting placeholder`);
+      assert.match(both, /\{\{client_name\}\}/, `${callType} lost the client placeholder`);
+
+      // The sample values must not survive into what an admin would save.
+      assert.doesNotMatch(both, /\bAnkita\b/, `${callType} leaked the sample patient name`);
+      assert.doesNotMatch(both, /\bGood (Morning|Afternoon|Evening)\b/, `${callType} leaked a fixed greeting`);
+    }
+  } finally {
+    server.close();
+  }
+});

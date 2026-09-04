@@ -105,8 +105,9 @@
         <div class="card">
           <h3>What the agent says</h3>
           <p class="hint">
-            Leave a box empty to use the built-in script. Anything you write here replaces it
-            for that call type.
+            This is what the agent says today. Edit it to change the wording. If you leave it
+            exactly as it is, the call keeps using the built-in script and picks up any future
+            improvements to it.
           </p>
           <div class="warn">
             These words are spoken to patients on live calls. Read yours back before saving, and
@@ -121,20 +122,22 @@
             </select>
           </div>
 
+          <div id="scriptStatus" class="hint"></div>
+
           <div class="field">
             <label for="openingPrompt">Opening line</label>
-            <textarea id="openingPrompt" rows="3" placeholder="Leave empty to use the built-in opening"></textarea>
+            <textarea id="openingPrompt" rows="3"></textarea>
             <span class="help">The first thing the agent says, word for word.</span>
           </div>
 
           <div class="field">
             <label for="systemPrompt">Script</label>
-            <textarea id="systemPrompt" rows="14" placeholder="Leave empty to use the built-in script"></textarea>
+            <textarea id="systemPrompt" rows="16"></textarea>
             <span class="help" id="scriptPlaceholders"></span>
           </div>
 
           <button id="saveScripts">Save</button>
-          <button id="showBuiltIn" class="secondary">Show the built-in script</button>
+          <button id="revertScript" class="secondary">Undo my changes</button>
           <button id="showRules" class="secondary">Show the rules that always apply</button>
           <pre id="scriptPreview" hidden></pre>
         </div>
@@ -258,10 +261,25 @@
 
     let callScripts = { review_call: {}, three_month_followup: {} };
     let scriptHelp = { placeholders: [], safety_rules: '' };
+    // The built-in wording, per call type, fetched once and kept as the
+    // baseline: a box left matching it saves as empty, so that call type keeps
+    // following the built-in script instead of freezing today's copy of it.
+    const builtIn = {};
 
     const currentCallType = () => $('scriptCallType').value;
 
-    /** Keeps the edits for the call type on screen before switching away. */
+    async function ensureBuiltIn(callType) {
+      if (!builtIn[callType]) {
+        builtIn[callType] = await AppShell.fetchJson(
+          `/api/settings/scripts/builtin?call_type=${encodeURIComponent(callType)}`
+        );
+      }
+      return builtIn[callType];
+    }
+
+    const sameText = (a, b) => String(a || '').trim() === String(b || '').trim();
+
+    /** Keeps whatever is on screen before switching call type or saving. */
     function captureScriptEdits(callType) {
       callScripts[callType] = {
         system_prompt: $('systemPrompt').value,
@@ -269,17 +287,48 @@
       };
     }
 
-    function showScript(callType) {
-      const script = callScripts[callType] || {};
-      $('systemPrompt').value = script.system_prompt || '';
-      $('openingPrompt').value = script.opening_prompt || '';
-      $('scriptPreview').hidden = true;
+    /** True when the boxes still match the built-in script word for word. */
+    function isUnchanged(callType) {
+      const base = builtIn[callType] || {};
+      const edited = callScripts[callType] || {};
+      return sameText(edited.system_prompt, base.system_prompt)
+        && sameText(edited.opening_prompt, base.opening_prompt);
     }
 
-    $('scriptCallType').onchange = function switchCallType() {
+    function updateScriptStatus() {
+      const callType = currentCallType();
+      captureScriptEdits(callType);
+      const unchanged = isUnchanged(callType);
+      $('scriptStatus').textContent = unchanged
+        ? 'Using the built-in script. Edit the wording below to change it.'
+        : 'You have edited this script. Saving will use your wording instead of the built-in one.';
+      $('revertScript').hidden = unchanged;
+    }
+
+    async function showScript(callType) {
+      const base = await ensureBuiltIn(callType);
+      const saved = callScripts[callType] || {};
+      // An empty saved value means "follow the built-in script", so the box
+      // shows the built-in wording rather than nothing to edit.
+      $('systemPrompt').value = String(saved.system_prompt || '').trim() || base.system_prompt;
+      $('openingPrompt').value = String(saved.opening_prompt || '').trim() || base.opening_prompt;
+      updateScriptStatus();
+    }
+
+    $('systemPrompt').oninput = updateScriptStatus;
+    $('openingPrompt').oninput = updateScriptStatus;
+
+    $('scriptCallType').onchange = async function switchCallType() {
       captureScriptEdits(this.dataset.showing || 'review_call');
       this.dataset.showing = this.value;
-      showScript(this.value);
+      try { await showScript(this.value); } catch (error) { banner(error.message, false); }
+    };
+
+    $('revertScript').onclick = async function revert() {
+      const callType = currentCallType();
+      callScripts[callType] = { system_prompt: '', opening_prompt: '' };
+      try { await showScript(callType); banner('Reverted — save to apply', true); }
+      catch (error) { banner(error.message, false); }
     };
 
     async function load() {
@@ -299,28 +348,32 @@
         ? `You can use ${scriptHelp.placeholders.map((name) => `{{${name}}}`).join(', ')}.`
         : '';
       $('scriptCallType').dataset.showing = currentCallType();
-      showScript(currentCallType());
+      await showScript(currentCallType());
     }
 
     $('saveScripts').onclick = async function save() {
       this.disabled = true;
       captureScriptEdits(currentCallType());
       try {
+        // A call type still matching the built-in wording is saved as empty, so
+        // it keeps following the built-in script rather than freezing a copy of
+        // today's text and missing every later improvement to it.
+        const payload = {};
+        for (const callType of Object.keys(callScripts)) {
+          payload[callType] = builtIn[callType] && isUnchanged(callType)
+            ? { system_prompt: '', opening_prompt: '' }
+            : callScripts[callType];
+        }
+
         await AppShell.fetchJson('/api/settings/call_scripts', {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(callScripts)
+          body: JSON.stringify(payload)
         });
-        const custom = String(callScripts[currentCallType()].system_prompt || '').trim();
-        banner(custom ? 'Saved — this wording will be used on the next call' : 'Saved — back to the built-in script', true);
-      } catch (error) { banner(error.message, false); } finally { this.disabled = false; }
-    };
-
-    $('showBuiltIn').onclick = async function show() {
-      this.disabled = true;
-      try {
-        const built = await AppShell.fetchJson(`/api/settings/scripts/builtin?call_type=${encodeURIComponent(currentCallType())}`);
-        $('scriptPreview').textContent = `OPENING LINE\n${built.opening_prompt}\n\nSCRIPT\n${built.system_prompt}`;
-        $('scriptPreview').hidden = false;
+        callScripts = payload;
+        updateScriptStatus();
+        banner(isUnchanged(currentCallType())
+          ? 'Saved — this call keeps using the built-in script'
+          : 'Saved — your wording will be used on the next call', true);
       } catch (error) { banner(error.message, false); } finally { this.disabled = false; }
     };
 

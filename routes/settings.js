@@ -69,19 +69,50 @@ router.get('/digest/preview', async (req, res, next) => {
  * Shown beside the editor so a script is written by adapting the real one
  * rather than from memory, which is how the disclosure got dropped before.
  */
+/**
+ * Turns a rendered prompt back into its template form.
+ *
+ * The built-in prompt is built by filling values in, so rendering it for the
+ * editor would put a literal patient name, greeting and date into the box. Save
+ * that and every call greets every patient as "Ankita" at "Good Afternoon".
+ * Each value is put back as the placeholder that produced it, longest first so
+ * a client name nested inside a longer phrase is not half-replaced.
+ */
+function toTemplate(text, values) {
+  return Object.entries(values)
+    .filter(([, value]) => String(value || '').trim())
+    .sort((a, b) => String(b[1]).length - String(a[1]).length)
+    .reduce((out, [name, value]) => {
+      const escaped = String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return out.replace(new RegExp(`\\b${escaped}\\b`, 'g'), `{{${name}}}`);
+    }, String(text || ''));
+}
+
 router.get('/scripts/builtin', async (req, res, next) => {
   try {
     const { buildCallTypeSystemPrompt, buildCallTypeOpeningPrompt } = require('../src/prompt-builder');
+    const { describeVisit, describeEligibility } = require('../prompts/review-calling.ts');
+    const { getGreeting } = require('../utils/greeting');
+
     const callType = String(req.query.call_type || 'review_call');
-    // A sample patient and a donation dated yesterday, so the dates in the
-    // preview read the way they will on a call.
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    const options = { lastVisitDate: yesterday };
+    // Rendered with values chosen so they can be put back as placeholders.
+    const sampleName = 'Ankita';
+    const lastVisitDate = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const options = { lastVisitDate };
+
+    const values = {
+      client_name: process.env.CALL_PROMPT_CLIENT_NAME || 'Apna Blood Centre',
+      client_city: process.env.CALL_PROMPT_CLIENT_CITY === undefined ? 'Palwal' : process.env.CALL_PROMPT_CLIENT_CITY,
+      patient_name: sampleName,
+      greeting: getGreeting(),
+      last_visit: describeVisit(lastVisitDate),
+      next_eligible: describeEligibility(lastVisitDate)
+    };
 
     res.json({
       call_type: callType,
-      opening_prompt: buildCallTypeOpeningPrompt(callType, null, 'Ankita', options),
-      system_prompt: buildCallTypeSystemPrompt(callType, null, 'Ankita', options)
+      opening_prompt: toTemplate(buildCallTypeOpeningPrompt(callType, null, sampleName, options), values),
+      system_prompt: toTemplate(buildCallTypeSystemPrompt(callType, null, sampleName, options), values)
     });
   } catch (error) { next(error); }
 });
