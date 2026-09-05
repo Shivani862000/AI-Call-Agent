@@ -39,6 +39,11 @@ jobs:
       image: ${{ steps.meta.outputs.image }}
     steps:
       - uses: actions/checkout@v4
+      # The runner's default buildx driver is "docker", which cannot export a
+      # cache; without this the build fails on cache-to before it compiles
+      # anything. The droplet is x86, so the image is built for that regardless
+      # of what the runner happens to be.
+      - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -51,6 +56,7 @@ jobs:
         with:
           context: .
           push: true
+          platforms: linux/amd64
           tags: ${{ steps.meta.outputs.image }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
