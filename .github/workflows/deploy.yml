@@ -1,8 +1,14 @@
 name: Deploy
 
+# UAT deploys itself when uat-kcpathlab moves, which -- with the branch
+# protected -- only happens when a pull request is merged into it.
+#
+# Production is deliberately not on a push trigger: it is chosen by hand from
+# the Actions tab. Note that the manual trigger only appears once this file is
+# on the default branch; the push trigger below works from the branch itself.
 on:
   push:
-    branches: [master]
+    branches: [uat-kcpathlab]
   workflow_dispatch:
     inputs:
       environment:
