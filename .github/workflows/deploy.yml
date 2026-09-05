@@ -100,9 +100,9 @@ jobs:
         run: |
           set -uo pipefail
           if [ "$TARGET" = "prod" ]; then
-            BASE="${PROD_BASE_URL:-https://app.vikitechsolutions.in}"
+            BASE="${PROD_BASE_URL:-https://kcpathlab.vikitechsolutions.in}"
           else
-            BASE="${UAT_BASE_URL:-https://uat.vikitechsolutions.in}"
+            BASE="${UAT_BASE_URL:-https://uat-kcpathlab.vikitechsolutions.in}"
           fi
           BASE="${BASE%/}"
           echo "Checking $BASE/login.html"
