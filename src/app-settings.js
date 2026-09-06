@@ -25,6 +25,12 @@ const DEFAULTS = Object.freeze({
     timezone: 'Asia/Kolkata',
     last_sent_date: null
   },
+  // Recordings and transcripts of donors are health data. Ten years from the
+  // call, then destroyed -- see src/retention.js for what survives.
+  data_retention: {
+    enabled: true,
+    years: 10
+  },
   // Empty means "use the built-in script". The safety rules are appended to
   // whatever is written here and cannot be edited away.
   call_scripts: {
@@ -92,6 +98,15 @@ function validateSetting(key, value) {
     if (value.enabled && value.recipients.length === 0) {
       return 'Add at least one recipient before switching the digest on';
     }
+    return null;
+  }
+
+  if (key === 'data_retention') {
+    const years = Number(value.years);
+    if (!Number.isFinite(years) || years < 1 || years > 50) {
+      return 'Retention must be between 1 and 50 years';
+    }
+    if (!Number.isInteger(years)) return 'Retention must be a whole number of years';
     return null;
   }
 

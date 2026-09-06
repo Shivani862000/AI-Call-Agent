@@ -12,6 +12,10 @@ const { CLIENT_NAME, CALL_TYPES } = require('./config');
 const { createSettingsStore } = require('./app-settings');
 const { selectPatientsToQueue } = require('./queue-rules');
 const {
+  cutoffDate, isDueForPurge, isEnabled, retentionYears, buildPurgeStatement
+} = require('./retention');
+const { removeObject } = require('../services/supabase-storage');
+const {
   shouldTriggerOwnerDigest,
   getLocalDateKey,
   normalizePhoneLookupValue,
@@ -294,6 +298,78 @@ async function runOwnerDigestTick() {
     logger.warn('OWNER_DIGEST_FAILED', { reason: error.message });
   } finally {
     ownerDigestRunning = false;
+  }
+}
+
+// ── Data Retention ─────────────────────────────────────────────────────────────
+
+let retentionRunning = false;
+
+/**
+ * Destroys call content that has passed its retention period.
+ *
+ * Recordings and transcripts of donors are health data, and keeping them
+ * forever because nothing deletes them is not a decision anyone made. The
+ * recording is removed from storage and every field holding what was said is
+ * emptied; the row survives with dates, outcome and counts, so the centre keeps
+ * its record that the call happened.
+ *
+ * The storage object goes first. If that fails the row is left intact and
+ * retried on the next sweep -- clearing the key first would orphan the audio
+ * with nothing left pointing at it.
+ */
+async function runRetentionSweep({ now = new Date(), limit = 200 } = {}) {
+  if (retentionRunning) return { skipped: true };
+  retentionRunning = true;
+
+  try {
+    const policy = await settings.get('data_retention');
+    if (!isEnabled(policy)) return { skipped: true, reason: 'retention is switched off' };
+
+    const cutoff = cutoffDate(policy, now);
+    const due = await dbAll(
+      `SELECT id, called_at, ended_at, created_at, recording_object_key
+         FROM calls
+        WHERE COALESCE(called_at, ended_at, created_at) < ?
+          AND COALESCE(recording_status, '') != 'purged'
+        ORDER BY COALESCE(called_at, ended_at, created_at) ASC
+        LIMIT ?`,
+      [cutoff.toISOString(), limit]
+    );
+
+    let purged = 0;
+    for (const call of due) {
+      // Re-checked against the pure rule, so the SQL filter can never be the
+      // only thing standing between a live record and destruction.
+      if (!isDueForPurge(call, policy, now)) continue;
+
+      if (call.recording_object_key) {
+        try {
+          await removeObject(call.recording_object_key);
+        } catch (error) {
+          logger.warn('RETENTION_RECORDING_DELETE_FAILED', {
+            callId: call.id, message: error.message
+          });
+          continue;
+        }
+      }
+
+      const { sql, params } = buildPurgeStatement(call.id);
+      await dbRun(sql, params);
+      purged += 1;
+    }
+
+    if (purged) {
+      logger.info('RETENTION_PURGED', {
+        purged, cutoff: cutoff.toISOString().slice(0, 10), years: retentionYears(policy)
+      });
+    }
+    return { purged, cutoff };
+  } catch (error) {
+    logger.warn('RETENTION_SWEEP_FAILED', { message: error.message });
+    return { failed: true, reason: error.message };
+  } finally {
+    retentionRunning = false;
   }
 }
 
@@ -682,6 +758,7 @@ async function runSchedulerTick() {
 
 module.exports = {
   formatExpectedVisitors,
+  runRetentionSweep,
   markSubmittedCallsWithoutMediaFailed,
   buildDigestBody,
   digestIsDue,

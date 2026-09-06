@@ -9,7 +9,7 @@ const { isMailConfigured } = require('../services/mailer');
 const settings = createSettingsStore({ dbGet, dbRun });
 const { SCRIPT_PLACEHOLDERS, NON_NEGOTIABLE_RULES } = require('../prompts/safety-rules.ts');
 
-const KEYS = new Set(['owner_digest', 'auto_queue', 'call_scripts']);
+const KEYS = new Set(['owner_digest', 'auto_queue', 'call_scripts', 'data_retention']);
 
 const router = express.Router();
 
@@ -19,6 +19,7 @@ router.get('/', async (req, res, next) => {
       owner_digest: await settings.get('owner_digest'),
       auto_queue: await settings.get('auto_queue'),
       call_scripts: await settings.get('call_scripts'),
+      data_retention: await settings.get('data_retention'),
       // Shown read-only beside the editor, so whoever writes a script can see
       // what is added to it and does not try to write the rules themselves.
       call_script_help: { placeholders: SCRIPT_PLACEHOLDERS, safety_rules: NON_NEGOTIABLE_RULES },

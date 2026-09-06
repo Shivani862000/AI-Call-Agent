@@ -18,7 +18,7 @@ const {
 } = require('./config');
 
 const { initializeDatabase } = require('../db');
-const { runSchedulerTick, runOwnerDigestTick } = require('./scheduler');
+const { runSchedulerTick, runOwnerDigestTick, runRetentionSweep } = require('./scheduler');
 const { pruneLiveCallState } = require('./helpers');
 const { validateAuthConfig, assertAdminAccountExists } = require('./auth');
 
@@ -50,6 +50,15 @@ module.exports = function startServer(server) {
     setInterval(() => {
       pruneLiveCallState();
     }, 60000);
+
+    // Once every six hours. Nothing becomes due for years, so the sweep only
+    // needs to be regular, not prompt; the interval keeps it running on a
+    // long-lived process without waiting for a restart.
+    setInterval(() => {
+      runRetentionSweep().catch((error) => {
+        console.error('[RETENTION ERROR]', error.message);
+      });
+    }, 6 * 60 * 60 * 1000);
 
     if (!DISABLE_SCHEDULER) {
       runSchedulerTick().catch((error) => {

@@ -193,7 +193,7 @@ module.exports = function mountApiRoutes(app) {
   app.use('/api/customers', customersRouter);
   app.use('/api/campaigns', campaignsRouter);
   app.use('/api/feedback', feedbackRouter);
-  app.use('/api/support-tickets', createSupportTicketsRouter({ dbRun, dbGet, dbAll, dbTx, notifyNewTicket: createSlackSupportNotifier({ webhookUrl: process.env.SLACK_SUPPORT_WEBHOOK_URL }) }));
+  app.use('/api/support-tickets', createSupportTicketsRouter({ dbRun, dbGet, dbAll, dbTx, notifyNewTicket: createSlackSupportNotifier({ webhookUrl: process.env.SLACK_SUPPORT_WEBHOOK_URL || process.env.SLACK_ALERT_WEBHOOK_URL }) }));
   app.use('/api/agents', agentsRouter);
   app.use('/api/users', require('../routes/users'));
   app.use('/api/patients', require('../routes/patients'));

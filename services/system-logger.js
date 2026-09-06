@@ -94,6 +94,22 @@ function getSink() {
   return sink;
 }
 
+/**
+ * Built on first use so the module loads without a webhook, and so the env is
+ * read after dotenv rather than at import time.
+ */
+let alerter;
+function getAlerter() {
+  if (alerter) return alerter;
+  const { createSlackAlerter } = require('./slack-alerts');
+  alerter = createSlackAlerter({
+    // One webhook covers both if only the support one is set.
+    webhookUrl: process.env.SLACK_ALERT_WEBHOOK_URL || process.env.SLACK_SUPPORT_WEBHOOK_URL || '',
+    sanitize: sanitizeLogDetails
+  });
+  return alerter;
+}
+
 function log(level, event, details = {}) {
   const normalizedLevel = normalizeLevel(level);
   if (normalizedLevel === 'DEBUG' && !DEBUG_ENABLED) return;
@@ -117,6 +133,14 @@ function log(level, event, details = {}) {
     event: normalizeEvent(event),
     details: sanitizeLogDetails(details)
   });
+
+  // Errors go to Slack, if a webhook is configured. Deliberately not awaited:
+  // logging must not slow down or fail the path that called it, and the alerter
+  // swallows its own failures.
+  if (normalizedLevel === 'ERROR') {
+    getAlerter()({ level: normalizedLevel, event: normalizeEvent(event), details })
+      .catch(() => {});
+  }
 }
 
 function info(event, details) {
