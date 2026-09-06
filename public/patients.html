@@ -465,21 +465,6 @@
         };
         actions.appendChild(edit);
 
-        const toggle = document.createElement('button');
-        toggle.className = 'link';
-        toggle.textContent = patient.status === 'active' ? 'Remove from calling' : 'Put back on calling';
-        toggle.onclick = async () => {
-          try {
-            await AppShell.fetchJson('/api/patients/' + patient.id + '/status', {
-              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: patient.status === 'active' ? 'inactive' : 'active' })
-            });
-            banner(patient.full_name + (patient.status === 'active' ? ' removed from the calling list' : ' put back on the calling list'), true);
-            load();
-          } catch (error) { banner(error.message, false); }
-        };
-        actions.appendChild(toggle);
-
         if (isAdmin) {
           const remove = document.createElement('button');
           remove.className = 'link'; remove.style.color = '#b23a2c';
