@@ -999,6 +999,15 @@
         loadPageData().catch(console.error);
       }, 30000);
       document.getElementById('newCallButton').addEventListener('click', () => openNewCallModal());
+
+      // Arrived from "Schedule a call" on the patients page: open the form with
+      // that patient already filled in, then drop the parameter so a reload or
+      // a shared link does not reopen it.
+      const scheduleFor = new URLSearchParams(location.search).get('schedule');
+      if (scheduleFor) {
+        openNewCallModal(null, { patientId: scheduleFor });
+        history.replaceState({}, '', location.pathname);
+      }
       // document.getElementById('deleteAllCustomersButton').addEventListener('click', async () => {
       //   if (!confirm('Are you sure you want to delete all patient and call records? This action cannot be undone.')) return;
       //   try {

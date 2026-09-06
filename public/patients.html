@@ -429,19 +429,32 @@
         // Only offered when the patient can actually be called; the server
         // refuses the rest, but an absent button beats an error after a click.
         if (patient.status === 'active' && Number(patient.do_not_call) !== 1) {
+          // Queued for now, so the scheduler dials within seconds. It was
+          // labelled "Schedule a call", which read as harmless and was not.
           const call = document.createElement('button');
           call.className = 'link';
-          call.textContent = 'Schedule a call';
+          call.textContent = 'Call now';
           call.onclick = async () => {
+            if (!confirm('Call ' + patient.full_name + ' now? The system will dial within a few seconds.')) return;
             try {
               await AppShell.fetchJson('/api/patients/' + patient.id + '/schedule-call', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
               });
-              banner(patient.full_name + ' added to the calling queue', true);
+              banner('Calling ' + patient.full_name + ' now', true);
               load();
             } catch (error) { banner(error.message, false); }
           };
           actions.appendChild(call);
+
+          // Picking a date and time instead: the outbound call form, with this
+          // patient already filled in.
+          const schedule = document.createElement('button');
+          schedule.className = 'link';
+          schedule.textContent = 'Schedule a call';
+          schedule.onclick = () => {
+            location.href = '/customers.html?schedule=' + encodeURIComponent(patient.id);
+          };
+          actions.appendChild(schedule);
         }
 
         const edit = document.createElement('button');

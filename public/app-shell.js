@@ -774,6 +774,40 @@
     let selectedPatientId = null;
     let isExistingPatientMode = false;
 
+    /**
+     * Fills the form from a patient record, whether picked from the dropdown or
+     * arrived at from the patients page.
+     *
+     * editingId is deliberately left empty: this is a person, not a queue
+     * entry, so submitting opens or refreshes their queue entry rather than
+     * trying to edit one that may not exist.
+     */
+    function applyPatientToForm(patient) {
+      getEl('editingId').value = '';
+      selectedPatientId = patient.id;
+      getEl('name').value = patient.full_name || '';
+
+      const phoneField = getEl('phone');
+      if (patient.phone) {
+        phoneField.value = formatPhoneForInput(patient.phone);
+        phoneField.readOnly = false;
+      } else {
+        // An agent cannot be shown the number, so the field carries the mask
+        // and the server resolves the real one from patient_id.
+        phoneField.value = patient.phone_masked || '';
+        phoneField.readOnly = true;
+      }
+
+      if (patient.preferred_call_slot) getEl('time').value = patient.preferred_call_slot;
+      const lastVisit = patient.last_visit_date || patient.last_test_date || patient.last_donation_date || '';
+      if (patient.date_of_birth || lastVisit) {
+        getEl('careToggle').open = !isMobileModalLayout();
+        getEl('dob').value = patient.date_of_birth || '';
+        getEl('lastVisit').value = lastVisit;
+      }
+      clearErrors();
+    }
+
     function showSelectionView() {
       getEl('selectionBody').style.display = 'block';
       getEl('formBody').style.display = 'none';
@@ -796,9 +830,22 @@
       setTimeout(() => nameInput.focus(), 50);
     }
 
-    async function open(customerId = null) {
+    async function open(customerId = null, openOptions = {}) {
       reset();
-      if (customerId && typeof options.getCustomer === 'function') {
+
+      // Arrived from the patients page: skip the picker and open the form with
+      // this patient already filled in.
+      if (openOptions.patientId) {
+        try {
+          const { patient } = await fetchJson(`${API_BASE}/patients/${openOptions.patientId}`);
+          showFormView(true);
+          getEl('panelTitle').textContent = 'Schedule a Call';
+          applyPatientToForm(patient);
+        } catch (error) {
+          showAlert(error.message, 'error');
+          showSelectionView();
+        }
+      } else if (customerId && typeof options.getCustomer === 'function') {
         const customer = options.getCustomer(customerId);
         if (customer) {
           getEl('editingId').value = customer.id;
@@ -907,32 +954,16 @@
           
           dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
             item.addEventListener('click', () => {
-              // This is a person, not a queue entry: leave editingId empty so
-              // submitting opens (or refreshes) their queue entry rather than
-              // trying to edit one that may not exist.
-              getEl('editingId').value = '';
-              selectedPatientId = item.dataset.patientId;
-              getEl('name').value = item.dataset.name;
-
-              const phoneField = getEl('phone');
-              if (item.dataset.phone) {
-                phoneField.value = formatPhoneForInput(item.dataset.phone);
-                phoneField.readOnly = false;
-              } else {
-                // An agent cannot be shown the number, so the field carries the
-                // mask and the server resolves the real one from patient_id.
-                phoneField.value = item.dataset.masked;
-                phoneField.readOnly = true;
-              }
-
-              if (item.dataset.slot) getEl('time').value = item.dataset.slot;
-              if (item.dataset.dob || item.dataset.lastVisit) {
-                getEl('careToggle').open = !isMobileModalLayout();
-                getEl('dob').value = item.dataset.dob || '';
-                getEl('lastVisit').value = item.dataset.lastVisit || '';
-              }
+              applyPatientToForm({
+                id: item.dataset.patientId,
+                full_name: item.dataset.name,
+                phone: item.dataset.phone,
+                phone_masked: item.dataset.masked,
+                preferred_call_slot: item.dataset.slot,
+                date_of_birth: item.dataset.dob,
+                last_visit_date: item.dataset.lastVisit
+              });
               dropdown.style.display = 'none';
-              clearErrors();
             });
           });
         } catch (error) {
