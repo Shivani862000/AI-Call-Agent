@@ -52,3 +52,31 @@ test('TLS is required on every port in both modes', () => {
   assert.match(source, /requireTLS: config\.port !== 465/);
   assert.match(source, /secure: config\.port === 465/);
 });
+
+// DigitalOcean and most hosts block outbound 25/465/587 by default and drop the
+// packets rather than refusing them, so every provider looks the same: a long
+// hang, then a timeout that says nothing about why.
+test('a blocked SMTP port is explained, not just timed out', () => {
+  const { explainMailError } = require('../services/mailer');
+  const config = { host: 'smtp-relay.gmail.com', port: 587 };
+
+  for (const code of ['ETIMEDOUT', 'ESOCKET', 'ECONNREFUSED']) {
+    const message = explainMailError(Object.assign(new Error('connect ' + code), { code }), config).message;
+    assert.match(message, /smtp-relay\.gmail\.com:587/);
+    assert.match(message, /blocked by the hosting provider/i);
+  }
+});
+
+// A wrong password must not be reported as a network block.
+test('an authentication failure is passed through untouched', () => {
+  const { explainMailError } = require('../services/mailer');
+  const original = Object.assign(new Error('Invalid login'), { code: 'EAUTH' });
+  assert.equal(explainMailError(original, { host: 'h', port: 587 }), original);
+});
+
+test('the transport cannot wait forever', () => {
+  const source = require('fs').readFileSync(require.resolve('../services/mailer'), 'utf8');
+  for (const option of ['connectionTimeout', 'greetingTimeout', 'socketTimeout']) {
+    assert.match(source, new RegExp(`${option}: \\d+`), `${option} is not set`);
+  }
+});

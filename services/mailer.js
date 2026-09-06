@@ -60,9 +60,35 @@ function getTransport() {
     requireTLS: config.port !== 465,
     // Omitted entirely for a relay that authenticates by IP: sending an empty
     // username makes the server reject the session rather than accept it.
-    ...(config.authMode === 'ip' ? {} : { auth: { user: config.user, pass: config.pass } })
+    ...(config.authMode === 'ip' ? {} : { auth: { user: config.user, pass: config.pass } }),
+    // Without these the socket waits indefinitely. A host that blocks outbound
+    // SMTP drops the packets rather than refusing them, so the "send a test"
+    // button spun for a minute and returned nothing at all.
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000
   });
   return transport;
+}
+
+/**
+ * Turns a silent network failure into something actionable.
+ *
+ * Many hosts -- DigitalOcean among them -- block outbound 25, 465 and 587 by
+ * default to deter spam, and drop the packets rather than refusing them. Every
+ * SMTP provider then looks identical: a long hang and a timeout that says
+ * nothing about the cause.
+ */
+function explainMailError(error, config) {
+  const code = String(error && (error.code || error.message) || '');
+  if (!/ETIMEDOUT|ESOCKET|ECONNREFUSED|Greeting never received|timeout/i.test(code)) {
+    return error;
+  }
+  return new Error(
+    `Could not reach ${config.host}:${config.port} (${code}). `
+    + 'Outbound SMTP is usually blocked by the hosting provider by default -- '
+    + 'ports 25, 465 and 587 to every host. Ask them to lift the block, or send over HTTPS instead.'
+  );
 }
 
 async function sendMail({ to, subject, text, html }) {
@@ -75,17 +101,17 @@ async function sendMail({ to, subject, text, html }) {
     subject,
     text,
     html
-  });
+  }).catch((error) => { throw explainMailError(error, mailConfig()); });
   return { sent: true, messageId: info.messageId, accepted: info.accepted };
 }
 
 /** Verifies credentials without sending, for the settings screen's test button. */
 async function verifyMail() {
-  await getTransport().verify();
+  await getTransport().verify().catch((error) => { throw explainMailError(error, mailConfig()); });
   return true;
 }
 
 /** Lets tests build a transport against a throwaway config. */
 function resetTransport() { transport = undefined; }
 
-module.exports = { sendMail, verifyMail, isMailConfigured, mailConfig, resetTransport };
+module.exports = { sendMail, verifyMail, isMailConfigured, mailConfig, resetTransport, explainMailError };
