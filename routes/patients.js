@@ -250,13 +250,22 @@ async function scheduleOne(patientId, { scheduledAt, callType, username }) {
   const blocked = blockingReason(patient);
   if (blocked) return { ok: false, patientId, reason: blocked };
 
-  const existing = await dbGet(
+  // A patient may have several calls scheduled -- a follow-up next week and a
+  // reminder next month are two different calls. What must not happen is the
+  // same call being queued twice, which is what a double-click on "Call now"
+  // produces: two entries seconds apart, and two phones ringing.
+  const requestedAt = new Date(scheduledAt || Date.now());
+  const clash = await dbGet(
     `SELECT id FROM customers
       WHERE patient_id = ?
-        AND status IN ('pending','scheduled','calling','retry_scheduled','callback_scheduled')`,
-    [patientId]
+        AND status IN ('pending','scheduled','calling','retry_scheduled','callback_scheduled')
+        AND scheduled_datetime IS NOT NULL
+        AND abs(extract(epoch FROM (scheduled_datetime - ?::timestamptz))) < 300`,
+    [patientId, requestedAt.toISOString()]
   );
-  if (existing) return { ok: false, patientId, reason: 'Already waiting to be called' };
+  if (clash) {
+    return { ok: false, patientId, reason: 'A call is already scheduled for around that time' };
+  }
 
   await dbRun(
     // A new row per scheduled call. It used to upsert onto a unique patient_id,
