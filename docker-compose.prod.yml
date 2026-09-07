@@ -25,6 +25,12 @@ services:
     image: ${APP_IMAGE}
     restart: always
     env_file: [.env.prod]
+    # The Gmail service-account key lives on the host beside the env files and
+    # is mounted read-only. Deliberately not an environment variable: the app
+    # prints its environment at boot, and a private key in a variable is one
+    # log line away from disk.
+    volumes:
+      - ./gmail-key.json:/app/gmail-key.json:ro
     environment:
       NODE_ENV: production
       # The patients are in India and several checks read the local hour. The
@@ -45,6 +51,12 @@ services:
     image: ${APP_IMAGE}
     restart: unless-stopped
     env_file: [.env.uat]
+    # The Gmail service-account key lives on the host beside the env files and
+    # is mounted read-only. Deliberately not an environment variable: the app
+    # prints its environment at boot, and a private key in a variable is one
+    # log line away from disk.
+    volumes:
+      - ./gmail-key.json:/app/gmail-key.json:ro
     environment:
       TZ: Asia/Kolkata
       # Deliberately not "production": resolveDatabaseUrl() only returns the
