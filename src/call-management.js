@@ -281,7 +281,10 @@ async function hydrateIcallMateSessionContext(session, message = {}, extraParams
         .get('call_scripts')
         .catch(() => null);
       session.videoSent = context.customer.video_sent === 1;
-      session.lastVisitDate = context.customer.last_visit_date || 'kal';
+      // Left empty when there is no recorded date, so the prompt says "haal hi
+      // mein" rather than asserting "kal" to someone whose donation date the
+      // system does not actually know.
+      session.lastVisitDate = context.customer.last_visit_date || '';
 
       console.log(
         `[ICALLMATE] Hydrated outbound context streamId=${message.streamId || session.streamId || ''} ` +

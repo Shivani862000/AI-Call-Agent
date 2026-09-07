@@ -60,3 +60,40 @@ test('a patient reply is recognised whatever the label', () => {
 test('an unlabelled transcript is analysed rather than discarded', () => {
   assert.equal(transcriptHasCustomerSpeech('namaste ji, experience achha tha'), true);
 });
+
+// From a real UAT call. The donor said "बहुत बेकार" and described waiting a
+// long time with nobody attending, and it scored neutral -- the exact call this
+// analysis exists to catch. "bekaar" is as common as "bura", and waiting is the
+// commonest complaint a blood centre gets; neither was in the vocabulary.
+const { buildCallAnalysis } = require('../services/call-analysis');
+
+const sentimentOf = (said) => buildCallAnalysis({
+  transcript_text: `AGENT: Aapka experience kaisa raha?\nCUSTOMER: ${said}`,
+  call_type: 'REVIEW_CALL'
+}).sentiment;
+
+test('a complaint about the service is read as negative', () => {
+  const cases = [
+    'बहुत बेकार. वहां पर बहुत देर wait करना पड़ा उसके बाद देखने के लिए कोई नहीं था.',
+    'bahut bekaar tha',
+    'bahut der wait karna pada',
+    'बहुत बुरा था',
+    'staff was rude and slow'
+  ];
+  for (const said of cases) {
+    assert.equal(sentimentOf(said), 'negative', `read as ${sentimentOf(said)}: ${said}`);
+  }
+});
+
+test('praise is still read as positive', () => {
+  for (const said of ['बहुत अच्छा था', 'ठीक है', 'achha tha', 'koi dikkat nahi hui']) {
+    assert.equal(sentimentOf(said), 'positive', `read as ${sentimentOf(said)}: ${said}`);
+  }
+});
+
+// "haan ji" is how anyone confirms who they are when the call opens. It is not
+// an opinion of the service and must not colour the sentiment.
+test('confirming your own name is not praise', () => {
+  assert.equal(sentimentOf('हां जी'), 'neutral');
+  assert.equal(sentimentOf('haan ji'), 'neutral');
+});

@@ -160,12 +160,16 @@ function detectSentiment(turns, entities, callType) {
   const NEGATED_COMPLAINT = /(?:koi |kuch |any )?(?:dikkat|problem|pareshani|takleef|shikayat|issue)\w*\s*(?:nahi|nahin|nhi|nai)\b|(?:कोई |कुछ )?(?:दिक्कत|परेशानी|समस्या|तकलीफ|शिकायत)\s*(?:नहीं|नही)/;
   const complaintText = patientText.replace(new RegExp(NEGATED_COMPLAINT, 'g'), ' ');
 
-  // "bura" and "kharab" are the words a Hindi speaker reaches for first, and
-  // neither appeared here — so the clearest possible complaint scored neutral.
-  const negativeSignals = /(problem|dikkat|issue|pain|chakkar|weak|bad|complaint|nahi hua|bura|buri|kharab|kharaab|ganda|pareshani|takleef|slow|late|rude|नहीं ठीक|दिक्कत|बुरा|बुरी|ख़राब|खराब|परेशानी|तकलीफ|गंदा|दर्द)/.test(complaintText);
+  // "bekaar" is as common as "bura", and waiting is the single most frequent
+  // complaint a blood centre gets. Neither was here, so a donor who said
+  // "bahut bekaar" and described waiting a long time with nobody attending
+  // scored neutral -- the exact call this analysis exists to catch.
+  const negativeSignals = /(problem|dikkat|issue|pain|chakkar|weak|bad|complaint|nahi hua|bura|buri|kharab|kharaab|ganda|bekar|bekaar|bakwas|pareshani|takleef|slow|late|rude|wait|intezar|intzar|der lag|der ho|नहीं ठीक|दिक्कत|बुरा|बुरी|ख़राब|खराब|बेकार|बकवास|परेशानी|तकलीफ|गंदा|दर्द|इंतजार|इंतज़ार|देर|कोई नहीं था)/.test(complaintText);
   // A negated complaint is itself a positive signal.
+  // "haan ji" is dropped: it is how anyone confirms who they are at the start
+  // of the call, not an opinion of the service.
   const positiveSignals = NEGATED_COMPLAINT.test(patientText)
-    || /(theek|achha|accha|acha|badhiya|good|great|haan ji|thank|dhanyavaad|no problem|ठीक|अच्छा|अच्छी|बढ़िया|धन्यवाद)/.test(patientText);
+    || /(theek|achha|accha|acha|badhiya|good|great|thank|dhanyavaad|no problem|ठीक|अच्छा|अच्छी|बढ़िया|धन्यवाद)/.test(patientText);
 
   // Checked before the positive branch: "koi dikkat nahi" contains "dikkat",
   // and "bahut achha" alongside a complaint should not cancel it out.
