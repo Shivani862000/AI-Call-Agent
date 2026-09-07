@@ -881,7 +881,6 @@
         const customer = options.getCustomer(customerId);
         if (customer) {
           getEl('editingId').value = customer.id;
-          getEl('panelTitle').textContent = 'Edit Scheduled Call';
           getEl('submit').textContent = 'Save Changes';
           getEl('name').value = customer.name || '';
           getEl('phone').value = formatPhoneForInput(customer.phone || '');
@@ -897,6 +896,9 @@
             getEl('lastVisit').value = patient.last_test_date || patient.last_donation_date || '';
           }
           showFormView(false);
+          // After showFormView, which sets its own title -- editing an existing
+          // call was announcing itself as "Schedule New Follow-up Call".
+          getEl('panelTitle').textContent = 'Edit Scheduled Call';
         } else {
           showSelectionView();
         }
