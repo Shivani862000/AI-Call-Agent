@@ -294,7 +294,7 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
       `SELECT COUNT(*) as count 
        FROM calls c
        WHERE c.customer_id = ? 
-         AND c.called_at::date = current_date
+         AND (c.called_at AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
          AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
       [customer.id]
     );

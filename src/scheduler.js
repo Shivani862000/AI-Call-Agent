@@ -137,16 +137,21 @@ async function markSubmittedCallsWithoutMediaFailed() {
       nextRetryAt = enforceBusinessHours(retryDate.toISOString());
     }
 
+    // The reason was written to the log and nowhere else, so the screen could
+    // only offer "Call failed" for a call that timed out waiting for media.
+    const failureReason = `No answer - the call was not picked up within ${timeoutLabel}`;
+
     await dbRun(
       `UPDATE customers
           SET status = ?,
               next_retry_at = ?,
               last_contact_outcome = 'failed',
+              failed_reason = ?,
               retry_count = COALESCE(retry_count, 0) + 1,
               attempt_count = COALESCE(attempt_count, 0) + 1
         WHERE id = ?
           AND status IN ('calling', 'called')`,
-      [nextStatus, nextRetryAt, call.customer_id]
+      [nextStatus, nextRetryAt, failureReason, call.customer_id]
     );
 
     logger.error('CALL_FAILED', {
@@ -595,7 +600,11 @@ async function triggerScheduledCalls() {
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
 
       const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND c.called_at::date = current_date AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+        `SELECT COUNT(*) as count FROM calls c
+          WHERE c.customer_id = ?
+            AND (c.called_at AT TIME ZONE 'Asia/Kolkata')::date
+                = (now() AT TIME ZONE 'Asia/Kolkata')::date
+            AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
         [customer.id]
       );
       const attempt = callsTodayRow ? callsTodayRow.count : 1;

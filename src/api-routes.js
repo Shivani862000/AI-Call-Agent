@@ -317,7 +317,7 @@ module.exports = function mountApiRoutes(app) {
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
       
       const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND c.called_at::date = current_date AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND (c.called_at AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
         [customer.id]
       );
       const attempt = callsTodayRow ? callsTodayRow.count : 1;
@@ -599,7 +599,7 @@ module.exports = function mountApiRoutes(app) {
       await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
       
       const callsTodayRow = await dbGet(
-        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND c.called_at::date = current_date AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+        `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND (c.called_at AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
         [customer.id]
       );
       const attempt = callsTodayRow ? callsTodayRow.count : 1;
@@ -694,7 +694,7 @@ module.exports = function mountApiRoutes(app) {
          COALESCE(call_direction, 'outbound') AS direction,
          COALESCE(outcome, 'unknown') AS outcome,
          COUNT(*) AS count,
-         SUM(CASE WHEN DATE(called_at) = current_date THEN 1 ELSE 0 END) AS today_count,
+         SUM(CASE WHEN (called_at AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date THEN 1 ELSE 0 END) AS today_count,
          SUM(COALESCE(media_packets, 0)) AS media_packets
        FROM calls
        GROUP BY COALESCE(call_direction, 'outbound'), COALESCE(outcome, 'unknown')`

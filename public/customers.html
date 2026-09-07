@@ -735,6 +735,25 @@
       return latestCall?.agent_name || 'Default Feedback Agent';
     }
 
+    // "no-answer" arrives hyphenated from the provider while the checks tested
+    // "no_answer", so every failure fell through to a flat "Call failed" -- a
+    // call nobody picked up and a call refused for exceeding the daily limit
+    // read identically.
+    const FAILURE_LABELS = {
+      'no_answer': 'No answer - the call was not picked up',
+      'busy': 'The number was busy',
+      'failed': 'The call could not be connected',
+      'wrong_number': 'Wrong number',
+      'cancelled': 'Cancelled before dialling'
+    };
+
+    function describeFailure(record) {
+      const stated = String(record.failed_reason || record.outcome_detail || '').trim();
+      if (stated) return stated;
+      const status = String(record.status || '').toLowerCase().replace(/-/g, '_');
+      return FAILURE_LABELS[status] || 'The call could not be connected';
+    }
+
     function renderMetrics(filteredCustomers = customerCache) {
       const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
       const completedCalls = recentCallsCache.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
@@ -905,7 +924,7 @@
         
         let contextButton = '';
         if (isFailed) {
-          const reason = customer.failed_reason || (customer.status === 'busy' ? 'User is busy' : customer.status === 'no_answer' ? 'User did not pick up' : 'Call failed');
+          const reason = describeFailure(customer);
           contextButton = `<span style="font-size: 13px; color: var(--text-muted);">${AppShell.escapeHtml(reason)}</span>`;
         } else if (completedCall) {
           contextButton = `<button class="secondary analysis-cta-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`;
@@ -965,7 +984,7 @@
         
         let actionButton = '';
         if (isFailed) {
-          const reason = customer.failed_reason || (customer.status === 'busy' ? 'User is busy' : customer.status === 'no_answer' ? 'User did not pick up' : 'Call failed');
+          const reason = describeFailure(customer);
           actionButton = `<span style="font-size: 13px; color: var(--text-muted);">${AppShell.escapeHtml(reason)}</span>`;
         } else if (completedCall) {
           actionButton = `<button class="secondary mobile-action-button analysis-cta-button" type="button" onclick="openAnalysisPage(${completedCall.id})">Analysis</button>`;

@@ -137,8 +137,12 @@ async function releaseCustomerOutboundClaim(customerId, fallbackStatus = 'pendin
   );
 }
 
-/** Nobody gets rung more than this in one day, however the call is requested. */
-const MAX_CALLS_PER_DAY = 3;
+/**
+ * Nobody gets rung more than this in one day, however the call is requested.
+ * Raised on UAT so testing is not blocked after three attempts; production
+ * keeps the default, which is a limit on how often a donor may be disturbed.
+ */
+const MAX_CALLS_PER_DAY = Math.max(1, Number(process.env.MAX_CALLS_PER_DAY) || 3);
 
 /**
  * Outbound calls placed to this number today, counted in India's day.

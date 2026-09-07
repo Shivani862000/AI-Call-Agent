@@ -336,7 +336,7 @@ router.post('/', async (req, res) => {
          FROM calls c
          JOIN customer_queue cu ON cu.id = c.customer_id
          WHERE cu.phone = ? 
-           AND c.called_at::date = current_date
+           AND (c.called_at AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
            AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
         [payload.phone]
       );
@@ -486,7 +486,7 @@ router.put('/:id', async (req, res) => {
          FROM calls c
          JOIN customer_queue cu ON cu.id = c.customer_id
          WHERE cu.phone = ? 
-           AND c.called_at::date = current_date
+           AND (c.called_at AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
            AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
         [payload.phone]
       );
