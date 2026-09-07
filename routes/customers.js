@@ -699,6 +699,38 @@ router.delete('/bulk', async (req, res) => {
 });
 
 // Delete customer
+/**
+ * Takes a queue entry out of the calling list without destroying the record.
+ *
+ * Call history hangs off the customers row -- calls.customer_id cascades on
+ * delete and there is no patient_id on calls -- so deleting a pending entry
+ * takes every completed call for that patient with it. Removing something from
+ * a to-do list should not erase what already happened, so this clears the
+ * schedule and leaves the history alone.
+ */
+router.post('/:id/cancel', async (req, res) => {
+  try {
+    const existing = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Customer not found' });
+
+    await dbRun(
+      `UPDATE customers
+          SET status = 'cancelled', scheduled_datetime = NULL, next_retry_at = NULL,
+              auto_retry_enabled = 0, updated_at = now()
+        WHERE id = ?`,
+      [req.params.id]
+    );
+
+    logger.info('CALL_CANCELLED', baseCustomerLogDetails(existing, {
+      by: req.adminSession?.username || 'admin'
+    }));
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error cancelling call:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.delete('/:id', async (req, res) => {
   try {
     const existing = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [req.params.id]);

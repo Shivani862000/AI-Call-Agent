@@ -584,8 +584,25 @@
       }
     }
 
+    /** Takes the entry off the calling list; the call history stays. */
+    async function cancelScheduledCall(customerId) {
+      if (!confirm('Remove this call from the list? Past calls for this patient are kept.')) return;
+      try {
+        await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}/cancel`, { method: 'POST' });
+        AppShell.showAlert('Removed from the calling list');
+        await loadCustomers();
+      } catch (error) { AppShell.showAlert(error.message, 'error'); }
+    }
+
     async function deleteCustomer(customerId) {
-      if (!confirm('Delete this customer and related call data?')) return;
+      // Deleting the queue entry cascades to every call for that patient, so
+      // the count goes in the question. "Delete this customer and related call
+      // data?" was true and far too easy to read past.
+      const history = recentCallsCache.filter((call) => Number(call.customer_id) === Number(customerId)).length;
+      const warning = history
+        ? `\n\nThis also permanently deletes ${history} call record${history === 1 ? '' : 's'} for this patient, including completed calls and their recordings.`
+        : '';
+      if (!confirm(`Delete this patient's calling record?${warning}`)) return;
       try {
         await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}`, { method: 'DELETE' });
         AppShell.showAlert('Patient record deleted successfully');
@@ -888,6 +905,9 @@
                 ${contextButton}
                 <button class="secondary desktop-action-button" type="button" onclick="openNewCallModal(${customer.id})">Edit</button>
                 <button class="secondary desktop-action-button" type="button" onclick="toggleAutoRetry(${customer.id}, ${customer.auto_retry_enabled === 0 ? 'true' : 'false'})">Auto Retry: ${customer.auto_retry_enabled === 0 ? 'OFF' : 'ON'}</button>
+                ${['pending', 'scheduled', 'called', 'retry_scheduled', 'callback_scheduled'].includes(getComputedCustomerStatus(customer))
+                  ? `<button class="secondary desktop-action-button" type="button" onclick="cancelScheduledCall(${customer.id})">Remove from list</button>`
+                  : ''}
                 <button class="danger desktop-action-button admin-only-control" type="button" onclick="deleteCustomer(${customer.id})">Delete</button>
               </div>
             </td>
@@ -1090,6 +1110,7 @@
     window.triggerCallNow = triggerCallNow;
     window.scheduleRetry = scheduleRetry;
     window.deleteCustomer = deleteCustomer;
+    window.cancelScheduledCall = cancelScheduledCall;
     window.toggleAutoRetry = toggleAutoRetry;
     window.openAnalysisModal = openAnalysisModal;
     window.openAnalysisPage = openAnalysisPage;
