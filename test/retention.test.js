@@ -8,6 +8,13 @@ const {
   cutoffDate, isDueForPurge, buildPurgeStatement
 } = require('../src/retention');
 
+// This file is mostly pure assertions about the SQL, but one test reads the
+// live schema. CI has no database, so it guards the same way every other
+// database-backed test does rather than failing the run.
+require('dotenv').config();
+const { resolveDatabaseUrl } = require('../src/config');
+const HAS_DB = /^postgres/i.test(resolveDatabaseUrl());
+
 const on = { enabled: true, years: 10 };
 const now = new Date('2026-09-06T00:00:00Z');
 
@@ -60,7 +67,7 @@ test('the purge empties the content and marks the recording gone', () => {
 
 // A column named here that does not exist would make the purge fail years from
 // now, which is the worst possible time to discover a typo.
-test('every column the purge clears exists on calls', async () => {
+test('every column the purge clears exists on calls', { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
   const { dbAll, initializeDatabase, closeDatabase } = require('../db');
   await initializeDatabase();
   try {
