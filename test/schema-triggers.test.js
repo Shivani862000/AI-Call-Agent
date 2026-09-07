@@ -46,12 +46,11 @@ test('deleting a queue entry keeps the calls and feedback', { skip: !HAS_DB && '
   const { initializeDatabase, dbRun, dbGet, closeDatabase } = require('../db');
   await initializeDatabase();
 
-  const marker = `cascade-test-${Date.now()}`;
-  const patient = await dbRun(
-    'INSERT INTO patients (first_name, phone) VALUES (?, ?)', [marker, marker]
-  );
+  const { withTestPatient } = require('./support/fixtures');
+  await withTestPatient(async ({ patientId }) => {
+  const patient = { lastID: patientId };
   const customer = await dbRun(
-    'INSERT INTO customers (patient_id, status) VALUES (?, ?)', [patient.lastID, 'pending']
+    'INSERT INTO customers (patient_id, status) VALUES (?, ?)', [patientId, 'pending']
   );
   const call = await dbRun(
     'INSERT INTO calls (customer_id, outcome) VALUES (?, ?)',
@@ -75,9 +74,7 @@ test('deleting a queue entry keeps the calls and feedback', { skip: !HAS_DB && '
 
   const survivingFeedback = await dbGet('SELECT id, call_id FROM feedback WHERE call_id = ?', [call.lastID]);
   assert.ok(survivingFeedback, 'the feedback was deleted with the queue entry');
-
-  await dbRun('DELETE FROM calls WHERE id = ?', [call.lastID]);
-  await dbRun('DELETE FROM patients WHERE id = ?', [patient.lastID]);
+  });
   await closeDatabase();
 });
 
@@ -87,15 +84,16 @@ test('a patient can have more than one call scheduled', { skip: !HAS_DB && 'no S
   const { initializeDatabase, dbRun, dbAll, closeDatabase } = require('../db');
   await initializeDatabase();
 
-  const marker = `multi-test-${Date.now()}`;
-  const patient = await dbRun('INSERT INTO patients (first_name, phone) VALUES (?, ?)', [marker, marker]);
+  const { withTestPatient } = require('./support/fixtures');
+  await withTestPatient(async ({ patientId }) => {
+  const patient = { lastID: patientId };
   const first = await dbRun(
     'INSERT INTO customers (patient_id, status, scheduled_datetime) VALUES (?, ?, now())',
-    [patient.lastID, 'scheduled']
+    [patientId, 'scheduled']
   );
   const second = await dbRun(
     'INSERT INTO customers (patient_id, status, scheduled_datetime) VALUES (?, ?, now())',
-    [patient.lastID, 'scheduled']
+    [patientId, 'scheduled']
   );
 
   assert.notEqual(first.lastID, second.lastID, 'each scheduled call needs its own id');
@@ -107,8 +105,6 @@ test('a patient can have more than one call scheduled', { skip: !HAS_DB && 'no S
   const remaining = await dbAll('SELECT id FROM customers WHERE patient_id = ?', [patient.lastID]);
   assert.equal(remaining.length, 1);
   assert.equal(Number(remaining[0].id), Number(second.lastID));
-
-  await dbRun('DELETE FROM customers WHERE patient_id = ?', [patient.lastID]);
-  await dbRun('DELETE FROM patients WHERE id = ?', [patient.lastID]);
+  });
   await closeDatabase();
 });

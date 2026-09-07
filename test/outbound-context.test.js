@@ -18,27 +18,23 @@ test('the outbound call is found even when the patient has several queue entries
   { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
   const { initializeDatabase, dbRun, closeDatabase } = require('../db');
   const { findRecentOutboundCallContextByPhone } = require('../src/call-management');
+  const { withTestPatient } = require('./support/fixtures');
   await initializeDatabase();
 
-  const phone = String(Date.now()).slice(-10);
-  const patient = await dbRun(
-    'INSERT INTO patients (first_name, phone, normalized_phone) VALUES (?, ?, ?)',
-    [`ctx-${phone}`, phone, phone]
-  );
-
   try {
+    await withTestPatient(async ({ patientId, phone }) => {
     // Several entries for one patient; only the last carries the placed call.
     const older = await dbRun(
       'INSERT INTO customers (patient_id, status, scheduled_datetime) VALUES (?, ?, now())',
-      [patient.lastID, 'scheduled']
+      [patientId, 'scheduled']
     );
     const decoy = await dbRun(
       'INSERT INTO customers (patient_id, status, scheduled_datetime) VALUES (?, ?, now())',
-      [patient.lastID, 'scheduled']
+      [patientId, 'scheduled']
     );
     const calling = await dbRun(
       'INSERT INTO customers (patient_id, status, scheduled_datetime) VALUES (?, ?, now())',
-      [patient.lastID, 'scheduled']
+      [patientId, 'scheduled']
     );
     const call = await dbRun(
       `INSERT INTO calls (customer_id, outcome, call_direction, call_type, called_at)
@@ -54,11 +50,8 @@ test('the outbound call is found even when the patient has several queue entries
       'the entry the call was placed for should win, not an arbitrary one');
     assert.notEqual(Number(context.customer.id), Number(decoy.lastID));
     assert.notEqual(Number(context.customer.id), Number(older.lastID));
-
-    await dbRun('DELETE FROM calls WHERE id = ?', [call.lastID]);
-    await dbRun('DELETE FROM customers WHERE patient_id = ?', [patient.lastID]);
+    });
   } finally {
-    await dbRun('DELETE FROM patients WHERE id = ?', [patient.lastID]).catch(() => {});
     await closeDatabase();
   }
 });
