@@ -88,3 +88,55 @@ test('the flow marks itself closing before the goodbye is spoken', () => {
   buildReviewCallTurnInstruction('bahut achha tha', state, 'C', 'Ankita');
   assert.equal(shouldIgnoreBargeIn({ state }), true, 'the closing turn must be protected');
 });
+
+// From two real follow-up calls. The donor's own "Hello" arrived while the
+// agent was introducing itself; barge-in cleared the audio, so both calls were
+// cut at "...quality ke liye record". Nobody was ever asked who they were.
+test('a hello during the introduction does not cut it off', () => {
+  const { shouldIgnoreBargeIn } = require('../src/conversation-state');
+  assert.equal(shouldIgnoreBargeIn({ openingInProgress: true }), true);
+  assert.equal(shouldIgnoreBargeIn({ openingInProgress: false, state: { step: 'experience' } }), false);
+});
+
+// "कहां" (where) contains "हां" (yes). The alternation had no word boundary, so
+// "आप कहां से बोल रहे हो?" was read as agreement and the agent answered a
+// question about its own identity with "Bahut achha. Kab donate kiya tha?".
+test('a question is never mistaken for a yes', () => {
+  const { isAffirmativeReply, isQuestionReply } = require('../src/conversation-state');
+
+  for (const asked of ['आप कहां से बोल रहे हो?', 'आप कौन बोल रहे हो?', 'aap kaun bol rahe ho']) {
+    assert.equal(isQuestionReply(asked), true, `not seen as a question: ${asked}`);
+    assert.equal(isAffirmativeReply(asked), false, `read as yes: ${asked}`);
+  }
+
+  for (const agreed of ['हां जी', 'हाँ', 'जी हां', 'ठीक है', 'haan ji']) {
+    assert.equal(isAffirmativeReply(agreed), true, `agreement missed: ${agreed}`);
+  }
+});
+
+// The donor said "नहीं मैंने नहीं कराया" and was congratulated -- "Bahut achha
+// kaam kiya" -- for a donation they had just denied.
+test('a denial is never treated as agreement', () => {
+  const { buildThreeMonthFollowupTurnInstruction } = require('../src/conversation-state');
+  const state = { step: 'donated_again' };
+
+  const reply = buildThreeMonthFollowupTurnInstruction('नहीं मैंने नहीं कराया', state, 'Apna Blood Centre', 'Rajesh');
+  assert.doesNotMatch(reply, /Kab donate kiya tha/, 'asked when they donated after they said they had not');
+  assert.match(reply, /bhavishya mein blood donate karne mein ruchi/);
+  assert.equal(state.step, 'plan_to_donate');
+});
+
+// One call asked the same question four times while the donor asked who was
+// calling.
+test('the follow-up gives up rather than repeating forever', () => {
+  const { buildThreeMonthFollowupTurnInstruction } = require('../src/conversation-state');
+  const state = { step: 'donated_again' };
+
+  const first = buildThreeMonthFollowupTurnInstruction('आप कौन बोल रहे हो?', state, 'Apna Blood Centre', 'Rajesh');
+  assert.match(first, /Answer their question/);
+
+  buildThreeMonthFollowupTurnInstruction('Hello', state, 'Apna Blood Centre', 'Rajesh');
+  const last = buildThreeMonthFollowupTurnInstruction('Hello', state, 'Apna Blood Centre', 'Rajesh');
+  assert.match(last, /Koi baat nahi/);
+  assert.equal(state.conversationCompleted, true);
+});

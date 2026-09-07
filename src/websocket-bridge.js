@@ -824,6 +824,8 @@ module.exports = function setupWebSocketBridge(server) {
 
                 // Signal the interval to flush the tail when buffer drains below 3200
                 session.turnComplete = true;
+                // The opening has been delivered; normal barge-in resumes.
+                session.openingInProgress = false;
 
                 const audioQueuedBytes = session.audioBuffer ? session.audioBuffer.length : 0;
                 console.log(`[GEMINI_TURN_COMPLETE] streamId=${getSessionLabel()}`);
@@ -856,7 +858,8 @@ module.exports = function setupWebSocketBridge(server) {
                 const closing = shouldIgnoreBargeIn({
                   hangupAfterAudioDrains: session.hangupAfterAudioDrains,
                   pendingHangup,
-                  state: outboundDemoState
+                  state: outboundDemoState,
+                  openingInProgress: session.openingInProgress === true
                 });
 
                 debugLog('Gemini Live interrupted signal', {
@@ -935,6 +938,7 @@ module.exports = function setupWebSocketBridge(server) {
       const openingLine = getOpeningPrompt();
 
       if (useGeminiLive()) {
+        session.openingInProgress = true;
         const sent = sendGeminiLiveText(buildSpokenOpeningInstruction(openingLine), { interrupt: true });
         if (sent) {
           openingPromptSent = true;

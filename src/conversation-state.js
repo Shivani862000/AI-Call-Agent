@@ -54,9 +54,15 @@ function shouldAutoHangupAfterAgentTurn(text) {
  *
  * Once the closing is being spoken there is nothing left to interrupt.
  */
-function shouldIgnoreBargeIn({ hangupAfterAudioDrains, pendingHangup, state } = {}) {
+function shouldIgnoreBargeIn({ hangupAfterAudioDrains, pendingHangup, state, openingInProgress } = {}) {
   return Boolean(
-    hangupAfterAudioDrains
+    // The opening carries the disclosure and the identity question, and the
+    // caller's own "Hello" landed in the middle of it: two calls were cut at
+    // "...quality ke liye record", so nobody was ever asked who they were and
+    // the agent resumed mid-word. Someone saying hello as you introduce
+    // yourself is not asking you to stop.
+    openingInProgress
+    || hangupAfterAudioDrains
     || pendingHangup
     || (state && (state.endCallAfterNextReply || state.conversationState === 'COMPLETED'))
   );
@@ -99,10 +105,28 @@ function isGreetingOnly(text) {
   return ['hello', 'helo', 'hi', 'haan hello', 'ji hello', 'namaste', 'हेलो', 'नमस्ते'].includes(normalized);
 }
 
+/**
+ * A question is not an answer.
+ *
+ * A donor asked "आप कहां से बोल रहे हो?" -- where are you calling from -- and
+ * the flow took it as a yes and moved on to "Kab donate kiya tha?".
+ */
+function isQuestionReply(text) {
+  const raw = String(text || '');
+  if (/[?？]/.test(raw)) return true;
+  const normalized = normalizeHindiEnglishText(raw);
+  return /\b(kaun|kahan|kahaan|kyun|kyon|kaise|kab|kya aap|who is|where are|why are)\b/i.test(normalized)
+    || /कौन|कहाँ|कहां|क्यों|कैसे/.test(raw);
+}
+
 function isAffirmativeReply(text) {
   const normalized = normalizeHindiEnglishText(text);
+  // A question is never a yes, however it is worded.
+  if (isQuestionReply(text)) return false;
   return /(^|\b)(haan|han|ha|yes|yeah|ji|jee|okay|ok|theek|thik|sure)(\b|$)/i.test(normalized)
-    || /हाँ|हां|जी|ठीक/.test(text);
+    // Anchored: "कहां" (where) contains "हां" (yes), so an unanchored
+    // alternation read "where are you calling from" as agreement.
+    || /(^|[\s,।"'(])(हाँ|हां|जी|ठीक|बिलकुल|बिल्कुल)([\s,।?.!"')]|$)/.test(text);
 }
 
 function isNegativeOrBusyReply(text) {
@@ -291,6 +315,26 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName
       return 'Donor has not donated again. Say exactly: "Hamare yahan garbhvati mahilaon aur thalassemia se grast bachchon ko free blood diya jata hai. Kya aap bhavishya mein blood donate karne mein ruchi rakhte hain?"';
     }
 
+    if (isAffirmativeReply(customerReply)) {
+      state.donatedAgain = true;
+      state.step = 'donation_date';
+      return 'Donor donated again. Say exactly: "Bahut achha. Kab donate kiya tha?"';
+    }
+
+    // Answer what they asked, then put the question back. Repeating the
+    // question at someone who asked who you are is how a call becomes a loop.
+    if (isQuestionReply(customerReply)) {
+      state.followupClarified = (state.followupClarified || 0) + 1;
+      if (state.followupClarified <= 2) {
+        return `Answer their question in one short sentence -- you are an automated assistant from ${centre} -- then ask again, exactly: "Kya aapne 3 mahine ke baad dobara blood donate kiya hai?"`;
+      }
+    }
+
+    state.followupClarified = (state.followupClarified || 0) + 1;
+    if (state.followupClarified > 2) {
+      markCompletedAfterReply();
+      return `The donor is not answering the question. Say exactly: "Koi baat nahi. ${closing}" Then end the call.`;
+    }
     return 'Clarify briefly. Say exactly: "Kya aapne 3 mahine ke baad dobara blood donate kiya hai?"';
   }
 
@@ -401,6 +445,7 @@ module.exports = {
   isUncertainReply,
   isWrongPersonReply,
   isGoodbyeReply,
+  isQuestionReply,
   buildReviewCallTurnInstruction,
   buildThreeMonthFollowupTurnInstruction,
   buildOutboundDemoTurnInstruction
