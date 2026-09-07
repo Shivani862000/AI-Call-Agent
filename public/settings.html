@@ -61,6 +61,9 @@
             <h2>Settings</h2>
             <div class="page-subtitle">Control the daily email and automatic calling.</div>
           </div>
+        <div class="header-actions">
+            <button id="logoutButton" class="secondary" type="button">Logout</button>
+          </div>
         </header>
 
         <div id="banner" class="banner"></div>
@@ -75,6 +78,13 @@
           <div id="mailWarning" class="warn" hidden>
             Email is not set up on the server yet, so nothing can be sent. Ask your developer to
             add the mail settings, then come back here.
+          </div>
+          <!-- Settings being present is not the same as mail working: the host
+               blocks outbound SMTP, so a fully configured server still cannot
+               send. An absent warning was reading as "ready". -->
+          <div id="mailUnverified" class="warn" hidden>
+            Mail settings are present, but sending has never been confirmed from this server.
+            Use <strong>Send one now</strong> to check before you rely on the daily summary.
           </div>
 
           <div class="switch">
@@ -259,6 +269,9 @@
       });
     }
 
+    // A successful "Send one now" is the only evidence that mail works.
+    let mailSendConfirmed = false;
+
     let callScripts = { review_call: {}, three_month_followup: {} };
     let scriptHelp = { placeholders: [], safety_rules: '' };
     // The built-in wording, per call type, fetched once and kept as the
@@ -338,6 +351,8 @@
       $('sendAt').value = data.owner_digest.send_at || '08:00';
       $('timezone').value = data.owner_digest.timezone || 'Asia/Kolkata';
       $('mailWarning').hidden = data.mail_configured;
+      // Shown until a test send actually succeeds in this browser session.
+      $('mailUnverified').hidden = !data.mail_configured || mailSendConfirmed;
       autoQueue = data.auto_queue;
       $('autoEnabled').checked = autoQueue.enabled;
       renderRules();
@@ -414,8 +429,17 @@
       this.disabled = true;
       try {
         const result = await AppShell.fetchJson('/api/settings/digest/test', { method: 'POST' });
+        mailSendConfirmed = true;
+        $('mailUnverified').hidden = true;
         banner('Sent to ' + (result.accepted || []).join(', '), true);
-      } catch (error) { banner(error.message, false); } finally { this.disabled = false; }
+      } catch (error) {
+        // A failure is the whole point of the button, and the banner clears
+        // itself after five seconds, so the reason stays on the page.
+        mailSendConfirmed = false;
+        $('mailUnverified').hidden = false;
+        $('mailUnverified').textContent = `Sending failed: ${error.message}`;
+        banner(error.message, false);
+      } finally { this.disabled = false; }
     };
 
     $('previewDigest').onclick = async function preview() {
@@ -428,6 +452,11 @@
     };
 
     AppShell.ensureAuthenticatedSession().then(load).catch(() => {});
+  
+    // Signing out was only possible from three of the seven pages; from here
+    // you had to navigate somewhere else first.
+    document.getElementById('logoutButton')
+      ?.addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
   </script>
 </body>
 </html>

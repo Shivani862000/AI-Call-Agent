@@ -47,6 +47,9 @@
             <h2>Support Tickets</h2>
             <div class="page-subtitle">Review submitted issues and manage ticket updates.</div>
           </div>
+        <div class="header-actions">
+            <button id="logoutButton" class="secondary" type="button">Logout</button>
+          </div>
         </header>
         <nav id="ticketJumpMenu" class="ticket-jump-menu" aria-label="Jump to ticket" hidden></nav>
         <div id="tickets">Loading…</div>
@@ -129,6 +132,11 @@
     }
 
     initialize();
+  
+    // Signing out was only possible from three of the seven pages; from here
+    // you had to navigate somewhere else first.
+    document.getElementById('logoutButton')
+      ?.addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
   </script>
 </body>
 </html>

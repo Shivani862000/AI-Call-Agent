@@ -80,6 +80,9 @@
             <h2>Patients</h2>
             <div class="page-subtitle">Add, update and remove the people this service calls.</div>
           </div>
+        <div class="header-actions">
+            <button id="logoutButton" class="secondary" type="button">Logout</button>
+          </div>
         </header>
 
         <div id="banner" class="banner"></div>
@@ -624,6 +627,11 @@
       await load();
       await applyDeepLink();
     }).catch(() => {});
+  
+    // Signing out was only possible from three of the seven pages; from here
+    // you had to navigate somewhere else first.
+    document.getElementById('logoutButton')
+      ?.addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
   </script>
 </body>
 </html>
