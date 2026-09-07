@@ -87,13 +87,56 @@ const logger = require('../services/system-logger');
 const { generateCallAnalysisPDF } = require('../services/pdf');
 
 module.exports = function mountApiRoutes(app) {
-  app.get('/health', (req, res) => {
-    res.json({
-      ok: true,
-      mode: CALL_MODE,
-      pipeline: VOICE_PIPELINE,
-      model: REALTIME_MODEL,
-      publicBaseUrl: PUBLIC_BASE_URL,
+  /**
+   * What an uptime monitor should watch.
+   *
+   * It used to answer {ok:true} unconditionally, so it stayed green with the
+   * database unreachable or the schema mismatched -- a check that cannot fail
+   * is worse than no check, because it is trusted.
+   *
+   * Unauthenticated by necessity, so it reports whether things work and not
+   * what they are: no model names, no base URL, no versions for a stranger.
+   */
+  app.get('/health', async (req, res) => {
+    const started = Date.now();
+    const checks = {};
+    let ok = true;
+
+    try {
+      const { dbGet, EXPECTED_SCHEMA_VERSION } = require('../db');
+      const row = await dbGet(
+        'SELECT max(version) AS version FROM supabase_migrations.schema_migrations'
+      );
+      const version = String(row?.version || '');
+      checks.database = 'ok';
+      if (version.startsWith(EXPECTED_SCHEMA_VERSION)) {
+        checks.schema = 'ok';
+      } else {
+        // The app refuses to boot on a mismatch, so this only catches a
+        // database changed underneath a running container.
+        checks.schema = 'mismatch';
+        ok = false;
+      }
+    } catch (error) {
+      checks.database = 'unreachable';
+      checks.schema = 'unknown';
+      ok = false;
+    }
+
+    // Reported, not fatal: the app runs, but it cannot hold a conversation, so
+    // a call would connect to silence.
+    try {
+      const { unusableCredentials } = require('./call-capability');
+      checks.voice = unusableCredentials().length ? 'not configured' : 'ok';
+    } catch (error) {
+      checks.voice = 'unknown';
+    }
+
+    res.status(ok ? 200 : 503).json({
+      ok,
+      checks,
+      uptimeSeconds: Math.round(process.uptime()),
+      checkedInMs: Date.now() - started,
       timestamp: new Date().toISOString()
     });
   });
