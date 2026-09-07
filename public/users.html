@@ -253,15 +253,28 @@
         reset.className = 'secondary';
         reset.textContent = 'Reset password';
         reset.onclick = async () => {
-          const password = generatePassword();
-          if (!confirm(`Reset the password for ${user.username}?`)) return;
+          // Asking is also the confirmation: cancelling here resets nothing.
+          // It used to generate a password unconditionally, with nowhere to
+          // type one, so an admin who wanted to set a specific password could
+          // not -- the button ignored the intent rather than refusing it.
+          const typed = window.prompt(
+            `New password for ${user.username}.\nLeave blank to generate a strong one.`, ''
+          );
+          if (typed === null) return;
+
+          const chosen = typed.trim();
+          const password = chosen || generatePassword();
           try {
             await AppShell.fetchJson('/api/users/' + user.id, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ password })
             });
-            window.prompt(`New password for ${user.username} — copy it now, it is not stored anywhere:`, password);
+            // Only shown back when the system invented it. Echoing a password
+            // the admin just typed teaches nothing and leaves it on screen.
+            if (!chosen) {
+              window.prompt(`New password for ${user.username} — copy it now, it is not stored anywhere:`, password);
+            }
             showBanner(`Password reset for ${user.username}`, true);
           } catch (error) { showBanner(error.message, false); }
         };
