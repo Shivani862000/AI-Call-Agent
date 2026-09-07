@@ -736,13 +736,16 @@
     }
 
     function renderMetrics(filteredCustomers = customerCache) {
-      const pendingStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
       const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
       const completedCalls = recentCallsCache.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
 
-      const isScheduled = (c) => ['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled'].includes(String(c.status || '').toLowerCase());
-      const scheduledCount = customerCache.filter((customer) => isScheduled(customer)).length;
-      const pendingCount = customerCache.filter((customer) => pendingStatuses.has(String(customer.status || '').toLowerCase())).length;
+      // Counted with the same predicate the list uses. These read the raw
+      // status while the list read the computed one, so an entry left at
+      // "called" counted as pending forever while the list -- which resolves it
+      // to completed or failed after three minutes -- showed nothing. A tile
+      // saying 1 above an empty table was the visible result.
+      const scheduledCount = customerCache.filter(isScheduledEntry).length;
+      const pendingCount = customerCache.filter(isPendingEntry).length;
       const completedCount = completedCalls.length;
       const failedCount = recentCallsCache.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
 
@@ -768,12 +771,18 @@
       updateCustomerMetricButtons();
     }
 
+    // One definition of each bucket, used by both the tiles and the table.
+    const PENDING_STATUSES = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
+    const SCHEDULED_STATUSES = new Set(['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled']);
+
+    const isPendingEntry = (customer) => PENDING_STATUSES.has(getComputedCustomerStatus(customer));
+    const isScheduledEntry = (customer) => SCHEDULED_STATUSES.has(getComputedCustomerStatus(customer));
+
     function getFilteredCustomers() {
       const search = document.getElementById('customerSearch').value.trim().toLowerCase();
       const dateFilter = document.getElementById('dateFilter').value;
       const customDate = document.getElementById('customDateFilter').value || document.getElementById('mobileCustomDateFilter').value;
       const callType = document.getElementById('callTypeFilter').value;
-      const pendingStatuses = new Set(['pending', 'called', 'retry_scheduled', 'callback_scheduled']);
       const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
 
       const matchesCommonFilters = (record) => {
@@ -820,13 +829,12 @@
       }
 
       return customerCache.filter((customer) => {
-        let computedStatus = getComputedCustomerStatus(customer);
         let matchesMetricFilter = true;
 
         if (activeCustomerMetricFilter === 'scheduled') {
-          matchesMetricFilter = ['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled'].includes(computedStatus);
+          matchesMetricFilter = isScheduledEntry(customer);
         } else if (activeCustomerMetricFilter === 'pending') {
-          matchesMetricFilter = pendingStatuses.has(computedStatus);
+          matchesMetricFilter = isPendingEntry(customer);
         }
         
         return matchesMetricFilter && matchesCommonFilters(customer);
