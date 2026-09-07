@@ -747,7 +747,13 @@
       const scheduledCount = customerCache.filter(isScheduledEntry).length;
       const pendingCount = customerCache.filter(isPendingEntry).length;
       const completedCount = completedCalls.length;
-      const failedCount = recentCallsCache.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
+      const failedFromCalls = recentCallsCache.filter((call) => failedOutcomes.has(String(call.outcome || '').toLowerCase())).length;
+      // Plus entries refused before a call record ever existed.
+      const failedBeforeDialling = customerCache
+        .filter((customer) => String(customer.status || '').toLowerCase() === 'failed')
+        .filter((customer) => !recentCallsCache.some((call) => Number(call.customer_id) === Number(customer.id)))
+        .length;
+      const failedCount = failedFromCalls + failedBeforeDialling;
 
       document.getElementById('scheduledTodayMetric').textContent = scheduledCount;
       document.getElementById('pendingCallsMetric').textContent = pendingCount;
@@ -809,7 +815,7 @@
           ? (c) => String(c.outcome || '').toLowerCase() === 'completed'
           : (c) => failedOutcomes.has(String(c.outcome || '').toLowerCase());
           
-        return recentCallsCache
+        const fromCalls = recentCallsCache
           .filter(targetState)
           .map(c => ({
             isCallRecord: true,
@@ -824,7 +830,27 @@
             preferred_slot: c.called_at ? new Date(c.called_at).toTimeString().slice(0,5) : '',
             failed_reason: c.outcome_detail,
             auto_retry_enabled: 0
-          }))
+          }));
+
+        // A call refused before it was dialled -- over the daily limit, do not
+        // call, no usable number -- produces no call record, so listing call
+        // records alone made it vanish: the queue entry said failed and the
+        // Failed tab showed nothing.
+        const blockedBeforeDialling = activeCustomerMetricFilter !== 'failed' ? [] : customerCache
+          .filter((customer) => String(customer.status || '').toLowerCase() === 'failed')
+          .filter((customer) => !recentCallsCache.some((call) => Number(call.customer_id) === Number(customer.id)))
+          .map((customer) => ({
+            ...customer,
+            status: 'failed',
+            // When it was attempted, not when it was meant to happen.
+            called_at: customer.updated_at || customer.scheduled_datetime,
+            scheduled_date: customer.updated_at || customer.scheduled_datetime,
+            failed_reason: customer.failed_reason || 'Not attempted',
+            auto_retry_enabled: 0
+          }));
+
+        return [...fromCalls, ...blockedBeforeDialling]
+          .sort((a, b) => new Date(b.called_at || 0) - new Date(a.called_at || 0))
           .filter(matchesCommonFilters);
       }
 

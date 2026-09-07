@@ -137,6 +137,29 @@ async function releaseCustomerOutboundClaim(customerId, fallbackStatus = 'pendin
   );
 }
 
+/** Nobody gets rung more than this in one day, however the call is requested. */
+const MAX_CALLS_PER_DAY = 3;
+
+/**
+ * Outbound calls placed to this number today, counted in India's day.
+ *
+ * current_date is UTC, so the counter reset at 05:30 IST rather than midnight:
+ * calls made late in the evening counted against the following morning.
+ */
+async function countOutboundCallsToday(phone) {
+  const rows = await dbAll(
+    `SELECT c.id
+       FROM calls c
+       JOIN customer_queue cu ON cu.id = c.customer_id
+      WHERE cu.phone = ?
+        AND (c.called_at AT TIME ZONE 'Asia/Kolkata')::date
+            = (now() AT TIME ZONE 'Asia/Kolkata')::date
+        AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
+    [phone]
+  );
+  return rows.length;
+}
+
 async function findCustomerByPhone(phoneValue) {
   const normalized = normalizePhoneLookupValue(phoneValue);
   if (!normalized) return null;
@@ -350,19 +373,13 @@ async function shouldBlockCustomerCall(customer) {
       }
     }
 
-    const callsToday = await dbAll(
-      `SELECT called_at 
-       FROM calls c
-       JOIN customer_queue cu ON cu.id = c.customer_id
-       WHERE cu.phone = ? 
-         AND c.called_at::date = current_date
-         AND COALESCE(c.call_direction, 'outbound') = 'outbound'
-       ORDER BY c.called_at DESC`,
-      [customer.phone]
-    );
+    const callsToday = await countOutboundCallsToday(customer.phone);
 
-    if (callsToday && callsToday.length >= 3) {
-      return { code: 'CALL_FAILED_MAX_ATTEMPTS', reason: 'Maximum 3 attempts completed for the day' };
+    if (callsToday >= MAX_CALLS_PER_DAY) {
+      return {
+        code: 'CALL_FAILED_MAX_ATTEMPTS',
+        reason: `Already called ${callsToday} times today. The daily limit is ${MAX_CALLS_PER_DAY}.`
+      };
     }
 
     if (callsToday && callsToday.length > 0) {
@@ -591,6 +608,8 @@ function getScriptedCopy(language, customerName = process.env.CUSTOMER_NAME, cli
 }
 
 module.exports = {
+  MAX_CALLS_PER_DAY,
+  countOutboundCallsToday,
   placeRealtimeCall,
   computeNextAnnualReminderDate,
   ensureCustomerForCall,

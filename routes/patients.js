@@ -14,6 +14,7 @@ const {
 } = require('../src/patient-rules');
 const { mapHeaders, buildImportPlan, COLUMN_ALIASES } = require('../src/patient-import');
 const { blockingReason } = require('../src/queue-rules');
+const { countOutboundCallsToday, MAX_CALLS_PER_DAY } = require('../src/call-management');
 
 const MAX_IMPORT_ROWS = 5000;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -249,6 +250,18 @@ async function scheduleOne(patientId, { scheduledAt, callType, username }) {
 
   const blocked = blockingReason(patient);
   if (blocked) return { ok: false, patientId, reason: blocked };
+
+  // Checked here as well as in the scheduler, so the person clicking is told
+  // why. Queuing succeeded and the scheduler failed the entry seconds later
+  // with nothing on screen: "Calling Ankita now", and then silence.
+  const callsToday = await countOutboundCallsToday(patient.normalized_phone || patient.phone);
+  if (callsToday >= MAX_CALLS_PER_DAY) {
+    return {
+      ok: false,
+      patientId,
+      reason: `Already called ${callsToday} times today. The daily limit is ${MAX_CALLS_PER_DAY}.`
+    };
+  }
 
   // A patient may have several calls scheduled -- a follow-up next week and a
   // reminder next month are two different calls. What must not happen is the
