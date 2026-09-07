@@ -878,6 +878,23 @@ module.exports = function setupWebSocketBridge(server) {
       }
     }
 
+    /**
+     * The opening is a line for the agent to speak, not something the patient
+     * said -- but it goes down the same channel as the caller's speech, as a
+     * user turn. Gemini answered it instead of saying it: a call opened with
+     * "Haan, main bol rahi hoon. Kya baat hai?", and one that asked "Kya main
+     * Shivani ji se baat kar rahi hoon?" got "Haan, main Shivani bol rahi
+     * hoon" -- the agent introducing itself as the patient.
+     *
+     * Framed as an instruction so the model speaks it rather than replies to it.
+     */
+    function buildSpokenOpeningInstruction(line) {
+      return 'SYSTEM: The call has just connected and you speak first. '
+        + 'Say the following line word for word, then stop and wait for their reply. '
+        + 'Do not answer it, do not add to it, and do not introduce yourself as the patient.\n'
+        + String(line || '').trim();
+    }
+
     function sendOpeningPrompt() {
       if (bridgeClosed || openingPromptSent) {
         return;
@@ -892,20 +909,23 @@ module.exports = function setupWebSocketBridge(server) {
         customer: getSessionCustomerName()
       });
 
+      const openingLine = getOpeningPrompt();
+
       if (useGeminiLive()) {
-        const openingText = getOpeningPrompt();
-        const sent = sendGeminiLiveText(openingText, { interrupt: true });
+        const sent = sendGeminiLiveText(buildSpokenOpeningInstruction(openingLine), { interrupt: true });
         if (sent) {
           openingPromptSent = true;
           session.openingPromptSentAt = Date.now();
-          scheduleOpeningFallback(openingText);
+          // The fallback speaks the line directly through TTS, so it takes the
+          // line itself rather than the instruction wrapped around it.
+          scheduleOpeningFallback(openingLine);
         }
         return;
       }
 
       if (useGemini()) {
         openingPromptSent = true;
-        sendGeminiClientTurn(getOpeningPrompt(), { interrupt: true });
+        sendGeminiClientTurn(buildSpokenOpeningInstruction(openingLine), { interrupt: true });
       }
     }
 

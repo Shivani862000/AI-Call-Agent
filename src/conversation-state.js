@@ -7,7 +7,7 @@
 
 const { CALL_TYPES, LIVE_MAX_RESPONSE_TOKENS } = require('./config');
 const { normalizeOutboundCallType, formatOutboundCallTypeLabel } = require('./helpers');
-const { FINAL_CLOSING_LINE, buildClosingLine } = require('../prompts/closing.ts');
+const { FINAL_CLOSING_LINE, buildClosingLine, spokenName } = require('../prompts/closing.ts');
 const { describeEligibility, describeVisit } = require('../prompts/review-calling.ts');
 
 // ── Sentiment evaluation ───────────────────────────────────────────────────────
@@ -110,10 +110,24 @@ function isWrongPersonReply(text) {
     || /गलत नंबर|कोई और|कौन बोल/.test(text);
 }
 
+/**
+ * Someone winding the call up: "ok bye", "theek hai bye", "rakhta hoon".
+ *
+ * A donor said "Ok, bye" and was asked the same question again, because
+ * nothing recognised it. Ending a call politely is not an unclear answer.
+ */
+function isGoodbyeReply(text) {
+  const normalized = normalizeHindiEnglishText(text);
+  return /\b(bye|goodbye|bye bye|rakhta hoon|rakhti hoon|rakhte hain|phone rakh|baad mein baat)\b/i.test(normalized)
+    || /अलविदा|रखता हूँ|रखती हूँ/.test(text);
+}
+
 function isPositiveExperienceReply(text) {
   const normalized = normalizeHindiEnglishText(text);
-  return /(ach+h?a|ac+h?a|badhiya|badiya|good|great|fine|excellent|smooth|sahi|satisfied|positive|bahut achhi)/i.test(normalized)
-    || /अच्छा|अच्छी|बढ़िया|सही|संतुष्ट/.test(text);
+  // "theek hai" is the commonest answer of all and matched nothing, in either
+  // script, so the flow treated it as unintelligible and asked again.
+  return /(ach+h?a|ac+h?a|badhiya|badiya|good|great|fine|excellent|smooth|sahi|satisfied|positive|bahut achhi|theek|thik)/i.test(normalized)
+    || /अच्छा|अच्छी|बढ़िया|सही|संतुष्ट|ठीक|बढिया/.test(text);
 }
 
 function isNegativeExperienceReply(text) {
@@ -152,7 +166,7 @@ function captureIntendedVisit(customerReply, state, closing) {
 // ── Review Call turn instruction builder ───────────────────────────────────────
 
 function buildReviewCallTurnInstruction(customerReply, state, clientName, customerName) {
-  const name = String(customerName || '').trim();
+  const name = spokenName(customerName);
   const address = name ? `${name} ji, ` : '';
   const closing = buildClosingLine(name);
   // Said once, on the way out. The review call runs the day after a donation,
@@ -198,6 +212,14 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
       return `Say exactly: "Bahut achhi baat hai, sunkar khushi hui. ${invitation} ${closing}" Then end the call.`;
     }
 
+    // Asked once. The clarification had no counter, so a donor whose answer
+    // matched nothing was asked the same question on every turn -- one call
+    // asked three times, the last after the donor had said "Ok, bye".
+    if (isGoodbyeReply(customerReply) || state.experienceClarified) {
+      markCompletedAfterReply();
+      return `The donor is not giving a clear answer or is ending the call. Say exactly: "Koi baat nahi. ${invitation} ${closing}" Then end the call.`;
+    }
+    state.experienceClarified = true;
     return `The experience answer was unclear. Say exactly: "${address}blood donate karne ka aapka experience achha tha ya koi pareshani hui thi?"`;
   }
 
@@ -213,7 +235,7 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
 // ── Three Month Follow-up turn instruction builder ─────────────────────────────
 
 function buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName, customerName) {
-  const name = String(customerName || '').trim();
+  const name = spokenName(customerName);
   const closing = buildClosingLine(name);
   const centre = clientName || 'Apna Blood Centre';
   const slotQuestion = 'Kya aap agli baar aane ka samay abhi bata sakte hain?';
@@ -357,6 +379,7 @@ module.exports = {
   isNegativeExperienceReply,
   isUncertainReply,
   isWrongPersonReply,
+  isGoodbyeReply,
   buildReviewCallTurnInstruction,
   buildThreeMonthFollowupTurnInstruction,
   buildOutboundDemoTurnInstruction

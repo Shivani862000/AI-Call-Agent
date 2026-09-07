@@ -1,4 +1,4 @@
-const { buildClosingLine } = require('./closing.ts');
+const { buildClosingLine, spokenName } = require('./closing.ts');
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
@@ -53,7 +53,7 @@ function describeEligibility(lastVisitDate) {
  * call proceeds as before rather than asking an unanswerable question.
  */
 function buildVerificationQuestion(patientName) {
-  const name = String(patientName || '').trim();
+  const name = spokenName(patientName);
   return name ? ` Kya main ${name} ji se baat kar rahi hoon?` : '';
 }
 
@@ -63,7 +63,7 @@ function buildReviewCallingPrompt({
   lastVisitDate = ''
 } = {}) {
   const client = clientName || 'Apna Blood Centre';
-  const name = String(patientName || '').trim();
+  const name = spokenName(patientName);
   const address = name ? `${name} ji, ` : '';
   const when = describeVisit(lastVisitDate);
   const eligible = describeEligibility(lastVisitDate);
@@ -107,7 +107,7 @@ function buildReviewCallingOpeningPrompt({
   lastVisitDate = ''
 } = {}) {
   const client = clientName || 'Apna Blood Centre';
-  const name = String(patientName || '').trim();
+  const name = spokenName(patientName);
   const address = name ? `${name} ji, ` : '';
   const when = describeVisit(lastVisitDate);
   const verify = buildVerificationQuestion(name);

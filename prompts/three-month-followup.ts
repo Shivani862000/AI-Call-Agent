@@ -1,4 +1,4 @@
-const { buildClosingLine } = require('./closing.ts');
+const { buildClosingLine, spokenName } = require('./closing.ts');
 const { describeVisit } = require('./review-calling.ts');
 
 function buildThreeMonthFollowupPrompt({
@@ -12,7 +12,7 @@ function buildThreeMonthFollowupPrompt({
   const where = city ? `${client}, ${city}` : client;
   // An empty name is left empty: the old default asked "Kya main Donor ji se
   // baat kar rahi hoon?" out loud.
-  const name = String(donorName || '').trim();
+  const name = spokenName(donorName);
   const verify = name ? `Kya main ${name} ji se baat kar rahi hoon?` : 'Kya main aapse do minute baat kar sakti hoon?';
   const when = describeVisit(lastVisitDate);
 
@@ -111,11 +111,10 @@ function buildThreeMonthFollowupOpeningPrompt({
   const client = clientName || 'Apna Blood Centre';
   const city = String(clientCity || '').trim();
   const where = city ? `${client}, ${city}` : client;
-  const name = String(donorName || '').trim();
+  const name = spokenName(donorName);
   const verify = name ? `Kya main ${name} ji se baat kar rahi hoon?` : 'Kya main aapse do minute baat kar sakti hoon?';
 
   return `
-Sirf yeh exact opening natural phone tone me boliye:
 "${greeting}. Main ${where} se baat kar rahi hoon - yeh ek automated call hai, aur quality ke liye record ho rahi hai. ${verify}"
 `.trim();
 }
