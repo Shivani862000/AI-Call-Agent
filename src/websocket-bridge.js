@@ -64,6 +64,7 @@ const {
 
 const {
   shouldAutoHangupAfterAgentTurn,
+  shouldIgnoreBargeIn,
   estimateHangupDelayMs,
   buildOutboundDemoTurnInstruction
 } = require('./conversation-state');
@@ -845,15 +846,37 @@ module.exports = function setupWebSocketBridge(server) {
 
               if (message?.serverContent?.interrupted) {
                 const pendingBytes = session.audioBuffer?.length || 0;
+                // Barge-in is right in the middle of a conversation and wrong
+                // at the end of one. Gemini raises this whenever its VAD hears
+                // the caller, and background noise on a mobile line is enough;
+                // clearing the queue then discarded the goodbye mid-word and
+                // the call simply stopped. Once the closing is being spoken
+                // there is nothing left to interrupt, so it is allowed to
+                // finish -- a second or two of audio, and the call ends anyway.
+                const closing = shouldIgnoreBargeIn({
+                  hangupAfterAudioDrains: session.hangupAfterAudioDrains,
+                  pendingHangup,
+                  state: outboundDemoState
+                });
+
                 debugLog('Gemini Live interrupted signal', {
                   streamId: getSessionLabel(),
                   pendingAudioBytes: pendingBytes,
-                  pendingAudioMs: Math.round(pendingBytes / 2 / 8000 * 1000)
+                  pendingAudioMs: Math.round(pendingBytes / 2 / 8000 * 1000),
+                  duringClosing: closing
                 });
-                sendReverseMediaStop(ws, session);
-                session.firstChunkSentAt = null;
-                session.geminiLiveFirstAudioAt = null;
-                session.sttProducedAt = null;
+
+                if (closing) {
+                  logger.info('BARGE_IN_IGNORED_DURING_CLOSING', {
+                    streamId: getSessionLabel(),
+                    pendingAudioMs: Math.round(pendingBytes / 2 / 8000 * 1000)
+                  });
+                } else {
+                  sendReverseMediaStop(ws, session);
+                  session.firstChunkSentAt = null;
+                  session.geminiLiveFirstAudioAt = null;
+                  session.sttProducedAt = null;
+                }
               }
             },
             onerror: (error) => {

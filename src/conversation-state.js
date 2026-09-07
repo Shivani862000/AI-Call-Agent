@@ -42,6 +42,26 @@ function shouldAutoHangupAfterAgentTurn(text) {
   return /Aapka din shubh ho/i.test(normalized);
 }
 
+/**
+ * Whether a barge-in should be ignored.
+ *
+ * Cutting the agent off when the caller speaks is right in the middle of a
+ * conversation and wrong at the end of one. Gemini raises its interrupt
+ * whenever the VAD hears anything, and background noise on a mobile line is
+ * enough: the queued goodbye was discarded mid-word and, because the hangup
+ * fires once the audio buffer drains, the call then ended on the spot. From the
+ * donor's side the agent stopped talking and hung up on them.
+ *
+ * Once the closing is being spoken there is nothing left to interrupt.
+ */
+function shouldIgnoreBargeIn({ hangupAfterAudioDrains, pendingHangup, state } = {}) {
+  return Boolean(
+    hangupAfterAudioDrains
+    || pendingHangup
+    || (state && (state.endCallAfterNextReply || state.conversationState === 'COMPLETED'))
+  );
+}
+
 function estimateHangupDelayMs(text) {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
   if (!normalized) {
@@ -369,6 +389,7 @@ function buildOutboundDemoTurnInstruction(callerText, state, clientName, custome
 module.exports = {
   evaluateLiveSentimentLabel,
   shouldAutoHangupAfterAgentTurn,
+  shouldIgnoreBargeIn,
   estimateHangupDelayMs,
   normalizeHindiEnglishText,
   isGreetingOnly,

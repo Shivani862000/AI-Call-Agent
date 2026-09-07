@@ -60,3 +60,31 @@ test('only the first name is spoken', () => {
   const closing = buildReviewCallTurnInstruction('bukhaar tha', state, 'C', 'Shivani Verma');
   assert.doesNotMatch(closing, /Verma/, 'the surname should never be spoken');
 });
+
+// A donor reported the agent stopping mid-goodbye and the call ending. Gemini
+// raises its interrupt whenever the VAD hears anything, background noise
+// included; clearing the audio queue then discarded the closing, and because
+// the hangup fires once the buffer drains, the call ended on the spot.
+test('background noise cannot cut the closing short', () => {
+  const { shouldIgnoreBargeIn } = require('../src/conversation-state');
+
+  // Mid-conversation: interrupting is correct.
+  assert.equal(shouldIgnoreBargeIn({ state: { step: 'experience' } }), false);
+  assert.equal(shouldIgnoreBargeIn({}), false);
+
+  // Closing: there is nothing left to interrupt.
+  assert.equal(shouldIgnoreBargeIn({ hangupAfterAudioDrains: true }), true);
+  assert.equal(shouldIgnoreBargeIn({ pendingHangup: true }), true);
+  assert.equal(shouldIgnoreBargeIn({ state: { endCallAfterNextReply: true } }), true);
+  assert.equal(shouldIgnoreBargeIn({ state: { conversationState: 'COMPLETED' } }), true);
+});
+
+test('the flow marks itself closing before the goodbye is spoken', () => {
+  const state = { step: 'experience', lastVisitDate: YESTERDAY };
+  const { shouldIgnoreBargeIn } = require('../src/conversation-state');
+
+  assert.equal(shouldIgnoreBargeIn({ state }), false, 'not closing yet');
+
+  buildReviewCallTurnInstruction('bahut achha tha', state, 'C', 'Ankita');
+  assert.equal(shouldIgnoreBargeIn({ state }), true, 'the closing turn must be protected');
+});
