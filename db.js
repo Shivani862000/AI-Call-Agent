@@ -16,7 +16,7 @@ const { toPgPlaceholders, withReturningId } = require('./src/sql-compat');
 const { resolveDatabaseUrl } = require('./src/config');
 
 /** Bump this when a migration is added. Checked against Supabase at boot. */
-const EXPECTED_SCHEMA_VERSION = '0016';
+const EXPECTED_SCHEMA_VERSION = '0019';
 
 let pool;
 

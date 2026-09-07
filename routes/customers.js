@@ -293,11 +293,7 @@ async function saveCustomer(payload, isManual = false) {
       customer_value, urgency_level,
       outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
       campaign_name, service_interest, call_type, is_manual
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (patient_id) DO UPDATE SET
-       scheduled_datetime = excluded.scheduled_datetime,
-       status = excluded.status,
-       updated_at = now()`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       patientId,
       payload.scheduled_datetime,
@@ -739,8 +735,8 @@ router.delete('/:id', async (req, res) => {
     }
     const latestCall = await dbGet('SELECT id, outcome FROM calls WHERE customer_id = ? ORDER BY id DESC LIMIT 1', [req.params.id]);
 
-    await dbRun('DELETE FROM feedback WHERE customer_id = ?', [req.params.id]);
-    await dbRun('DELETE FROM calls WHERE customer_id = ?', [req.params.id]);
+    // Only the queue entry. The calls and feedback it produced belong to the
+    // patient and outlive it -- they keep patient_id and lose customer_id.
     await dbRun('DELETE FROM customers WHERE id = ?', [req.params.id]);
 
     logger.warn('USER_DELETED_CALL', baseCustomerLogDetails(existing, {

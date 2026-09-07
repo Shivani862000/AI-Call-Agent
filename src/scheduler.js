@@ -723,9 +723,7 @@ async function queuePatientsFromRules() {
       await dbRun(
         `INSERT INTO customers (patient_id, scheduled_datetime, status, call_type, is_manual, created_at)
          VALUES (?, now(), 'scheduled', ?, 0, now())
-         ON CONFLICT (patient_id) DO UPDATE SET
-           scheduled_datetime = now(), status = 'scheduled',
-           call_type = excluded.call_type, attempt_count = 0, updated_at = now()`,
+`,
         [entry.patientId, entry.rule.call_type || 'REVIEW_CALL']
       );
       logger.info('CALL_AUTO_QUEUED', {

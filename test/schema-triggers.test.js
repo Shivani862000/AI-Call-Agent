@@ -39,7 +39,10 @@ test('calls.status mirrors calls.outcome via trigger', { skip: !HAS_DB && 'no Su
   }
 });
 
-test('deleting a customer cascades to calls and feedback', { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
+// Removing one scheduled call used to delete every call that patient had ever
+// had, recordings and feedback included, because calls and feedback cascaded
+// from the queue entry. A call belongs to the patient now.
+test('deleting a queue entry keeps the calls and feedback', { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
   const { initializeDatabase, dbRun, dbGet, closeDatabase } = require('../db');
   await initializeDatabase();
 
@@ -59,13 +62,53 @@ test('deleting a customer cascades to calls and feedback', { skip: !HAS_DB && 'n
     [customer.lastID, call.lastID, 'cascade check', 5]
   );
 
+  // The trigger anchors the call to the person, so history survives the entry.
+  const beforeDelete = await dbGet('SELECT patient_id FROM calls WHERE id = ?', [call.lastID]);
+  assert.equal(Number(beforeDelete.patient_id), Number(patient.lastID));
+
   await dbRun('DELETE FROM customers WHERE id = ?', [customer.lastID]);
 
-  const orphanCall = await dbGet('SELECT id FROM calls WHERE id = ?', [call.lastID]);
-  const orphanFeedback = await dbGet('SELECT id FROM feedback WHERE customer_id = ?', [customer.lastID]);
-  assert.equal(orphanCall, undefined);
-  assert.equal(orphanFeedback, undefined);
+  const survivingCall = await dbGet('SELECT id, customer_id, patient_id FROM calls WHERE id = ?', [call.lastID]);
+  assert.ok(survivingCall, 'the call was deleted with the queue entry');
+  assert.equal(survivingCall.customer_id, null, 'the link to the deleted entry should be cleared');
+  assert.equal(Number(survivingCall.patient_id), Number(patient.lastID), 'the call should still name the patient');
 
+  const survivingFeedback = await dbGet('SELECT id, call_id FROM feedback WHERE call_id = ?', [call.lastID]);
+  assert.ok(survivingFeedback, 'the feedback was deleted with the queue entry');
+
+  await dbRun('DELETE FROM calls WHERE id = ?', [call.lastID]);
+  await dbRun('DELETE FROM patients WHERE id = ?', [patient.lastID]);
+  await closeDatabase();
+});
+
+// A patient may have several calls scheduled at once; scheduling one used to
+// overwrite the last, because patient_id was unique on the queue.
+test('a patient can have more than one call scheduled', { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
+  const { initializeDatabase, dbRun, dbAll, closeDatabase } = require('../db');
+  await initializeDatabase();
+
+  const marker = `multi-test-${Date.now()}`;
+  const patient = await dbRun('INSERT INTO patients (first_name, phone) VALUES (?, ?)', [marker, marker]);
+  const first = await dbRun(
+    'INSERT INTO customers (patient_id, status, scheduled_datetime) VALUES (?, ?, now())',
+    [patient.lastID, 'scheduled']
+  );
+  const second = await dbRun(
+    'INSERT INTO customers (patient_id, status, scheduled_datetime) VALUES (?, ?, now())',
+    [patient.lastID, 'scheduled']
+  );
+
+  assert.notEqual(first.lastID, second.lastID, 'each scheduled call needs its own id');
+  const rows = await dbAll('SELECT id FROM customers WHERE patient_id = ?', [patient.lastID]);
+  assert.equal(rows.length, 2);
+
+  // Removing one leaves the other alone.
+  await dbRun('DELETE FROM customers WHERE id = ?', [first.lastID]);
+  const remaining = await dbAll('SELECT id FROM customers WHERE patient_id = ?', [patient.lastID]);
+  assert.equal(remaining.length, 1);
+  assert.equal(Number(remaining[0].id), Number(second.lastID));
+
+  await dbRun('DELETE FROM customers WHERE patient_id = ?', [patient.lastID]);
   await dbRun('DELETE FROM patients WHERE id = ?', [patient.lastID]);
   await closeDatabase();
 });

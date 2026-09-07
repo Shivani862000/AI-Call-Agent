@@ -104,7 +104,7 @@ async function getOrCreateBrowserTestCustomer() {
   const result = await dbRun(
     `INSERT INTO customers (patient_id, status, created_at)
      VALUES (?, ?, ?)
-     ON CONFLICT (patient_id) DO UPDATE SET updated_at = now()`,
+`,
     [await require('../src/patient-link').resolvePatientId({ name: BROWSER_TEST_CALLER, phone }),
      'completed', new Date().toISOString()]
   );

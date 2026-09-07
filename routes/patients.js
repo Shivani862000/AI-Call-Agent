@@ -259,14 +259,11 @@ async function scheduleOne(patientId, { scheduledAt, callType, username }) {
   if (existing) return { ok: false, patientId, reason: 'Already waiting to be called' };
 
   await dbRun(
+    // A new row per scheduled call. It used to upsert onto a unique patient_id,
+    // so scheduling overwrote whatever that patient already had queued.
     `INSERT INTO customers (patient_id, scheduled_datetime, status, call_type, is_manual, created_at)
      VALUES (?, ?, 'scheduled', ?, 1, now())
-     ON CONFLICT (patient_id) DO UPDATE SET
-       scheduled_datetime = excluded.scheduled_datetime,
-       status = 'scheduled',
-       call_type = excluded.call_type,
-       attempt_count = 0,
-       updated_at = now()`,
+`,
     [patientId, scheduledAt || new Date().toISOString(), callType || 'REVIEW_CALL']
   );
 

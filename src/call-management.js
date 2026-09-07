@@ -85,14 +85,33 @@ async function ensureCustomerForCall({ customerId, customerName, customerPhone }
   }
 
   const patientId = await resolvePatientId({ name: customerName || 'Customer', phone: customerPhone });
-  const result = await dbRun(
-    `INSERT INTO customers (patient_id, status, created_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT (patient_id) DO UPDATE SET updated_at = now()`,
-    [patientId, 'pending', new Date().toISOString()]
-  );
+  const queueRowId = await ensureQueueRow(patientId, 'pending');
+  return dbGet('SELECT * FROM customer_queue WHERE id = ?', [queueRowId]);
+}
 
-  return dbGet('SELECT * FROM customer_queue WHERE id = ?', [result.lastID]);
+/**
+ * The queue row an ad-hoc call hangs off, reused if one is already open.
+ *
+ * These two sites wanted "make sure a row exists", and got it from an upsert on
+ * a unique patient_id. That uniqueness is gone -- a patient may now have
+ * several scheduled calls -- so a plain insert here would add a row for every
+ * inbound call. Matched on status so an open entry is reused and a finished one
+ * is never resurrected.
+ */
+async function ensureQueueRow(patientId, status) {
+  const existing = await dbGet(
+    'SELECT id FROM customers WHERE patient_id = ? AND status = ? ORDER BY id DESC LIMIT 1',
+    [patientId, status]
+  );
+  if (existing) {
+    await dbRun('UPDATE customers SET updated_at = now() WHERE id = ?', [existing.id]);
+    return existing.id;
+  }
+  const result = await dbRun(
+    'INSERT INTO customers (patient_id, status, created_at) VALUES (?, ?, ?)',
+    [patientId, status, new Date().toISOString()]
+  );
+  return result.lastID;
 }
 
 async function claimCustomerForOutboundCall(customerId) {
@@ -139,14 +158,8 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
   const incomingPatientId = await resolvePatientId({
     name: fallbackName || 'Incoming caller', phone: normalizedPhone
   });
-  const result = await dbRun(
-    `INSERT INTO customers (patient_id, status, created_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT (patient_id) DO UPDATE SET updated_at = now()`,
-    [incomingPatientId, 'incoming', new Date().toISOString()]
-  );
-
-  return dbGet('SELECT * FROM customer_queue WHERE id = ?', [result.lastID]);
+  const incomingCustomerId = await ensureQueueRow(incomingPatientId, 'incoming');
+  return dbGet('SELECT * FROM customer_queue WHERE id = ?', [incomingCustomerId]);
 }
 
 // ── Call Context & Intelligence ───────────────────────────────────────────────

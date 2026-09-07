@@ -595,14 +595,9 @@
     }
 
     async function deleteCustomer(customerId) {
-      // Deleting the queue entry cascades to every call for that patient, so
-      // the count goes in the question. "Delete this customer and related call
-      // data?" was true and far too easy to read past.
-      const history = recentCallsCache.filter((call) => Number(call.customer_id) === Number(customerId)).length;
-      const warning = history
-        ? `\n\nThis also permanently deletes ${history} call record${history === 1 ? '' : 's'} for this patient, including completed calls and their recordings.`
-        : '';
-      if (!confirm(`Delete this patient's calling record?${warning}`)) return;
+      // Deletes only this entry now. Calls and feedback belong to the patient
+      // and outlive it, so this no longer destroys their history.
+      if (!confirm('Delete this call entry? Past calls and feedback for this patient are kept.')) return;
       try {
         await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}`, { method: 'DELETE' });
         AppShell.showAlert('Patient record deleted successfully');

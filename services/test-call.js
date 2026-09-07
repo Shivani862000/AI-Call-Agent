@@ -151,7 +151,7 @@ async function createCustomerForTestCall(name, phone) {
   const result = await dbRun(
     `INSERT INTO customers (patient_id, status, created_at)
      VALUES (?, ?, ?)
-     ON CONFLICT (patient_id) DO UPDATE SET updated_at = now()`,
+`,
     [await resolvePatientId({ name, phone: normalizedPhone }), 'completed', new Date().toISOString()]
   );
 
