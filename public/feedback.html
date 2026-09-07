@@ -358,9 +358,9 @@
       <div id="alertContainer" class="alert-stack"></div>
       <div class="feedback-workspace">
         <div class="feedback-tabs" role="tablist" aria-label="Feedback views">
-          <button id="overallTab" class="feedback-tab active" type="button" role="tab" aria-selected="true" data-view="overall">Overall</button>
-          <button id="individualTab" class="feedback-tab" type="button" role="tab" aria-selected="false" data-view="individual">Individual</button>
-          <button id="manualTab" class="feedback-tab" type="button" role="tab" aria-selected="false" data-view="manual">Manual Entry</button>
+          <button id="overallTab" class="feedback-tab active" type="button" role="tab" aria-selected="true" data-view="all">All feedback</button>
+          <button id="individualTab" class="feedback-tab" type="button" role="tab" aria-selected="false" data-view="call">From calls</button>
+          <button id="manualTab" class="feedback-tab" type="button" role="tab" aria-selected="false" data-view="manual">Manual entries</button>
         </div>
 
         <section id="overallView" class="feedback-view" role="tabpanel" aria-labelledby="overallTab">
@@ -376,23 +376,12 @@
             <section><h3 class="feedback-section-title">Rating Breakdown</h3><div id="ratingBreakdown" class="breakdown-list"></div></section>
           </div>
 
-          <section class="feedback-table-section" style="margin-top: 22px;">
-            <div class="feedback-section-heading"><h3>Recent Feedback</h3><button id="viewAllFeedbackButton" class="secondary" type="button">View All</button></div>
-            <div class="table-wrap feedback-table-desktop">
-              <table class="feedback-data-table">
-                <thead><tr><th>Patient</th><th>Type</th><th>Sentiment</th><th>Rating</th><th>Feedback</th><th>Date</th></tr></thead>
-                <tbody id="recentFeedbackBody"></tbody>
-              </table>
-            </div>
-            <div id="recentFeedbackMobile" class="feedback-mobile-list"></div>
-          </section>
         </section>
 
-        <section id="individualView" class="feedback-view" role="tabpanel" aria-labelledby="individualTab" hidden>
+        <section id="individualView" class="feedback-view" role="tabpanel" aria-labelledby="individualTab">
           <div class="feedback-toolbar">
             <input id="feedbackSearch" type="search" placeholder="Search patient or feedback" aria-label="Search feedback">
             <select id="sentimentFilter" aria-label="Filter by sentiment"><option value="all">All sentiments</option><option value="positive">Positive</option><option value="neutral">Neutral</option><option value="negative">Negative</option></select>
-            <select id="sourceFilter" aria-label="Filter by source"><option value="all">All sources</option><option value="call">Call feedback</option><option value="manual">Manual feedback</option></select>
             <select id="dateFilter" aria-label="Filter by date"><option value="all">All dates</option><option value="today">Today</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select>
           </div>
           <div class="feedback-section-heading"><h3>Individual Feedback</h3><span id="individualCount" class="muted">0 records</span></div>
@@ -446,7 +435,7 @@
 
   <script src="/app-shell.js"></script>
   <script>
-    const state = { customers: [], items: [], overview: null, activeView: 'overall', currentPage: 1, pageSize: 10, activeItem: null, transcriptTurns: [] };
+    const state = { customers: [], items: [], overview: null, activeView: 'all', currentPage: 1, pageSize: 10, activeItem: null, transcriptTurns: [] };
 
     function feedbackType(item) {
       if (!item.call_id) return 'Manual';
@@ -501,8 +490,6 @@
       const ratedTotal = Object.values(overview.ratings || {}).reduce((sum, value) => sum + Number(value || 0), 0);
       renderBreakdown('ratingBreakdown', [5, 4, 3, 2, 1].map((rating) => [`${rating} stars`, overview.ratings[rating] || 0]), ratedTotal);
       const recent = overview.recent || [];
-      document.getElementById('recentFeedbackBody').innerHTML = recent.length ? recent.map(rowMarkup).join('') : `<tr><td colspan="6">${emptyMarkup('No feedback recorded yet')}</td></tr>`;
-      document.getElementById('recentFeedbackMobile').innerHTML = recent.length ? recent.map(mobileItemMarkup).join('') : emptyMarkup('No feedback recorded yet');
     }
     function matchesDate(item, value) {
       if (value === 'all') return true;
@@ -517,7 +504,8 @@
     function filteredItems() {
       const query = document.getElementById('feedbackSearch').value.trim().toLowerCase();
       const sentiment = document.getElementById('sentimentFilter').value;
-      const source = document.getElementById('sourceFilter').value;
+      // The tab strip is the source filter; there is no separate dropdown.
+      const source = state.activeView;
       const date = document.getElementById('dateFilter').value;
       return state.items.filter((item) => {
         const haystack = `${item.customer_name || ''} ${item.customer_phone || ''} ${item.review_text || ''}`.toLowerCase();
@@ -538,16 +526,35 @@
       document.getElementById('individualFeedbackMobile').innerHTML = pageItems.length ? pageItems.map(mobileItemMarkup).join('') : emptyMarkup('No feedback matches these filters');
       document.getElementById('individualPagination').innerHTML = items.length > state.pageSize ? `<button type="button" data-page-action="previous" aria-label="Previous page" ${state.currentPage === 1 ? 'disabled' : ''}>&larr;</button><span>Page ${state.currentPage} of ${totalPages}</span><button type="button" data-page-action="next" aria-label="Next page" ${state.currentPage === totalPages ? 'disabled' : ''}>&rarr;</button>` : '';
     }
+    /**
+     * The tabs select which feedback is listed, not which screen is shown.
+     *
+     * The summary describes all feedback, so it belongs to that tab; the form
+     * for adding feedback by hand belongs to the manual one. The list itself is
+     * always on screen, filtered to the chosen source.
+     */
     function setActiveView(view, updateHash = true) {
-      state.activeView = ['overall', 'individual', 'manual'].includes(view) ? view : 'overall';
+      state.activeView = ['all', 'call', 'manual'].includes(view) ? view : 'all';
       document.querySelectorAll('[data-view]').forEach((button) => {
         const active = button.dataset.view === state.activeView;
         button.classList.toggle('active', active);
         button.setAttribute('aria-selected', active ? 'true' : 'false');
       });
-      ['overall', 'individual', 'manual'].forEach((name) => { document.getElementById(`${name}View`).hidden = name !== state.activeView; });
+
+      document.getElementById('overallView').hidden = state.activeView !== 'all';
+      document.getElementById('manualView').hidden = state.activeView !== 'manual';
+      document.getElementById('individualView').hidden = false;
+
+      const heading = document.querySelector('#individualView .feedback-section-heading h3');
+      if (heading) {
+        heading.textContent = state.activeView === 'call' ? 'Feedback from calls'
+          : state.activeView === 'manual' ? 'Manually entered feedback'
+          : 'All feedback';
+      }
+
+      state.currentPage = 1;
       if (updateHash) window.history.replaceState(null, '', `#${state.activeView}`);
-      if (state.activeView === 'individual') renderIndividual();
+      renderIndividual();
     }
     function populateCustomers() {
       document.getElementById('feedbackCustomer').innerHTML = '<option value="">Select patient</option>' + state.customers.map((customer) => `<option value="${customer.id}">${AppShell.escapeHtml(AppShell.formatName(customer.name))} · ${AppShell.escapeHtml(customer.phone)}</option>`).join('');
@@ -640,7 +647,7 @@
         document.getElementById('manualFeedbackForm').reset();
         document.getElementById('reviewStars').value = '5';
         await loadFeedbackData();
-        setActiveView('individual');
+        setActiveView('manual');
         AppShell.showAlert('Feedback added successfully');
       } catch (error) {
         if (error.fieldErrors) AppShell.applyFieldErrors(error.fieldErrors, { customer_id: 'feedbackCustomer', stars: 'reviewStars', review_text: 'reviewText' });
@@ -654,8 +661,7 @@
       document.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', () => setActiveView(button.dataset.view)));
       document.getElementById('headerManualButton').addEventListener('click', () => setActiveView('manual'));
       document.getElementById('mobileManualButton').addEventListener('click', () => setActiveView('manual'));
-      document.getElementById('viewAllFeedbackButton').addEventListener('click', () => setActiveView('individual'));
-      ['feedbackSearch', 'sentimentFilter', 'sourceFilter', 'dateFilter'].forEach((id) => {
+      ['feedbackSearch', 'sentimentFilter', 'dateFilter'].forEach((id) => {
         document.getElementById(id).addEventListener(id === 'feedbackSearch' ? 'input' : 'change', () => { state.currentPage = 1; renderIndividual(); });
       });
       document.addEventListener('click', (event) => {
@@ -669,7 +675,7 @@
       document.getElementById('feedbackDetailModal').addEventListener('click', (event) => { if (event.target.id === 'feedbackDetailModal') closeFeedbackDetail(); });
       document.getElementById('transcriptSearch').addEventListener('input', renderTranscript);
       document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeFeedbackDetail(); });
-      setActiveView(window.location.hash.replace('#', '') || 'overall', false);
+      setActiveView(window.location.hash.replace('#', '') || 'all', false);
       try { await loadFeedbackData(); } catch (error) { AppShell.showAlert(error.message, 'error'); }
     });
   </script>
