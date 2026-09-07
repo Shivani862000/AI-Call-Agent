@@ -590,7 +590,7 @@
       try {
         await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}/cancel`, { method: 'POST' });
         AppShell.showAlert('Removed from the calling list');
-        await loadCustomers();
+        await loadPageData();
       } catch (error) { AppShell.showAlert(error.message, 'error'); }
     }
 
@@ -600,7 +600,7 @@
       if (!confirm('Delete this call entry? Past calls and feedback for this patient are kept.')) return;
       try {
         await AppShell.fetchJson(`${AppShell.API_BASE}/customers/${customerId}`, { method: 'DELETE' });
-        AppShell.showAlert('Patient record deleted successfully');
+        AppShell.showAlert('Call removed from the list');
         await loadPageData();
       } catch (error) {
         AppShell.showAlert(error.message, 'error');
