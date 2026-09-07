@@ -141,8 +141,10 @@ async function findCustomerByPhone(phoneValue) {
   const normalized = normalizePhoneLookupValue(phoneValue);
   if (!normalized) return null;
 
+  // A patient may now have several queue entries, so "LIMIT 1" without an order
+  // returned whichever one Postgres felt like. Newest wins, deterministically.
   const customer = await dbGet(
-    'SELECT * FROM customer_queue WHERE normalized_phone = ? LIMIT 1',
+    'SELECT * FROM customer_queue WHERE normalized_phone = ? ORDER BY id DESC LIMIT 1',
     [normalized]
   );
   return customer || null;
@@ -164,25 +166,41 @@ async function ensureIncomingCustomerForCall(phoneValue, fallbackName = 'Incomin
 
 // ── Call Context & Intelligence ───────────────────────────────────────────────
 
+/**
+ * The call this incoming media stream belongs to, found from the number dialled.
+ *
+ * It used to pick a queue entry for the number and then look for a call on it.
+ * That worked while a patient had exactly one entry; once they could have
+ * several, the unordered LIMIT 1 chose an arbitrary one, the call lookup found
+ * nothing, and hydration gave up. A hydration failure is silent and total: the
+ * session stays "incoming", so the outbound script is never used and the call
+ * is never marked completed or given a transcript.
+ *
+ * The call is now found first, and its own queue entry follows from it.
+ */
 async function findRecentOutboundCallContextByPhone(phoneValue) {
-  const customer = await findCustomerByPhone(phoneValue);
-  if (!customer) {
-    return null;
-  }
+  const normalized = normalizePhoneLookupValue(phoneValue);
+  if (!normalized) return null;
 
   const call = await dbGet(
     `SELECT calls.*, agents.client_name AS agent_client_name
        FROM calls
+       JOIN customer_queue ON customer_queue.id = calls.customer_id
        LEFT JOIN agents ON agents.id = calls.agent_id
-      WHERE calls.customer_id = ?
+      WHERE customer_queue.normalized_phone = ?
         AND COALESCE(calls.call_direction, 'outbound') = 'outbound'
         AND calls.called_at >= (now() - interval '30 minutes')
-      ORDER BY calls.id DESC
+      ORDER BY calls.called_at DESC, calls.id DESC
       LIMIT 1`,
-    [customer.id]
+    [normalized]
   );
 
   if (!call) {
+    return null;
+  }
+
+  const customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [call.customer_id]);
+  if (!customer) {
     return null;
   }
 
