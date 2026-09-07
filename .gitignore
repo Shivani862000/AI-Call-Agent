@@ -16,3 +16,8 @@ backups/
 *.wav
 *.log
 cleanup-backup-*
+# Google service-account keys. These live on the droplet, never in git.
+gmail-key.json
+*-service-account*.json
+*.iam.gserviceaccount.com.json
+client_secret_*.json
