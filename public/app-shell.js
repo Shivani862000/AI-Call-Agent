@@ -349,6 +349,7 @@
       existingPatientBtn: `${modalId}ExistingPatientBtn`,
       newPatientBtn: `${modalId}NewPatientBtn`,
       formBody: `${modalId}FormBody`,
+      formError: `${modalId}FormError`,
       nameDropdown: `${fieldPrefix}NameDropdown`
     };
 
@@ -485,6 +486,10 @@
           </div>
 
           <div class="saas-modal-footer">
+            <!-- Errors belong where the person is looking. The page-level alert
+                 container sits behind this modal, so a failed save produced a
+                 message nobody could see. -->
+            <span class="error-text" id="${ids.formError}" style="margin-right:auto;text-align:left"></span>
             <button id="${ids.cancel}" class="btn-ghost-saas" type="button">Cancel</button>
             <button id="${ids.submit}" class="btn-primary-saas" type="button">Schedule Call</button>
           </div>
@@ -683,6 +688,8 @@
       getEl('treatment').value = '';
       getEl('notes').value = '';
       getEl('careToggle').open = false;
+      const formError = getEl('formError');
+      if (formError) formError.textContent = '';
       setCallTypeSelection('REVIEW_CALL');
       syncMobileOptionalSections();
       clearErrors();
@@ -720,15 +727,29 @@
       });
     }
 
+    /** Shows a message inside the modal, where the person can actually see it. */
+    function showFormError(message) {
+      const target = getEl('formError');
+      if (target) target.textContent = message || '';
+    }
+
     async function submit() {
       clearErrors();
+      showFormError('');
       const payload = getPayload();
       const carePayload = getCarePayload(payload);
       const fieldErrors = validate(payload, carePayload);
 
       if (Object.keys(fieldErrors).length) {
         applyFieldErrors(fieldErrors);
-        showAlert('Please fix the highlighted fields', 'error');
+        // Named rather than "fix the highlighted fields": the offending field
+        // can be scrolled out of view inside the modal, so the summary has to
+        // carry the reason on its own.
+        showFormError(Object.values(fieldErrors)[0]);
+        const firstInvalid = document.getElementById(Object.keys(fieldErrors)[0]);
+        if (firstInvalid && typeof firstInvalid.scrollIntoView === 'function') {
+          firstInvalid.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
         return;
       }
 
@@ -754,6 +775,7 @@
           await options.onSaved();
         }
       } catch (error) {
+        showFormError(error.message);
         if (error.fieldErrors) {
           applyFieldErrors(error.fieldErrors, {
             phone: ids.phone,
@@ -782,6 +804,11 @@
      * entry, so submitting opens or refreshes their queue entry rather than
      * trying to edit one that may not exist.
      */
+    function isTimeLaterToday(slot) {
+      const parsed = parseScheduledDateTime(todayDateValue(), slot);
+      return Boolean(parsed) && parsed.getTime() > Date.now();
+    }
+
     function applyPatientToForm(patient) {
       getEl('editingId').value = '';
       selectedPatientId = patient.id;
@@ -798,7 +825,12 @@
         phoneField.readOnly = true;
       }
 
-      if (patient.preferred_call_slot) getEl('time').value = patient.preferred_call_slot;
+      // Their usual time, but only while it is still ahead today. Filling in a
+      // slot that has already passed makes the form reject itself the moment
+      // it opens, with the offending value one the person never chose.
+      if (patient.preferred_call_slot && isTimeLaterToday(patient.preferred_call_slot)) {
+        getEl('time').value = patient.preferred_call_slot;
+      }
       const lastVisit = patient.last_visit_date || patient.last_test_date || patient.last_donation_date || '';
       if (patient.date_of_birth || lastVisit) {
         getEl('careToggle').open = !isMobileModalLayout();

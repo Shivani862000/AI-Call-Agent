@@ -27,6 +27,7 @@ const {
   getIncomingCallKey,
   normalizeIcallTimestamp
 } = require('./helpers');
+const { hourInCallTimezone } = require('./helpers');
 const { resolvePatientId } = require('./patient-link');
 const { buildIcallMateCallbackUrl } = require('./icallmate-webhook');
 
@@ -353,8 +354,10 @@ async function shouldBlockCustomerCall(customer) {
     }
   }
 
-  const now = new Date();
-  const hours = now.getHours();
+  // Read in the patients' timezone, not the server's. The container runs UTC,
+  // so this rule used to block calls until 12:30 IST and permit them until
+  // 2:30 in the morning -- the opposite of what it says.
+  const hours = hourInCallTimezone();
   if (hours < 7 || hours >= 21) {
     return { code: 'CALL_SKIPPED_QUIET_HOURS', reason: 'Calls can only be scheduled between 7:00 AM and 9:00 PM' };
   }

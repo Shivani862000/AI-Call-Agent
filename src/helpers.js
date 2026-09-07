@@ -137,6 +137,25 @@ function getLocalDateKey(now = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * The hour of day where the patients are, not where the server is.
+ *
+ * The containers run UTC, so every getHours() check was five and a half hours
+ * out: the "no calls before 7am" rule blocked calls until 12:30 IST and allowed
+ * them until 2:30 in the morning. TZ is set on the containers as well, but the
+ * gate that decides whether to phone someone should not depend on an ambient
+ * setting being right.
+ */
+const CALL_TIMEZONE = process.env.CALL_TIMEZONE || 'Asia/Kolkata';
+
+function hourInCallTimezone(date = new Date(), timeZone = CALL_TIMEZONE) {
+  const hour = new Intl.DateTimeFormat('en-GB', {
+    timeZone, hour: '2-digit', hour12: false
+  }).format(date);
+  // "24" is midnight in some locales' 2-digit output.
+  return Number(hour) % 24;
+}
+
 function shouldTriggerOwnerDigest(now = new Date()) {
   const hour = now.getHours();
   const minute = now.getMinutes();
@@ -343,6 +362,8 @@ function pruneIncomingCallState(now = Date.now()) {
 }
 
 module.exports = {
+  CALL_TIMEZONE,
+  hourInCallTimezone,
   runInBackground,
   pickRequestValue,
   safeJsonParse,

@@ -27,6 +27,10 @@ services:
     env_file: [.env.prod]
     environment:
       NODE_ENV: production
+      # The patients are in India and several checks read the local hour. The
+      # image defaults to UTC, which put the "no calls before 7am" rule five
+      # and a half hours out.
+      TZ: Asia/Kolkata
     # mem_limit, not deploy.resources — the latter is swarm-oriented and is
     # quietly ignored by a plain `docker compose up`.
     mem_limit: 512m
@@ -42,6 +46,7 @@ services:
     restart: unless-stopped
     env_file: [.env.uat]
     environment:
+      TZ: Asia/Kolkata
       # Deliberately not "production": resolveDatabaseUrl() only returns the
       # production database when NODE_ENV === 'production', so UAT cannot reach
       # production data even if its env file is wrong.
