@@ -25,3 +25,13 @@ uat-kcpathlab.vikitechsolutions.in {
 		format json
 	}
 }
+
+# Old bookmarks point at the droplet's IP. Caddy redirects every plain HTTP
+# request to HTTPS, and no certificate can exist for a bare IP, so those
+# bookmarks died at a TLS error rather than a login page. The explicit http://
+# scheme stops Caddy trying to serve this over TLS itself.
+#
+# It goes to UAT because that is what port 80 on this IP used to serve.
+http://64.227.128.128 {
+	redir https://uat-kcpathlab.vikitechsolutions.in{uri} permanent
+}
