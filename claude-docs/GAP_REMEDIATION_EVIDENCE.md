@@ -63,3 +63,14 @@ Date: 8 September 2026. Prerequisite: `9710dd2`.
 - Verification uses synthetic credentials, real handlers/middleware and intercepted database boundaries. An authenticated status fixture reaches its read handler without logging the secret. No live provider configuration or database was inspected or changed.
 
 Provider use of legacy URLs and exact recording origins are pending user/integration evidence. This is containment, not verified restoration of provider compatibility. P05 recording fetch hardening and callback schema checks, and P10 replay/correlation remain open. No deployment is authorized by this evidence.
+
+## P06 — Database log privacy (partial implementation)
+
+Date: 8 September 2026. Prerequisite: `d0f3f61`.
+
+- Configuration snapshots report the selected database source variable and presence instead of its URL. Initialization and idle pool errors use a fixed diagnostic mapping; arbitrary driver messages/causes are not propagated from initialization. Failed pools are closed.
+- Before: `node --test test/config-redaction.test.js` — 3 failures, reproducing raw URL/password/query-token logging and driver-message propagation.
+- After: redaction plus existing database URL selection tests — 11 pass. Combined `npm run test:remediation` — 56 pass, 0 fail, 0 skip. `git diff --check` is clean.
+- The real configuration snapshot and DB initialization code run with an inert dotenv and fake pool; no database connection or real credentials are loaded. Success uses a synthetic `0019` schema row. This does not establish real schema/runtime compatibility.
+
+P06 remains open for Docker context/image-layer exclusion proof, runtime upgrade and full isolated image startup, broader application/provider error paths, and operational credential-exposure assessment. P04–P06 are partial local implementations, not complete release gates.
