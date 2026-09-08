@@ -35,7 +35,7 @@ function createAuthorizationRouter({ requireAdminAuth, requireRole, basicAuth })
     res.setHeader('Expires', '0');
     next();
   });
-  router.get('/api/auth/session', publicRoute);
+  // Session inspection must use current account state, like protected APIs.
   router.post(['/api/auth/login', '/api/auth/logout'], publicRoute);
   // The callback handler verifies its provider secret. Other methods and
   // neighboring paths still fall through the authenticated API boundary.

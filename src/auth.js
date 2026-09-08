@@ -341,10 +341,11 @@ async function loadAccountState(username) {
     'SELECT username, role, is_active, password_changed_at FROM users WHERE lower(username) = lower(?)',
     [key]
   );
-  const state = row && Number(row.is_active) === 1
+  const role = normalizeRole(row?.role);
+  const state = row && Number(row.is_active) === 1 && role
     ? {
       active: true,
-      role: normalizeRole(row.role),
+      role,
       username: row.username,
       passwordChangedAt: row.password_changed_at ? new Date(row.password_changed_at).getTime() : 0
     }

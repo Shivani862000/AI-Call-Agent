@@ -10,7 +10,7 @@ test('anonymous URL variants cannot reach protected API or call handlers', async
     ['GET', '/api/users'], ['GET', '/API/users'], ['POST', '/API/users/'],
     ['POST', '/call/start'], ['POST', '/call/start/'], ['POST', '/CALL/START'],
     ['GET', '/api/patients/'], ['GET', '/API/calls/recent'],
-    ['GET', '/api//users'], ['GET', '/%61pi/users']
+    ['GET', '/api//users'], ['GET', '/%61pi/users'], ['GET', '/api/auth/session']
   ]) {
     const response = await app.request(method, route);
     assert.ok([400, 401, 404].includes(response.status), `${method} ${route}: ${response.status}`);
@@ -66,7 +66,7 @@ test('valid agent workflows, admin actions and public provider boundaries remain
     ['POST', '/API/support-tickets/', 'AGENT'], ['GET', '/api/campaigns', 'AGENT'],
     ['GET', '/api/calls/recent', 'AGENT'], ['GET', '/api/users', 'ADMIN'],
     ['POST', '/api/calls/initiate/42/', 'ADMIN'], ['POST', '/api/calls/42/escalate', 'ADMIN'],
-    ['GET', '/health'], ['GET', '/api/auth/session'], ['POST', '/api/auth/login'],
+    ['GET', '/health'], ['GET', '/api/auth/session', 'AGENT'], ['POST', '/api/auth/login'],
     ['POST', '/api/auth/logout'], ['POST', '/api/icallmate/callback'],
     ['GET', '/api/icallmate/config', 'ADMIN'], ['GET', '/icallmate/health', 'ADMIN']
   ]) {

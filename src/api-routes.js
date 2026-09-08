@@ -150,7 +150,7 @@ module.exports = function mountApiRoutes(app) {
   });
 
   app.get('/api/auth/session', (req, res) => {
-    const session = readAuthSession(req);
+    const session = req.adminSession;
     if (!session) {
       return res.status(401).json({ authenticated: false });
     }
