@@ -7,6 +7,7 @@
     "start": "node index.js",
     "dev": "node index.js",
     "test": "node --test test/*.test.js",
+    "test:hotfix": "node --test test/authorization-routes.test.js test/auth-security.test.js test/user-rules.test.js test/csp-http-deployment.test.js",
     "users": "node scripts/manage-users.js",
     "migrate": "node scripts/migrate.js"
   },
