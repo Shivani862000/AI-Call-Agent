@@ -52,3 +52,14 @@ Date: 8 September 2026. Prerequisite: `6869a5f`.
 - Test boundary: real HTTP/auth/serialization and route handlers with synthetic database rows, analysis results and in-memory state. No real database/provider/storage/PDF access. Browser behavior, all nested routers, broader patient free text and real database sessions remain unverified.
 
 These two P04 changes are locally implemented; P04 as a whole and its release gates remain open.
+
+## P05 — Legacy callback containment (partial implementation)
+
+Date: 8 September 2026. Prerequisite: `9710dd2`.
+
+- `/call/status` and `/call/recording-status` default to 404 before database access. Explicit legacy enablement requires the existing configured header/query provider secret; missing/wrong/array credentials return 401, including requests carrying an ADMIN cookie.
+- Removed full query logging from the status handler. Environment examples document `ENABLE_LEGACY_CALL_WEBHOOKS=false`. The canonical callback's supported string-credential behavior is retained.
+- Before: four legacy HTTP regressions failed; a separate credential-shape regression failed (array accepted). After: the named legacy/webhook/privacy/session/hotfix suite passes 45 tests, with no failures/skips; also available as `npm run test:remediation`.
+- Verification uses synthetic credentials, real handlers/middleware and intercepted database boundaries. An authenticated status fixture reaches its read handler without logging the secret. No live provider configuration or database was inspected or changed.
+
+Provider use of legacy URLs and exact recording origins are pending user/integration evidence. This is containment, not verified restoration of provider compatibility. P05 recording fetch hardening and callback schema checks, and P10 replay/correlation remain open. No deployment is authorized by this evidence.

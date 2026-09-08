@@ -46,7 +46,8 @@ function redactIcallMateCallbackUrl(value) {
 
 function hasValidIcallMateWebhookSecret(req, env = process.env) {
   const expected = getIcallMateWebhookSecret(env);
-  const supplied = String(req?.headers?.['x-webhook-secret'] || req?.query?.secret || '').trim();
+  const value = req?.headers?.['x-webhook-secret'] || req?.query?.secret;
+  const supplied = typeof value === 'string' ? value.trim() : '';
   if (!expected || !supplied) {
     return false;
   }
@@ -57,10 +58,22 @@ function hasValidIcallMateWebhookSecret(req, env = process.env) {
     && crypto.timingSafeEqual(expectedBuffer, suppliedBuffer);
 }
 
+function requireLegacyCallWebhook(req, res, next) {
+  // Enable only after confirming the provider can supply the configured secret.
+  if (String(process.env.ENABLE_LEGACY_CALL_WEBHOOKS || '').toLowerCase() !== 'true') {
+    return res.status(404).json({ error: 'Endpoint not found' });
+  }
+  if (!hasValidIcallMateWebhookSecret(req)) {
+    return res.status(401).json({ error: 'Invalid webhook credentials' });
+  }
+  next();
+}
+
 module.exports = {
   CALLBACK_PATH,
   getIcallMateWebhookSecret,
   buildIcallMateCallbackUrl,
   redactIcallMateCallbackUrl,
-  hasValidIcallMateWebhookSecret
+  hasValidIcallMateWebhookSecret,
+  requireLegacyCallWebhook
 };

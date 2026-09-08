@@ -51,13 +51,12 @@ async function servePrivacyApp(t, options = {}) {
     '../services/call-analysis': { buildCallAnalysis: options.buildCallAnalysis || (() => ({})) },
     '../services/icallmate': { initiateCall: fail('provider') },
     '../services/post-call-pipeline': { processCompletedCallPipeline: fail('pipeline') },
-    './icallmate-webhook': {},
     '../services/system-logger': { info() {}, warn() {}, error() {} },
     '../services/pdf': { generateCallAnalysisPDF: fail('pdf') },
     '../services/supabase-storage': { createSignedUrl: fail('signed URL') }
   };
   const files = new Set(['src/auth.js', 'src/api-routes.js', 'src/helpers.js',
-    'src/patient-rules.js', 'src/call-serialization.js']);
+    'src/patient-rules.js', 'src/call-serialization.js', 'src/icallmate-webhook.js']);
   const modules = new Map();
   function load(relative) {
     if (modules.has(relative)) return modules.get(relative).exports;
@@ -65,8 +64,8 @@ async function servePrivacyApp(t, options = {}) {
     const module = { exports: {} };
     modules.set(relative, module);
     vm.runInNewContext(fs.readFileSync(path.join(root, relative), 'utf8'), {
-      module, exports: module.exports, Buffer, Date: Clock, console: options.console || console,
-      process: { env: { NODE_ENV: 'test', AUTH_SIGNING_SECRET: 'synthetic-privacy-test-signing-secret-at-least-32-bytes' } },
+      module, exports: module.exports, Buffer, URL, Date: Clock, console: options.console || console,
+      process: { env: { NODE_ENV: 'test', AUTH_SIGNING_SECRET: 'synthetic-privacy-test-signing-secret-at-least-32-bytes', ...options.env } },
       setTimeout: fail('timer'), fetch: fail('network'),
       require(name) {
         if (name === 'crypto' || name === 'bcrypt') return require(name);

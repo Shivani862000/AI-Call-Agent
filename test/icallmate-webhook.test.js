@@ -35,3 +35,8 @@ test('callback authentication accepts header or query secret and rejects missing
     query: { secret: 'wrong-secret' }
   }, env), false);
 });
+
+test('callback credentials must be scalar strings', () => {
+  assert.equal(hasValidIcallMateWebhookSecret({ headers: {},
+    query: { secret: [env.ICALLMATE_WEBHOOK_SECRET] } }, env), false);
+});

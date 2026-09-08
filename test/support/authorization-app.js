@@ -23,6 +23,7 @@ function createAuthorizationApp(publicBaseUrl = 'http://localhost:3000') {
     module,
     process: { env: {} },
     require(name) {
+      if (name === './icallmate-webhook') return require('../../src/icallmate-webhook');
       if (name === '../routes/support-tickets') return () => router(name);
       if (name.startsWith('../routes/')) return router(name);
       if (name === '../services/slack-support') return { createSlackSupportNotifier: () => () => {} };

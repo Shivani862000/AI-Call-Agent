@@ -81,7 +81,8 @@ const { initiateCall, buildMasterPostPayload } = require('../services/icallmate'
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
 const {
   buildIcallMateCallbackUrl,
-  hasValidIcallMateWebhookSecret
+  hasValidIcallMateWebhookSecret,
+  requireLegacyCallWebhook
 } = require('./icallmate-webhook');
 const logger = require('../services/system-logger');
 const { generateCallAnalysisPDF } = require('../services/pdf');
@@ -417,7 +418,7 @@ module.exports = function mountApiRoutes(app) {
   //   res.type('text/xml').send(buildScriptedRatingResponse(req));
   // });
 
-  app.all('/call/status', async (req, res) => {
+  app.all('/call/status', requireLegacyCallWebhook, async (req, res) => {
     try {
       const providerStatus = pickRequestValue(req, ['CallStatus', 'Status', 'status']);
       const providerCallSid = pickRequestValue(req, ['CallSid', 'call_sid', 'Sid', 'sid']);
@@ -426,7 +427,7 @@ module.exports = function mountApiRoutes(app) {
       const eventType = pickRequestValue(req, ['EventType', 'event_type']);
       console.log(
         `[CALL STATUS] method=${req.method} status=${providerStatus || ''} sid=${providerCallSid || ''} ` +
-        `query=${JSON.stringify(req.query || {})} bodyKeys=${JSON.stringify(Object.keys(req.body || {}))}`
+        `bodyKeys=${JSON.stringify(Object.keys(req.body || {}))}`
       );
 
       if (providerCallSid) {
@@ -530,7 +531,7 @@ module.exports = function mountApiRoutes(app) {
     }
   });
 
-  app.post('/call/recording-status', async (req, res) => {
+  app.post('/call/recording-status', requireLegacyCallWebhook, async (req, res) => {
     try {
       const callSid = req.body.CallSid;
       const recordingSid = req.body.RecordingSid;
