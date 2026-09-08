@@ -39,3 +39,16 @@ The session endpoint now uses authenticated current account state rather than th
 - Real HTTP, signed cookies, authentication middleware, account cache and session handler; synthetic clock and database results. No shared database, provider, dotenv, WebSocket or background startup. Denied cases leave sensitive query/write/provider spies untouched.
 
 P04 is still open for call-response privacy, media/free-text policy, complete route/ID coverage, database-backed revocation and session/logout assurance. No UAT or production verification is claimed.
+
+## P04 — Call response privacy (partial implementation)
+
+Date: 8 September 2026. Prerequisite: `6869a5f`.
+
+- One shared serializer limits AGENT recent/detail/incoming/live responses to operational fields and masked contact labels. Raw phones/emails, provider payloads, nested joins, transcripts, analysis and recording references are excluded; ADMIN retains authorized data.
+- Working product assumption announced after an optional clarification: media, transcript, analysis PDF and supervisor-payload reads require ADMIN. The same restriction covers inline free text. The unanswered clarification remains a policy confirmation item; P02 is not complete.
+- Read/export/media call IDs reject zero, noncanonical spellings and overflow before effects. Recordings and transcript responses use `no-store`. Desktop/mobile queue labels and search preserve masked contacts.
+- Before: `node --test test/call-response-privacy.test.js` — 1 pass, 7 fail, reproducing raw contact leaks in all four read paths, AGENT media dispatch, invalid-ID dispatch and transcript caching.
+- After: `node --test test/call-response-privacy.test.js test/auth-session-state.test.js test/authorization-routes.test.js test/auth-security.test.js test/user-rules.test.js test/csp-http-deployment.test.js` — 38 pass, 0 fail, 0 skip. Customer page inline JavaScript parses successfully; `git diff --check` is clean.
+- Test boundary: real HTTP/auth/serialization and route handlers with synthetic database rows, analysis results and in-memory state. No real database/provider/storage/PDF access. Browser behavior, all nested routers, broader patient free text and real database sessions remain unverified.
+
+These two P04 changes are locally implemented; P04 as a whole and its release gates remain open.

@@ -20,9 +20,11 @@ Files: modify `src/authorization.js`, `src/api-routes.js`, `test/authorization-r
 
 Files: create `src/call-serialization.js`, `test/call-response-privacy.test.js`; modify `src/api-routes.js`, `src/authorization.js` and affected UI consumers.
 
-- [ ] Record the AGENT recording/transcript/PDF decision before changing those permissions. Existing patient policy already permits only masked phone/email.
-- [ ] Send real HTTP requests to recent, detail, incoming and live call endpoints with synthetic contact and provider-payload sentinels. AGENT JSON must exclude raw contacts; ADMIN JSON must preserve authorized data. Cover nested analysis/patient/queue content and in-memory rows.
-- [ ] Introduce one role-aware serializer and use it on every call response. Preserve a useful masked contact label. Apply the agreed free-text/media policy consistently to inline fields and direct endpoints.
-- [ ] Verify allowed workflows and denied requests before query/network/file effects, run focused privacy and hotfix tests, update evidence and commit.
+- [x] Record the AGENT recording/transcript/PDF decision before changing those permissions. Working product assumption, announced while the optional user question remains unanswered: ADMIN-only media, reports, supervisor payloads and inline analysis/transcript text. AGENT retains operational call metadata and existing masked contact labels. This is an implementation choice pending product confirmation, not a claim the full P02 policy assessment is closed.
+- [x] Send real HTTP requests to recent, detail, incoming and live call endpoints with synthetic contact and provider-payload sentinels. AGENT JSON must exclude raw contacts; ADMIN JSON must preserve authorized data. Cover nested analysis/patient/queue content and in-memory rows.
+- [x] Introduce one role-aware serializer on all four call read responses. Preserve a useful masked contact label in desktop/mobile queue rendering and search. Apply the working free-text/media policy consistently to inline fields and direct endpoints.
+- [x] Verify allowed workflows and denied requests before query/network/file effects; the eight call-privacy tests plus session/hotfix suite pass (38 total, no failures/skips). Parse the modified customer-page script, update evidence and commit.
+
+Still open in P04: full nested router/method/ID inventory, database-backed revocation and multi-process session/logout assurance, broader patient/queue free-text policy, and authenticated browser verification. This plan does not claim these gates are complete.
 
 Rollback: revert the individual implementation commit on this branch. No migration, live DB access, provider call, push or deployment is part of this item. A code rollback would restore the identified exposure and requires an access restriction before release.

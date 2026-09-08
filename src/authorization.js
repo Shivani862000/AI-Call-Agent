@@ -60,6 +60,13 @@ function createAuthorizationRouter({ requireAdminAuth, requireRole, basicAuth })
   router.post([
     '/api/calls/initiate/:id', '/api/calls/:id/analyze', '/api/calls/:id/escalate'
   ], admin, validateOperationId);
+  // Audio, transcripts, generated reports and supervisor payloads can expose
+  // contacts even when the operational call-history fields have been masked.
+  router.get([
+    '/api/calls/:id/recording', '/api/calls/:id/transcript',
+    '/api/calls/:id/analysis-pdf', '/api/calls/:id/supervisor-events'
+  ], admin, validateOperationId);
+  router.get('/api/calls/:id(\\d+)', validateOperationId);
   return router;
 }
 

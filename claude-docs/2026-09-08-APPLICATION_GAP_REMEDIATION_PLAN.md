@@ -19,7 +19,7 @@
 ## Implementation progress
 
 - **P00a / F01:** HTTP authorization implementation completed locally on `codex/remediation-fixes`; `npm run test:hotfix` passes 22 tests, with no failures or skips. [Execution evidence](GAP_REMEDIATION_EVIDENCE.md).
-- **P04, session response portion:** implemented locally; current account role/activity/password state now governs session inspection. Eight session regressions plus the 22 hotfix tests pass. Remaining P04 privacy, complete router coverage and real database verification stay open.
+- **P04, session/call privacy portions:** implemented locally; current account state governs session inspection. Four call read endpoints now return permitted operational fields and masked contacts to AGENT; media, transcripts, reports and supervisor payloads use an ADMIN-only working policy. Eight privacy tests, eight session tests and 22 hotfix tests pass. Full router coverage, remaining policy decisions, real database and browser verification stay open.
 - **Release status:** not deployed. G0 still requires P03a deployment isolation. P04 database-backed session/privacy checks and P05 callback protections remain open.
 - **Current user-selected sequence:** groups 3–7, starting with P04 security/privacy, then P05–P19 and P20 evidence. Work proceeds one reviewable item at a time. P01/P02 prerequisite decisions and P03 release gates remain required where applicable; selecting product fixes first does not authorize a deployment or shared-UAT tests.
 

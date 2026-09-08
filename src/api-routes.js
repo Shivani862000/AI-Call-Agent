@@ -85,6 +85,7 @@ const {
 } = require('./icallmate-webhook');
 const logger = require('../services/system-logger');
 const { generateCallAnalysisPDF } = require('../services/pdf');
+const { serializeCall } = require('./call-serialization');
 
 module.exports = function mountApiRoutes(app) {
   /**
@@ -721,7 +722,7 @@ module.exports = function mountApiRoutes(app) {
     ].sort((a, b) => new Date(b.updated_at || b.received_at || 0) - new Date(a.updated_at || a.received_at || 0));
 
     res.json({
-      calls,
+      calls: calls.map(call => serializeCall(call, req.adminSession?.role)),
       active_count: calls.filter((call) => call.status === 'active').length,
       missed_count: calls.filter((call) => call.status === 'missed').length,
       completed_count: calls.filter((call) => call.status === 'completed').length,
@@ -1257,7 +1258,7 @@ module.exports = function mountApiRoutes(app) {
        LIMIT 25`
       );
 
-      res.json(rows);
+      res.json(rows.map(row => serializeCall(row, req.adminSession?.role)));
     } catch (error) {
       console.error('[RECENT CALLS ERROR]', error.message);
       res.status(500).json({ error: error.message });
@@ -1339,7 +1340,7 @@ module.exports = function mountApiRoutes(app) {
       const timelineEvents = safeJsonParse(row.timeline_events, analysis.timeline_events || []);
       const extractedEntities = safeJsonParse(row.extracted_entities, analysis.entities || {});
 
-      res.json({
+      res.json(serializeCall({
         ...row,
         summary: row.summary || row.analysis_summary || analysis.summary || null,
         analysis_summary: row.analysis_summary || row.summary || analysis.summary || null,
@@ -1362,7 +1363,7 @@ module.exports = function mountApiRoutes(app) {
           sentiment_score: Number(row.sentiment_score || analysis.sentiment_score || generatedAnalysis.sentiment_score || 0),
           quality_score: Number(row.quality_score || analysis.quality_score || generatedAnalysis.quality_score || 0)
         }
-      });
+      }, req.adminSession?.role));
     } catch (error) {
       console.error('[CALL DETAIL ERROR]', error.message);
       res.status(500).json({ error: error.message });
@@ -1518,7 +1519,7 @@ module.exports = function mountApiRoutes(app) {
           })
       ].sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
 
-      res.json(mergedRows);
+      res.json(mergedRows.map(row => serializeCall(row, req.adminSession?.role)));
     } catch (error) {
       console.error('[LIVE CALLS ERROR]', error.message);
       res.status(500).json({ error: error.message });
@@ -1587,7 +1588,7 @@ module.exports = function mountApiRoutes(app) {
 
       const arrayBuffer = await response.arrayBuffer();
       res.setHeader('Content-Type', response.headers.get('content-type') || 'audio/mpeg');
-      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.setHeader('Cache-Control', 'private, no-store');
       res.send(Buffer.from(arrayBuffer));
     } catch (error) {
       console.error('[RECORDING PROXY ERROR]', error.message);
@@ -1638,7 +1639,7 @@ module.exports = function mountApiRoutes(app) {
         return res.status(404).json({ error: 'Transcript not available yet' });
       }
 
-      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.setHeader('Cache-Control', 'private, no-store');
 
       if (String(req.query.raw || '') === '1') {
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
