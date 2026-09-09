@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const express = require('express');
 const http = require('node:http');
 const { randomUUID } = require('node:crypto');
+const ExcelJS = require('exceljs');
 
 let server;
 let baseUrl;
@@ -21,13 +22,48 @@ async function jsonRequest(method, path, body, username = 'import-admin') {
 }
 
 async function previewCsv(csv, username = 'import-admin') {
+  return previewFile(csv, 'patients.csv', 'text/csv', username);
+}
+
+async function previewFile(content, filename, type, username = 'import-admin') {
   const form = new FormData();
-  form.append('file', new Blob([csv], { type: 'text/csv' }), 'patients.csv');
+  form.append('file', new Blob([content], { type }), filename);
   const response = await fetch(baseUrl + '/api/patients/import/preview', {
     method: 'POST', headers: { 'x-test-user': username }, body: form
   });
   return { status: response.status, body: await response.json() };
 }
+
+test('actual XLSX preview and commit preserve workbook values', async () => {
+  const marker = randomUUID().replace(/\D/g, '').padEnd(10, '0').slice(0, 10);
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Patients');
+  sheet.addRow(['Reference ID', 'First Name', 'Mobile Number', 'Preferred Language']);
+  sheet.addRow([`XLSX-${marker}`, 'Synthetic XLSX', marker, 'en']);
+  const preview = await previewFile(
+    await workbook.xlsx.writeBuffer(),
+    'patients.xlsx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+
+  assert.equal(preview.status, 200, JSON.stringify(preview.body));
+  assert.deepEqual(preview.body.summary, { total: 1, new: 1, updates: 0, problems: 0 });
+  const committed = await jsonRequest('POST', '/api/patients/import/commit', { token: preview.body.token });
+  assert.equal(committed.status, 200, JSON.stringify(committed.body));
+  assert.deepEqual(committed.body, { created: 1, updated: 0, failures: [] });
+  const stored = await db.dbGet(
+    'SELECT id, reference_id, first_name, normalized_phone, preferred_language FROM patients WHERE reference_id = ?',
+    [`XLSX-${marker}`]
+  );
+  patientIds.push(stored.id);
+  assert.deepEqual(stored, {
+    id: stored.id,
+    reference_id: `XLSX-${marker}`,
+    first_name: 'Synthetic XLSX',
+    normalized_phone: marker,
+    preferred_language: 'en'
+  });
+});
 
 async function seedPatient(overrides = {}) {
   const marker = randomUUID();

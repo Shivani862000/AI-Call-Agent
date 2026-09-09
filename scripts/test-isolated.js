@@ -21,6 +21,7 @@ const UNIT_FILES = [
   'test/config-database-url.test.js', 'test/config-redaction.test.js',
   'test/config.test.js', 'test/csp-http-deployment.test.js',
   'test/customer-phone-lookup.test.js', 'test/database-isolation.test.js',
+  'test/dependency-compatibility.test.js',
   'test/deepgram-transcript.test.js', 'test/digest.test.js',
   'test/followup-call-script.test.js', 'test/gmail-transport.test.js',
   'test/health-endpoint.test.js', 'test/icallmate-config.test.js',

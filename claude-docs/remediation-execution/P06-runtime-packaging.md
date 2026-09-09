@@ -25,6 +25,14 @@
 3. Verify synthetic CSV/XLSX preview and import, form/query parsing, login/authorization URL variants and captured email composition with existing plus focused tests. Run the audited affected suites once after final changes; a lockfile-only assertion is not compatibility evidence. Re-run `npm audit --json`, documenting exact remaining advisories and reachability instead of suppressing them. Fix actionable high/critical findings in the changed dependency graph.
 4. Commit named files and a bounded report. Controller arranges separate review before Task 2.
 
+#### Task 1 implementation evidence — 9 September 2026
+
+- Registry metadata and upstream release/advisory notes were checked before installation. The production graph now pins `csv-parse` 7.0.2, Multer 2.3.0 and Nodemailer 9.1.1. A root `overrides.qs` pin documents and enforces qs 6.16.0 for Express and body-parser because Express 4.22.2's transitive range otherwise resolved the vulnerable 6.15.3. Express remains 4.22.2; no application adapter or framework-major change was needed.
+- A focused test demonstrated the csv-parse defect before the update: duplicate `__proto__` columns with `columns` and `group_columns_by_name` replaced the record prototype under 5.6.0. The same test passes under 7.0.2 and verifies the names remain ordinary own data properties. Actual customer route tests also accept those column names without side effects, enforce the 5,000-row limit before writes, and reject malformed and over-5 MiB multipart bodies without writes.
+- The production Express app preserves its existing query and URL-encoded form shapes with the patched qs graph. Existing authorization cases continue to cover login/public route variants, case changes, trailing and duplicate slashes, encoded paths, invalid IDs and role boundaries.
+- Nodemailer's SMTP path was exercised through `services/mailer.js` with the real in-memory stream composer. It captured sender, recipients, subject, text and HTML while opening no outbound connection. Existing Gmail API raw-message coverage also remained green.
+- `npm run test:db -- --file test/patient-import-route.test.js` ran the audited owned PostgreSQL harness at schema 0019: 7/7 passed, including real CSV and generated XLSX preview/commit behavior. `npm test` ran the audited unit manifest: 342/342 passed. A final `npm audit --json` reported 0 vulnerabilities across 411 dependencies (290 production, 121 development, 5 optional; npm's categories overlap). No advisories remain to classify for reachability.
+
 ### Task 2: Exclude secrets and boot the pinned production image
 
 1. Expand `.dockerignore` for root/nested environment files, Gmail and service-account keys, OAuth client-secret names, private key material and archive/backup patterns including `feedback.db.archived-20260830`. Exclude development scratch/SDD state. Keep only required runtime assets.
