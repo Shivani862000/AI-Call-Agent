@@ -4866,6 +4866,32 @@ a[href="/incoming-calls.html"] {
   gap: 6px;
 }
 
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.saas-call-type-field {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.saas-call-type-field legend {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+}
+
 .saas-field label {
   font-size: 13px;
   font-weight: 600;
@@ -4910,6 +4936,12 @@ a[href="/incoming-calls.html"] {
   justify-content: space-between;
   align-items: center;
   gap: 4px;
+}
+
+.saas-campaign-card:focus-within,
+.saas-selection-card:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 2px;
 }
 
 .saas-card-content {
@@ -6518,6 +6550,9 @@ a[href="/incoming-calls.html"] {
   cursor: pointer;
   transition: all 0.2s ease;
   min-height: 140px;
+  width: 100%;
+  font: inherit;
+  color: inherit;
 }
 
 .saas-selection-card:hover {

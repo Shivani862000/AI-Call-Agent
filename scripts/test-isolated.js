@@ -21,6 +21,7 @@ const UNIT_FILES = [
   'test/config-database-url.test.js', 'test/config-redaction.test.js',
   'test/config.test.js', 'test/csp-http-deployment.test.js',
   'test/call-events.test.js',
+  'test/modal-accessibility.test.js',
   'test/contact-policy.test.js',
   'test/customer-phone-lookup.test.js', 'test/database-isolation.test.js',
   'test/dependency-compatibility.test.js',

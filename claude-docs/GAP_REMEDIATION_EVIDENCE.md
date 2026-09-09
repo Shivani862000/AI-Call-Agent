@@ -255,3 +255,13 @@ Date: 9 September 2026. Prerequisite: P07 import limits and durable queue identi
 - The isolated PostgreSQL regression passed **1/1**, covering three pages, complete unique coverage, legacy response compatibility, malformed cursor rejection and the maximum page size.
 
 Browser load-more consumption, patient-list pagination, bounded import batching and representative workload measurement remain open; P16 is not complete.
+
+## P18 — Scheduling-modal keyboard boundary (partial)
+
+Date: 9 September 2026. Scope: the shared scheduling modal mounted by the authenticated admin and outbound pages. [Execution plan](remediation-execution/P18-scheduling-modal-accessibility.md).
+
+- Patient-choice cards are native buttons. Call-type choices use native radios with a fieldset legend and a clipped visual treatment that preserves keyboard and screen-reader access.
+- Opening the modal marks background siblings inert, focuses the first control, traps Tab/Shift+Tab, supports Escape and restores the opener's focus on close.
+- `node --check public/app-shell.js` and `node --test test/modal-accessibility.test.js` passed; no browser or screen-reader boundary was used.
+
+Search/listbox semantics, full keyboard journey, field-error announcements, visual reflow/contrast and human screen-reader assessment remain open; P18 is not complete.
