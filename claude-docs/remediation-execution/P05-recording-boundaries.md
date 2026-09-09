@@ -13,6 +13,12 @@
 - Empty recording origin configuration denies provider retrieval. Unknown provider support must stay explicit; do not invent signature, redirect or URL-suffix guarantees.
 - Existing legacy callbacks default disabled and require the configured scalar secret when enabled. Preserve supported canonical authentication. P10 owns attempt correlation and replay safety; a shared secret alone does not complete that work.
 
+## Verified implementation references
+
+Read on 9 September 2026: the [IANA IPv4](https://www.iana.org/assignments/iana-ipv4-special-registry/) and [IPv6 special-purpose registries](https://www.iana.org/assignments/iana-ipv6-special-registry/) distinguish globally reachable addresses from private, shared, documentation and protocol-specific space. Include easily missed cases such as `100.64.0.0/10`, IPv4-mapped/translation addresses, `2002::/16`, `2001:db8::/32` and the newer `3fff::/20` documentation block. Conservative rejection of special-purpose/translation ranges is acceptable for this exact-provider-origin client; do not mistake a library's broad “unicast” label for the complete policy.
+
+The [Node 24 HTTP API](https://nodejs.org/docs/latest-v24.x/api/http.html#httprequesturl-options-callback) supports a custom `lookup` and per-request connection isolation. Its timeout option only emits an event; explicit abort/destruction is still required. The [HTTPS API](https://nodejs.org/docs/latest-v24.x/api/https.html#httpsrequesturl-options-callback) retains TLS options. Implement a total deadline starting before DNS; a late DNS result must not start a connection after cancellation. Avoid a global pooled/proxy connector that bypasses the pinned-address contract, and test this production connector boundary with inert adapters.
+
 ### Task 1: Bound callback recording metadata and all retrieval paths
 
 **Create:** `services/recording-fetch.js`, `test/recording-fetch.test.js` and focused actual route/pipeline integration tests.

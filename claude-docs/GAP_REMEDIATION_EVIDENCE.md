@@ -119,3 +119,21 @@ Verification sequence, with no unexpected skips:
 - Intentional outer migration failure and interrupted runs exited nonzero and reported `cleaned: true`; exact-name Docker inspection found no owned network/container. Syntax and `git diff --check` passed.
 
 No shared database, genuine credential, provider, call or notification was used. Supabase extension/role equivalence, production image compatibility, deployment isolation and browser coverage retain their separate release gates.
+
+## P07 — Import and schedule preservation
+
+Date: 9 September 2026. Prerequisites: reviewed P01 `ed9a3e6`, controller baseline `5ff850e`. Implementation `c1fba27`, review fixes `346d294`; independent spec and quality review approved the final scoped change. [Execution plan](remediation-execution/P07-import-schedule-preservation.md).
+
+- Imports carry header presence into allowlisted update patches. Omitted fields and all existing contact restrictions survive; explicit nullable blanks clear visibly, and blank required fields/non-nullable language reject. Creates use separate defaults. Protected restriction headers cannot become writes through an internal header map.
+- Preview resolves reference and normalized phone, reports conflicts/duplicate targets, and captures `xmin`. Confirmation locks and revalidates each patient in `dbTx`, rejects stale/deleted/newly conflicting identities, and applies only previewed fields. Tokens remain user-owned, expiring and single use. The UI shows bounded field changes/clears and actionable failures; consumed-token confirmation remains disabled until a new preview succeeds.
+- Schedule edits compare instants, preserving retry/status/attempt/manual/lock state for equivalent times and unrelated edits. Validation checks the exact persisted instant and component consistency in Asia/Kolkata; past, disallowed-hour and impossible calendar timestamps reject without writes. Valid changed future schedules retain supported rescheduling behavior.
+
+Behavior and verification:
+
+- Initial regressions: import unit **12 pass / 5 fail**; actual schedule routes **0/2 pass**; actual import routes **0/5 pass**, reproducing the reported defects.
+- Initial implementation: complete audited unit suite **315 passed**, including authorization/session/privacy tests; import routes **5 passed** and schedule routes **2 passed**. The sandbox's loopback-listen denial was resolved by the authorized local-binding rerun, which passed.
+- Review found validation of a different timestamp from the one saved and permissive normalization of an impossible date. Final targeted results: import unit **17 passed**, import route/DB **6 passed**, schedule route/DB **3 passed**; no failures/skips. The latter cover canonical-time rejection and exact no-write assertions, valid offset equivalence and actual rescheduling.
+- Added a fault after a real transactional import update: the failed row's exact values, `updated_at` and `xmin` are restored, a sanitized failure is returned, and another valid row commits. This adds missing rollback evidence around the existing real `dbTx`; it is not a claim that the prior transaction implementation was broken.
+- Inline patient-page script parsing, JavaScript syntax and `git diff --check` passed. Full unit tests were not redundantly repeated after the scoped fix; affected files were rerun and independently reviewed.
+
+The tests use actual patient/customer routers and guarded application DB helpers with owned, nondialable fixtures and inert provider boundaries. The 5 MiB/5,000-row limits and ADMIN import guards remain. Schema stays `0019`; no live data or external service was used. P08 owns ordinary patient/contact edits and P16 owns batching/multi-instance import persistence. Hosted CI, browser workflows and rollout remain separate evidence gates.

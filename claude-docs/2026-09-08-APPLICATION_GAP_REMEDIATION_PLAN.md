@@ -26,6 +26,7 @@
 - **Current user-selected sequence:** groups 3–7, starting with P04 security/privacy, then P05–P19 and P20 evidence. Work proceeds one reviewable item at a time. P01/P02 prerequisite decisions and P03 release gates remain required where applicable; selecting product fixes first does not authorize a deployment or shared-UAT tests.
 - **9 September continuation:** the user requested completion of all remaining work. P01 is being implemented first to enable safe real database regressions; subsequent fixes proceed one item at a time. Local Docker setup is included in that instruction. The user confirmed Supabase manages the deployed database; read-only dashboard inspection subsequently verified PostgreSQL major 17 in both projects (service build `17.6.1.166`). Supabase role/extension equivalence still needs separate verification.
 - **P01 implementation and local verification complete:** disposable PG17/Node24 tests and connection/cleanup guards passed scoped review through `ed9a3e6`. The initial combined run passed 307 unit/18 DB checks; later affected checks include 20 full DB, six isolation and five role assertions. Hosted Linux CI execution, browser coverage and actual Supabase grant equivalence remain separate evidence gates. P07 import/schedule preservation is next. [Evidence](GAP_REMEDIATION_EVIDENCE.md#p01--disposable-database-testing-and-fixture-cleanup).
+- **P07 / F04 and schedule portion of F13 complete locally:** imports preserve omitted fields/restrictions, preview actual changes and revalidate identity/version in a transaction. Schedule comparisons/validation use the actual instant and India calling hours. Reviewed commits `c1fba27`, `346d294`; final targeted checks: 17 import unit, six import DB and three schedule DB tests pass. [Evidence](GAP_REMEDIATION_EVIDENCE.md#p07--import-and-schedule-preservation). P05 recording/callback boundaries are next.
 - **P02 working contracts:** [Domain and policy decisions](APPLICATION_DOMAIN_CONTRACTS.md) and [provider capability matrix](ICALLMATE_CAPABILITY_MATRIX.md) record implementation choices and unresolved external evidence. These documents do not claim provider compatibility or completion of operational assessments.
 
 ## Scope, status, and execution rules
@@ -425,23 +426,19 @@ npm run test:isolated
 **Modify:** `src/patient-import.js`, `src/patient-rules.js`, `routes/patients.js`, `routes/customers.js`, `public/patients.html`, `test/patient-import.test.js`.
 **Create:** `src/schedule-time.js`, `test/patient-import-route.test.js`, `test/schedule-edit.test.js`.
 
-- [ ] Carry actual field presence from header parsing into each planned update, its server-held preview and confirmation. Normalize create payloads separately from update patches; the prior plan's proposed `IMPORTABLE_FIELDS` approach alone does not establish presence (that export is not current application code).
-- [ ] Adopt explicit patch semantics: absent columns preserve existing values; present blank optional cells clear that optional value; present blank required name/phone is an error. The preview shows clears distinctly. Ordinary imports never modify consent, suppression or patient status, even if an upload introduces those headers.
-- [ ] Revalidate identity and row version at confirmation; if a patient changed after preview, require a refreshed preview rather than replacing newer data. Reject conflicting reference/phone matches and duplicate update targets with row-specific errors.
-- [ ] Compare schedule timestamps by epoch milliseconds. Preserve the existing validation of past dates; reject invalid nonempty timestamps before comparing. Only a real changed future schedule may reset attempts/workflow.
+- [x] Carry actual field presence from header parsing into each planned update, its server-held preview and confirmation. Normalize create payloads separately from update patches; the prior plan's proposed `IMPORTABLE_FIELDS` approach alone does not establish presence (that export is not current application code).
+- [x] Adopt explicit patch semantics: absent columns preserve existing values; present blank optional cells clear that optional value; present blank required name/phone is an error. The preview shows clears distinctly. Ordinary imports never modify consent, suppression or patient status, even if an upload introduces those headers.
+- [x] Revalidate identity and row version at confirmation; if a patient changed after preview, require a refreshed preview rather than replacing newer data. Reject conflicting reference/phone matches and duplicate update targets with row-specific errors.
+- [x] Compare schedule timestamps by epoch milliseconds. Preserve the existing validation of past dates; reject invalid nonempty timestamps before comparing. Only a real changed future schedule may reset attempts/workflow.
 
 ```js
-// Proposed src/schedule-time.js core, after route input validation.
-function sameInstant(a, b) {
-  const epoch = value => value == null || value === '' ? null : new Date(value).getTime();
-  return epoch(a) === epoch(b);
-}
-// Regression assertion for test/schedule-edit.test.js:
-assert.equal(sameInstant('2026-09-09T10:00:00.000Z',
+// Implemented helper; strict input validation precedes comparison.
+const { sameScheduleInstant } = require('./src/schedule-time');
+assert.equal(sameScheduleInstant('2026-09-09T10:00:00.000Z',
   new Date('2026-09-09T10:00:00Z')), true);
 ```
 
-- [ ] Test the real preview/confirm route with a refused inactive patient containing notes, dates and email: omitted columns preserve values; explicit blanks follow the rule; safe updates change only intended fields. Test unrelated edits on future callback/retry schedules with PostgreSQL `Date` values and timezone-equivalent strings; attempts/status remain unchanged.
+- [x] Test the real preview/confirm route with a refused inactive patient containing notes, dates and email: omitted columns preserve values; explicit blanks follow the rule; safe updates change only intended fields. Test unrelated edits on future callback/retry schedules with PostgreSQL `Date` values and timezone-equivalent strings; attempts/status remain unchanged.
 
 **Verify:** unit import tests and guarded `test/patient-import-route.test.js`/`test/schedule-edit.test.js`. Ship the data-preservation fix early; admission races remain P08–P10 work.
 
