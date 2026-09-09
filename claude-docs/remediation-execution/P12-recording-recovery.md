@@ -19,6 +19,6 @@ Date: 9 September 2026. Prerequisite: P05 recording boundaries and P11 job owner
 
 1. [ ] Persist separate recording, transcription and analysis stage status and use P11 claim fencing for each metadata write.
 2. [ ] Add storage-object missing/retry, delayed-reader, upload-failure and cleanup-failure restart tests against real temporary files.
-3. [ ] Wire a bounded boot/recovery worker to resume pending recording/transcription jobs without a callback.
+3. [x] Wire a bounded boot/60-second recovery worker to resume due post-call jobs without a callback. Stage-specific recording/transcription recovery remains open.
 
 No storage credentials or live provider/object was used. The code is locally verified and remains behind the broader P11/P12 release and recovery gates.

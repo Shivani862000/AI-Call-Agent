@@ -84,4 +84,42 @@ async function failPostCallJob({ dbTx, jobId, claimToken, attemptCount = 1, erro
   });
 }
 
-module.exports = { RETRY_DELAYS_MS, DEFAULT_LEASE_MS, buildInputRevision, retryDelayMs, claimPostCallJob, completePostCallJob, failPostCallJob };
+async function listDuePostCallJobs({ dbAll, now = new Date(), limit = 10 } = {}) {
+  if (typeof dbAll !== 'function') throw new TypeError('dbAll is required');
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new TypeError('limit must be between 1 and 100');
+  return dbAll(
+    `SELECT id, call_id, stage, input_revision, status, attempt_count
+       FROM post_call_jobs
+      WHERE (status IN ('pending', 'blocked') AND next_run_at <= ?)
+         OR (status = 'processing' AND claim_expires_at <= ?)
+      ORDER BY next_run_at ASC, id ASC
+      LIMIT ?`,
+    [new Date(now).toISOString(), new Date(now).toISOString(), limit]
+  );
+}
+
+async function recoverDuePostCallJobs({ dbAll, processCall, now = new Date(), limit = 10 } = {}) {
+  if (typeof processCall !== 'function') throw new TypeError('processCall is required');
+  const jobs = await listDuePostCallJobs({ dbAll, now, limit });
+  const results = [];
+  for (const job of jobs) {
+    try {
+      results.push(await processCall(job.call_id));
+    } catch (error) {
+      results.push({ ok: false, callId: job.call_id, reason: error.code || error.name || 'recovery_failed' });
+    }
+  }
+  return { scanned: jobs.length, results };
+}
+
+module.exports = {
+  RETRY_DELAYS_MS,
+  DEFAULT_LEASE_MS,
+  buildInputRevision,
+  retryDelayMs,
+  claimPostCallJob,
+  completePostCallJob,
+  failPostCallJob,
+  listDuePostCallJobs,
+  recoverDuePostCallJobs
+};

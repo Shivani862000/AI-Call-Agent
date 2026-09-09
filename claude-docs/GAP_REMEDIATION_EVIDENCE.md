@@ -200,9 +200,9 @@ Date: 9 September 2026. Prerequisite: P09/P10 local lifecycle slices. [Execution
 
 - Migration `0023_post_call_jobs.sql` adds revisioned, RLS-protected stage-job rows with retry state, due indexes, claim leases/tokens and call-delete cascade.
 - `services/post-call-jobs.js` provides deterministic input revisions, bounded retry delays, row-locked claims and token-fenced completion/failure transitions. The post-call pipeline claims before work and records blocked/retry state for missing input or processing errors.
-- Verification: isolated unit suite **364/364** and isolated PostgreSQL suite **37/37** passed after migrating through schema `0023`. The focused DB regression covers duplicate claims, wrong-token completion, retry state and cascade cleanup.
+- Verification: isolated unit suite **369/369** and isolated PostgreSQL suite **41/41** passed after migrating through schema `0025`. Focused regressions cover duplicate claims, wrong-token completion, retry state, cascade cleanup and bounded recovery scanning.
 
-Stage-specific recovery, token-fenced final effects, boot/restart scans, notification outbox delivery and legacy backfill/reconciliation remain open. This is durable job ownership, not a claim of exactly-once completion. No provider, notification, storage or deployment boundary was used.
+Stage-specific recovery, token-fenced final effects, lease renewal, notification outbox delivery and legacy backfill/reconciliation remain open. This is durable job ownership plus due-job rediscovery, not a claim of exactly-once completion. No provider, notification, storage or deployment boundary was used.
 
 ## P12 — Recording and transcription recovery (partial)
 
@@ -240,6 +240,6 @@ Date: 9 September 2026. Prerequisite: durable customer/queue identity. [Executio
 
 - Migration `0025_campaign_identity.sql` adds and backfills `customers.campaign_id`, keeps legacy names compatible through a trigger, and indexes the identity for reporting.
 - Customer writes accept a campaign ID, and campaign reporting resolves the current campaign configuration name through that ID so renames do not split attribution.
-- Verification: isolated unit suite **367/367** and PostgreSQL suite **41/41** passed through schema `0025`.
+- Verification at the P13 slice: isolated unit suite **367/367** and PostgreSQL suite **39/39** passed through schema `0024`; the current branch suite is **369/369** and **41/41** after P14/P15 and recovery tests.
 
 Import/attempt/UI propagation, ambiguous-name review and production backfill remain open; P15 is not complete.
