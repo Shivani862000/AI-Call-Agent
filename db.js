@@ -1,4 +1,4 @@
-require('dotenv').config();
+if (process.env.NODE_ENV !== 'test') require('dotenv').config();
 const { Pool, types } = require('pg');
 
 // pg returns int8 (bigint, and COUNT(*)) as a string to avoid precision loss.
@@ -102,6 +102,9 @@ async function assertSchemaVersion() {
 async function initializeDatabase() {
   try {
     const connectionString = resolveDatabaseUrl();
+    if (process.env.NODE_ENV === 'test') {
+      require('./test/support/database').assertOwnedTestDatabase(connectionString);
+    }
     pool = new Pool({
       connectionString,
       max: 10,
