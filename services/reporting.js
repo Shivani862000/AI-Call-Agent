@@ -421,13 +421,16 @@ async function buildOwnerDashboardData() {
 
   const campaignPerformance = await dbAll(`
     SELECT
-      COALESCE(campaign_name, 'Unassigned') AS campaign_name,
+      COALESCE(cfg.name, queue.campaign_name, 'Unassigned') AS campaign_name,
+      raw_customer.campaign_id,
       COUNT(*) AS total_customers,
       SUM(CASE WHEN status IN ('hot_lead', 'completed', 'called', 'callback_scheduled') THEN 1 ELSE 0 END) AS active_leads,
       SUM(CASE WHEN revenue_stage IN ('qualified', 'follow_up') THEN 1 ELSE 0 END) AS qualified_leads,
       SUM(COALESCE(revenue_estimate, 0)) AS revenue_pipeline
-    FROM customer_queue
-    GROUP BY COALESCE(campaign_name, 'Unassigned')
+    FROM customer_queue queue
+    LEFT JOIN customers raw_customer ON raw_customer.id = queue.id
+    LEFT JOIN campaign_configs cfg ON cfg.id = raw_customer.campaign_id
+    GROUP BY cfg.name, queue.campaign_name, raw_customer.campaign_id
     ORDER BY revenue_pipeline DESC, total_customers DESC
   `);
 

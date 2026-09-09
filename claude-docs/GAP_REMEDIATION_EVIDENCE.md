@@ -233,3 +233,13 @@ Date: 9 September 2026. Prerequisite: P13 patient-owned feedback/history. [Execu
 - Verification: focused PostgreSQL reporting regression, full isolated database suite **40/40**, and full isolated unit suite **367/367** passed.
 
 Other report/export aggregates and browser/date-boundary verification remain open; P14 is not complete.
+
+## P15 — Durable campaign identity (partial)
+
+Date: 9 September 2026. Prerequisite: durable customer/queue identity. [Execution plan and detailed evidence](remediation-execution/P15-campaign-identity.md).
+
+- Migration `0025_campaign_identity.sql` adds and backfills `customers.campaign_id`, keeps legacy names compatible through a trigger, and indexes the identity for reporting.
+- Customer writes accept a campaign ID, and campaign reporting resolves the current campaign configuration name through that ID so renames do not split attribution.
+- Verification: isolated unit suite **367/367** and PostgreSQL suite **41/41** passed through schema `0025`.
+
+Import/attempt/UI propagation, ambiguous-name review and production backfill remain open; P15 is not complete.

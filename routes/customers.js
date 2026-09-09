@@ -175,6 +175,7 @@ function normalizeCustomerPayload(payload = {}) {
     pending_follow_ups: String(payload.pending_follow_ups || '').trim(),
     revenue_stage: String(payload.revenue_stage || 'unassigned').trim().toLowerCase() || 'unassigned',
     revenue_estimate: Number(payload.revenue_estimate || 0) || 0,
+    campaign_id: Number(payload.campaign_id) || null,
     campaign_name: String(payload.campaign_name || '').trim(),
     service_interest: String(payload.service_interest || '').trim()
   };
@@ -303,8 +304,8 @@ async function saveCustomer(payload, isManual = false) {
       patient_id, scheduled_datetime, status,
       customer_value, urgency_level,
       outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
-      campaign_name, service_interest, call_type, is_manual
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      campaign_id, campaign_name, service_interest, call_type, is_manual
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       patientId,
       payload.scheduled_datetime,
@@ -315,6 +316,7 @@ async function saveCustomer(payload, isManual = false) {
       payload.pending_follow_ups || null,
       payload.revenue_stage,
       payload.revenue_estimate,
+      payload.campaign_id,
       payload.campaign_name || null,
       payload.service_interest || null,
       payload.call_type,
@@ -531,6 +533,7 @@ router.put('/:id', async (req, res) => {
               next_retry_at = ?,
               revenue_stage = ?,
               revenue_estimate = ?,
+              campaign_id = ?,
               campaign_name = ?,
               service_interest = ?,
               call_type = ?,
@@ -548,6 +551,7 @@ router.put('/:id', async (req, res) => {
         nextRetryAt,
         payload.revenue_stage,
         payload.revenue_estimate,
+        payload.campaign_id,
         payload.campaign_name || null,
         payload.service_interest || null,
         payload.call_type,
