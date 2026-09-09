@@ -87,6 +87,8 @@ An explicitly audited DB-free Node stdin program, launched with `env -i PATH="$P
 
 Result: three intended behavior failures, exit 1. This proves the pure classification/payload defects; persisted import behavior and contact-event races still require P07/P08 real-route/database regressions. No post-fix result is claimed here.
 
+Additional F17/F18 baseline on 9 September: the unchanged actual `services/reporting.js` module was evaluated in a VM with its sole `../db` import replaced by synthetic results (two scalar queries/five list queries asserted). No application DB module, dotenv, provider, timer or network was loaded. Calling `buildReportData` with one positive unrated call produced `service_recovery_count: 1` instead of 0. Supplying ten negative rated calls produced a recovery total of 6 instead of 10, reproducing the display-limit-derived count. Both checks failed as intended (exit 1). This proves report classification/aggregation behavior with known inputs; P14 still needs real SQL population and rendered-output verification.
+
 ## P01/P02 — Deployed PostgreSQL major verification
 
 Date: 9 September 2026. The user identified Supabase as the managed database. Read-only navigation in the already-authenticated Supabase dashboard showed these **Service versions → Postgres version** values:
@@ -99,3 +101,21 @@ Date: 9 September 2026. The user identified Supabase as the managed database. Re
 This resolves the PostgreSQL-major prerequisite for a PG17 lab. It does not establish equivalence of Supabase extensions, roles, view grants, storage policies or production behavior. No SQL was executed, records read, credentials revealed, settings saved or service lifecycle action taken. The temporary research tab was closed afterward.
 
 The production project overview also displayed an Advisor warning for the `public.customer_queue` SECURITY DEFINER view and a “No backups” overview label. Those are actionable inputs for P03/P04 permission and recovery assessment; they are not proof of an exposed Data API or absence of an independently managed backup. Neither was dismissed or modified.
+
+## P01 — Disposable database testing and fixture cleanup
+
+Date: 9 September 2026. Implementation commits `fe84465`, `75a1f49`, `1d41757`, `5a6945c`, `ed9a3e6`; supporting task documentation `4b9c8cf`. [Execution plan and detailed evidence](remediation-execution/P01-isolated-tests.md).
+
+- Audited explicit unit/DB manifests reject unknown, stale and empty selections. `npm test` is a safe unit alias; `test:isolated` runs the audited unit and database groups. The browser command explicitly fails until P17 supplies its harness. Both workflow test jobs use the isolated command; no actual GitHub Actions run is claimed.
+- UUID-owned PostgreSQL and Node workloads use an inspected internal Docker network with no published DB port, minimal synthetic environment, nondialable fixtures and purpose-bound connection identities checked before client construction. The lab pins PostgreSQL 17.6 and the available Node 24.20.0 image by digest. Application tests use a non-superuser trusted server login; migration ownership is separate.
+- Synthetic anon/authenticated roles cannot read a real application-visible patient sentinel, perform schema DDL or assume the owner role. A controlled RLS-disabled negative case exposes that same sentinel, then restores RLS and reconfirms denial. This establishes the tested base-table boundary; the existing `customer_queue` SECURITY DEFINER view and actual Supabase grants remain P04 work.
+- Test staging excludes nested environment, service-account/client-secret/Gmail-key variants, key material, archived databases/backups and symlinks. All exclusion experiments use dummy files in a separate temporary fixture directory.
+- Cleanup tracks durable call IDs as well as queue/patient ownership. Injected assertion and migration failures clean or roll back their owned effects. SIGINT during workload and a deterministic pre-assignment provisioning barrier both leave no UUID-owned Docker resources; final cleanup retries the resource inventory after in-flight creation settles.
+
+Verification sequence, with no unexpected skips:
+
+- Initial complete isolated run: **307 unit + 18 DB assertions passed**, 19 fresh migrations, zero on repeat. Preserved remediation suite: **56 passed**; safe `npm test` alias: **307 passed**.
+- After restricted-role/fixture fixes: full DB suite **20 passed**. Later targeted staging/identity checks **6 passed**; final role suite at `ed9a3e6` **5 passed**, including existing-row RLS, negative control and zero-client rejection for missing/mismatched identities. Full suites were not redundantly repeated after these scoped test-only refinements.
+- Intentional outer migration failure and interrupted runs exited nonzero and reported `cleaned: true`; exact-name Docker inspection found no owned network/container. Syntax and `git diff --check` passed.
+
+No shared database, genuine credential, provider, call or notification was used. Supabase extension/role equivalence, production image compatibility, deployment isolation and browser coverage retain their separate release gates.
