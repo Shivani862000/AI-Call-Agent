@@ -412,6 +412,34 @@ async function buildOwnerDashboardData() {
     LIMIT 40
   `);
 
+  // Keep the alert detail list bounded without letting its display limit change
+  // the dashboard totals. The list is a review queue; these counts describe the
+  // complete seven-day population behind it.
+  const ownerAlertCounts = await dbGet(`
+    SELECT
+      COUNT(*) FILTER (
+        WHERE calls.outcome IN ('interested', 'hot_lead')
+           OR COALESCE(calls.hot_lead_score, 0) >= 85
+      ) AS hot_leads,
+      COUNT(*) FILTER (
+        WHERE LOWER(COALESCE(calls.sentiment_label, '')) = 'negative'
+           OR COALESCE(calls.live_red_flag, 0) = 1
+      ) AS complaints,
+      COUNT(*) FILTER (WHERE calls.outcome = 'callback') AS callbacks,
+      COUNT(*) FILTER (
+        WHERE COALESCE(c.admin_review_required, 0) = 1
+           OR COALESCE(c.wrong_number_flag, 0) = 1
+      ) AS admin_reviews,
+      COUNT(*) FILTER (
+        WHERE calls.next_action_at IS NOT NULL
+          AND calls.next_action_at < now()
+      ) AS stale_followups
+    FROM calls
+    JOIN patients p ON p.id = calls.patient_id
+    LEFT JOIN customer_queue c ON c.id = calls.customer_id
+    WHERE calls.called_at >= (now() - interval '7 days')
+  `);
+
   const campaignConfigs = await dbAll(`
     SELECT id, name, service_name, monthly_spend_inr, status
     FROM campaign_configs
@@ -493,10 +521,10 @@ async function buildOwnerDashboardData() {
     })
     .slice(0, 12);
 
-  const complaintCount = normalizedAlerts.filter((item) => item.type === 'reputation').length;
-  const hotLeadCount = normalizedAlerts.filter((item) => item.type === 'hot_lead').length;
-  const callbackCount = normalizedAlerts.filter((item) => item.type === 'callback').length;
-  const staleLeadCount = normalizedAlerts.filter((item) => item.type === 'stale_followup').length;
+  const complaintCount = Number(ownerAlertCounts?.complaints) || 0;
+  const hotLeadCount = Number(ownerAlertCounts?.hot_leads) || 0;
+  const callbackCount = Number(ownerAlertCounts?.callbacks) || 0;
+  const staleLeadCount = Number(ownerAlertCounts?.stale_followups) || 0;
 
   const campaignRoi = campaignPerformance.map((campaign) => {
     const config = campaignConfigs.find((item) => Number(item.id) === Number(campaign.campaign_id))
@@ -561,7 +589,7 @@ async function buildOwnerDashboardData() {
     },
     owner_cards: ownerCards,
     alerts: normalizedAlerts,
-    critical_alert_count: normalizedAlerts.filter((item) => item.severity === 'high').length,
+    critical_alert_count: complaintCount + hotLeadCount,
     campaign_roi: campaignRoi,
     stale_leads: staleLeads,
     weekly_summary: weekly.summary_text,

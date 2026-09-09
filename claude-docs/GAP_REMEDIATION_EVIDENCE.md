@@ -231,8 +231,8 @@ An explicit feedback store, production backfill/conflict review and complete ret
 Date: 9 September 2026. Prerequisite: P13 patient-owned feedback/history. [Execution plan and detailed evidence](remediation-execution/P14-reporting-aggregates.md).
 
 - Recovery classification now requires negative sentiment or an explicit 1–2 rating; null ratings are not treated as low scores.
-- A pre-limit window aggregate supplies the full-period recovery count while the dashboard queue remains bounded to six items.
-- Verification: focused PostgreSQL reporting regression, full isolated database suite **40/40**, and full isolated unit suite **367/367** passed.
+- A pre-limit window aggregate supplies the full-period recovery count while the dashboard queue remains bounded to six items. Owner alert cards/counts now use a separate full seven-day aggregate while the alert detail list remains bounded to twelve items.
+- Verification: focused PostgreSQL reporting regressions cover recovery and 15 owner alerts, full isolated database suite **44/44**, and full isolated unit suite **371/371** passed.
 
 Other report/export aggregates and browser/date-boundary verification remain open; P14 is not complete.
 
