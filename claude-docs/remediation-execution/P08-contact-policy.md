@@ -2,7 +2,7 @@
 
 **Goal:** Explicit refusals and suppression survive stale workflow updates and prevent further disallowed contact across every calling path.
 **Spec:** [P08 remediation contract](../2026-09-08-APPLICATION_GAP_REMEDIATION_PLAN.md#p08--make-contact-restrictions-authoritative-and-monotonic).
-**Dependencies:** reviewed P01/P07; [domain contract](../APPLICATION_DOMAIN_CONTRACTS.md). Durable revisions ship with P09/P10 in migration `0020_contact_and_call_attempts.sql`.
+**Dependencies:** reviewed P01/P07; [domain contract](../APPLICATION_DOMAIN_CONTRACTS.md). Durable revisions ship with P09/P10 in migration `0021_contact_and_call_attempts.sql`.
 **Architecture:** A shared contact vocabulary/policy, patient-turn intent detection, and patient-owned contact events. Transactions lock the patient before deciding restrictions, modifying dependent queue work and recording the decision.
 
 ## Global Constraints
@@ -11,7 +11,7 @@
 - Tests use only audited disposable infrastructure and nondialable fixtures. No live database, provider, notifications, push, merge or deployment.
 - Canonical consent is `unknown|granted|refused`; legacy `denied` maps to `refused` and `pending` to `unknown` at one compatibility boundary. Unknown consent retains current behavior; never infer a legal consent grant from interest or ordinary completion.
 - Patient restrictions are authoritative. An AGENT may report a restriction; restoring suppressed/refused contact requires an ADMIN's explicit current-revision decision and evidence. No import or ordinary transport update relaxes restrictions.
-- Use `dbTx()` and append-only numbered migrations. Schema-free corrections may ship at `0019`; durable contact/attempt state belongs to the coordinated `0020` expansion, with RLS and reviewed grants. No later task edits a committed distributed migration.
+- Use `dbTx()` and append-only numbered migrations. Schema-free corrections may ship at `0019`; durable contact/attempt state belongs to the coordinated `0021` expansion, with RLS and reviewed grants. No later task edits a committed distributed migration.
 - A local pause/cancel prevents future admission; it cannot promise a provider has terminated an already submitted call.
 
 ### Task 1: Correct vocabulary, intent and schema-free suppression writes
@@ -27,11 +27,11 @@
 
 ### Task 2: Integrate versioned contact events with the durable lifecycle
 
-Execute together with P09/P10's `0020` design and migration release, after Task 1 review.
+Execute together with P09/P10's `0021` design and migration release, after Task 1 review.
 
 1. Add patient contact revision and durable restriction/review fields; an append-only event records patient, actor/source attempt, evidence reference, expected/new revision, decision and timestamp. Existing restrictions are preserved during expansion/backfill. Tables have appropriate RLS/grants; processing state is not exposed through the public Data API.
 2. Implement one contact event transaction that locks the patient, rejects stale permissive changes, persists restriction/evidence/revision, cancels newly disallowed queued retries, and records related attempt effects atomically. Restrictive evidence remains effective if it arrives after older permissive work. A restore endpoint requires ADMIN and current expected revision; report conflicts without overwriting current evidence.
 3. Integrate all patient/workflow/contact writers and the P09 admission decision. With two database connections and barriers, interleave refusal with old analysis/completion, explicit staff edit and dispatch. Refusal committed before the dispatch decision means no provider submission. Cover rollback and restart without sleeps or duplicated mocked SQL as proof.
 4. Document the externally unverified remote-hangup limitation and stage activation with P09/P10. Do not call P08 complete from pure tests or schema-free fixes alone.
 
-Review each task separately. The controller owns main progress/evidence; implementers write their bounded report and named-files commit, without spawning subagents. Rollback of schema-free changes is an application revert; `0020` uses the coordinated expand/compatibility recovery contract, never a destructive down migration.
+Review each task separately. The controller owns main progress/evidence; implementers write their bounded report and named-files commit, without spawning subagents. Rollback of schema-free changes is an application revert; `0021` uses the coordinated expand/compatibility recovery contract, never a destructive down migration.

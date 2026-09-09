@@ -20,13 +20,13 @@
 
 - **P00a / F01:** HTTP authorization implementation completed locally on `codex/remediation-fixes`; `npm run test:hotfix` passes 22 tests, with no failures or skips. [Execution evidence](GAP_REMEDIATION_EVIDENCE.md).
 - **P04, session/call privacy portions:** implemented locally; current account state governs session inspection. Four call read endpoints now return permitted operational fields and masked contacts to AGENT; media, transcripts, reports and supervisor payloads use an ADMIN-only working policy. Eight privacy tests, eight session tests and 22 hotfix tests pass. Full router coverage, remaining policy decisions, real database and browser verification stay open.
-- **P05, legacy containment portion:** implemented locally; legacy callbacks default disabled and require the existing provider secret when explicitly enabled. Raw query logging is removed. `npm run test:remediation` covers 45 DB-free tests. Provider compatibility, recording retrieval restrictions, callback payload validation and event correlation remain open.
+- **P05, local callback/recording boundaries:** implemented and independently reviewed at `2582266`; shared pinned HTTPS streaming, strict callback input and trusted storage signing pass the audited 336-test unit suite. Legacy routes remain default disabled. Provider origins/fixtures and P10 event correlation remain open. [Evidence](GAP_REMEDIATION_EVIDENCE.md#p05--recording-and-callback-boundaries).
 - **P06, database log portion:** implemented locally; configuration snapshots omit database credentials, and initialization/pool diagnostics use fixed safe messages. Current `npm run test:remediation`: 56 pass, no failures/skips. Image/runtime compatibility, Docker context proof, broader logs and incident assessment remain open.
-- **Release status:** not deployed. G0 still requires P03a deployment isolation. P04 database-backed session/privacy checks and P05 callback protections remain open.
+- **Release status:** not deployed. G0 still requires P03a deployment isolation. P04 database-backed session/privacy checks and P05 provider compatibility remain open.
 - **Current user-selected sequence:** groups 3–7, starting with P04 security/privacy, then P05–P19 and P20 evidence. Work proceeds one reviewable item at a time. P01/P02 prerequisite decisions and P03 release gates remain required where applicable; selecting product fixes first does not authorize a deployment or shared-UAT tests.
 - **9 September continuation:** the user requested completion of all remaining work. P01 is being implemented first to enable safe real database regressions; subsequent fixes proceed one item at a time. Local Docker setup is included in that instruction. The user confirmed Supabase manages the deployed database; read-only dashboard inspection subsequently verified PostgreSQL major 17 in both projects (service build `17.6.1.166`). Supabase role/extension equivalence still needs separate verification.
 - **P01 implementation and local verification complete:** disposable PG17/Node24 tests and connection/cleanup guards passed scoped review through `ed9a3e6`. The initial combined run passed 307 unit/18 DB checks; later affected checks include 20 full DB, six isolation and five role assertions. Hosted Linux CI execution, browser coverage and actual Supabase grant equivalence remain separate evidence gates. P07 import/schedule preservation is next. [Evidence](GAP_REMEDIATION_EVIDENCE.md#p01--disposable-database-testing-and-fixture-cleanup).
-- **P07 / F04 and schedule portion of F13 complete locally:** imports preserve omitted fields/restrictions, preview actual changes and revalidate identity/version in a transaction. Schedule comparisons/validation use the actual instant and India calling hours. Reviewed commits `c1fba27`, `346d294`; final targeted checks: 17 import unit, six import DB and three schedule DB tests pass. [Evidence](GAP_REMEDIATION_EVIDENCE.md#p07--import-and-schedule-preservation). P05 recording/callback boundaries are next.
+- **P07 / F04 and schedule portion of F13 complete locally:** imports preserve omitted fields/restrictions, preview actual changes and revalidate identity/version in a transaction. Schedule comparisons/validation use the actual instant and India calling hours. Reviewed commits `c1fba27`, `346d294`; final targeted checks: 17 import unit, six import DB and three schedule DB tests pass. [Evidence](GAP_REMEDIATION_EVIDENCE.md#p07--import-and-schedule-preservation). P05 local recording/callback boundaries are also reviewed; P06 dependency/runtime work is next.
 - **P02 working contracts:** [Domain and policy decisions](APPLICATION_DOMAIN_CONTRACTS.md) and [provider capability matrix](ICALLMATE_CAPABILITY_MATRIX.md) record implementation choices and unresolved external evidence. These documents do not claim provider compatibility or completion of operational assessments.
 
 ## Scope, status, and execution rules
@@ -90,11 +90,12 @@ The original planning pass changed documentation only and did not run applicatio
 | Release | Contents and prerequisites | Exposure controlled |
 | --- | --- | --- |
 | G0 — emergency protection, schema `0019` | P00a DB-free authorization fix plus P03a bounded target-only deployment rehearsal. Start P00b, P01 and P02a/P02b immediately alongside eligible work. | F01; minimal deploy isolation for this release. Full session/data/privacy review follows in G1. |
-| G1 — contact/data protection, schema `0019` | P01, P03b, P04–P07 and P08's explicitly schema-free vocabulary/negative-intent/suppression fixes. Release verified smaller changes within this group as ready. | Forged callbacks, secret exposure, import resets and known refusal errors. Lifecycle races remain open until G2. |
-| G2 — call lifecycle, schema `0020` | Durable part of P08 plus P09/P10; provider contract gate, bounded replay/shadow/canary and calling controls. | Duplicate/unknown submissions, wrong-attempt events, stale contact decisions and capacity. |
-| G3 — recoverable processing, schema `0021` | P11/P12 with restart/fencing/storage recovery evidence. | Premature completion, abandoned work and recording races. |
-| G4 — retained history, schema `0022` | P13; P14 follows after durable history/disposition are available. | Unattributed feedback, missing history and sampled metrics. |
-| G5 — attribution and scale, schema `0023` | P15; P16 follows P07/P13/P14 and adds only measured index migrations. | Campaign identity and complete bounded lists/imports. |
+| G1a — contact/data protection, schema `0019` | P01, P03b, schema-free P04–P07 and P08's explicitly schema-free vocabulary/negative-intent/suppression fixes. Release verified smaller changes within this group as ready. | Forged callbacks, secret exposure, import resets and known refusal errors. Lifecycle races remain open until G2. |
+| G1b — durable access, schema `0020` | P04 durable credential/session revocation and caller-permission queue view, after P03b compatibility/recovery. | Copied-cookie replay after logout/restart and browser-role view exposure. |
+| G2 — call lifecycle, schema `0021` | Durable part of P08 plus P09/P10; provider contract gate, bounded replay/shadow/canary and calling controls. | Duplicate/unknown submissions, wrong-attempt events, stale contact decisions and capacity. |
+| G3 — recoverable processing, schema `0022` | P11/P12 with restart/fencing/storage recovery evidence. | Premature completion, abandoned work and recording races. |
+| G4 — retained history, schema `0023` | P13; P14 follows after durable history/disposition are available. | Unattributed feedback, missing history and sampled metrics. |
+| G5 — attribution and scale, schema `0024` | P15; P16 follows P07/P13/P14 and adds only measured index migrations. | Campaign identity and complete bounded lists/imports. |
 | GU — interface release, no assumed new schema | P17 starts once P00a/P01/P04/P06 permit authenticated startup; P18/P19 follow. This lane need not wait for G5. | Keyboard/task accessibility, CSP and UI regressions. |
 
 The assessment register names the exact releases it blocks. P20 coordinates evidence only; it is no longer a late umbrella implementation/assessment phase. A targeted G0 access/packaging/release check is required, while unrelated full penetration/load/voice programmes do not delay that hotfix.
@@ -159,12 +160,14 @@ flowchart TD
   P08 --> P09
   P02a --> P09
   P09 --> P10
-  P03b --> G2["G2: schema 0020 + staged activation"]
+  P03b --> G1b["G1b: schema 0020 durable access"]
+  P04 --> G1b
+  G1b --> G2["G2: schema 0021 + staged activation"]
   P05 --> G2
   P10 --> G2
-  G2 --> P11 --> P12 --> G3["G3: schema 0021"]
-  G3 --> P13 --> G4["G4: schema 0022"]
-  G4 --> P14 --> P15 --> G5["G5: schema 0023"]
+  G2 --> P11 --> P12 --> G3["G3: schema 0022"]
+  G3 --> P13 --> G4["G4: schema 0023"]
+  G4 --> P14 --> P15 --> G5["G5: schema 0024"]
   P14 --> P16
   P07 --> P16
   P04 --> P17
@@ -172,7 +175,7 @@ flowchart TD
   P17 --> P18 --> P19 --> GU["GU: interface release"]
 ```
 
-G1 groups independently verified schema-free work after P03b; it is not a requirement to finish all P05 work before shipping P07. The principal implementation chain is **P01 → P08 → P09 → P10 → P11/P12 → P13 → P14/P15**. P02a/provider compatibility and P03b/schema recovery are external/operational gates on G2; shadow observation adds elapsed time without equivalent full-time coding effort. P16 and the GU lane are not prerequisites for core call safety.
+G1a groups independently verified schema-free work after P03b; it is not a requirement to finish all P05 work before shipping P07. The principal implementation chain is **P01 → P08 → P09 → P10 → P11/P12 → P13 → P14/P15**. P02a/provider compatibility and P03b/schema recovery are external/operational gates on G2; shadow observation adds elapsed time without equivalent full-time coding effort. P16 and the GU lane are not prerequisites for core call safety.
 
 ### Integration strategy
 
@@ -180,14 +183,17 @@ The inspected checkout is `uat-kcpathlab`; `master` is the production branch nam
 
 ### Fixed schema sequence
 
+Allocation revised 9 September before any post-`0019` migration exists: `0020` closes durable access; the still-uncreated lifecycle migrations move to `0021`–`0024`. No applied or shared migration is renumbered.
+
 These names describe planned migrations, not files created by this document. If the repository advances before implementation starts, revise this entire table once before distributing any new migration; never repair ordering by renumbering deployed files.
 
 | Migration | First consumer and complete contents | Required release dependency |
 | --- | --- | --- |
-| `0020_contact_and_call_attempts.sql` | P08–P10: patient contact revision/events; durable attempt identity, dispatch/transport/disposition state, writer version/cohort, event deduplication and unmatched/conflict/comparison records; indexes/constraints needed for admission and identity. Reuse `calls.idempotency_key` where suitable. | Compatible schema expansion, single-authority transition, provider contract, admission tests and G2 staged activation. |
-| `0021_post_call_jobs.sql` | P11–P12: stage jobs, claim ownership/expiry/retries, uniqueness for automatic feedback/effects, notification outbox. | Workflow and helper completion ownership; restart/failure tests. |
-| `0022_feedback_patient_ownership.sql` | P13: durable feedback patient link, backfill, writer invariant, deletion protection and necessary indexes. | All feedback writers, retained-history readers, and fixture cleanup updated. |
-| `0023_campaign_identity.sql` | P15: campaign IDs on queue/attempt history, backfill, explicit compatible view projection, relevant keys/indexes. | Create/update/import writers, configuration projection, report grouping and UI updated. |
+| `0020_access_boundaries.sql` | P04: durable credential revisions, expiring session revocations, browser-role isolation and caller-permission `customer_queue` view with preserved write behavior. | P03 schema/recovery contract; copied-session, same-instant reset and Supabase-equivalent privilege rehearsals; finite old-token compatibility. |
+| `0021_contact_and_call_attempts.sql` | P08–P10: patient contact revision/events; durable attempt identity, dispatch/transport/disposition state, writer version/cohort, event deduplication and unmatched/conflict/comparison records; indexes/constraints needed for admission and identity. Reuse `calls.idempotency_key` where suitable. | Compatible schema expansion, single-authority transition, provider contract, admission tests and G2 staged activation. |
+| `0022_post_call_jobs.sql` | P11–P12: stage jobs, claim ownership/expiry/retries, uniqueness for automatic feedback/effects, notification outbox. | Workflow and helper completion ownership; restart/failure tests. |
+| `0023_feedback_patient_ownership.sql` | P13: durable feedback patient link, backfill, writer invariant, deletion protection and necessary indexes. | All feedback writers, retained-history readers, and fixture cleanup updated. |
+| `0024_campaign_identity.sql` | P15: campaign IDs on queue/attempt history, backfill, explicit compatible view projection, relevant keys/indexes. | Create/update/import writers, configuration projection, report grouping and UI updated. |
 
 Each release updates `EXPECTED_SCHEMA_VERSION` and an explicit required-migration manifest in the same change. P03 replaces maximum-version-only validation with required-set validation and a tested compatibility bound. Fresh installs and upgrades from `0019` must both pass, including nonempty backfills, duplicate identifiers, and a failed intermediate migration.
 
@@ -199,10 +205,11 @@ Actual environment row counts and durations are **not measured in this planning-
 
 | Migration | Rows to measure / production-size rehearsal | Blocking-data and resumability decision |
 | --- | --- | --- |
-| `0020` | Patients needing contact revisions; all calls/provider IDs; existing idempotency keys; active/unresolved attempts. Rehearse measured volume plus 2× projected growth using deidentified/synthetic equivalents. | Duplicate scoped IDs or conflicting active ownership block constraint activation. Preserve rows, quarantine conflicts and perform reviewed repair. Transactional backfill rolls back as a unit; any large batch variant needs a checkpointed job before release. |
-| `0021` | Calls by analysis status, existing feedback/supervisor effects and unfinished audio/transcripts. Measure recovery-job seeding and uniqueness validation. | Ambiguous legacy “completed” effects go to review; no blind historical notification replay. Seed jobs idempotently with stable call/stage/revision keys; retries resume without duplicate effects. |
-| `0022` | Feedback linked by call/queue, missing/conflicting patient links, retained calls and deletion dependencies. Measure join backfill and constraint-validation duration. | Conflicting historical identity blocks enforcement for those rows until reviewed; never delete history to pass the migration. Small one-transaction migration is restartable after rollback; large repair/backfill uses resumable keyset batches. |
-| `0023` | Campaign configs, queue rows and retained calls; ambiguous/unmatched normalized names and historical attribution. Measure view replacement/backfill/index time. | Only unique matches are backfilled. Unmatched rows remain explicitly unassigned; conflicting IDs need repair. Batch progress must use stable IDs and idempotent writes, not mutable campaign names. |
+| `0020` | Users, active-session compatibility window, application views/functions and existing/default grants. Rehearse nonempty upgrade and bounded revocation cleanup. | Permission or session invariants block release; transaction failure restores prior migration state. Do not restore exposed browser grants or weaken revocation as an application rollback. |
+| `0021` | Patients needing contact revisions; all calls/provider IDs; existing idempotency keys; active/unresolved attempts. Rehearse measured volume plus 2× projected growth using deidentified/synthetic equivalents. | Duplicate scoped IDs or conflicting active ownership block constraint activation. Preserve rows, quarantine conflicts and perform reviewed repair. Transactional backfill rolls back as a unit; any large batch variant needs a checkpointed job before release. |
+| `0022` | Calls by analysis status, existing feedback/supervisor effects and unfinished audio/transcripts. Measure recovery-job seeding and uniqueness validation. | Ambiguous legacy “completed” effects go to review; no blind historical notification replay. Seed jobs idempotently with stable call/stage/revision keys; retries resume without duplicate effects. |
+| `0023` | Feedback linked by call/queue, missing/conflicting patient links, retained calls and deletion dependencies. Measure join backfill and constraint-validation duration. | Conflicting historical identity blocks enforcement for those rows until reviewed; never delete history to pass the migration. Small one-transaction migration is restartable after rollback; large repair/backfill uses resumable keyset batches. |
+| `0024` | Campaign configs, queue rows and retained calls; ambiguous/unmatched normalized names and historical attribution. Measure view replacement/backfill/index time. | Only unique matches are backfilled. Unmatched rows remain explicitly unassigned; conflicting IDs need repair. Batch progress must use stable IDs and idempotent writes, not mutable campaign names. |
 
 Initial maintenance budget per selected environment: **15 minutes total**, reserving at most **5 minutes for schema/backfill work** and the remaining time for drain/startup/checks or recovery. Use a 5-second lock timeout and a watchdog for the 5-minute migration budget; individual statement limits cannot replace the overall deadline. Rehearsal must complete within 70% of each budget at the selected volume before scheduling a release. If actual volume differs by more than 20% or the drain cannot fit, replan the window before starting. These are planning limits, not measured durations or an RTO promise.
 
@@ -215,11 +222,11 @@ If rehearsal exceeds the budget, split the not-yet-shared release into nullable 
 P09/P10 include this work and its tests; maintenance alone does not prove the new provider matching contract.
 
 1. **Replay first.** Run normalized captured/redacted provider fixtures through old-candidate and new-candidate matching functions without mutations or provider calls. Cover unknown IDs, delayed A-after-B, missing metadata, duplicate callbacks, early media and reconnects. Disagreement with the old phone matcher can be evidence of the intended fix; classify it instead of optimizing for zero raw disagreement.
-2. **Safe observation.** Deploy compatible additive `0020` schema/code only after P03b checks. Compare both pure candidates for authenticated events; persist minimal redacted diagnostics with event/attempt identity, result and reason. The old latest-phone lookup is diagnostic only for ambiguous events. Any authoritative compatibility path must already require verified exact correlation and enforce contact policy; otherwise quarantine the event and pause the affected calling path. Do not retain known cross-attempt writes to collect telemetry.
+2. **Safe observation.** Deploy compatible additive `0021` schema/code only after P03b checks. Compare both pure candidates for authenticated events; persist minimal redacted diagnostics with event/attempt identity, result and reason. The old latest-phone lookup is diagnostic only for ambiguous events. Any authoritative compatibility path must already require verified exact correlation and enforce contact policy; otherwise quarantine the event and pause the affected calling path. Do not retain known cross-attempt writes to collect telemetry.
 3. **Runtime mode and one writer.** Persist an ADMIN-only, audited mode `observe|canary|enforce|paused` and config revision in the existing settings infrastructure. Apply the mode consistently at admission and stamp `writer_version`/cohort on the durable attempt. Every later event uses that owner; changing a flag never transfers an in-flight attempt between competing writers. Comparison never submits calls, writes outcomes or queues notifications.
 4. **Canary.** Start in controlled UAT with provider fakes; any live provider compatibility test uses an explicitly authorized test destination. Then select a deterministic small production cohort from normal eligible traffic, cap new-path concurrency initially at 1, and expand only after the exit criteria pass. All cohorts retain the same refusal, admission-capacity and callback-authentication safeguards; a feature flag cannot disable them.
 5. **Exit criteria.** Require at least 3 consecutive operating days and 100 naturally occurring attempts/500 relevant events, every unexplained mismatch investigated, zero wrong-attempt writes, zero duplicate submissions and zero explicit-refusal violations. Also require the synthetic rare-event matrix, including provider response loss, to pass. If normal volume is lower, extend observation or record a release-owner decision based on a longer representative window and controlled test evidence; never generate extra patient calls just to reach a quota. Do not call an unobserved path verified.
-6. **Abort/rollback.** Any wrong-attempt write, prohibited contact, duplicate submission, lost ownership, or inbox/job threshold breach pauses new admissions for the affected scope, preserves events and alerts the operator. Continue authenticated event ingestion and owned in-flight processing. Roll back code only to a version compatible with `0020` and the recorded writer ownership; otherwise forward-fix while paused. Do not flip back to the unsafe phone matcher or redial uncertain attempts.
+6. **Abort/rollback.** Any wrong-attempt write, prohibited contact, duplicate submission, lost ownership, or inbox/job threshold breach pauses new admissions for the affected scope, preserves events and alerts the operator. Continue authenticated event ingestion and owned in-flight processing. Roll back code only to a version compatible with `0021` and the recorded writer ownership; otherwise forward-fix while paused. Do not flip back to the unsafe phone matcher or redial uncertain attempts.
 
 **Initial post-release indicators:** instrument in P09–P11, expose in the operator view, and validate alerts with a controlled sink. Owners may tighten thresholds after baseline measurement; the first two have no nonzero error budget.
 
@@ -374,6 +381,8 @@ npm run test:isolated
 
 ### P04 — Bind authorization to actual routes and shape sensitive responses
 
+Schema-free route/privacy assurance stays at `0019`; durable credential/session revocation and view/grant correction use `0020_access_boundaries.sql` after P03b, as specified in [the access completion plan](remediation-execution/P04-access-completion.md).
+
 **Owner:** Backend/security. **Gaps:** remaining F01/session coverage, F10, T02; R03, R18. **Dependencies:** P00a, P01 and P02b route/role decisions. The critical route fix has already been delivered by P00a.
 
 **Create:** `src/call-serialization.js`, `test/call-response-privacy.test.js`.
@@ -395,13 +404,13 @@ npm run test:isolated
 **Modify:** `src/api-routes.js` (`/call/status`, `/call/recording-status`, `/api/icallmate/callback`, recording playback), `src/icallmate-webhook.js`, `services/post-call-pipeline.js`, `services/supabase-storage.js`, configuration examples.
 
 - [ ] Establish which legacy routes have active provider consumers. Default unused legacy routes to disabled; required routes get the verified provider-compatible authentication mechanism and reject missing/invalid credentials before mutation. Never invent signature support the provider does not supply.
-- [ ] Normalize/validate callback schema and payload size; constrain recording metadata independently of authentication. Replay-safe attempt/event application is completed in P10; do not close that portion based on a shared secret alone.
-- [ ] Implement one retrieval service used by both pipeline download and playback proxy. Allow exact configured HTTPS origins/ports, reject userinfo and IP literals, validate all resolved addresses, and bind the connection to a validated address while retaining correct TLS server name. Validate each redirect independently or reject redirects until the provider contract permits them. A separate DNS check followed by an unpinned fetch is insufficient.
-- [ ] Bound redirects, bytes, response type and duration. Proposed initial test limits: 3 redirects, 25 MiB, 30 seconds total; P02a and G2 T12/M04 provider/capacity evidence set production values. Stream playback with backpressure and cancel upstream when the client disconnects.
-- [ ] Fetch stored objects through trusted storage configuration/object keys, not provider-controlled storage origins. Authorize before issuing signed URLs and avoid logging signed query strings.
+- [x] Normalize/validate callback schema and payload size; constrain recording metadata independently of authentication. Replay-safe attempt/event application is completed in P10; do not close that portion based on a shared secret alone.
+- [x] Implement one retrieval service used by both pipeline download and playback proxy. Allow exact configured HTTPS origins/ports, reject userinfo and IP literals, validate all resolved addresses, and bind the connection to a validated address while retaining correct TLS server name. Validate each redirect independently or reject redirects until the provider contract permits them. A separate DNS check followed by an unpinned fetch is insufficient.
+- [x] Bound redirects, bytes, response type and duration. Proposed initial test limits: 3 redirects, 25 MiB, 30 seconds total; P02a and G2 T12/M04 provider/capacity evidence set production values. Stream playback with backpressure and cancel upstream when the client disconnects.
+- [x] Fetch stored objects through trusted storage configuration/object keys, not provider-controlled storage origins. Authorize before issuing signed URLs and avoid logging signed query strings.
 - [ ] Test both entry points against allowed fixtures, private/loopback/link-local/IPv6 addresses, mixed DNS answers, DNS rebinding, forbidden redirects, oversized/slow streams and client cancellation. Forbidden requests must never reach the network spy. Missing provider contract blocks affected recording rollout rather than silently opening the allowlist.
 
-**Verify:** focused callback and retrieval unit/integration tests, followed by provider-fixture compatibility through the isolated harness.
+**Verify:** local callback/retrieval tests and independent review passed at `2582266` (336 audited unit tests). External provider-fixture compatibility remains required before activation; the final test checkbox remains open for that evidence.
 
 ### P06 — Remove secret leakage and move to a supported runtime
 
@@ -444,10 +453,10 @@ assert.equal(sameScheduleInstant('2026-09-09T10:00:00.000Z',
 
 ### P08 — Make contact restrictions authoritative and monotonic
 
-**Owner:** Backend/product. **Gaps:** F05, M07, M09; R06, R09. **Dependencies:** P01/P02; durable revision portion ships with P09/P10 and `0020`.
+**Owner:** Backend/product. **Gaps:** F05, M07, M09; R06, R09. **Dependencies:** P01/P02; durable revision portion ships with P09/P10 and `0021`.
 
 **Create:** `src/contact-policy.js`, `test/contact-policy.test.js`, `test/contact-event-races.test.js`.
-**Modify:** `src/queue-rules.js`, `src/call-management.js`, `src/scheduler.js`, `routes/customers.js`, `routes/patients.js`, `services/call-orchestration.js`, `src/patient-rules.js`; contribute to `0020_contact_and_call_attempts.sql`.
+**Modify:** `src/queue-rules.js`, `src/call-management.js`, `src/scheduler.js`, `routes/customers.js`, `routes/patients.js`, `services/call-orchestration.js`, `src/patient-rules.js`; contribute to `0021_contact_and_call_attempts.sql`.
 
 - [ ] Use persisted `unknown|granted|refused` everywhere. For legacy API `denied`, either map to `refused` in one compatibility boundary or reject with a field error; choose and document one behavior. Fix `computePriorityScore` in `services/call-orchestration.js`, automatic queueing, manual calls, scheduler and workflow validation as well as the obvious guards.
 - [ ] Evaluate explicit negative phrases before positive interest, using patient turns rather than assistant scripts as evidence. Preserve the existing suppression policy for recognized `not_interested`/`wrong_number`; distinguish that calling restriction from an unsupported legal-consent inference.
@@ -467,10 +476,10 @@ assert.equal(detectConversationOutcome({
 
 ### P09 — Reserve capacity and persist attempt identity before provider submission
 
-**Owner:** Backend/platform. **Gaps:** F06–F07, F13 cooldown, F22, M03–M04, M07–M08; R08, R16. **Dependencies:** P01, P08 policy and P02a capability decision; `0020` with P10. Unsupported provider capabilities use the documented restricted mode; G2 activation still requires its evidence gate.
+**Owner:** Backend/platform. **Gaps:** F06–F07, F13 cooldown, F22, M03–M04, M07–M08; R08, R16. **Dependencies:** P01, P08 policy and P02a capability decision; `0021` with P10. Unsupported provider capabilities use the documented restricted mode; G2 activation still requires its evidence gate.
 
 **Create:** `services/outbound-admission.js`, `test/outbound-admission.test.js`, `test/provider-uncertainty.test.js`.
-**Modify:** `src/call-management.js`, `src/scheduler.js`, `services/icallmate.js`, `src/api-routes.js`, `routes/calls.js`, `routes/test-call.js`, `routes/test-ai-call.js`, related diagnostic service entry points, settings/API/UI; create `0020_contact_and_call_attempts.sql` with P08/P10.
+**Modify:** `src/call-management.js`, `src/scheduler.js`, `services/icallmate.js`, `src/api-routes.js`, `routes/calls.js`, `routes/test-call.js`, `routes/test-ai-call.js`, related diagnostic service entry points, settings/API/UI; create `0021_contact_and_call_attempts.sql` with P08/P10.
 
 - [ ] Route every provider submission through the shared admission boundary. A diagnostic route is not exempt from capacity/authentication; tests use provider fakes, not a production bypass. Existing endpoint response shapes get adapters for the new admission result.
 - [ ] Under a consistent transaction lock order, reserve global capacity and lock patient/queue state; recheck pause, activity, suppression, consent, wrong-number/review flags, schedule/business hours, daily limit and cooldown from current durable history. Use a database lock/row reservation, not count-then-submit in separate transactions.
@@ -481,11 +490,11 @@ assert.equal(detectConversationOutcome({
 - [ ] Add the ADMIN pause/resume control, audited lifecycle mode/revision and active/uncertain-attempt view described in G2 rollout. Stamp attempt writer ownership at admission. Pause prevents new admission; stopping active calls is a separate action with provider-confirmed results. G2 M08/T12 establishes spend-limit behavior before claiming a hard monetary cap.
 - [ ] Test N/N+1 reservations, two workers, scheduler plus manual initiation, double click, retained-history cooldown, midnight boundaries, refusal/pause races, crash before/after submission, and accepted-with-lost-response. Assert actual provider submissions, not merely count-query results.
 
-**Verify:** guarded concurrent admission/provider-uncertainty tests. `0020` releases only after P08–P10's entire lifecycle contract passes.
+**Verify:** guarded concurrent admission/provider-uncertainty tests. `0021` releases only after P08–P10's entire lifecycle contract passes.
 
 ### P10 — Match events exactly and reconcile the call lifecycle
 
-**Owner:** Backend/voice. **Gaps:** F06–F07, F15, M10; R08–R09, R11. **Dependencies:** P09/P02 provider fixtures; contributes to `0020`.
+**Owner:** Backend/voice. **Gaps:** F06–F07, F15, M10; R08–R09, R11. **Dependencies:** P09/P02 provider fixtures; contributes to `0021`.
 
 **Create:** `src/call-events.js`, `test/call-event-ordering.test.js`, `test/media-identity.test.js`, `test/unanswered-reconciliation.test.js`.
 **Modify:** `src/api-routes.js`, `src/call-management.js`, `src/websocket-bridge.js`, `src/scheduler.js`, `services/icallmate.js`, `services/call-orchestration.js`, affected state readers/trigger compatibility.
@@ -503,9 +512,9 @@ assert.equal(detectConversationOutcome({
 
 ### P11 — Make post-call completion durable, fenced, and recoverable
 
-**Owner:** Backend/platform. **Gaps:** F08, T09, M02–M03; R10–R11. **Dependencies:** lifecycle release; ships with P12 and `0021`.
+**Owner:** Backend/platform. **Gaps:** F08, T09, M02–M03; R10–R11. **Dependencies:** lifecycle release; ships with P12 and `0022`.
 
-**Create:** `services/post-call-jobs.js`, `services/notification-outbox.js`, `test/post-call-recovery.test.js`, `test/post-call-claim-fencing.test.js`, `supabase/migrations/0021_post_call_jobs.sql`.
+**Create:** `services/post-call-jobs.js`, `services/notification-outbox.js`, `test/post-call-recovery.test.js`, `test/post-call-claim-fencing.test.js`, `supabase/migrations/0022_post_call_jobs.sql`.
 **Modify:** `services/post-call-pipeline.js`, `services/call-analysis.js`, `services/call-orchestration.js`, `src/server.js`, `src/api-routes.js`, `src/websocket-bridge.js`, notification invocation sites and schema expectation.
 
 - [ ] Persist a unique stage job per call/stage/input revision. Model recording acquisition, transcription, analysis computation and finalization separately. Store status, attempt count, next run, claim token/expiry, error code and completion time; do not log sensitive raw inputs as errors.
@@ -520,7 +529,7 @@ assert.equal(detectConversationOutcome({
 
 ### P12 — Make recording/transcription retries independent of temporary files
 
-**Owner:** Backend/voice. **Gaps:** F16, recording portion of F08; R11. **Dependencies:** P05/P11; ships with `0021`.
+**Owner:** Backend/voice. **Gaps:** F16, recording portion of F08; R11. **Dependencies:** P05/P11; ships with `0022`.
 
 **Modify:** `services/post-call-pipeline.js`, `services/supabase-storage.js`, `services/gemini.js`, `services/post-call-jobs.js`.
 **Create:** `test/recording-recovery.test.js`.
@@ -534,9 +543,9 @@ assert.equal(detectConversationOutcome({
 
 ### P13 — Anchor feedback/history to patients and enforce deletion policy
 
-**Owner:** Backend/data. **Gaps:** F09, F10, T04; R12. **Dependencies:** P04/P11; schema `0022`.
+**Owner:** Backend/data. **Gaps:** F09, F10, T04; R12. **Dependencies:** P04/P11; schema `0023`.
 
-**Create:** `services/feedback-store.js`, `test/retained-history.test.js`, `supabase/migrations/0022_feedback_patient_ownership.sql`.
+**Create:** `services/feedback-store.js`, `test/retained-history.test.js`, `supabase/migrations/0023_feedback_patient_ownership.sql`.
 **Modify:** `routes/feedback.js`, `routes/patients.js`, `src/api-routes.js`, `src/call-management.js`, `services/post-call-pipeline.js`, `services/reporting.js`, `src/retention.js`, all other feedback writers and `test/support/fixtures.js`.
 
 - [ ] Add/backfill `feedback.patient_id` from linked call first, then queue; detect conflicts and record unresolvable historical rows without guessing. Preserve them as explicitly unattributed history pending reviewed repair.
@@ -565,9 +574,9 @@ assert.equal(detectConversationOutcome({
 
 ### P15 — Preserve campaign identity through renames and history
 
-**Owner:** Backend/data/product. **Gaps:** F19; R14. **Dependencies:** P13/P14; schema `0023`.
+**Owner:** Backend/data/product. **Gaps:** F19; R14. **Dependencies:** P13/P14; schema `0024`.
 
-**Create:** `supabase/migrations/0023_campaign_identity.sql`, `test/campaign-attribution.test.js`.
+**Create:** `supabase/migrations/0024_campaign_identity.sql`, `test/campaign-attribution.test.js`.
 **Modify:** `routes/campaigns.js`, `routes/customers.js`, `src/scheduler.js`, `services/outbound-admission.js`, `services/reporting.js`, campaign selection UI and schema expectation.
 
 - [ ] Add stable campaign IDs to new queue entries and snapshot attribution on calls so queue deletion does not erase campaign membership. Backfill only unique normalized-name matches; mark ambiguous/unassigned rows and preserve legacy names for review.
@@ -576,7 +585,7 @@ assert.equal(detectConversationOutcome({
 - [ ] Attribute configured monthly spend once per campaign and declared reporting period. Keep an all-time pipeline/monthly-spend ratio explicitly labeled until a time-aligned business metric is defined; do not present it as realized financial ROI.
 - [ ] Prefer archiving referenced configurations over deleting identity. Test old/new names, post-rename rows, case/whitespace ambiguity, unassigned rows, archived configs, retained calls and no-spend cases through real report functions.
 
-**Verify:** upgrade from `0022`, view-column/permission checks, writer integration and exact group/spend results. New campaign IDs must flow through admission as well as configuration CRUD.
+**Verify:** upgrade from `0023`, view-column/permission checks, writer integration and exact group/spend results. New campaign IDs must flow through admission as well as configuration CRUD.
 
 ### P16 — Make lists and imports bounded and complete
 
@@ -694,7 +703,7 @@ Business-set thresholds such as RTO/RPO, accepted spend, real call concurrency a
 | Review ID | Disposition in this plan |
 | --- | --- |
 | R01 | P01 positively owned DB plus guarded migration entry point; no `TEST_DATABASE_URL`-only migration commands. |
-| R02 | One cumulative `0020`→`0023` sequence, full required-set validation, release/schema dependencies and pre-release recovery. |
+| R02 | One cumulative `0020`→`0024` sequence, full required-set validation, release/schema dependencies and pre-release recovery. |
 | R03 | P04 binds permission to actual handlers/families and protects static resolution, including nonnumeric parameter forms. |
 | R04 | P05 covers download, playback proxy and trusted stored-object retrieval together. |
 | R05 | P06 uses a temporary sanitized sentinel context; no real credential path is created or removed. |

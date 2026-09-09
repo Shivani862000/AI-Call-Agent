@@ -62,7 +62,7 @@ Date: 8 September 2026. Prerequisite: `9710dd2`.
 - Before: four legacy HTTP regressions failed; a separate credential-shape regression failed (array accepted). After: the named legacy/webhook/privacy/session/hotfix suite passes 45 tests, with no failures/skips; also available as `npm run test:remediation`.
 - Verification uses synthetic credentials, real handlers/middleware and intercepted database boundaries. An authenticated status fixture reaches its read handler without logging the secret. No live provider configuration or database was inspected or changed.
 
-Provider use of legacy URLs and exact recording origins are pending user/integration evidence. This is containment, not verified restoration of provider compatibility. P05 recording fetch hardening and callback schema checks, and P10 replay/correlation remain open. No deployment is authorized by this evidence.
+Provider use of legacy URLs and exact recording origins are pending user/integration evidence. This is containment, not verified restoration of provider compatibility. P05 recording fetch hardening and callback schema checks were subsequently verified below; P10 replay/correlation remains open. No deployment is authorized by this evidence.
 
 ## P06 — Database log privacy (partial implementation)
 
@@ -137,3 +137,13 @@ Behavior and verification:
 - Inline patient-page script parsing, JavaScript syntax and `git diff --check` passed. Full unit tests were not redundantly repeated after the scoped fix; affected files were rerun and independently reviewed.
 
 The tests use actual patient/customer routers and guarded application DB helpers with owned, nondialable fixtures and inert provider boundaries. The 5 MiB/5,000-row limits and ADMIN import guards remain. Schema stays `0019`; no live data or external service was used. P08 owns ordinary patient/contact edits and P16 owns batching/multi-instance import persistence. Hosted CI, browser workflows and rollout remain separate evidence gates.
+
+## P05 — Recording and callback boundaries
+
+Date: 9 September 2026. Implementation `2582266`, independent scoped spec and quality review approved. [Execution plan and detailed evidence](remediation-execution/P05-recording-boundaries.md). Schema remains `0019`.
+
+The real pipeline download and authenticated playback share exact-origin HTTPS retrieval, validation of every DNS answer, pinned TLS, streaming size/type/deadline limits, independently validated opt-in redirects and client cancellation. Callback shape/size and recording metadata are validated before effects. Storage signing validates object keys, configured origin and returned destination; failures omit raw external errors. Playback responses, including denial, use private/no-store.
+
+Initial regressions reproduced arbitrary pipeline/playback destinations and malformed callbacks reaching processing. Final audited `npm run test:unit`: **336 passed**, no failures, cancellations or skips; includes ten retrieval, seven actual consumer/callback and four storage boundary tests. Diff checks passed. No DB schema/query changed, so no repeated DB suite was needed. Expected test diagnostics remain a nonblocking fixture cleanup item for P06/final review.
+
+Controller verified preserved ADMIN media/transcript/analysis guards and scalar-secret legacy authentication. Provider origins and representative fixtures are still unavailable: empty origins deny retrieval and redirects default disabled. This is local boundary verification, not provider compatibility or rollout evidence. P10 replay/correlation and P12 successful-audio lifetime/recovery remain separate work. No live provider, storage or database access, deployment or notification was used.
