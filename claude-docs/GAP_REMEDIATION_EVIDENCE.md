@@ -223,3 +223,13 @@ Date: 9 September 2026. Prerequisite: calls retain `patient_id` and queue deleti
 - Verification: isolated PostgreSQL suite **39/39** and isolated unit suite **367/367** passed through schema `0024`. No live data or deletion was used.
 
 An explicit feedback store, production backfill/conflict review and complete retained-history deletion/read audit remain open; P13 is not complete.
+
+## P14 — Reporting aggregate correctness (partial)
+
+Date: 9 September 2026. Prerequisite: P13 patient-owned feedback/history. [Execution plan and detailed evidence](remediation-execution/P14-reporting-aggregates.md).
+
+- Recovery classification now requires negative sentiment or an explicit 1–2 rating; null ratings are not treated as low scores.
+- A pre-limit window aggregate supplies the full-period recovery count while the dashboard queue remains bounded to six items.
+- Verification: focused PostgreSQL reporting regression, full isolated database suite **40/40**, and full isolated unit suite **367/367** passed.
+
+Other report/export aggregates and browser/date-boundary verification remain open; P14 is not complete.

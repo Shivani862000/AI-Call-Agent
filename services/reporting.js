@@ -105,7 +105,11 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
       calls.objections_json,
       calls.competitor_mentions_json,
       calls.live_red_flag,
-      calls.supervisor_alert_level
+      calls.supervisor_alert_level,
+      COUNT(*) FILTER (
+        WHERE LOWER(COALESCE(calls.sentiment_label, '')) = 'negative'
+           OR (calls.extracted_rating IS NOT NULL AND calls.extracted_rating BETWEEN 1 AND 2)
+      ) OVER () AS service_recovery_total
     FROM calls
     JOIN patients p ON p.id = calls.patient_id
     WHERE calls.called_at >= ? AND calls.called_at <= ?
@@ -219,7 +223,11 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
     }));
 
   const serviceRecoveryQueue = analyzedCalls
-    .filter((call) => String(call.sentiment_label || '').toLowerCase() === 'negative' || Number(call.extracted_rating || 0) <= 2)
+    .filter((call) => {
+      const rating = Number(call.extracted_rating);
+      return String(call.sentiment_label || '').toLowerCase() === 'negative'
+        || (Number.isFinite(rating) && rating >= 1 && rating <= 2);
+    })
     .slice(0, 6)
     .map((call) => ({
       customer_name: call.customer_name,
@@ -241,7 +249,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (char) => char.toUpperCase());
   const effectiveHotLeadCount = Math.max(safeHotLeads, hotLeadQueue.length);
-  const serviceRecoveryCount = serviceRecoveryQueue.length;
+  const serviceRecoveryCount = Number(analyzedCalls[0]?.service_recovery_total) || serviceRecoveryQueue.length;
   const callbackBacklogCount = pendingItems.filter((item) => String(item.outcome || '').toLowerCase() === 'callback').length || safeCallbacksRequested;
 
   const priorityActions = [

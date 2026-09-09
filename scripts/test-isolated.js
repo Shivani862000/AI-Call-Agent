@@ -47,6 +47,7 @@ const DB_FILES = [
   'test/outbound-admission-db.test.js', 'test/outbound-context.test.js', 'test/patient-import-route.test.js', 'test/retention.test.js', 'test/role-isolation.test.js',
   'test/post-call-jobs-db.test.js',
   'test/feedback-patient-ownership-db.test.js',
+  'test/reporting-db.test.js',
   'test/schema-triggers.test.js', 'test/schedule-edit.test.js'
 ];
 const PACKAGING_FILES = ['test/image-context.test.js'];
