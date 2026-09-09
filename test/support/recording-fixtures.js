@@ -38,7 +38,9 @@ function storageFixture({ signedURL = '/object/sign/call-recordings/calls/1/audi
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../services/supabase-storage.js'), 'utf8'), {
     module, exports: module.exports, URL, Buffer, AbortController, setTimeout: schedule, clearTimeout,
     process: { env: {} },
-    require: () => ({ resolveStorageUrl: () => base, resolveServiceRoleKey: () => 'synthetic-secret' }),
+    require: name => name === 'node:fs'
+      ? require('node:fs')
+      : ({ resolveStorageUrl: () => base, resolveServiceRoleKey: () => 'synthetic-secret' }),
     fetch: async (url, options) => { effects.push({ url, options }); if (fetchResponse) return fetchResponse(url, options); return new Response(body || JSON.stringify({ signedURL }), { status, headers: { 'content-type': 'application/json' } }); }
   });
   return { storage: module.exports, effects };

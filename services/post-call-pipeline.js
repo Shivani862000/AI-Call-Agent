@@ -161,6 +161,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     ['processing', 'processing', callRecord.id]
   );
 
+  let recordingLocalPath = null;
   try {
     logger.info('FEEDBACK_ANALYSIS_STARTED', {
     callId: callRecord.id,
@@ -169,8 +170,18 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     phone: callRecord.customer_phone
     });
 
-  let recordingLocalPath = null;
-  if (!callRecord.recording_object_key && callRecord.recording_url) {
+  let transcriptText = callRecord.transcript_text || '';
+  if (!transcriptText && callRecord.recording_object_key && callRecord.recording_status === 'stored') {
+    try {
+      const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), `feedback-recording-${process.pid}-`));
+      recordingLocalPath = path.join(directory, 'audio.mp3');
+      const { downloadObjectToFile } = require('./supabase-storage');
+      await downloadObjectToFile(callRecord.recording_object_key, recordingLocalPath);
+    } catch (error) {
+      await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['download_failed', 'blocked', callRecord.id]);
+      throw error;
+    }
+  } else if (!callRecord.recording_object_key && callRecord.recording_url) {
     try {
       recordingLocalPath = await downloadRecording(callRecord.recording_url);
       const objectKey = `calls/${callRecord.id}/${path.basename(recordingLocalPath)}`;
@@ -181,7 +192,6 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
           "UPDATE calls SET recording_object_key = ?, recording_status = 'stored' WHERE id = ?",
           [objectKey, callRecord.id]
         );
-        fs.promises.unlink(recordingLocalPath).catch(() => {});
       }
     } catch (error) {
       await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['download_failed', 'blocked', callRecord.id]);
@@ -189,7 +199,6 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     }
   }
 
-  let transcriptText = callRecord.transcript_text || '';
   let transcriptSource = transcriptText ? 'live_stream' : null;
 
   if (recordingLocalPath) {
@@ -450,6 +459,8 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
       errorCode: error.code || error.name || 'post_call_failed'
     }).catch(() => {});
     throw error;
+  } finally {
+    if (recordingLocalPath) await fs.promises.rm(path.dirname(recordingLocalPath), { recursive: true, force: true }).catch(() => {});
   }
 }
 

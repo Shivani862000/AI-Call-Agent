@@ -203,3 +203,13 @@ Date: 9 September 2026. Prerequisite: P09/P10 local lifecycle slices. [Execution
 - Verification: isolated unit suite **364/364** and isolated PostgreSQL suite **37/37** passed after migrating through schema `0023`. The focused DB regression covers duplicate claims, wrong-token completion, retry state and cascade cleanup.
 
 Stage-specific recovery, token-fenced final effects, boot/restart scans, notification outbox delivery and legacy backfill/reconciliation remain open. This is durable job ownership, not a claim of exactly-once completion. No provider, notification, storage or deployment boundary was used.
+
+## P12 — Recording and transcription recovery (partial)
+
+Date: 9 September 2026. Prerequisite: P05 recording boundaries and P11 job ownership. [Execution plan and detailed evidence](remediation-execution/P12-recording-recovery.md).
+
+- The trusted storage adapter now downloads an existing recording object to an exclusive `0600` temporary file with bounded size, validated object keys and partial-file cleanup.
+- The post-call pipeline can reconstruct transcript input from `recording_object_key`; temporary recording directories are retained through transcription and removed in the outer `finally` block.
+- Verification: focused recording/storage tests **14/14** and the isolated unit suite **367/367** passed. No live storage, provider or credential boundary was used.
+
+Separate recording/transcription stage state, storage-missing/restart tests and a boot recovery worker remain open, so P12 is not complete.

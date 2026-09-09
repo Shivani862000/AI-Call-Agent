@@ -1,6 +1,7 @@
 'use strict';
 
 const { resolveServiceRoleKey, resolveStorageUrl } = require('../src/config');
+const fs = require('node:fs');
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'call-recordings';
 const failure = () => new Error('Storage request failed');
 
@@ -73,6 +74,60 @@ async function uploadObject(key, body, contentType) {
   return key;
 }
 
+async function downloadObjectToFile(key, destination, { signal, maxBytes = 100 * 1024 * 1024 } = {}) {
+  const encoded = objectPath(key);
+  if (typeof destination !== 'string' || !destination || !Number.isSafeInteger(maxBytes) || maxBytes < 1) throw failure();
+  const { base, token } = requireConfig();
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  let writer;
+  try {
+    if (signal?.aborted) throw failure();
+    const response = await fetch(`${base}/object/${BUCKET}/${encoded}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+      redirect: 'error',
+      signal: controller.signal
+    });
+    if (!response.ok || !response.body) throw failure();
+    const contentLength = response.headers.get('content-length');
+    if (contentLength !== null && (!/^\d+$/.test(contentLength) || Number(contentLength) > maxBytes)) throw failure();
+    writer = fs.createWriteStream(destination, { flags: 'wx', mode: 0o600 });
+    let bytes = 0;
+    await new Promise((resolve, reject) => {
+      writer.once('error', reject);
+      writer.once('finish', resolve);
+      (async () => {
+        try {
+          for await (const chunk of response.body) {
+            const buffer = Buffer.from(chunk);
+            bytes += buffer.length;
+            if (bytes > maxBytes || !writer.write(buffer)) {
+              if (bytes > maxBytes) throw failure();
+              await new Promise((drainResolve, drainReject) => {
+                writer.once('drain', drainResolve);
+                writer.once('error', drainReject);
+              });
+            }
+          }
+          writer.end();
+        } catch (error) {
+          writer.destroy(error);
+        }
+      })();
+    });
+    return destination;
+  } catch {
+    controller.abort();
+    writer?.destroy();
+    await fs.promises.rm(destination, { force: true }).catch(() => {});
+    throw failure();
+  } finally {
+    signal?.removeEventListener('abort', abort);
+  }
+}
+
 async function createSignedUrl(key, expiresIn = 60, { signal } = {}) {
   const encoded = objectPath(key);
   const { base, token } = requireConfig();
@@ -104,4 +159,4 @@ async function removeObject(key) {
   }, { allow404: true });
 }
 
-module.exports = { uploadObject, createSignedUrl, removeObject, isStorageConfigured, BUCKET };
+module.exports = { uploadObject, downloadObjectToFile, createSignedUrl, removeObject, isStorageConfigured, BUCKET };

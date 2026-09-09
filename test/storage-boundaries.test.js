@@ -34,6 +34,36 @@ test('storage response size/status/config errors have fixed diagnostics without 
   }
 });
 
+test('storage downloads an owned object to the requested private path', async () => {
+  const dir = await fs.promises.mkdtemp(path.join(require('node:os').tmpdir(), 'storage-download-'));
+  const destination = path.join(dir, 'audio.mp3');
+  const f = storageFixture({
+    fetchResponse: async () => new Response('audio', { status: 200, headers: { 'content-length': '5' } })
+  });
+  try {
+    assert.equal(await f.storage.downloadObjectToFile('calls/1/audio.mp3', destination), destination);
+    assert.equal(await fs.promises.readFile(destination, 'utf8'), 'audio');
+    assert.equal(f.effects[0].url, 'https://storage.example/storage/v1/object/call-recordings/calls/1/audio.mp3');
+    assert.equal(f.effects[0].options.headers.Authorization, 'Bearer synthetic-secret');
+  } finally {
+    await fs.promises.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('storage download removes a partial object when the byte limit is exceeded', async () => {
+  const dir = await fs.promises.mkdtemp(path.join(require('node:os').tmpdir(), 'storage-download-'));
+  const destination = path.join(dir, 'audio.mp3');
+  const f = storageFixture({
+    fetchResponse: async () => new Response('audio', { status: 200, headers: { 'content-length': '5' } })
+  });
+  try {
+    await assert.rejects(f.storage.downloadObjectToFile('calls/1/audio.mp3', destination, { maxBytes: 3 }), /Storage request failed/);
+    assert.equal(fs.existsSync(destination), false);
+  } finally {
+    await fs.promises.rm(dir, { recursive: true, force: true });
+  }
+});
+
 
 test('signing total deadline and caller disconnect cancel slow response bodies', async () => {
   let cancelled = 0;

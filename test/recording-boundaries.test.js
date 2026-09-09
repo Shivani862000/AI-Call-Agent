@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const { servePrivacyApp } = require('./support/privacy-app');
 
-function pipelineModule(fetch, recording, transcribe = async () => '', fileSystem = fs) {
+function pipelineModule(fetch, recording, transcribe = async () => '', fileSystem = fs, storage = { isStorageConfigured: () => false }) {
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../services/post-call-pipeline.js'), 'utf8'), {
     module, exports: module.exports, fetch, Buffer, process, console,
@@ -15,7 +15,7 @@ function pipelineModule(fetch, recording, transcribe = async () => '', fileSyste
       if (['path', 'node:os', 'node:stream/promises'].includes(name)) return require(name);
       if (name === './recording-fetch') return recording || require('../services/recording-fetch');
       if (name === './system-logger') return { info() {}, warn() {} };
-      if (name === './supabase-storage') return { isStorageConfigured: () => false };
+      if (name === './supabase-storage') return storage;
       if (name === './gemini') return { transcribeAudioFile: transcribe };
       if (name === './post-call-jobs') return {
         buildInputRevision: () => 'synthetic-revision',
@@ -137,6 +137,28 @@ test('pipeline streams into unique owned files independent of provider ID and re
   await assert.rejects(run(pipelineModule(undefined, oversized, undefined, fileSystem)), /Recording unavailable/);
   assert.equal(dirs.length, 1);
   assert.ok(!fs.existsSync(dirs[0]));
+});
+
+test('pipeline reconstructs a stored recording when the transcript is missing', async () => {
+  const seen = [];
+  const storage = {
+    isStorageConfigured: () => true,
+    downloadObjectToFile: async (key, destination) => {
+      assert.equal(key, 'calls/1/audio.mp3');
+      await fs.promises.writeFile(destination, 'audio', { mode: 0o600 });
+      return destination;
+    },
+    uploadObject: async () => { throw Error('upload should not run'); }
+  };
+  const mod = pipelineModule(undefined, undefined, async file => {
+    seen.push(await fs.promises.readFile(file, 'utf8'));
+    return '';
+  }, fs, storage);
+  await mod.processCompletedCallPipeline({ callId: 1,
+    dbGet: async () => ({ id: 1, recording_object_key: 'calls/1/audio.mp3', recording_status: 'stored' }),
+    dbRun: async () => ({ changes: 1 })
+  });
+  assert.deepEqual(seen, ['audio']);
 });
 
 test('authenticated legacy metadata preserves complete URL query and invalid URLs have no effects', async t => {
