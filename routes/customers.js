@@ -54,6 +54,45 @@ const RESCHEDULABLE_STATUSES = new Set([
   'cancelled',
   'rescheduled'
 ]);
+
+const CUSTOMER_PAGE_DEFAULT = 50;
+const CUSTOMER_PAGE_MAX = 100;
+
+function parseCustomerPageSize(value) {
+  if (value == null || value === '') return CUSTOMER_PAGE_DEFAULT;
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!/^\d+$/.test(String(raw))) return null;
+  const size = Number(raw);
+  return Number.isSafeInteger(size) && size > 0 && size <= CUSTOMER_PAGE_MAX ? size : null;
+}
+
+function encodeCustomerCursor(row) {
+  const createdAt = row.created_at instanceof Date
+    ? row.created_at.toISOString()
+    : String(row.created_at || '1970-01-01T00:00:00.000Z');
+  return Buffer.from(JSON.stringify({
+    priority: Number(row.priority_score) || 0,
+    createdAt,
+    id: Number(row.id)
+  })).toString('base64url');
+}
+
+function decodeCustomerCursor(value) {
+  if (typeof value !== 'string' || !value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+    if (!Number.isSafeInteger(parsed.priority)
+        || !Number.isSafeInteger(parsed.id)
+        || parsed.id < 1
+        || typeof parsed.createdAt !== 'string'
+        || Number.isNaN(Date.parse(parsed.createdAt))) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 /**
  * Coerces the many ways a flag arrives — boolean, 1/0, "1"/"0", "true"/"yes" —
  * into the integer the schema stores. Returns 0 for anything unrecognised
@@ -459,11 +498,50 @@ router.get('/search', async (req, res) => {
 // List all customers
 router.get('/', async (req, res) => {
   try {
-    const customers = await dbAll('SELECT * FROM customer_queue ORDER BY COALESCE(priority_score, 0) DESC, created_at DESC');
-    res.json(customers.map((row) => serializeQueueRow(row, roleOf(req))));
+    const paginationRequested = req.query.cursor != null
+      || req.query.page_size != null
+      || req.query.pageSize != null;
+    if (!paginationRequested) {
+      const customers = await dbAll('SELECT * FROM customer_queue ORDER BY COALESCE(priority_score, 0) DESC, created_at DESC');
+      return res.json(customers.map((row) => serializeQueueRow(row, roleOf(req))));
+    }
+
+    const pageSize = parseCustomerPageSize(req.query.page_size ?? req.query.pageSize);
+    if (!pageSize) return res.status(400).json({ error: `page_size must be an integer from 1 to ${CUSTOMER_PAGE_MAX}` });
+    if (Array.isArray(req.query.cursor)) return res.status(400).json({ error: 'cursor must be a single value' });
+    const cursor = req.query.cursor == null ? null : decodeCustomerCursor(req.query.cursor);
+    if (req.query.cursor != null && !cursor) return res.status(400).json({ error: 'cursor is invalid or expired' });
+
+    const cursorClause = cursor ? `
+      AND (
+        COALESCE(priority_score, 0) < ?
+        OR (COALESCE(priority_score, 0) = ? AND (
+          COALESCE(created_at, '1970-01-01T00:00:00.000Z') < ?
+          OR (COALESCE(created_at, '1970-01-01T00:00:00.000Z') = ? AND id < ?)
+        ))
+      )` : '';
+    const params = cursor
+      ? [cursor.priority, cursor.priority, cursor.createdAt, cursor.createdAt, cursor.id, pageSize + 1]
+      : [pageSize + 1];
+    const customers = await dbAll(
+      `SELECT * FROM customer_queue
+        WHERE 1 = 1${cursorClause}
+        ORDER BY COALESCE(priority_score, 0) DESC,
+                 COALESCE(created_at, '1970-01-01T00:00:00.000Z') DESC,
+                 id DESC
+        LIMIT ?`,
+      params
+    );
+    const hasMore = customers.length > pageSize;
+    const items = customers.slice(0, pageSize);
+    return res.json({
+      items: items.map((row) => serializeQueueRow(row, roleOf(req))),
+      nextCursor: hasMore ? encodeCustomerCursor(items[items.length - 1]) : null,
+      hasMore
+    });
   } catch (error) {
     console.error('Error fetching customers:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Unable to fetch customers' });
   }
 });
 

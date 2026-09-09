@@ -245,3 +245,13 @@ Date: 9 September 2026. Prerequisite: durable customer/queue identity. [Executio
 - Verification at the P13 slice: isolated unit suite **367/367** and PostgreSQL suite **39/39** passed through schema `0024`; the current branch suite is **369/369** and **42/42** after P14/P15, recovery and patient-lock tests.
 
 Import/attempt/UI propagation, ambiguous-name review and production backfill remain open; P15 is not complete.
+
+## P16 — Bounded customer-list pagination (partial)
+
+Date: 9 September 2026. Prerequisite: P07 import limits and durable queue identity. [Execution plan](remediation-execution/P16-customer-pagination.md).
+
+- `GET /api/customers` preserves its legacy array response when called without pagination parameters. The opt-in `page_size`/`cursor` contract returns `{ items, nextCursor, hasMore }`, defaults to 50 records, caps requests at 100 and rejects malformed cursors before querying.
+- The cursor carries priority, creation time and ID, matching the endpoint's descending ordering and preventing duplicate/omitted rows across page traversal with tied priorities.
+- The isolated PostgreSQL regression passed **1/1**, covering three pages, complete unique coverage, legacy response compatibility, malformed cursor rejection and the maximum page size.
+
+Browser load-more consumption, patient-list pagination, bounded import batching and representative workload measurement remain open; P16 is not complete.
