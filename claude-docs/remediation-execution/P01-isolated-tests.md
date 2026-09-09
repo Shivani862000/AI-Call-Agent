@@ -88,7 +88,7 @@ Rollback: revert this isolated infrastructure commit without database migration;
 
 ### Review fix round 2
 
-- The RLS proof seeds a UUID sentinel through the restricted trusted application login, confirms that login sees the row, then confirms both anon/authenticated equivalents cannot see that exact existing row. The application login removes the sentinel in `finally`.
+- The RLS proof seeds a UUID sentinel through the restricted trusted application login, confirms that login sees the row, then confirms both anon/authenticated equivalents cannot see that exact existing row. An owner-only negative control disables RLS in the disposable database, proves anon sees the same sentinel, restores RLS in `finally`, and reconfirms both browser roles are isolated. The application login removes the sentinel in `finally`.
 - Recursive staging also rejects underscore/hyphen and case variants of `service_account`, `client_secret*.json`, and `gmail-key.json`, plus compound archived database names such as `feedback.db.archived-20260830`. The independent synthetic fixture covers every requested spelling.
 - Provisioning assigns every completed in-flight Docker resource before checking interruption. A deterministic pre-assignment barrier can pause after network creation; SIGINT releases the barrier, stops further provisioning, and forces a fresh final cleanup pass rather than trusting an earlier memoized empty cleanup.
 - `npm run test:unit -- --file test/database-isolation.test.js`: 6 passed, zero failures/skips with the expanded sentinel set.
