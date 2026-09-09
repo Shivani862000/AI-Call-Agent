@@ -186,6 +186,8 @@ Date: 9 September 2026. Dependencies: schema-free P08 policy; durable attempt/co
 
 The durable follow-up added migration `0021_contact_and_call_attempts.sql`, `reserveOutboundAttempt`/`recordAttemptSubmission`, and routed `/call/start`, `/api/calls/initiate/:customerId`, `/api/icallmate/outgoing-call`, the legacy `routes/calls.js` initiator and the scheduler through the reservation. Focused disposable PostgreSQL verification passed **1/1**; the audited database suite passed **36/36** and the isolated unit suite passed **355/355**. Two-worker race proof, provider replay/uncertainty reconciliation and event/media identity remain open; P09 is not complete.
 
+The admission transaction now locks the durable patient row before evaluating the daily budget/cooldown. The focused PostgreSQL race regression passes with two queue rows for one patient: exactly one reservation is accepted and the second is rejected by the daily attempt limit. Provider replay/uncertainty reconciliation and the broader lifecycle race suite remain open.
+
 ## P10 — Exact call-event correlation (partial)
 
 Date: 9 September 2026. Dependencies: P09 durable attempts and provider capability evidence.
@@ -200,7 +202,7 @@ Date: 9 September 2026. Prerequisite: P09/P10 local lifecycle slices. [Execution
 
 - Migration `0023_post_call_jobs.sql` adds revisioned, RLS-protected stage-job rows with retry state, due indexes, claim leases/tokens and call-delete cascade.
 - `services/post-call-jobs.js` provides deterministic input revisions, bounded retry delays, row-locked claims and token-fenced completion/failure transitions. The post-call pipeline claims before work and records blocked/retry state for missing input or processing errors.
-- Verification: isolated unit suite **369/369** and isolated PostgreSQL suite **41/41** passed after migrating through schema `0025`. Focused regressions cover duplicate claims, wrong-token completion, retry state, cascade cleanup and bounded recovery scanning.
+- Verification: isolated unit suite **369/369** and isolated PostgreSQL suite **42/42** passed after migrating through schema `0025`. Focused regressions cover duplicate claims, wrong-token completion, retry state, cascade cleanup, bounded recovery scanning and patient-level admission serialization.
 
 Stage-specific recovery, token-fenced final effects, lease renewal, notification outbox delivery and legacy backfill/reconciliation remain open. This is durable job ownership plus due-job rediscovery, not a claim of exactly-once completion. No provider, notification, storage or deployment boundary was used.
 
@@ -240,6 +242,6 @@ Date: 9 September 2026. Prerequisite: durable customer/queue identity. [Executio
 
 - Migration `0025_campaign_identity.sql` adds and backfills `customers.campaign_id`, keeps legacy names compatible through a trigger, and indexes the identity for reporting.
 - Customer writes accept a campaign ID, and campaign reporting resolves the current campaign configuration name through that ID so renames do not split attribution.
-- Verification at the P13 slice: isolated unit suite **367/367** and PostgreSQL suite **39/39** passed through schema `0024`; the current branch suite is **369/369** and **41/41** after P14/P15 and recovery tests.
+- Verification at the P13 slice: isolated unit suite **367/367** and PostgreSQL suite **39/39** passed through schema `0024`; the current branch suite is **369/369** and **42/42** after P14/P15, recovery and patient-lock tests.
 
 Import/attempt/UI propagation, ambiguous-name review and production backfill remain open; P15 is not complete.

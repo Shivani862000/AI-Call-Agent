@@ -100,3 +100,23 @@ test('schema 0022 keeps contact revisions, attempts and event quarantine durable
     await closeDatabase();
   }
 });
+
+test('different queue rows for one patient serialize the daily admission budget', async () => {
+  const { initializeDatabase, dbRun, dbTx, closeDatabase } = require('../db');
+  const { reserveOutboundAttempt } = require('../services/outbound-admission');
+  await initializeDatabase();
+  try {
+    await withTestPatient(async ({ patientId }) => {
+      const first = await dbRun('INSERT INTO customers (patient_id, status) VALUES (?, ?)', [patientId, 'pending']);
+      const second = await dbRun('INSERT INTO customers (patient_id, status) VALUES (?, ?)', [patientId, 'pending']);
+      const [left, right] = await Promise.all([
+        reserveOutboundAttempt({ dbTx, customerId: first.lastID, requestKey: `race-a-${patientId}`, maxAttemptsPerDay: 1, cooldownMs: 0 }),
+        reserveOutboundAttempt({ dbTx, customerId: second.lastID, requestKey: `race-b-${patientId}`, maxAttemptsPerDay: 1, cooldownMs: 0 })
+      ]);
+      assert.equal([left, right].filter(result => result.outcome === 'accepted').length, 1);
+      assert.equal([left, right].filter(result => result.reason === 'daily_attempt_limit').length, 1);
+    });
+  } finally {
+    await closeDatabase();
+  }
+});

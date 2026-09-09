@@ -13,7 +13,7 @@ Date: 9 September 2026. Prerequisite: P09/P10 local lifecycle slices. Schema mig
 ## Verification
 
 - Initial P11 slice verification: `npm run test:unit` **364/364** and `npm run test:db` **37/37** through schema `0023`.
-- Current branch verification after the recovery, ownership, reporting and campaign slices: unit **369/369** and DB **41/41**.
+- Current branch verification after the recovery, ownership, reporting, campaign and patient-lock slices: unit **369/369** and DB **42/42**.
 - Focused job test covers duplicate claim blocking, wrong-token completion, retry state/error persistence and call-delete cascade.
 
 ## Remaining before P11 completion

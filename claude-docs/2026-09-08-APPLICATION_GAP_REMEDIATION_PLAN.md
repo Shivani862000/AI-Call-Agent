@@ -28,9 +28,9 @@
 - **P01 implementation and local verification complete:** disposable PG17/Node24 tests and connection/cleanup guards passed scoped review through `ed9a3e6`. The initial combined run passed 307 unit/18 DB checks; later affected checks include 20 full DB, six isolation and five role assertions. Hosted Linux CI execution, browser coverage and actual Supabase grant equivalence remain separate evidence gates. P07 import/schedule preservation is next. [Evidence](GAP_REMEDIATION_EVIDENCE.md#p01--disposable-database-testing-and-fixture-cleanup).
 - **P07 / F04 and schedule portion of F13 complete locally:** imports preserve omitted fields/restrictions, preview actual changes and revalidate identity/version in a transaction. Schedule comparisons/validation use the actual instant and India calling hours. Reviewed commits `c1fba27`, `346d294`; final targeted checks: 17 import unit, six import DB and three schedule DB tests pass. [Evidence](GAP_REMEDIATION_EVIDENCE.md#p07--import-and-schedule-preservation). P05 local recording/callback boundaries are also reviewed; P06 dependency updates are reviewed; production-image/runtime verification is next.
 - **P08 Task 1 / contact-policy correction is locally implemented:** canonical consent normalization, safe boolean parsing, patient-turn refusal precedence, blocked queue/manual-call checks, monotonic schema-free suppression, and ordinary-form restoration guards are covered by 28 focused unit assertions. Durable contact revisions/events, transactional queue cancellation and race tests remain open for the coordinated P09/P10 migration `0021` work. [Execution plan](remediation-execution/P08-contact-policy.md).
-- **P09 admission is partially durable:** the pure decision contract remains green, migration `0021` now stores contact revisions/events and attempt reservations, and all current outbound submitters (`/call/start`, `/api/calls/initiate/:customerId`, `/api/icallmate/outgoing-call`, the legacy calls router and scheduler) use the transaction-backed reservation/idempotent response. Unit **355/355** and DB **36/36** checks pass. Concurrent/race, provider reconciliation and event/media identity evidence remain open. [Execution plan](remediation-execution/P09-outbound-admission.md).
+- **P09 admission is partially durable:** the pure decision contract remains green, migration `0021` stores contact revisions/events and attempt reservations, all current outbound submitters use the transaction-backed reservation/idempotent response, and admission now locks the durable patient before budget checks. Unit **369/369** and DB **42/42** pass at current head; one focused concurrent two-queue-row race is covered. Provider reconciliation and the broader lifecycle/event/media race evidence remain open. [Execution plan](remediation-execution/P09-outbound-admission.md).
 - **P10 event identity is partially durable:** exact attempt/request/provider correlation, `0022` event quarantine, provider extra-parameter propagation and identifier-first outbound media hydration are implemented. Unknown callback IDs no longer fall back to a phone match. Unit **362/362** and DB **36/36** checks pass; transition fencing, provider-ID audit and restart/reconciliation evidence remain open. [Execution plan](remediation-execution/P10-call-events.md).
-- **P11 post-call durability is partially implemented:** migration `0023` adds revisioned stage jobs with leases, retry state and claim-token fencing; the pipeline and a boot/60-second recovery scan claim and complete a revision or record retry/manual-review state. Unit **369/369** and DB **41/41** checks pass. Stage separation, token-fenced final effects, lease renewal, outbox delivery and restart/failure-boundary evidence remain open. [Execution plan](remediation-execution/P11-post-call-jobs.md).
+- **P11 post-call durability is partially implemented:** migration `0023` adds revisioned stage jobs with leases, retry state and claim-token fencing; the pipeline and a boot/60-second recovery scan claim and complete a revision or record retry/manual-review state. Unit **369/369** and DB **42/42** checks pass. Stage separation, token-fenced final effects, lease renewal, outbox delivery and restart/failure-boundary evidence remain open. [Execution plan](remediation-execution/P11-post-call-jobs.md).
 - **P12 recording recovery is partially implemented:** trusted storage downloads reconstruct a missing transcript input, bounded private files use exclusive `0600` writes, and pipeline cleanup waits until transcription finishes. Unit **367/367** and focused recording/storage checks **14/14** pass. Separate stage status, storage/restart recovery and boot scans remain open. [Execution plan](remediation-execution/P12-recording-recovery.md).
 - **P13 feedback ownership is partially implemented:** migration `0024` backfills and requires `feedback.patient_id`, a trigger preserves compatibility for existing writers, patient deletion is protected, and feedback/reporting reads survive queue deletion. Unit **367/367** and DB **39/39** checks pass. An explicit shared feedback store, production backfill review and complete reader/deletion audit remain open. [Execution plan](remediation-execution/P13-feedback-patient-ownership.md).
 - **P14 reporting aggregates are partially implemented:** unrated positive calls no longer enter service recovery, and recovery totals are computed before the bounded display queue. Unit **367/367** and DB **40/40** checks pass. Other dashboard aggregates and browser/date-boundary evidence remain open. [Execution plan](remediation-execution/P14-reporting-aggregates.md).
@@ -174,8 +174,8 @@ flowchart TD
   P05 --> G2
   P10 --> G2
   G2 --> P11 --> P12 --> G3["G3: schema 0023"]
-  G3 --> P13 --> G4["G4: schema 0023"]
-  G4 --> P14 --> P15 --> G5["G5: schema 0024"]
+  G3 --> P13 --> G4["G4: schema 0024"]
+  G4 --> P14 --> P15 --> G5["G5: schema 0025"]
   P14 --> P16
   P07 --> P16
   P04 --> P17
@@ -522,7 +522,7 @@ assert.equal(detectConversationOutcome({
 
 ### P11 — Make post-call completion durable, fenced, and recoverable
 
-**Owner:** Backend/platform. **Gaps:** F08, T09, M02–M03; R10–R11. **Dependencies:** lifecycle release; ships with P12 and `0022`.
+**Owner:** Backend/platform. **Gaps:** F08, T09, M02–M03; R10–R11. **Dependencies:** lifecycle release; ships with P12 and `0023`.
 
 **Create:** `services/post-call-jobs.js`, `services/notification-outbox.js`, `test/post-call-recovery.test.js`, `test/post-call-claim-fencing.test.js`, `supabase/migrations/0023_post_call_jobs.sql`.
 **Modify:** `services/post-call-pipeline.js`, `services/call-analysis.js`, `services/call-orchestration.js`, `src/server.js`, `src/api-routes.js`, `src/websocket-bridge.js`, notification invocation sites and schema expectation.
@@ -555,7 +555,7 @@ assert.equal(detectConversationOutcome({
 
 **Owner:** Backend/data. **Gaps:** F09, F10, T04; R12. **Dependencies:** P04/P11; schema `0024`.
 
-**Create:** `services/feedback-store.js`, `test/retained-history.test.js`, `supabase/migrations/0023_feedback_patient_ownership.sql`.
+**Create:** `services/feedback-store.js`, `test/retained-history.test.js`, `supabase/migrations/0024_feedback_patient_ownership.sql`.
 **Modify:** `routes/feedback.js`, `routes/patients.js`, `src/api-routes.js`, `src/call-management.js`, `services/post-call-pipeline.js`, `services/reporting.js`, `src/retention.js`, all other feedback writers and `test/support/fixtures.js`.
 
 - [ ] Add/backfill `feedback.patient_id` from linked call first, then queue; detect conflicts and record unresolvable historical rows without guessing. Preserve them as explicitly unattributed history pending reviewed repair.
@@ -584,7 +584,7 @@ assert.equal(detectConversationOutcome({
 
 ### P15 — Preserve campaign identity through renames and history
 
-**Owner:** Backend/data/product. **Gaps:** F19; R14. **Dependencies:** P13/P14; schema `0024`.
+**Owner:** Backend/data/product. **Gaps:** F19; R14. **Dependencies:** P13/P14; schema `0025`.
 
 **Create:** `supabase/migrations/0024_campaign_identity.sql`, `test/campaign-attribution.test.js`.
 **Modify:** `routes/campaigns.js`, `routes/customers.js`, `src/scheduler.js`, `services/outbound-admission.js`, `services/reporting.js`, campaign selection UI and schema expectation.

@@ -138,15 +138,25 @@ async function reserveOutboundAttempt({
     );
     if (!customer) return { outcome: ADMISSION_OUTCOMES.REJECTED, reason: 'customer_not_found' };
 
+    // Queue rows are intentionally repeatable for one patient. Serialize on
+    // the durable patient row as well, otherwise two different queue entries
+    // can both observe the same cooldown/attempt budget and reserve calls.
+    const lockedPatient = await tx.get(
+      `SELECT id, status, normalized_phone, phone, do_not_call, consent_status, contact_revision
+         FROM patients WHERE id = ? FOR UPDATE`,
+      [customer.current_patient_id]
+    );
+    if (!lockedPatient) return { outcome: ADMISSION_OUTCOMES.REJECTED, reason: 'patient_not_found' };
+
     const patient = {
-      id: customer.current_patient_id,
-      status: customer.current_patient_status,
-      normalized_phone: customer.patient_normalized_phone,
-      phone: customer.patient_phone,
-      do_not_call: customer.patient_do_not_call,
+      id: lockedPatient.id,
+      status: lockedPatient.status,
+      normalized_phone: lockedPatient.normalized_phone,
+      phone: lockedPatient.phone,
+      do_not_call: lockedPatient.do_not_call,
       wrong_number_flag: customer.wrong_number_flag,
-      consent_status: customer.patient_consent_status,
-      contact_revision: customer.contact_revision
+      consent_status: lockedPatient.consent_status,
+      contact_revision: lockedPatient.contact_revision
     };
     const input = {
       patientId: patient.id,
