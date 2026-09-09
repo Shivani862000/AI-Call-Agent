@@ -94,3 +94,9 @@ Rollback: revert this isolated infrastructure commit without database migration;
 - `npm run test:unit -- --file test/database-isolation.test.js`: 6 passed, zero failures/skips with the expanded sentinel set.
 - `npm run test:db -- --file test/role-isolation.test.js`: 4 passed, zero failures/skips; 19 fresh migrations and zero-migration repeat.
 - Deterministic `network` pre-assignment SIGINT probe: expected exit 1; marker recorded `cleaned: true`, `failures: []`; exact UUID container/network inspection returned no resources.
+
+### Review fix round 3
+
+- The sentinel test validates the exact application identity before constructing its application client. Its owner-only negative control maps the owner URL and identity into a purpose-specific environment and validates `migration-owner` before constructing the owner client.
+- A focused zero-constructor regression supplies missing application identity and mismatched owner purpose, confirms both guards reject, and confirms no client was constructed.
+- `npm run test:db -- --file test/role-isolation.test.js`: 5 passed, zero failures/skips; 19 fresh migrations and zero-migration repeat.

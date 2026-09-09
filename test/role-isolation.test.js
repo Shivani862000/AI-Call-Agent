@@ -6,6 +6,30 @@ const { randomUUID } = require('node:crypto');
 const { Client } = require('pg');
 const { assertOwnedTestDatabase } = require('./support/database');
 
+function createOwnedClient(connectionString, env, purpose, ClientClass = Client) {
+  assertOwnedTestDatabase(connectionString, env, purpose);
+  return new ClientClass({ connectionString });
+}
+
+test('sentinel application and owner guards reject before client construction', () => {
+  let clients = 0;
+  class CountingClient { constructor() { clients++; } }
+  assert.throws(
+    () => createOwnedClient(process.env.DATABASE_URL, { NODE_ENV: 'test' }, 'application', CountingClient),
+    /identity|IDENTITY/
+  );
+  assert.throws(
+    () => createOwnedClient(
+      process.env.AI_CALL_AGENT_TEST_OWNER_URL,
+      { ...process.env, AI_CALL_AGENT_TEST_DB_IDENTITY: process.env.AI_CALL_AGENT_TEST_DB_IDENTITY },
+      'migration-owner',
+      CountingClient
+    ),
+    /purpose|Unsafe/
+  );
+  assert.equal(clients, 0);
+});
+
 test('application regressions use the restricted trusted server role', async () => {
   const connectionString = process.env.DATABASE_URL;
   assertOwnedTestDatabase(connectionString, process.env, 'application');
@@ -23,7 +47,7 @@ test('application regressions use the restricted trusted server role', async () 
 });
 
 test('browser-equivalent roles cannot see an existing application sentinel through base-table RLS', async () => {
-  const application = new Client({ connectionString: process.env.DATABASE_URL });
+  const application = createOwnedClient(process.env.DATABASE_URL, process.env, 'application');
   let patientId;
   const querySentinelAs = async (purpose) => {
     const key = purpose.toUpperCase();
@@ -55,7 +79,12 @@ test('browser-equivalent roles cannot see an existing application sentinel throu
       assert.equal(hidden.rowCount, 0, `${purpose} role saw the existing sentinel`);
     }
 
-    const owner = new Client({ connectionString: process.env.AI_CALL_AGENT_TEST_OWNER_URL });
+    const ownerEnv = {
+      ...process.env,
+      DATABASE_URL: process.env.AI_CALL_AGENT_TEST_OWNER_URL,
+      AI_CALL_AGENT_TEST_DB_IDENTITY: process.env.AI_CALL_AGENT_TEST_OWNER_IDENTITY
+    };
+    const owner = createOwnedClient(ownerEnv.DATABASE_URL, ownerEnv, 'migration-owner');
     let rlsDisabled = false;
     try {
       await owner.connect();
