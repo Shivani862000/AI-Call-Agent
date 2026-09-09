@@ -413,24 +413,24 @@ async function buildOwnerDashboardData() {
   `);
 
   const campaignConfigs = await dbAll(`
-    SELECT name, service_name, monthly_spend_inr, status
+    SELECT id, name, service_name, monthly_spend_inr, status
     FROM campaign_configs
-    WHERE COALESCE(status, 'active') = 'active'
     ORDER BY created_at DESC, name ASC
   `);
 
   const campaignPerformance = await dbAll(`
     SELECT
-      COALESCE(cfg.name, queue.campaign_name, 'Unassigned') AS campaign_name,
+      COALESCE(cfg.name, raw_customer.campaign_name, queue.campaign_name, 'Unassigned') AS campaign_name,
       raw_customer.campaign_id,
+      COALESCE(raw_customer.campaign_name, queue.campaign_name) AS campaign_snapshot_name,
       COUNT(*) AS total_customers,
-      SUM(CASE WHEN status IN ('hot_lead', 'completed', 'called', 'callback_scheduled') THEN 1 ELSE 0 END) AS active_leads,
-      SUM(CASE WHEN revenue_stage IN ('qualified', 'follow_up') THEN 1 ELSE 0 END) AS qualified_leads,
-      SUM(COALESCE(revenue_estimate, 0)) AS revenue_pipeline
+      SUM(CASE WHEN queue.status IN ('hot_lead', 'completed', 'called', 'callback_scheduled') THEN 1 ELSE 0 END) AS active_leads,
+      SUM(CASE WHEN queue.revenue_stage IN ('qualified', 'follow_up') THEN 1 ELSE 0 END) AS qualified_leads,
+      SUM(COALESCE(queue.revenue_estimate, 0)) AS revenue_pipeline
     FROM customer_queue queue
     LEFT JOIN customers raw_customer ON raw_customer.id = queue.id
     LEFT JOIN campaign_configs cfg ON cfg.id = raw_customer.campaign_id
-    GROUP BY cfg.name, queue.campaign_name, raw_customer.campaign_id
+    GROUP BY cfg.name, raw_customer.campaign_name, queue.campaign_name, raw_customer.campaign_id
     ORDER BY revenue_pipeline DESC, total_customers DESC
   `);
 
@@ -499,11 +499,14 @@ async function buildOwnerDashboardData() {
   const staleLeadCount = normalizedAlerts.filter((item) => item.type === 'stale_followup').length;
 
   const campaignRoi = campaignPerformance.map((campaign) => {
-    const config = campaignConfigs.find((item) => item.name === campaign.campaign_name);
+    const config = campaignConfigs.find((item) => Number(item.id) === Number(campaign.campaign_id))
+      || campaignConfigs.find((item) => item.name === campaign.campaign_name);
     const spend = Number(config?.monthly_spend_inr || 0);
     const pipeline = Number(campaign.revenue_pipeline || 0);
     return {
+      campaign_id: campaign.campaign_id == null ? null : Number(campaign.campaign_id),
       campaign_name: campaign.campaign_name,
+      historical_campaign_name: campaign.campaign_snapshot_name || null,
       service_name: config?.service_name || null,
       spend_inr: spend,
       active_leads: Number(campaign.active_leads || 0),

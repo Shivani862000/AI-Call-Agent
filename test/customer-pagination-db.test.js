@@ -46,19 +46,20 @@ test('customer pagination traverses a complete stable set and preserves the lega
       ids.push(row.lastID);
     }
 
-    const first = await get('/api/customers?page_size=2');
+    const filter = `patient_id=${patientId}`;
+    const first = await get(`/api/customers?page_size=2&${filter}`);
     assert.equal(first.status, 200, JSON.stringify(first.body));
     assert.equal(first.body.items.length, 2);
     assert.equal(first.body.hasMore, true);
     assert.ok(first.body.nextCursor);
 
-    const second = await get(`/api/customers?page_size=2&cursor=${encodeURIComponent(first.body.nextCursor)}`);
+    const second = await get(`/api/customers?page_size=2&${filter}&cursor=${encodeURIComponent(first.body.nextCursor)}`);
     assert.equal(second.status, 200, JSON.stringify(second.body));
     assert.equal(second.body.items.length, 2);
     assert.equal(second.body.hasMore, true);
     assert.ok(second.body.nextCursor);
 
-    const third = await get(`/api/customers?page_size=2&cursor=${encodeURIComponent(second.body.nextCursor)}`);
+    const third = await get(`/api/customers?page_size=2&${filter}&cursor=${encodeURIComponent(second.body.nextCursor)}`);
     assert.equal(third.status, 200, JSON.stringify(third.body));
     assert.equal(third.body.items.length, 1);
     assert.equal(third.body.hasMore, false);
@@ -75,11 +76,15 @@ test('customer pagination traverses a complete stable set and preserves the lega
     const legacy = await get('/api/customers');
     assert.equal(legacy.status, 200, JSON.stringify(legacy.body));
     assert.ok(Array.isArray(legacy.body));
-    assert.equal(legacy.body.length, ids.length);
+    const legacyIds = new Set(legacy.body.map((row) => Number(row.id)));
+    assert.ok(ids.every((id) => legacyIds.has(id)));
+    assert.ok(legacy.body.length >= ids.length);
 
     const badCursor = await get('/api/customers?page_size=2&cursor=broken');
     assert.equal(badCursor.status, 400);
     const tooLarge = await get('/api/customers?page_size=101');
     assert.equal(tooLarge.status, 400);
+    const badPatient = await get('/api/customers?page_size=2&patient_id=nope');
+    assert.equal(badPatient.status, 400);
   });
 });

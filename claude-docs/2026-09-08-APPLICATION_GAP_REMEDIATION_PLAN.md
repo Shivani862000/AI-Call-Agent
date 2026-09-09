@@ -14,7 +14,7 @@
 
 **Revision 2:** Incorporates [the review of this plan](2026-09-08-REMEDIATION_PLAN_REVIEW.md). C01–C14 dispositions appear below. Delivery now prioritizes an immediate DB-free authorization fix, bounded provider discovery, staged lifecycle activation and release-specific assurance. No confidence score is claimed without implementation evidence.
 
-**Prepared:** 8 September 2026. **Source baseline:** `95015780b0c2f02e415e6bfeb37375e2a735ca4a`; current schema expectation `0019`.
+**Prepared:** 8 September 2026. **Source baseline:** `95015780b0c2f02e415e6bfeb37375e2a735ca4a`; current branch schema expectation `0026`.
 
 ## Implementation progress
 
@@ -28,13 +28,13 @@
 - **P01 implementation and local verification complete:** disposable PG17/Node24 tests and connection/cleanup guards passed scoped review through `ed9a3e6`. The initial combined run passed 307 unit/18 DB checks; later affected checks include 20 full DB, six isolation and five role assertions. Hosted Linux CI execution, browser coverage and actual Supabase grant equivalence remain separate evidence gates. P07 import/schedule preservation is next. [Evidence](GAP_REMEDIATION_EVIDENCE.md#p01--disposable-database-testing-and-fixture-cleanup).
 - **P07 / F04 and schedule portion of F13 complete locally:** imports preserve omitted fields/restrictions, preview actual changes and revalidate identity/version in a transaction. Schedule comparisons/validation use the actual instant and India calling hours. Reviewed commits `c1fba27`, `346d294`; final targeted checks: 17 import unit, six import DB and three schedule DB tests pass. [Evidence](GAP_REMEDIATION_EVIDENCE.md#p07--import-and-schedule-preservation). P05 local recording/callback boundaries are also reviewed; P06 dependency updates are reviewed; production-image/runtime verification is next.
 - **P08 Task 1 / contact-policy correction is locally implemented:** canonical consent normalization, safe boolean parsing, patient-turn refusal precedence, blocked queue/manual-call checks, monotonic schema-free suppression, and ordinary-form restoration guards are covered by 28 focused unit assertions. Durable contact revisions/events, transactional queue cancellation and race tests remain open for the coordinated P09/P10 migration `0021` work. [Execution plan](remediation-execution/P08-contact-policy.md).
-- **P09 admission is partially durable:** the pure decision contract remains green, migration `0021` stores contact revisions/events and attempt reservations, all current outbound submitters use the transaction-backed reservation/idempotent response, and admission now locks the durable patient before budget checks. Unit **369/369** and DB **42/42** pass at current head; one focused concurrent two-queue-row race is covered. Provider reconciliation and the broader lifecycle/event/media race evidence remain open. [Execution plan](remediation-execution/P09-outbound-admission.md).
+- **P09 admission is partially durable:** the pure decision contract remains green, migration `0021` stores contact revisions/events and attempt reservations, all current outbound submitters use the transaction-backed reservation/idempotent response, and admission now locks the durable patient before budget checks. Unit **371/371** and DB **43/43** pass at current head; one focused concurrent two-queue-row race is covered. Provider reconciliation and the broader lifecycle/event/media race evidence remain open. [Execution plan](remediation-execution/P09-outbound-admission.md).
 - **P10 event identity is partially durable:** exact attempt/request/provider correlation, `0022` event quarantine, provider extra-parameter propagation and identifier-first outbound media hydration are implemented. Unknown callback IDs no longer fall back to a phone match. Unit **362/362** and DB **36/36** checks pass; transition fencing, provider-ID audit and restart/reconciliation evidence remain open. [Execution plan](remediation-execution/P10-call-events.md).
-- **P11 post-call durability is partially implemented:** migration `0023` adds revisioned stage jobs with leases, retry state and claim-token fencing; the pipeline and a boot/60-second recovery scan claim and complete a revision or record retry/manual-review state. Unit **369/369** and DB **42/42** checks pass. Stage separation, token-fenced final effects, lease renewal, outbox delivery and restart/failure-boundary evidence remain open. [Execution plan](remediation-execution/P11-post-call-jobs.md).
+- **P11 post-call durability is partially implemented:** migration `0023` adds revisioned stage jobs with leases, retry state and claim-token fencing; the pipeline and a boot/60-second recovery scan claim and complete a revision or record retry/manual-review state. Unit **371/371** and DB **43/43** checks pass. Stage separation, token-fenced final effects, lease renewal, outbox delivery and restart/failure-boundary evidence remain open. [Execution plan](remediation-execution/P11-post-call-jobs.md).
 - **P12 recording recovery is partially implemented:** trusted storage downloads reconstruct a missing transcript input, bounded private files use exclusive `0600` writes, and pipeline cleanup waits until transcription finishes. Unit **367/367** and focused recording/storage checks **14/14** pass. Separate stage status, storage/restart recovery and boot scans remain open. [Execution plan](remediation-execution/P12-recording-recovery.md).
 - **P13 feedback ownership is partially implemented:** migration `0024` backfills and requires `feedback.patient_id`, a trigger preserves compatibility for existing writers, patient deletion is protected, and feedback/reporting reads survive queue deletion. Unit **367/367** and DB **39/39** checks pass. An explicit shared feedback store, production backfill review and complete reader/deletion audit remain open. [Execution plan](remediation-execution/P13-feedback-patient-ownership.md).
 - **P14 reporting aggregates are partially implemented:** unrated positive calls no longer enter service recovery, and recovery totals are computed before the bounded display queue. Unit **367/367** and DB **40/40** checks pass. Other dashboard aggregates and browser/date-boundary evidence remain open. [Execution plan](remediation-execution/P14-reporting-aggregates.md).
-- **P15 campaign identity is partially implemented:** migration `0025` adds and backfills `customers.campaign_id`, compatibility writes resolve legacy names, and campaign reporting follows renamed configuration IDs. Unit **367/367** and DB **41/41** checks pass. Import/attempt/UI propagation and production backfill review remain open. [Execution plan](remediation-execution/P15-campaign-identity.md).
+- **P15 campaign identity is partially implemented:** migrations `0025` and `0026` add/backfill durable queue and call campaign identity, preserve a historical label through queue deletion, and make reporting resolve spend by campaign ID after renames. Unit **371/371** and DB **43/43** pass through schema `0026`; import/attempt/UI propagation and production backfill review remain open. [Execution plan](remediation-execution/P15-campaign-identity.md).
 - **P16 pagination has a bounded backend slice:** `GET /api/customers?page_size=&cursor=` now supports a stable `{items,nextCursor,hasMore}` response with a 50-row default, 100-row maximum and malformed-input rejection while preserving the legacy array response for existing callers. The isolated PostgreSQL regression passes; browser consumption, patients/import batching and performance measurement remain open. [Execution plan](remediation-execution/P16-customer-pagination.md).
 - **P18 scheduling-modal accessibility has a first slice:** the reachable shared modal uses native patient-choice buttons and radio inputs, visible focus styling, background inerting, Tab/Shift+Tab containment, Escape close and opener-focus restoration. The source regression passes 1/1; full keyboard, screen-reader and browser assessment remain open. [Execution plan](remediation-execution/P18-scheduling-modal-accessibility.md).
 - **P19 CSP has removed unused string evaluation:** the application source contains no `eval`/`new Function` consumer, and `unsafe-eval` is no longer emitted by Helmet. `unsafe-inline` and inline event attributes remain open for the separate page migration. [Execution plan](remediation-execution/P19-csp-script-eval.md).
@@ -178,7 +178,7 @@ flowchart TD
   P10 --> G2
   G2 --> P11 --> P12 --> G3["G3: schema 0023"]
   G3 --> P13 --> G4["G4: schema 0024"]
-  G4 --> P14 --> P15 --> G5["G5: schema 0025"]
+  G4 --> P14 --> P15 --> G5["G5: schema 0026"]
   P14 --> P16
   P07 --> P16
   P04 --> P17
@@ -194,7 +194,7 @@ The inspected checkout is `uat-kcpathlab`; `master` is the production branch nam
 
 ### Fixed schema sequence
 
-Allocation revised 9 September: `0021` remains the contact/attempt lifecycle migration; `0022` is the event inbox and `0023` is post-call jobs. Future retained-history and campaign migrations therefore begin at `0024` and `0025`. No applied or shared migration is renumbered.
+Allocation revised 9 September: `0021` remains the contact/attempt lifecycle migration; `0022` is the event inbox and `0023` is post-call jobs. Retained history uses `0024`, queue identity uses `0025`, and call-level campaign snapshots use `0026`. No applied or shared migration is renumbered.
 
 These names describe planned migrations, not files created by this document. If the repository advances before implementation starts, revise this entire table once before distributing any new migration; never repair ordering by renumbering deployed files.
 
@@ -205,7 +205,8 @@ These names describe planned migrations, not files created by this document. If 
 | `0022_call_event_inbox.sql` | P10: durable provider event quarantine for matched, unmatched, ambiguous and conflicting callback identities. | Exact event matching, safe unmatched handling and callback identity tests. |
 | `0023_post_call_jobs.sql` | P11–P12: stage jobs, claim ownership/expiry/retries, uniqueness for automatic feedback/effects, notification outbox. | Workflow and helper completion ownership; restart/failure tests. |
 | `0024_feedback_patient_ownership.sql` | P13: durable feedback patient link, backfill, writer invariant, deletion protection and necessary indexes. | All feedback writers, retained-history readers, and fixture cleanup updated. |
-| `0025_campaign_identity.sql` | P15: campaign IDs on queue/attempt history, backfill, explicit compatible view projection, relevant keys/indexes. | Create/update/import writers, configuration projection, report grouping and UI updated. |
+| `0025_campaign_identity.sql` | P15: campaign IDs on queue rows, unique-name backfill, compatibility writer trigger and identity index. | Create/update/import writers and queue identity consumers. |
+| `0026_call_campaign_snapshot.sql` | P15: campaign ID/name snapshots on calls, call backfill/trigger, campaign identity index and appended queue-view projection. | Call writers, retained-history reporting, rename/deletion regression and schema upgrade verification. |
 
 Each release updates `EXPECTED_SCHEMA_VERSION` and an explicit required-migration manifest in the same change. P03 replaces maximum-version-only validation with required-set validation and a tested compatibility bound. Fresh installs and upgrades from `0019` must both pass, including nonempty backfills, duplicate identifiers, and a failed intermediate migration.
 
@@ -587,14 +588,14 @@ assert.equal(detectConversationOutcome({
 
 ### P15 — Preserve campaign identity through renames and history
 
-**Owner:** Backend/data/product. **Gaps:** F19; R14. **Dependencies:** P13/P14; schema `0025`.
+**Owner:** Backend/data/product. **Gaps:** F19; R14. **Dependencies:** P13/P14; schema `0026`.
 
-**Create:** `supabase/migrations/0024_campaign_identity.sql`, `test/campaign-attribution.test.js`.
+**Create:** `supabase/migrations/0025_campaign_identity.sql`, `supabase/migrations/0026_call_campaign_snapshot.sql`, `test/campaign-attribution.test.js`.
 **Modify:** `routes/campaigns.js`, `routes/customers.js`, `src/scheduler.js`, `services/outbound-admission.js`, `services/reporting.js`, campaign selection UI and schema expectation.
 
-- [ ] Add stable campaign IDs to new queue entries and snapshot attribution on calls so queue deletion does not erase campaign membership. Backfill only unique normalized-name matches; mark ambiguous/unassigned rows and preserve legacy names for review.
-- [ ] Recreate/replace `customer_queue` with its existing column names/order/types explicitly preserved and new columns appended. Preserve grants/security options/dependencies. A prior `SELECT c.*` view does not automatically expose later table columns; verify the resulting schema, not only the migration text.
-- [ ] Update all campaign writers and include `campaign_configs.id` in reporting's configuration projection. Group by stable ID; use current name for display and retain historical label separately. Do not group by both name and ID in a way that splits a renamed campaign.
+- [ ] Add stable campaign IDs to new queue entries and snapshot attribution on calls so queue deletion does not erase campaign membership. The ID/snapshot path is implemented; ambiguous-name review and production backfill evidence remain open.
+- [ ] Recreate/replace `customer_queue` with its existing column names/order/types preserved and the campaign ID appended. The append-only view migration is implemented; grants/security-option verification remains open.
+- [x] Update campaign writers and include `campaign_configs.id` in reporting's configuration projection. Group by stable ID; use current name for display and retain the historical call/queue label separately.
 - [ ] Attribute configured monthly spend once per campaign and declared reporting period. Keep an all-time pipeline/monthly-spend ratio explicitly labeled until a time-aligned business metric is defined; do not present it as realized financial ROI.
 - [ ] Prefer archiving referenced configurations over deleting identity. Test old/new names, post-rename rows, case/whitespace ambiguity, unassigned rows, archived configs, retained calls and no-spend cases through real report functions.
 

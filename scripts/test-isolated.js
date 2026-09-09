@@ -388,11 +388,17 @@ async function runDatabase(requestedFile, { runtime = false, full = false } = {}
     process.stdout.write(provisioned.output);
     if (provisioned.exitCode !== 0) throw new Error(`test role provisioning exited ${provisioned.exitCode}`);
     if (!runtime || full) {
-      const tested = await runner.exec(
-        ['node', '--test', '--test-reporter=spec', ...selected], { workingDir: '/app', env }
-      );
-      process.stdout.write(tested.output);
-      if (tested.exitCode !== 0) throw new Error(`database test process exited ${tested.exitCode}`);
+      // Database test files share one owned database. Run each file in its own
+      // child process so one fixture cannot be created or cleaned up while
+      // another file is taking a global count/snapshot. The container, roles
+      // and migration identity remain shared and still exercise upgrade use.
+      for (const file of selected) {
+        const tested = await runner.exec(
+          ['node', '--test', '--test-reporter=spec', file], { workingDir: '/app', env }
+        );
+        process.stdout.write(tested.output);
+        if (tested.exitCode !== 0) throw new Error(`database test process exited ${tested.exitCode} (${file})`);
+      }
     }
     if (full) {
       const version = await runner.exec(['node', '-p', 'process.version']);

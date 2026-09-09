@@ -202,7 +202,7 @@ Date: 9 September 2026. Prerequisite: P09/P10 local lifecycle slices. [Execution
 
 - Migration `0023_post_call_jobs.sql` adds revisioned, RLS-protected stage-job rows with retry state, due indexes, claim leases/tokens and call-delete cascade.
 - `services/post-call-jobs.js` provides deterministic input revisions, bounded retry delays, row-locked claims and token-fenced completion/failure transitions. The post-call pipeline claims before work and records blocked/retry state for missing input or processing errors.
-- Verification: isolated unit suite **369/369** and isolated PostgreSQL suite **42/42** passed after migrating through schema `0025`. Focused regressions cover duplicate claims, wrong-token completion, retry state, cascade cleanup, bounded recovery scanning and patient-level admission serialization.
+- Verification: isolated unit suite **371/371** and isolated PostgreSQL suite **43/43** passed after migrating through schema `0026`. Focused regressions cover duplicate claims, wrong-token completion, retry state, cascade cleanup, bounded recovery scanning and patient-level admission serialization.
 
 Stage-specific recovery, token-fenced final effects, lease renewal, notification outbox delivery and legacy backfill/reconciliation remain open. This is durable job ownership plus due-job rediscovery, not a claim of exactly-once completion. No provider, notification, storage or deployment boundary was used.
 
@@ -240,9 +240,9 @@ Other report/export aggregates and browser/date-boundary verification remain ope
 
 Date: 9 September 2026. Prerequisite: durable customer/queue identity. [Execution plan and detailed evidence](remediation-execution/P15-campaign-identity.md).
 
-- Migration `0025_campaign_identity.sql` adds and backfills `customers.campaign_id`, keeps legacy names compatible through a trigger, and indexes the identity for reporting.
-- Customer writes accept a campaign ID, and campaign reporting resolves the current campaign configuration name through that ID so renames do not split attribution.
-- Verification at the P13 slice: isolated unit suite **367/367** and PostgreSQL suite **39/39** passed through schema `0024`; the current branch suite is **369/369** and **42/42** after P14/P15, recovery and patient-lock tests.
+- Migration `0025_campaign_identity.sql` adds and backfills `customers.campaign_id`, keeps legacy names compatible through a trigger, and indexes the identity for reporting. Migration `0026_call_campaign_snapshot.sql` adds and backfills call-level campaign ID/name snapshots and appends the ID to the queue view.
+- Customer writes accept a campaign ID, and campaign reporting resolves configuration name and spend by durable ID while retaining the historical queue/call label.
+- Verification: isolated unit suite **371/371** and PostgreSQL suite **43/43** passed through schema `0026`; the focused database regression covers call snapshots, queue-view projection, rename continuity and exact spend/pipeline attribution.
 
 Import/attempt/UI propagation, ambiguous-name review and production backfill remain open; P15 is not complete.
 

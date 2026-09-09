@@ -42,7 +42,7 @@ test('production amd64 image boots and serves bcrypt login, XLSX import, Unicode
   const cookie = signedIn.headers.get('set-cookie').split(';')[0];
   const headers = { cookie, origin: base };
   assert.equal((await request('/admin.html', { headers })).status, 200);
-  console.log('Readiness, database schema 0025 and real bcrypt password login verified');
+  console.log('Readiness, database schema 0026 and real bcrypt password login verified');
 
   const workbook = new (require('exceljs').Workbook)();
   const sheet = workbook.addWorksheet('Synthetic patients');

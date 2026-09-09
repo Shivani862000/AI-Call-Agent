@@ -17,7 +17,7 @@ const { resolveDatabaseUrl } = require('./src/config');
 const { databaseErrorSummary } = require('./src/database-error');
 
 /** Bump this when a migration is added. Checked against Supabase at boot. */
-const EXPECTED_SCHEMA_VERSION = '0025';
+const EXPECTED_SCHEMA_VERSION = '0026';
 
 let pool;
 

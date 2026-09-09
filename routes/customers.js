@@ -512,6 +512,16 @@ router.get('/', async (req, res) => {
     const cursor = req.query.cursor == null ? null : decodeCustomerCursor(req.query.cursor);
     if (req.query.cursor != null && !cursor) return res.status(400).json({ error: 'cursor is invalid or expired' });
 
+    const requestedPatientId = req.query.patient_id ?? req.query.patientId;
+    if (Array.isArray(requestedPatientId)
+        || (requestedPatientId != null && !/^\d+$/.test(String(requestedPatientId)))) {
+      return res.status(400).json({ error: 'patient_id must be a positive integer' });
+    }
+    const patientId = requestedPatientId == null ? null : Number(requestedPatientId);
+    if (patientId != null && (!Number.isSafeInteger(patientId) || patientId < 1)) {
+      return res.status(400).json({ error: 'patient_id must be a positive integer' });
+    }
+
     const cursorClause = cursor ? `
       AND (
         COALESCE(priority_score, 0) < ?
@@ -520,12 +530,14 @@ router.get('/', async (req, res) => {
           OR (COALESCE(created_at, '1970-01-01T00:00:00.000Z') = ? AND id < ?)
         ))
       )` : '';
-    const params = cursor
-      ? [cursor.priority, cursor.priority, cursor.createdAt, cursor.createdAt, cursor.id, pageSize + 1]
-      : [pageSize + 1];
+    const patientClause = patientId == null ? '' : ' AND patient_id = ?';
+    const params = [];
+    if (patientId != null) params.push(patientId);
+    if (cursor) params.push(cursor.priority, cursor.priority, cursor.createdAt, cursor.createdAt, cursor.id);
+    params.push(pageSize + 1);
     const customers = await dbAll(
       `SELECT * FROM customer_queue
-        WHERE 1 = 1${cursorClause}
+        WHERE 1 = 1${patientClause}${cursorClause}
         ORDER BY COALESCE(priority_score, 0) DESC,
                  COALESCE(created_at, '1970-01-01T00:00:00.000Z') DESC,
                  id DESC
