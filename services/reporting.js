@@ -560,11 +560,73 @@ async function buildOwnerDashboardData() {
   };
 }
 
+/**
+ * Calls and feedback from a rolling window, for the owner's daily digest.
+ *
+ * The window is computed in SQL rather than from a JS Date: the other ranges in
+ * this file derive their day boundaries from the server's local time, which on
+ * a UTC host is not the day an IST reader means.
+ *
+ * `has_recording` mirrors what GET /api/calls/:id/recording can actually serve,
+ * so the email never offers a link that answers 404.
+ *
+ * A failing query throws rather than yielding []. runOwnerDigestTick logs the
+ * failure and leaves last_sent_date alone, so the digest retries -- far better
+ * than mailing an empty report that reads as "no calls happened".
+ */
+async function buildDigestCallReport({ hours = 24 } = {}) {
+  const window = Number(hours) || 24;
+  const calls = await dbAll(`
+    SELECT
+      calls.id,
+      COALESCE(NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), ''), q.name) AS patient_name,
+      q.phone AS customer_phone,
+      calls.outcome,
+      calls.called_at,
+      calls.answered_at,
+      calls.ended_at,
+      COALESCE(NULLIF(calls.analysis_summary, ''), NULLIF(calls.summary, ''), NULLIF(calls.report_excerpt, '')) AS summary,
+      (calls.transcript_text IS NOT NULL AND LENGTH(TRIM(calls.transcript_text)) > 0) AS has_transcript,
+      (
+        (calls.recording_object_key IS NOT NULL AND calls.recording_status = 'stored')
+        OR COALESCE(calls.recording_url, '') <> ''
+      ) AS has_recording
+    FROM calls
+    LEFT JOIN customer_queue q ON q.id = calls.customer_id
+    LEFT JOIN patients p ON p.id = calls.patient_id
+    WHERE calls.called_at >= now() - make_interval(hours => ?)
+    ORDER BY calls.called_at DESC
+    LIMIT 100
+  `, [window]);
+
+  const feedback = await dbAll(`
+    SELECT
+      f.id,
+      f.call_id,
+      COALESCE(NULLIF(TRIM(CONCAT_WS(' ', p.first_name, p.last_name)), ''), q.name) AS patient_name,
+      f.category,
+      f.stars,
+      f.review_text,
+      f.source,
+      f.submitted_at
+    FROM feedback f
+    LEFT JOIN customer_queue q ON q.id = f.customer_id
+    LEFT JOIN calls c ON c.id = f.call_id
+    LEFT JOIN patients p ON p.id = c.patient_id
+    WHERE f.submitted_at >= now() - make_interval(hours => ?)
+    ORDER BY f.submitted_at DESC
+    LIMIT 50
+  `, [window]);
+
+  return { calls, feedback };
+}
+
 module.exports = {
   getTodayDateRange,
   getYesterdayDateRange,
   getCurrentWeekDateRange,
   buildReportData,
   buildWeeklySummary,
-  buildOwnerDashboardData
+  buildOwnerDashboardData,
+  buildDigestCallReport
 };

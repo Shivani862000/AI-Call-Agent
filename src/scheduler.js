@@ -227,28 +227,44 @@ function formatExpectedVisitors(rows) {
   ].join('\n');
 }
 
+/**
+ * Builds the digest as { text, html }.
+ *
+ * The call and feedback sections cover a rolling 24 hours computed in SQL. The
+ * alerts, expected visitors and pipeline figures come from the existing
+ * dashboard rollup and keep its own windows -- see claude-docs/PENDING-WORK.md
+ * item 5.
+ */
 async function buildDigestBody() {
-  const digest = await buildOwnerDashboardData();
-  const rupees = (value) => `Rs ${Number(value || 0).toFixed(0)}`;
-  const expectedVisitors = formatExpectedVisitors(await buildExpectedVisitors());
+  const { buildDigestCallReport } = require('../services/reporting');
+  const { renderDigest } = require('../services/digest-email');
+  const { PUBLIC_BASE_URL, HAS_CONFIGURED_PUBLIC_BASE_URL } = require('./config');
 
-  const alerts = digest.alerts?.length
-    ? `Priority alerts:\n- ${digest.alerts.map((item) => `${item.customer_name}: ${item.headline}`).join('\n- ')}`
-    : 'Priority alerts: none';
+  const config = await settings.get('owner_digest').catch(() => ({}));
+  const [digest, report, visitors] = await Promise.all([
+    buildOwnerDashboardData(),
+    buildDigestCallReport({ hours: 24 }),
+    buildExpectedVisitors()
+  ]);
 
-  return [
-    digest.digest_text,
-    '',
-    `Revenue pipeline: ${rupees(digest.roi_snapshot?.revenue_pipeline_estimate)}`,
-    `Estimated AI ops cost: ${rupees(digest.roi_snapshot?.ai_ops_cost_estimate)}`,
-    `Estimated staff saving: ${rupees(digest.roi_snapshot?.estimated_saving_vs_staff)}`,
-    '',
-    alerts,
-    '',
-    expectedVisitors,
-    '',
-    'This message contains patient information. Handle accordingly.'
-  ].join('\n');
+  if (!HAS_CONFIGURED_PUBLIC_BASE_URL) {
+    logger.warn('OWNER_DIGEST_NO_LINKS', { reason: 'PUBLIC_BASE_URL is not configured' });
+  }
+
+  return renderDigest({
+    windowHours: 24,
+    timezone: config?.timezone || 'Asia/Kolkata',
+    // A localhost link in the owner's inbox is worse than no link at all.
+    baseUrl: HAS_CONFIGURED_PUBLIC_BASE_URL ? PUBLIC_BASE_URL : '',
+    calls: report.calls,
+    feedback: report.feedback,
+    alerts: digest.alerts || [],
+    expectedVisitors: visitors.map((row) => ({
+      name: `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Unnamed patient',
+      when: String(row.intended_visit_note || row.redonation_note || '').trim()
+    })),
+    roi: digest.roi_snapshot || {}
+  });
 }
 
 /** True once the configured local send time has passed today. */
@@ -270,11 +286,12 @@ async function sendOwnerDigest({ force = false, to = null } = {}) {
   if (recipients.length === 0) return { sent: false, reason: 'no recipients configured' };
   if (!isMailConfigured()) return { sent: false, reason: 'SMTP is not configured' };
 
-  const body = await buildDigestBody();
+  const { text, html } = await buildDigestBody();
   const result = await sendMail({
     to: recipients,
     subject: `${CLIENT_NAME || 'Path Lab'} — daily call digest`,
-    text: body
+    text,
+    html
   });
   logger.info('OWNER_DIGEST_SENT', { recipients: recipients.length, forced: force });
   return { sent: true, ...result };
