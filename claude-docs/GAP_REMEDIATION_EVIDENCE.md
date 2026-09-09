@@ -74,3 +74,28 @@ Date: 8 September 2026. Prerequisite: `d0f3f61`.
 - The real configuration snapshot and DB initialization code run with an inert dotenv and fake pool; no database connection or real credentials are loaded. Success uses a synthetic `0019` schema row. This does not establish real schema/runtime compatibility.
 
 P06 remains open for Docker context/image-layer exclusion proof, runtime upgrade and full isolated image startup, broader application/provider error paths, and operational credential-exposure assessment. P04–P06 are partial local implementations, not complete release gates.
+
+## P00b — Additional pure behavior reproductions
+
+Date: 9 September 2026. Application behavior baseline: `8aa79ec`; P01 infrastructure changes are concurrently uncommitted and were not used by these reproductions.
+
+An explicitly audited DB-free Node stdin program, launched with `env -i PATH="$PATH" NODE_ENV=test node`, imported only the pure `services/call-orchestration.js` and `src/patient-import.js` code (the latter's helper/config dependencies do not initialize DB, dotenv, providers or timers). It used a nondialable all-zero fixture number and an `example.invalid` email. No file, database, provider or notification mutation occurred.
+
+- F05: `detectConversationOutcome({ transcriptText: 'CUSTOMER: I am not interested.' })` returned `interested`, failing the expected `not_interested` assertion.
+- F04: a first-name/phone-only import matching a refused, suppressed, inactive patient generated an update payload containing `consent_status: unknown`, `do_not_call: 0` and `status: active`.
+- F04: that same upload generated `notes: null` and `email: null` despite neither column being present.
+
+Result: three intended behavior failures, exit 1. This proves the pure classification/payload defects; persisted import behavior and contact-event races still require P07/P08 real-route/database regressions. No post-fix result is claimed here.
+
+## P01/P02 — Deployed PostgreSQL major verification
+
+Date: 9 September 2026. The user identified Supabase as the managed database. Read-only navigation in the already-authenticated Supabase dashboard showed these **Service versions → Postgres version** values:
+
+| Project | Reported version | Evidence surface |
+| --- | --- | --- |
+| `ai-call-agent-kcpathdb-dev` | `17.6.1.166` | [General settings](https://supabase.com/dashboard/project/zedslcznathmuaetllgn/settings/general) |
+| `ai-call-agent-kcpathdb` | `17.6.1.166` | [General settings](https://supabase.com/dashboard/project/quaorcrmgmzozjbehadl/settings/general) |
+
+This resolves the PostgreSQL-major prerequisite for a PG17 lab. It does not establish equivalence of Supabase extensions, roles, view grants, storage policies or production behavior. No SQL was executed, records read, credentials revealed, settings saved or service lifecycle action taken. The temporary research tab was closed afterward.
+
+The production project overview also displayed an Advisor warning for the `public.customer_queue` SECURITY DEFINER view and a “No backups” overview label. Those are actionable inputs for P03/P04 permission and recovery assessment; they are not proof of an exposed Data API or absence of an independently managed backup. Neither was dismissed or modified.

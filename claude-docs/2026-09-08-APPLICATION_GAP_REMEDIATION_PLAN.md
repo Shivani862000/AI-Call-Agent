@@ -24,6 +24,8 @@
 - **P06, database log portion:** implemented locally; configuration snapshots omit database credentials, and initialization/pool diagnostics use fixed safe messages. Current `npm run test:remediation`: 56 pass, no failures/skips. Image/runtime compatibility, Docker context proof, broader logs and incident assessment remain open.
 - **Release status:** not deployed. G0 still requires P03a deployment isolation. P04 database-backed session/privacy checks and P05 callback protections remain open.
 - **Current user-selected sequence:** groups 3–7, starting with P04 security/privacy, then P05–P19 and P20 evidence. Work proceeds one reviewable item at a time. P01/P02 prerequisite decisions and P03 release gates remain required where applicable; selecting product fixes first does not authorize a deployment or shared-UAT tests.
+- **9 September continuation:** the user requested completion of all remaining work. P01 is being implemented first to enable safe real database regressions; subsequent fixes proceed one item at a time. Local Docker setup is included in that instruction. The user confirmed Supabase manages the deployed database; read-only dashboard inspection subsequently verified PostgreSQL major 17 in both projects (service build `17.6.1.166`). Supabase role/extension equivalence still needs separate verification.
+- **P02 working contracts:** [Domain and policy decisions](APPLICATION_DOMAIN_CONTRACTS.md) and [provider capability matrix](ICALLMATE_CAPABILITY_MATRIX.md) record implementation choices and unresolved external evidence. These documents do not claim provider compatibility or completion of operational assessments.
 
 ## Scope, status, and execution rules
 
