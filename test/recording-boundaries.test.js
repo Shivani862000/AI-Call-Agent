@@ -17,6 +17,12 @@ function pipelineModule(fetch, recording, transcribe = async () => '', fileSyste
       if (name === './system-logger') return { info() {}, warn() {} };
       if (name === './supabase-storage') return { isStorageConfigured: () => false };
       if (name === './gemini') return { transcribeAudioFile: transcribe };
+      if (name === './post-call-jobs') return {
+        buildInputRevision: () => 'synthetic-revision',
+        claimPostCallJob: async () => ({ state: 'claimed', job: { id: 1, attempt_count: 1 }, token: 'synthetic-token' }),
+        completePostCallJob: async () => true,
+        failPostCallJob: async () => true
+      };
       return {};
     }
   });

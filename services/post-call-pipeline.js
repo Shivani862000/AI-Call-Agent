@@ -13,6 +13,12 @@ const {
 } = require('./call-orchestration');
 const { syncCallToCrm, sendHotLeadAlert } = require('./crm-sync');
 const { dbTx } = require('../db');
+const {
+  buildInputRevision,
+  claimPostCallJob,
+  completePostCallJob,
+  failPostCallJob
+} = require('./post-call-jobs');
 
 const os = require('node:os');
 const { pipeline } = require('node:stream/promises');
@@ -140,25 +146,28 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     return { ok: false, reason: 'already_processed' };
   }
 
-  const claimResult = await dbRun(
+  const inputRevision = buildInputRevision(callRecord);
+  const claim = await claimPostCallJob({ dbTx, callId: callRecord.id, inputRevision });
+  if (claim.state === 'completed') return { ok: false, reason: 'already_processed' };
+  if (claim.state === 'busy') return { ok: false, reason: 'already_processing' };
+  if (claim.state !== 'claimed') return { ok: false, reason: claim.state };
+
+  const jobId = claim.job.id;
+  const claimToken = claim.token;
+  await dbRun(
     `UPDATE calls
-        SET transcript_status = ?,
-            analysis_status = ?
-      WHERE id = ?
-        AND COALESCE(analysis_status, 'pending') NOT IN ('processing', 'completed')`,
+        SET transcript_status = ?, analysis_status = ?
+      WHERE id = ? AND COALESCE(analysis_status, 'pending') <> 'completed'`,
     ['processing', 'processing', callRecord.id]
   );
 
-  if (!claimResult.changes) {
-    return { ok: false, reason: 'already_processing' };
-  }
-
-  logger.info('FEEDBACK_ANALYSIS_STARTED', {
+  try {
+    logger.info('FEEDBACK_ANALYSIS_STARTED', {
     callId: callRecord.id,
     customerId: callRecord.customer_id,
     patient: callRecord.customer_name,
     phone: callRecord.customer_phone
-  });
+    });
 
   let recordingLocalPath = null;
   if (!callRecord.recording_object_key && callRecord.recording_url) {
@@ -196,6 +205,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
 
   if (!transcriptText) {
     await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['missing', 'blocked', callRecord.id]);
+    await failPostCallJob({ dbTx, jobId, claimToken, attemptCount: claim.job.attempt_count, errorCode: 'no_transcript_available' });
     logger.warn('FEEDBACK_PENDING', {
       callId: callRecord.id,
       customerId: callRecord.customer_id,
@@ -422,6 +432,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     );
   }
 
+  await completePostCallJob({ dbTx, jobId, claimToken });
   return {
     ok: true,
     callId: callRecord.id,
@@ -430,6 +441,16 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     feedbackId: feedbackResult.feedbackId,
     workflowResult
   };
+  } catch (error) {
+    await failPostCallJob({
+      dbTx,
+      jobId,
+      claimToken,
+      attemptCount: claim.job.attempt_count,
+      errorCode: error.code || error.name || 'post_call_failed'
+    }).catch(() => {});
+    throw error;
+  }
 }
 
 module.exports = {

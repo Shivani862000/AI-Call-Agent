@@ -10,7 +10,7 @@ async function main() {
   await runMigrations({
     connectionString,
     migrationsDir: path.join(__dirname, '..', 'supabase', 'migrations'),
-    expectedVersion: '0022',
+    expectedVersion: '0023',
     validateConnection: (target) => assertOwnedTestDatabase(target, process.env, 'migration-owner')
   });
 }

@@ -18,6 +18,7 @@ async function removeTestPatient(patientId, { callIds = [] } = {}) {
   const calls = [...new Set([...callIds, ...ownedCalls.map((call) => call.id)])];
 
   for (const callId of calls) {
+    await dbRun('DELETE FROM post_call_jobs WHERE call_id = ?', [callId]);
     await dbRun('DELETE FROM call_supervisor_events WHERE call_id = ?', [callId]);
     await dbRun('DELETE FROM feedback WHERE call_id = ?', [callId]);
     await dbRun('DELETE FROM calls WHERE id = ?', [callId]);

@@ -193,3 +193,13 @@ Date: 9 September 2026. Dependencies: P09 durable attempts and provider capabili
 - Added `src/call-events.js` with exact attempt/request/provider matching. Supplied unknown IDs remain unmatched; phone-only compatibility is off by default and only accepts one eligible candidate when explicitly enabled.
 - Added `0022_call_event_inbox.sql` and routed the authenticated iCallMate callback through durable event quarantine before matched call updates. Outbound provider extra parameters now carry the attempt/request identity, and outbound media hydration prefers those identifiers over phone recency.
 - Verification: identity tests **7/7**, isolated unit suite **362/362**, isolated PostgreSQL suite **36/36** on schema `0022`. Transport/disposition transition fencing, provider-ID historical audit and restart/timeout reconciliation remain open; P10 is not complete.
+
+## P11 — Durable post-call job ownership (partial)
+
+Date: 9 September 2026. Prerequisite: P09/P10 local lifecycle slices. [Execution plan and detailed evidence](remediation-execution/P11-post-call-jobs.md).
+
+- Migration `0023_post_call_jobs.sql` adds revisioned, RLS-protected stage-job rows with retry state, due indexes, claim leases/tokens and call-delete cascade.
+- `services/post-call-jobs.js` provides deterministic input revisions, bounded retry delays, row-locked claims and token-fenced completion/failure transitions. The post-call pipeline claims before work and records blocked/retry state for missing input or processing errors.
+- Verification: isolated unit suite **364/364** and isolated PostgreSQL suite **37/37** passed after migrating through schema `0023`. The focused DB regression covers duplicate claims, wrong-token completion, retry state and cascade cleanup.
+
+Stage-specific recovery, token-fenced final effects, boot/restart scans, notification outbox delivery and legacy backfill/reconciliation remain open. This is durable job ownership, not a claim of exactly-once completion. No provider, notification, storage or deployment boundary was used.

@@ -36,6 +36,7 @@ const UNIT_FILES = [
   'test/no-sqlite-sql.test.js', 'test/patient-import.test.js',
   'test/outbound-admission.test.js',
   'test/patient-rules.test.js', 'test/queue-rules.test.js',
+  'test/post-call-jobs.test.js',
   'test/review-call-script.test.js', 'test/slack-alerts.test.js',
   'test/sql-compat.test.js', 'test/supabase-storage-config.test.js',
   'test/support-ticket.test.js', 'test/support-widget.test.js',
@@ -44,6 +45,7 @@ const UNIT_FILES = [
 const DB_FILES = [
   'test/daily-call-limit.test.js', 'test/fixture-cleanup.test.js',
   'test/outbound-admission-db.test.js', 'test/outbound-context.test.js', 'test/patient-import-route.test.js', 'test/retention.test.js', 'test/role-isolation.test.js',
+  'test/post-call-jobs-db.test.js',
   'test/schema-triggers.test.js', 'test/schedule-edit.test.js'
 ];
 const PACKAGING_FILES = ['test/image-context.test.js'];

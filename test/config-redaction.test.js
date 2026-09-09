@@ -50,7 +50,7 @@ async function databaseFixture(failure) {
         on(event, handler) { assert.equal(event, 'error'); poolError = handler; }
         async query(sql) {
           if (failure) throw failure;
-          return { rows: sql.includes('schema_migrations') ? [{ version: '0022' }] : [] };
+          return { rows: sql.includes('schema_migrations') ? [{ version: '0023' }] : [] };
         }
         async end() {}
       }
@@ -82,7 +82,7 @@ test('idle pool errors omit raw error messages while healthy initialization stil
   fixture.poolError(Object.assign(new Error('secret-password'), { code: 'secret-query-token' }));
   const output = fixture.messages.join('\n');
   assert.doesNotMatch(output, /secret-password|secret-query-token/);
-  assert.match(output, /0022/);
+  assert.match(output, /0023/);
   assert.match(output, /connection reset/i);
   await fixture.db.closeDatabase();
 });

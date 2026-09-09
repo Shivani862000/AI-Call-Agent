@@ -30,6 +30,7 @@
 - **P08 Task 1 / contact-policy correction is locally implemented:** canonical consent normalization, safe boolean parsing, patient-turn refusal precedence, blocked queue/manual-call checks, monotonic schema-free suppression, and ordinary-form restoration guards are covered by 28 focused unit assertions. Durable contact revisions/events, transactional queue cancellation and race tests remain open for the coordinated P09/P10 migration `0021` work. [Execution plan](remediation-execution/P08-contact-policy.md).
 - **P09 admission is partially durable:** the pure decision contract remains green, migration `0021` now stores contact revisions/events and attempt reservations, and all current outbound submitters (`/call/start`, `/api/calls/initiate/:customerId`, `/api/icallmate/outgoing-call`, the legacy calls router and scheduler) use the transaction-backed reservation/idempotent response. Unit **355/355** and DB **36/36** checks pass. Concurrent/race, provider reconciliation and event/media identity evidence remain open. [Execution plan](remediation-execution/P09-outbound-admission.md).
 - **P10 event identity is partially durable:** exact attempt/request/provider correlation, `0022` event quarantine, provider extra-parameter propagation and identifier-first outbound media hydration are implemented. Unknown callback IDs no longer fall back to a phone match. Unit **362/362** and DB **36/36** checks pass; transition fencing, provider-ID audit and restart/reconciliation evidence remain open. [Execution plan](remediation-execution/P10-call-events.md).
+- **P11 post-call durability is partially implemented:** migration `0023` adds revisioned stage jobs with leases, retry state and claim-token fencing; the existing post-call pipeline now claims and completes a revision or records a retry/manual-review state. Unit **364/364** and DB **37/37** checks pass. Stage separation, token-fenced final effects, boot recovery, outbox delivery and restart/failure-boundary evidence remain open. [Execution plan](remediation-execution/P11-post-call-jobs.md).
 - **P02 working contracts:** [Domain and policy decisions](APPLICATION_DOMAIN_CONTRACTS.md) and [provider capability matrix](ICALLMATE_CAPABILITY_MATRIX.md) record implementation choices and unresolved external evidence. These documents do not claim provider compatibility or completion of operational assessments.
 
 ## Scope, status, and execution rules
@@ -96,9 +97,9 @@ The original planning pass changed documentation only and did not run applicatio
 | G1a — contact/data protection, schema `0019` | P01, P03b, schema-free P04–P07 and P08's explicitly schema-free vocabulary/negative-intent/suppression fixes. Release verified smaller changes within this group as ready. | Forged callbacks, secret exposure, import resets and known refusal errors. Lifecycle races remain open until G2. |
 | G1b — durable access, schema `0020` | P04 durable credential/session revocation and caller-permission queue view, after P03b compatibility/recovery. | Copied-cookie replay after logout/restart and browser-role view exposure. |
 | G2 — call lifecycle, schema `0021` | Durable part of P08 plus P09/P10; provider contract gate, bounded replay/shadow/canary and calling controls. | Duplicate/unknown submissions, wrong-attempt events, stale contact decisions and capacity. |
-| G3 — recoverable processing, schema `0022` | P11/P12 with restart/fencing/storage recovery evidence. | Premature completion, abandoned work and recording races. |
-| G4 — retained history, schema `0023` | P13; P14 follows after durable history/disposition are available. | Unattributed feedback, missing history and sampled metrics. |
-| G5 — attribution and scale, schema `0024` | P15; P16 follows P07/P13/P14 and adds only measured index migrations. | Campaign identity and complete bounded lists/imports. |
+| G3 — recoverable processing, schema `0023` | P11/P12 with restart/fencing/storage recovery evidence. | Premature completion, abandoned work and recording races. |
+| G4 — retained history, schema `0024` | P13; P14 follows after durable history/disposition are available. | Unattributed feedback, missing history and sampled metrics. |
+| G5 — attribution and scale, schema `0025` | P15; P16 follows P07/P13/P14 and adds only measured index migrations. | Campaign identity and complete bounded lists/imports. |
 | GU — interface release, no assumed new schema | P17 starts once P00a/P01/P04/P06 permit authenticated startup; P18/P19 follow. This lane need not wait for G5. | Keyboard/task accessibility, CSP and UI regressions. |
 
 The assessment register names the exact releases it blocks. P20 coordinates evidence only; it is no longer a late umbrella implementation/assessment phase. A targeted G0 access/packaging/release check is required, while unrelated full penetration/load/voice programmes do not delay that hotfix.
@@ -186,7 +187,7 @@ The inspected checkout is `uat-kcpathlab`; `master` is the production branch nam
 
 ### Fixed schema sequence
 
-Allocation revised 9 September before any post-`0019` migration exists: `0020` closes durable access; the still-uncreated lifecycle migrations move to `0021`–`0024`. No applied or shared migration is renumbered.
+Allocation revised 9 September: `0021` remains the contact/attempt lifecycle migration; `0022` is the event inbox and `0023` is post-call jobs. Future retained-history and campaign migrations therefore begin at `0024` and `0025`. No applied or shared migration is renumbered.
 
 These names describe planned migrations, not files created by this document. If the repository advances before implementation starts, revise this entire table once before distributing any new migration; never repair ordering by renumbering deployed files.
 
@@ -194,9 +195,10 @@ These names describe planned migrations, not files created by this document. If 
 | --- | --- | --- |
 | `0020_access_boundaries.sql` | P04: durable credential revisions, expiring session revocations, browser-role isolation and caller-permission `customer_queue` view with preserved write behavior. | P03 schema/recovery contract; copied-session, same-instant reset and Supabase-equivalent privilege rehearsals; finite old-token compatibility. |
 | `0021_contact_and_call_attempts.sql` | P08–P10: patient contact revision/events; durable attempt identity, dispatch/transport/disposition state, writer version/cohort, event deduplication and unmatched/conflict/comparison records; indexes/constraints needed for admission and identity. Reuse `calls.idempotency_key` where suitable. | Compatible schema expansion, single-authority transition, provider contract, admission tests and G2 staged activation. |
-| `0022_post_call_jobs.sql` | P11–P12: stage jobs, claim ownership/expiry/retries, uniqueness for automatic feedback/effects, notification outbox. | Workflow and helper completion ownership; restart/failure tests. |
-| `0023_feedback_patient_ownership.sql` | P13: durable feedback patient link, backfill, writer invariant, deletion protection and necessary indexes. | All feedback writers, retained-history readers, and fixture cleanup updated. |
-| `0024_campaign_identity.sql` | P15: campaign IDs on queue/attempt history, backfill, explicit compatible view projection, relevant keys/indexes. | Create/update/import writers, configuration projection, report grouping and UI updated. |
+| `0022_call_event_inbox.sql` | P10: durable provider event quarantine for matched, unmatched, ambiguous and conflicting callback identities. | Exact event matching, safe unmatched handling and callback identity tests. |
+| `0023_post_call_jobs.sql` | P11–P12: stage jobs, claim ownership/expiry/retries, uniqueness for automatic feedback/effects, notification outbox. | Workflow and helper completion ownership; restart/failure tests. |
+| `0024_feedback_patient_ownership.sql` | P13: durable feedback patient link, backfill, writer invariant, deletion protection and necessary indexes. | All feedback writers, retained-history readers, and fixture cleanup updated. |
+| `0025_campaign_identity.sql` | P15: campaign IDs on queue/attempt history, backfill, explicit compatible view projection, relevant keys/indexes. | Create/update/import writers, configuration projection, report grouping and UI updated. |
 
 Each release updates `EXPECTED_SCHEMA_VERSION` and an explicit required-migration manifest in the same change. P03 replaces maximum-version-only validation with required-set validation and a tested compatibility bound. Fresh installs and upgrades from `0019` must both pass, including nonempty backfills, duplicate identifiers, and a failed intermediate migration.
 
