@@ -60,7 +60,10 @@ router.post('/digest/test', async (req, res, next) => {
 router.get('/digest/preview', async (req, res, next) => {
   try {
     const { buildDigestBody } = require('../src/scheduler');
-    res.json({ body: await buildDigestBody() });
+    // The screen shows the plain-text alternative: it is the same content the
+    // HTML carries, and it renders as-is in a textContent node.
+    const { text } = await buildDigestBody();
+    res.json({ body: text });
   } catch (error) { next(error); }
 });
 
