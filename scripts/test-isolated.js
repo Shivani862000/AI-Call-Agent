@@ -49,8 +49,10 @@ function assertSafeStageEntry(sourceRoot, sourcePath) {
   const stat = fs.lstatSync(sourcePath);
   if (stat.isSymbolicLink()) throw new Error(`staging rejects symlink: ${relative}`);
   const name = path.basename(sourcePath).toLowerCase();
-  if (name.startsWith('.env') || /(?:credential|service-account|oauth)/.test(name)
-      || /\.(?:pem|key|p12|pfx|db|sqlite|sqlite3|bak|backup|zip|tgz|tar|gz)$/i.test(name)) {
+  if (name.startsWith('.env')
+      || /(?:credential|service[-_]account|oauth|client[-_]secret|gmail[-_]key)/i.test(name)
+      || /\.(?:pem|key|p12|pfx|db|sqlite|sqlite3|bak|backup|archive|archived|zip|tgz|tar|gz)$/i.test(name)
+      || /\.(?:db|sqlite|sqlite3)[._-](?:archive|archived|backup|bak)(?:[._-]|$)/i.test(name)) {
     throw new Error(`staging rejects sensitive/archive path: ${relative}`);
   }
   return stat;
@@ -158,12 +160,25 @@ async function runDatabase(requestedFile) {
   let stageDir;
   let interrupted = false;
   let cleanupPromise;
-  const cleanup = () => {
+  let releasePreassignment;
+  let barrierKeepAlive;
+  const interruptionGate = new Promise((resolve) => {
+    releasePreassignment = () => {
+      clearInterval(barrierKeepAlive);
+      resolve();
+    };
+  });
+  const cleanup = async ({ fresh = false } = {}) => {
+    if (fresh && cleanupPromise) {
+      try { await cleanupPromise; } catch {}
+      cleanupPromise = undefined;
+    }
     if (cleanupPromise) return cleanupPromise;
     cleanupPromise = (async () => {
       const failures = [];
       const attempt = async (label, action) => {
         let timer;
+        let cleaned = true;
         try {
           await Promise.race([
             action(),
@@ -174,12 +189,23 @@ async function runDatabase(requestedFile) {
         } catch (error) {
           if (!/no such (?:container|network)|already (?:stopped|removed)/i.test(error.message)) {
             failures.push(`${label}: ${error.message}`);
+            cleaned = false;
           }
         } finally { clearTimeout(timer); }
+        return cleaned;
       };
-      if (runner) await attempt('test runner cleanup', () => runner.stop());
-      if (container) await attempt('PostgreSQL cleanup', () => container.stop());
-      if (network) await attempt('network cleanup', () => network.stop());
+      if (runner) {
+        const owned = runner;
+        if (await attempt('test runner cleanup', () => owned.stop()) && runner === owned) runner = undefined;
+      }
+      if (container) {
+        const owned = container;
+        if (await attempt('PostgreSQL cleanup', () => owned.stop()) && container === owned) container = undefined;
+      }
+      if (network) {
+        const owned = network;
+        if (await attempt('network cleanup', () => owned.stop()) && network === owned) network = undefined;
+      }
       try { fs.rmSync(identityDir, { recursive: true, force: true }); }
       catch (error) { failures.push(`identity cleanup: ${error.message}`); }
       if (stageDir) {
@@ -198,23 +224,39 @@ async function runDatabase(requestedFile) {
   };
   const markInterrupted = (signal) => {
     interrupted = true;
+    releasePreassignment();
     console.error(`Received ${signal}; stopping isolated test resources`);
     void cleanup().catch((error) => console.error(error.message));
   };
   process.once('SIGINT', markInterrupted);
   process.once('SIGTERM', markInterrupted);
   try {
+    const stopIfInterrupted = () => {
+      if (interrupted) throw new Error('test run interrupted');
+    };
+    const assignOwned = async (kind, creation, wrap, assign) => {
+      const owned = wrap(await creation);
+      if (process.env.AI_CALL_AGENT_TEST_PREASSIGN_BARRIER === kind) {
+        const barrierFile = process.env.AI_CALL_AGENT_TEST_BARRIER_FILE;
+        if (!barrierFile) throw new Error('pre-assignment barrier file is required');
+        barrierKeepAlive = setInterval(() => {}, 1_000);
+        fs.writeFileSync(barrierFile, JSON.stringify({ resourceName, kind, ready: true }));
+        await interruptionGate;
+      }
+      assign(owned);
+      stopIfInterrupted();
+      return owned;
+    };
     const client = await getContainerRuntimeClient();
     const reaper = await getReaper(client);
-    const rawNetwork = await client.network.create({
+    await assignOwned('network', client.network.create({
       Name: resourceName, CheckDuplicate: true, Driver: 'bridge', Internal: true,
       Attachable: false, Ingress: false, EnableIPv6: false,
       Labels: {
         'ai.call-agent.test-run': runId,
         [LABEL_TESTCONTAINERS_SESSION_ID]: reaper.sessionId
       }
-    });
-    network = new StartedNetwork(client, resourceName, rawNetwork);
+    }), (raw) => new StartedNetwork(client, resourceName, raw), (owned) => { network = owned; });
     stageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-call-agent-stage-'));
     stageAllowedSource(ROOT, stageDir);
     fs.writeFileSync(path.join(stageDir, 'Dockerfile.test'), [
@@ -226,13 +268,15 @@ async function runDatabase(requestedFile) {
     ].join('\n'));
     const runnerImage = await GenericContainer.fromDockerfile(stageDir, 'Dockerfile.test')
       .withCache(false).build(`ai-call-agent-test-runner:${runId}`, { deleteOnExit: true });
+    stopIfInterrupted();
 
     const password = crypto.randomBytes(24).toString('hex');
     const database = `test_${runId.replaceAll('-', '')}`;
     const user = `runner_${runId.replaceAll('-', '_')}`;
-    container = await new InternalPostgres('postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3')
+    await assignOwned('postgres', new InternalPostgres('postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3')
       .withName(resourceName).withNetworkMode(resourceName)
-      .withDatabase(database).withUsername(user).withPassword(password).start();
+      .withDatabase(database).withUsername(user).withPassword(password).start(),
+    (owned) => owned, (owned) => { container = owned; });
 
     const ports = dockerJson(['inspect', container.getId(), '--format', '{{json .NetworkSettings.Ports}}']);
     const inspectedNetwork = dockerJson(['network', 'inspect', network.getId()])[0];
@@ -280,12 +324,12 @@ async function runDatabase(requestedFile) {
       AI_CALL_AGENT_TEST_AUTHENTICATED_URL: identities.authenticated.connectionString,
       AI_CALL_AGENT_TEST_AUTHENTICATED_IDENTITY: '/run/authenticated.json'
     });
-    runner = await runnerImage.withName(`${resourceName}-runner`).withNetworkMode(resourceName)
+    await assignOwned('runner', runnerImage.withName(`${resourceName}-runner`).withNetworkMode(resourceName)
       .withEnvironment(env)
       .withCopyContentToContainer(Object.entries(identities).map(([purpose, identity]) => ({
         content: JSON.stringify(identity), target: `/run/${purpose}.json`, mode: 0o600
       })))
-      .start();
+      .start(), (owned) => owned, (owned) => { runner = owned; });
     if (process.env.AI_CALL_AGENT_TEST_RESOURCE_FILE) {
       fs.writeFileSync(process.env.AI_CALL_AGENT_TEST_RESOURCE_FILE,
         JSON.stringify({ resourceName, cleaned: false }));
@@ -320,7 +364,7 @@ async function runDatabase(requestedFile) {
   } finally {
     process.removeListener('SIGINT', markInterrupted);
     process.removeListener('SIGTERM', markInterrupted);
-    await cleanup();
+    await cleanup({ fresh: true });
   }
 }
 

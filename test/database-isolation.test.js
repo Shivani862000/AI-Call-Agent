@@ -90,7 +90,12 @@ test('an exact private runner identity is accepted', () => {
 });
 
 test('sanitized staging rejects nested secrets, archives, and symlink escapes', () => {
-  for (const sentinel of ['.env.local', 'synthetic-service-account.json', 'fixture.backup']) {
+  for (const sentinel of [
+    '.env.local', 'synthetic-service-account.json', 'SYNTHETIC_SERVICE_ACCOUNT.JSON',
+    'client_secret-demo.json', 'CLIENT-SECRET-demo.JSON', 'gmail-key.json',
+    'GMAIL_KEY.JSON', 'fixture.backup', 'feedback.db.archived-20260830',
+    'FEEDBACK.DB.ARCHIVE_20260830'
+  ]) {
     const source = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-source-'));
     const target = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-target-'));
     try {
