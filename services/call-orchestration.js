@@ -1,5 +1,6 @@
 
 const { normalizeConsentStatus, patientTurns, hasSpeakerLabels } = require('../src/contact-policy');
+const { recordContactDecision } = require('./outbound-admission');
 
 const VALUE_SCORES = {
   vip: 95,
@@ -266,7 +267,7 @@ async function createSupervisorEvent({ dbRun, callId, eventType, severity = 'inf
   );
 }
 
-async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, providerStatus, inferredOutcome }) {
+async function applyCallOutcomeWorkflow({ dbGet, dbRun, dbTx, callRecord, customer, providerStatus, inferredOutcome }) {
   const nowIso = new Date().toISOString();
   const currentOutcome = inferredOutcome || providerStatus;
   const normalized = String(currentOutcome || '').toLowerCase();
@@ -367,12 +368,25 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
   // Transport completion never grants consent. Restrictive patient outcomes
   // are monotonic until the durable contact-event workflow authorizes a reset.
   if (normalized === 'wrong_number' || normalized === 'not_interested') {
-    await dbRun(
-      `UPDATE patients SET do_not_call = 1, consent_status = 'refused', consent_updated_at = now(), updated_at = now()
-        WHERE id = (SELECT patient_id FROM customers WHERE id = ?)
-          AND (COALESCE(do_not_call, 0) <> 1 OR consent_status IS DISTINCT FROM 'refused')`,
-      [customer.id]
-    );
+    if (dbTx && customer?.patient_id) {
+      await recordContactDecision({
+        dbTx,
+        patientId: customer.patient_id,
+        decision: 'refused',
+        expectedRevision: customer.contact_revision ?? null,
+        actorUsername: 'call-workflow',
+        sourceType: normalized === 'wrong_number' ? 'wrong_number_outcome' : 'not_interested_outcome',
+        sourceAttemptId: callRecord?.attempt_id || null,
+        evidenceRef: callRecord?.id ? `call:${callRecord.id}` : null
+      });
+    } else {
+      await dbRun(
+        `UPDATE patients SET do_not_call = 1, consent_status = 'refused', consent_updated_at = now(), updated_at = now()
+          WHERE id = (SELECT patient_id FROM customers WHERE id = ?)
+            AND (COALESCE(do_not_call, 0) <> 1 OR consent_status IS DISTINCT FROM 'refused')`,
+        [customer.id]
+      );
+    }
   }
 
   await dbRun(

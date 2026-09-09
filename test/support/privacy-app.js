@@ -48,6 +48,7 @@ async function servePrivacyApp(t, options = {}) {
     '../services/slack-support': { createSlackSupportNotifier: () => fail('notification') },
     './call-management': {}, './scripted-ivr': {}, './prompt-builder': {},
     '../services/call-orchestration': { createSupervisorEvent: fail('supervisor mutation') },
+    '../services/outbound-admission': { reserveOutboundAttempt: fail('admission'), recordAttemptSubmission: fail('admission') },
     '../services/call-analysis': { buildCallAnalysis: options.buildCallAnalysis || (() => ({})) },
     '../services/icallmate': { initiateCall: fail('provider') },
     '../services/post-call-pipeline': { processCompletedCallPipeline: fail('pipeline') },

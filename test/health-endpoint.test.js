@@ -48,7 +48,7 @@ function healthApp(dbBehaviour) {
 // uptime monitor is built to trust it.
 test('an unreachable database is reported as unhealthy', async () => {
   const { app, restore } = healthApp({
-    EXPECTED_SCHEMA_VERSION: '0019',
+    EXPECTED_SCHEMA_VERSION: '0021',
     dbGet: async () => { throw new Error('connection refused'); }
   });
   const server = await serve(app);
@@ -65,7 +65,7 @@ test('an unreachable database is reported as unhealthy', async () => {
 
 test('a schema the code does not expect is reported as unhealthy', async () => {
   const { app, restore } = healthApp({
-    EXPECTED_SCHEMA_VERSION: '0019',
+    EXPECTED_SCHEMA_VERSION: '0021',
     dbGet: async () => ({ version: '0011' })
   });
   const server = await serve(app);
@@ -81,8 +81,8 @@ test('a schema the code does not expect is reported as unhealthy', async () => {
 
 test('a working app answers 200 and says what it checked', async () => {
   const { app, restore } = healthApp({
-    EXPECTED_SCHEMA_VERSION: '0019',
-    dbGet: async () => ({ version: '0019_something' })
+    EXPECTED_SCHEMA_VERSION: '0021',
+    dbGet: async () => ({ version: '0021_something' })
   });
   const server = await serve(app);
   try {
@@ -102,8 +102,8 @@ test('a working app answers 200 and says what it checked', async () => {
 // whoever asks.
 test('the public health check does not advertise internals', async () => {
   const { app, restore } = healthApp({
-    EXPECTED_SCHEMA_VERSION: '0019',
-    dbGet: async () => ({ version: '0019' })
+    EXPECTED_SCHEMA_VERSION: '0021',
+    dbGet: async () => ({ version: '0021' })
   });
   const server = await serve(app);
   try {

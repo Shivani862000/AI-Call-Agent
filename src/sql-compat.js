@@ -56,6 +56,8 @@ const ID_TABLES = new Set([
   'call_supervisor_events',
   'support_tickets',
   'patients',
+  'call_attempts',
+  'contact_events',
   'system_logs'
 ]);
 

@@ -12,6 +12,7 @@ const {
   createSupervisorEvent
 } = require('./call-orchestration');
 const { syncCallToCrm, sendHotLeadAlert } = require('./crm-sync');
+const { dbTx } = require('../db');
 
 const os = require('node:os');
 const { pipeline } = require('node:stream/promises');
@@ -352,6 +353,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   const workflowResult = await applyCallOutcomeWorkflow({
     dbGet,
     dbRun,
+    dbTx,
     callRecord: refreshedCall,
     customer: refreshedCustomer,
     providerStatus: refreshedCall.outcome,

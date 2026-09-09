@@ -31,13 +31,19 @@
 - Updated queue rules, manual call admission, scheduler filtering, patient/customer normalization and workflow validation. Ordinary patient/customer edits cannot relax an existing do-not-call, wrong-number or refused-consent restriction; invalid explicit consent is a field error. `applyCallOutcomeWorkflow` no longer grants consent for `consent_given` or ordinary completion, and recognized refusal/wrong-number outcomes monotonically persist the patient restriction.
 - Focused verification: `node --test test/contact-policy.test.js test/queue-rules.test.js test/patient-rules.test.js test/call-orchestration.test.js` — **28 passed, 0 failed, 0 skipped**. The pure tests use no database/provider/network. Task 1's requested real DB race/rollback evidence and durable queue cancellation remain open and are intentionally not claimed here.
 
-### Task 2: Integrate versioned contact events with the durable lifecycle
+### Task 2: Integrate versioned contact events with the durable lifecycle (partial)
 
-Execute together with P09/P10's `0021` design and migration release, after Task 1 review.
+The `0021` schema and shared transaction are now present, but the full P09/P10 admission/event cutover and race evidence remain open.
 
-1. Add patient contact revision and durable restriction/review fields; an append-only event records patient, actor/source attempt, evidence reference, expected/new revision, decision and timestamp. Existing restrictions are preserved during expansion/backfill. Tables have appropriate RLS/grants; processing state is not exposed through the public Data API.
-2. Implement one contact event transaction that locks the patient, rejects stale permissive changes, persists restriction/evidence/revision, cancels newly disallowed queued retries, and records related attempt effects atomically. Restrictive evidence remains effective if it arrives after older permissive work. A restore endpoint requires ADMIN and current expected revision; report conflicts without overwriting current evidence.
-3. Integrate all patient/workflow/contact writers and the P09 admission decision. With two database connections and barriers, interleave refusal with old analysis/completion, explicit staff edit and dispatch. Refusal committed before the dispatch decision means no provider submission. Cover rollback and restart without sleeps or duplicated mocked SQL as proof.
-4. Document the externally unverified remote-hangup limitation and stage activation with P09/P10. Do not call P08 complete from pure tests or schema-free fixes alone.
+1. [x] Add patient contact revision and durable restriction/review fields; an append-only event records patient, actor/source attempt, evidence reference, expected/new revision, decision and timestamp. Existing restrictions are preserved during expansion/backfill. Tables have RLS enabled with no public policies; reviewed grants and remote Supabase equivalence remain open.
+2. [x] Implement `recordContactDecision` to lock the patient, reject stale permissive changes, persist restriction/evidence/revision, cancel newly disallowed queued retries, and record related attempt effects atomically. Restrictive evidence remains effective when repeated. A reviewed ADMIN restoration endpoint and full conflict response contract remain open.
+3. [ ] Integrate all patient/workflow/contact writers and the full P09 admission decision. With two database connections and barriers, interleave refusal with old analysis/completion, explicit staff edit and dispatch. Refusal committed before the dispatch decision means no provider submission. Cover rollback and restart without sleeps or duplicated mocked SQL as proof.
+4. [ ] Document the externally unverified remote-hangup limitation and stage activation with P09/P10. Do not call P08 complete from pure tests or schema-free fixes alone.
+
+#### Task 2 implementation evidence — 9 September 2026
+
+- `0021_contact_and_call_attempts.sql` adds patient contact revisions, append-only `contact_events`, durable `call_attempts`, scoped provider identity and `calls.attempt_id`; the new processing tables have RLS enabled with no public policies.
+- `recordContactDecision` locks the current patient, checks the expected revision, rejects ADMIN-less restoration, writes the patient/event together, and cancels pending/calling queue retries for a refusal. `applyCallOutcomeWorkflow` uses this transaction when a durable DB transaction is supplied.
+- The shared admission service and `/api/calls/initiate/:customerId` use the same reservation/attempt identity; provider metadata is reduced to safe status fields. Focused disposable DB evidence passed **1/1** and the full audited DB suite passed **35/35** after the migration. Two-worker race, full writer cutover and restoration endpoint evidence remain open.
 
 Review each task separately. The controller owns main progress/evidence; implementers write their bounded report and named-files commit, without spawning subagents. Rollback of schema-free changes is an application revert; `0021` uses the coordinated expand/compatibility recovery contract, never a destructive down migration.

@@ -167,7 +167,7 @@ Date: 9 September 2026. Prerequisites: reviewed P01/P07; durable contact revisio
 - Queue rules, scheduler filtering and manual call admission all honor refused consent, do-not-call and wrong-number restrictions. Ordinary customer/patient edits reject invalid consent and cannot relax an existing restriction; `applyCallOutcomeWorkflow` no longer turns `consent_given` or ordinary completion into a consent grant. Wrong-number/not-interested outcomes persist a monotonic patient restriction using a null-safe predicate.
 - Focused verification: `node --test test/contact-policy.test.js test/queue-rules.test.js test/patient-rules.test.js test/call-orchestration.test.js` — **28 passed, 0 failed, 0 skipped**. These tests are pure and use no database, provider, storage, notification or network boundary.
 
-Task 1's real database refusal/stale-completion race, rollback after a dependent-write failure, durable pending-retry cancellation and provider-no-submit assertion remain open. Task 2 will be implemented with P09/P10's versioned contact-event and attempt lifecycle in `0021`; this section does not claim P08 complete.
+Task 1's two-worker refusal/stale-completion race, rollback after a dependent-write failure and provider-no-submit assertion remain open. The initial `0021` contact-event transaction and queue cancellation are now implemented and covered by the P09 focused DB test; full writer cutover, restoration endpoint and race evidence remain open, so P08 is not complete.
 
 ## P06 — Provider metadata log redaction follow-up
 
@@ -184,4 +184,4 @@ Date: 9 September 2026. Dependencies: schema-free P08 policy; durable attempt/co
 - Added `services/outbound-admission.js` with deterministic attempt request keys, same-key idempotency, mismatched-payload conflict detection, current contact restriction checks, pause/capacity/daily-limit/cooldown decisions and explicit provider `submitted`, `rejected` and `submission_unknown` states. Unknown provider results are retained rather than treated as safe retries.
 - Focused verification: `node --test test/outbound-admission.test.js` — **5 passed, 0 failed, 0 skipped**. Tests are pure and use no provider or database boundary.
 
-This is a contract slice only. It does not claim P09 completion: no durable reservation table, transaction-backed shared admission, multi-worker race proof or provider replay/uncertainty reconciliation has shipped yet.
+The durable follow-up added migration `0021_contact_and_call_attempts.sql`, `reserveOutboundAttempt`/`recordAttemptSubmission`, and routed `/api/calls/initiate/:customerId` through the reservation. Focused disposable PostgreSQL verification passed **1/1**; the audited database suite passed **35/35** after the migration. Remaining manual/scheduler/diagnostic submitters, two-worker race proof and provider replay/uncertainty reconciliation remain open; P09 is not complete.

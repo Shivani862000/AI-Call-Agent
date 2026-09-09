@@ -42,7 +42,7 @@ const UNIT_FILES = [
 ];
 const DB_FILES = [
   'test/daily-call-limit.test.js', 'test/fixture-cleanup.test.js',
-  'test/outbound-context.test.js', 'test/patient-import-route.test.js', 'test/retention.test.js', 'test/role-isolation.test.js',
+  'test/outbound-admission-db.test.js', 'test/outbound-context.test.js', 'test/patient-import-route.test.js', 'test/retention.test.js', 'test/role-isolation.test.js',
   'test/schema-triggers.test.js', 'test/schedule-edit.test.js'
 ];
 const PACKAGING_FILES = ['test/image-context.test.js'];

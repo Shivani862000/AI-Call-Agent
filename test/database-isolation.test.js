@@ -42,7 +42,7 @@ test('db and migration rejection construct zero clients', () => {
     const db = require('./db'); const { runMigrations } = require('./scripts/migrate');
     Promise.allSettled([
       db.initializeDatabase(),
-      runMigrations({ connectionString: process.env.DATABASE_URL, migrationsDir: '.', expectedVersion: '0019',
+      runMigrations({ connectionString: process.env.DATABASE_URL, migrationsDir: '.', expectedVersion: '0021',
         validateConnection: require('./test/support/database').assertOwnedTestDatabase })
     ]).then(() => process.stdout.write(JSON.stringify({ pools, clients })));
   `;
@@ -65,7 +65,7 @@ test('omitted migration validator and test CLI still reject before Client constr
     pg.Client = class { constructor() { clients++; } };
     require('./scripts/migrate').runMigrations({
       connectionString: 'postgres://other:secret@127.0.0.1:25432/other_db',
-      migrationsDir: '.', expectedVersion: '0019'
+      migrationsDir: '.', expectedVersion: '0021'
     }).catch(() => process.stdout.write(String(clients)));
   `;
   try {
