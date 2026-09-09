@@ -12,7 +12,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
 // Import modular components
-const { PORT, PUBLIC_BASE_URL } = require('./src/config');
+const { PORT, PUBLIC_BASE_URL, resolveStorageOrigin } = require('./src/config');
 const { PROTECTED_HTML_PATHS, requireAdminAuth, requireRole, basicAuth } = require('./src/auth');
 const { isAdminOnlyRequest } = require('./src/authorization');
 const mountApiRoutes = require('./src/api-routes');
@@ -30,6 +30,11 @@ app.disable('x-powered-by');
 // Emitted only when we are actually served over TLS.
 const SERVES_OVER_HTTPS = /^https:/i.test(String(PUBLIC_BASE_URL || ''));
 
+// Recordings are handed to the browser as a 302 to a signed Supabase Storage
+// URL. CSP is re-applied to a redirect target, so without this host in
+// media-src every player fails with MEDIA_ELEMENT_ERROR and nothing plays.
+const STORAGE_ORIGIN = resolveStorageOrigin();
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -39,7 +44,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "blob:"],
       connectSrc: ["'self'", "ws:", "wss:"],
-      mediaSrc: ["'self'", "data:", "blob:"],
+      mediaSrc: ["'self'", "data:", "blob:", ...(STORAGE_ORIGIN ? [STORAGE_ORIGIN] : [])],
       ...(SERVES_OVER_HTTPS ? {} : { upgradeInsecureRequests: null })
     }
   },

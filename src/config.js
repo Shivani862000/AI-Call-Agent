@@ -190,6 +190,19 @@ function resolveStorageUrl(env = process.env) {
   return ref ? `https://${ref}.supabase.co/storage/v1` : '';
 }
 
+/**
+ * Origin of the Supabase Storage host, e.g. https://<ref>.supabase.co.
+ *
+ * The recording endpoint redirects to a signed Storage URL, and CSP is
+ * re-applied to a redirect target, so the browser needs this host named in
+ * media-src or the audio is blocked.
+ */
+function resolveStorageOrigin(env = process.env) {
+  const url = resolveStorageUrl(env);
+  if (!url) return '';
+  try { return new URL(url).origin; } catch { return ''; }
+}
+
 /** Names the variable resolveDatabaseUrl would have read, for error messages. */
 function databaseUrlVarName(env = process.env) {
   if (String(env.DATABASE_URL || '').trim()) return 'DATABASE_URL';
@@ -314,5 +327,6 @@ module.exports = {
   resolveDatabaseUrl,
   databaseUrlVarName,
   resolveServiceRoleKey,
-  resolveStorageUrl
+  resolveStorageUrl,
+  resolveStorageOrigin
 };
