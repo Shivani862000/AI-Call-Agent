@@ -213,3 +213,13 @@ Date: 9 September 2026. Prerequisite: P05 recording boundaries and P11 job owner
 - Verification: focused recording/storage tests **14/14** and the isolated unit suite **367/367** passed. No live storage, provider or credential boundary was used.
 
 Separate recording/transcription stage state, storage-missing/restart tests and a boot recovery worker remain open, so P12 is not complete.
+
+## P13 — Feedback anchored to patients (partial)
+
+Date: 9 September 2026. Prerequisite: calls retain `patient_id` and queue deletion preserves history. [Execution plan and detailed evidence](remediation-execution/P13-feedback-patient-ownership.md).
+
+- Migration `0024_feedback_patient_ownership.sql` backfills and requires `feedback.patient_id`, adds an `ON DELETE RESTRICT` patient foreign key, and installs a compatibility trigger for call-linked and manual writers.
+- Feedback and reporting readers use the durable patient identity, so deleting a queue entry clears only the queue link and leaves retained feedback readable.
+- Verification: isolated PostgreSQL suite **39/39** and isolated unit suite **367/367** passed through schema `0024`. No live data or deletion was used.
+
+An explicit feedback store, production backfill/conflict review and complete retained-history deletion/read audit remain open; P13 is not complete.

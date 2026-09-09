@@ -68,13 +68,13 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const feedbackList = await dbAll(`
     SELECT 
       f.id,
-      c.name as customer_name,
+      concat_ws(' ', p.first_name, p.last_name) as customer_name,
       f.category,
       f.stars,
       SUBSTR(f.review_text, 1, 180) as review_excerpt,
       f.submitted_at
     FROM feedback f
-    JOIN customer_queue c ON f.customer_id = c.id
+    JOIN patients p ON f.patient_id = p.id
     WHERE f.submitted_at >= ? AND f.submitted_at <= ?
     ORDER BY f.submitted_at DESC
     LIMIT 20
@@ -83,8 +83,8 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const analyzedCalls = await dbAll(`
     SELECT
       calls.id,
-      c.name AS customer_name,
-      c.phone AS customer_phone,
+      concat_ws(' ', p.first_name, p.last_name) AS customer_name,
+      p.phone AS customer_phone,
       calls.called_at,
       calls.outcome,
       calls.call_type,
@@ -107,7 +107,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
       calls.live_red_flag,
       calls.supervisor_alert_level
     FROM calls
-    JOIN customer_queue c ON c.id = calls.customer_id
+    JOIN patients p ON p.id = calls.patient_id
     WHERE calls.called_at >= ? AND calls.called_at <= ?
     ORDER BY calls.called_at DESC
     LIMIT 25
@@ -116,7 +116,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const pendingItems = await dbAll(`
     SELECT
       calls.id,
-      c.name AS customer_name,
+      concat_ws(' ', p.first_name, p.last_name) AS customer_name,
       calls.called_at,
       calls.outcome,
       calls.recording_status,
@@ -124,7 +124,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
       calls.analysis_status,
       calls.follow_up_task
     FROM calls
-    JOIN customer_queue c ON c.id = calls.customer_id
+    JOIN patients p ON p.id = calls.patient_id
     WHERE calls.called_at >= ? AND calls.called_at <= ?
       AND (
         COALESCE(calls.recording_status, 'pending') != 'completed'
@@ -378,8 +378,8 @@ async function buildOwnerDashboardData() {
     SELECT
       calls.id AS call_id,
       c.id AS customer_id,
-      c.name AS customer_name,
-      c.phone AS customer_phone,
+      concat_ws(' ', p.first_name, p.last_name) AS customer_name,
+      p.phone AS customer_phone,
       calls.called_at,
       calls.outcome,
       calls.call_type,
@@ -397,7 +397,8 @@ async function buildOwnerDashboardData() {
       c.pending_follow_ups,
       c.revenue_estimate
     FROM calls
-    JOIN customer_queue c ON c.id = calls.customer_id
+    JOIN patients p ON p.id = calls.patient_id
+    LEFT JOIN customer_queue c ON c.id = calls.customer_id
     WHERE calls.called_at >= (now() - interval '7 days')
     ORDER BY calls.called_at DESC
     LIMIT 40
