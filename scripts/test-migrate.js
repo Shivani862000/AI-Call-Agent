@@ -6,12 +6,12 @@ const { runMigrations } = require('./migrate');
 
 async function main() {
   const connectionString = process.env.DATABASE_URL;
-  assertOwnedTestDatabase(connectionString);
+  assertOwnedTestDatabase(connectionString, process.env, 'migration-owner');
   await runMigrations({
     connectionString,
     migrationsDir: path.join(__dirname, '..', 'supabase', 'migrations'),
     expectedVersion: '0019',
-    validateConnection: assertOwnedTestDatabase
+    validateConnection: (target) => assertOwnedTestDatabase(target, process.env, 'migration-owner')
   });
 }
 

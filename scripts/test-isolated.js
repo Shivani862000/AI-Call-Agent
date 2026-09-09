@@ -37,9 +37,46 @@ const UNIT_FILES = [
 ];
 const DB_FILES = [
   'test/daily-call-limit.test.js', 'test/fixture-cleanup.test.js',
-  'test/outbound-context.test.js', 'test/retention.test.js',
+  'test/outbound-context.test.js', 'test/retention.test.js', 'test/role-isolation.test.js',
   'test/schema-triggers.test.js'
 ];
+const STAGED_FILES = ['package.json', 'package-lock.json', 'db.js'];
+const STAGED_DIRECTORIES = ['prompts', 'scripts', 'services', 'src', 'supabase', 'test'];
+
+function assertSafeStageEntry(sourceRoot, sourcePath) {
+  const relative = path.relative(sourceRoot, sourcePath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('staging path escaped source root');
+  const stat = fs.lstatSync(sourcePath);
+  if (stat.isSymbolicLink()) throw new Error(`staging rejects symlink: ${relative}`);
+  const name = path.basename(sourcePath).toLowerCase();
+  if (name.startsWith('.env') || /(?:credential|service-account|oauth)/.test(name)
+      || /\.(?:pem|key|p12|pfx|db|sqlite|sqlite3|bak|backup|zip|tgz|tar|gz)$/i.test(name)) {
+    throw new Error(`staging rejects sensitive/archive path: ${relative}`);
+  }
+  return stat;
+}
+
+function copyTreeChecked(sourceRoot, sourcePath, targetPath) {
+  const stat = assertSafeStageEntry(sourceRoot, sourcePath);
+  if (stat.isDirectory()) {
+    fs.mkdirSync(targetPath, { recursive: true });
+    for (const entry of fs.readdirSync(sourcePath)) {
+      copyTreeChecked(sourceRoot, path.join(sourcePath, entry), path.join(targetPath, entry));
+    }
+  } else if (stat.isFile()) {
+    fs.copyFileSync(sourcePath, targetPath);
+  } else {
+    throw new Error(`staging rejects non-file entry: ${path.relative(sourceRoot, sourcePath)}`);
+  }
+}
+
+function stageAllowedSource(sourceRoot, targetRoot, files = STAGED_FILES, directories = STAGED_DIRECTORIES) {
+  fs.mkdirSync(targetRoot, { recursive: true });
+  for (const file of files) copyTreeChecked(sourceRoot, path.join(sourceRoot, file), path.join(targetRoot, file));
+  for (const directory of directories) {
+    copyTreeChecked(sourceRoot, path.join(sourceRoot, directory), path.join(targetRoot, directory));
+  }
+}
 
 function auditManifest() {
   const discovered = fs.readdirSync(path.join(ROOT, 'test'))
@@ -57,7 +94,7 @@ function minimalEnvironment(extra = {}) {
     PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
     NODE_ENV: 'test', TZ: 'UTC', CI: process.env.CI || '',
     DISABLE_INBOUND_CALLS: 'true', DISABLE_SCHEDULER: 'true',
-    DISABLE_DIGEST: 'true', DISABLE_OUTBOUND_CALLS: 'true',
+    DISABLE_OWNER_DIGEST: 'true',
     NODE_OPTIONS: `--require=${path.join(ROOT, 'test/support/provider-fakes.js')}`,
     ...extra
   };
@@ -115,13 +152,55 @@ async function runDatabase(requestedFile) {
   const runId = crypto.randomUUID();
   const resourceName = `ai-call-agent-test-${runId}`;
   const identityDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-call-agent-test-'));
-  const identityPath = path.join(identityDir, 'database-identity.json');
   let network;
   let container;
   let runner;
   let stageDir;
   let interrupted = false;
-  const markInterrupted = () => { interrupted = true; };
+  let cleanupPromise;
+  const cleanup = () => {
+    if (cleanupPromise) return cleanupPromise;
+    cleanupPromise = (async () => {
+      const failures = [];
+      const attempt = async (label, action) => {
+        let timer;
+        try {
+          await Promise.race([
+            action(),
+            new Promise((_, reject) => {
+              timer = setTimeout(() => reject(new Error('timed out')), 10_000);
+            })
+          ]);
+        } catch (error) {
+          if (!/no such (?:container|network)|already (?:stopped|removed)/i.test(error.message)) {
+            failures.push(`${label}: ${error.message}`);
+          }
+        } finally { clearTimeout(timer); }
+      };
+      if (runner) await attempt('test runner cleanup', () => runner.stop());
+      if (container) await attempt('PostgreSQL cleanup', () => container.stop());
+      if (network) await attempt('network cleanup', () => network.stop());
+      try { fs.rmSync(identityDir, { recursive: true, force: true }); }
+      catch (error) { failures.push(`identity cleanup: ${error.message}`); }
+      if (stageDir) {
+        try { fs.rmSync(stageDir, { recursive: true, force: true }); }
+        catch (error) { failures.push(`staging cleanup: ${error.message}`); }
+      }
+      if (process.env.AI_CALL_AGENT_TEST_RESOURCE_FILE) {
+        try {
+          fs.writeFileSync(process.env.AI_CALL_AGENT_TEST_RESOURCE_FILE,
+            JSON.stringify({ resourceName, cleaned: failures.length === 0, failures }));
+        } catch (error) { failures.push(`cleanup evidence: ${error.message}`); }
+      }
+      if (failures.length) throw new Error(`isolated test cleanup failed: ${failures.join('; ')}`);
+    })();
+    return cleanupPromise;
+  };
+  const markInterrupted = (signal) => {
+    interrupted = true;
+    console.error(`Received ${signal}; stopping isolated test resources`);
+    void cleanup().catch((error) => console.error(error.message));
+  };
   process.once('SIGINT', markInterrupted);
   process.once('SIGTERM', markInterrupted);
   try {
@@ -137,12 +216,7 @@ async function runDatabase(requestedFile) {
     });
     network = new StartedNetwork(client, resourceName, rawNetwork);
     stageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-call-agent-stage-'));
-    for (const file of ['package.json', 'package-lock.json', 'db.js']) {
-      fs.copyFileSync(path.join(ROOT, file), path.join(stageDir, file));
-    }
-    for (const dir of ['prompts', 'scripts', 'services', 'src', 'supabase', 'test']) {
-      fs.cpSync(path.join(ROOT, dir), path.join(stageDir, dir), { recursive: true });
-    }
+    stageAllowedSource(ROOT, stageDir);
     fs.writeFileSync(path.join(stageDir, 'Dockerfile.test'), [
       'FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e', 'WORKDIR /app',
       'COPY package.json package-lock.json ./', 'RUN npm ci --ignore-scripts',
@@ -165,29 +239,78 @@ async function runDatabase(requestedFile) {
     if (ports['5432/tcp']?.length) throw new Error('PostgreSQL unexpectedly publishes a host port');
     if (!inspectedNetwork.Internal) throw new Error('PostgreSQL network is not internal');
 
-    const connectionString = `postgres://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${resourceName}:5432/${database}`;
-    const url = new URL(connectionString);
-    const identity = {
-      runId, containerId: container.getId(), networkId: network.getId(),
-      connectionString, host: url.hostname, port: Number(url.port),
-      database, user, transport: 'docker-internal', internalNetwork: true
+    const roleSuffix = runId.replaceAll('-', '_');
+    const roles = {
+      application: { name: `app_${roleSuffix}`, password: crypto.randomBytes(24).toString('hex') },
+      anon: { name: `anon_${roleSuffix}`, password: crypto.randomBytes(24).toString('hex') },
+      authenticated: { name: `auth_${roleSuffix}`, password: crypto.randomBytes(24).toString('hex') }
     };
-    fs.writeFileSync(identityPath, JSON.stringify(identity), { mode: 0o600, flag: 'wx' });
+    const makeIdentity = (purpose, role) => {
+      const connectionString = `postgres://${encodeURIComponent(role.name)}:${encodeURIComponent(role.password)}@${resourceName}:5432/${database}`;
+      const url = new URL(connectionString);
+      return {
+        runId, purpose, containerId: container.getId(), networkId: network.getId(),
+        connectionString, host: url.hostname, port: Number(url.port), database,
+        user: role.name, transport: 'docker-internal', internalNetwork: true
+      };
+    };
+    const identities = {
+      owner: makeIdentity('migration-owner', { name: user, password }),
+      application: makeIdentity('application', roles.application),
+      anon: makeIdentity('anon', roles.anon),
+      authenticated: makeIdentity('authenticated', roles.authenticated)
+    };
+    for (const [purpose, identity] of Object.entries(identities)) {
+      fs.writeFileSync(path.join(identityDir, `${purpose}.json`), JSON.stringify(identity), {
+        mode: 0o600, flag: 'wx'
+      });
+    }
+    const ownerEnv = minimalEnvironment({
+      DATABASE_URL: identities.owner.connectionString, AI_CALL_AGENT_TEST_RUN_ID: runId,
+      AI_CALL_AGENT_TEST_DB_IDENTITY: '/run/owner.json', NODE_OPTIONS: '',
+      AI_CALL_AGENT_TEST_ROLES: JSON.stringify(roles)
+    });
     const env = minimalEnvironment({
-      DATABASE_URL: connectionString, AI_CALL_AGENT_TEST_RUN_ID: runId,
-      AI_CALL_AGENT_TEST_DB_IDENTITY: '/run/test-identity.json', NODE_OPTIONS: ''
+      DATABASE_URL: identities.application.connectionString, AI_CALL_AGENT_TEST_RUN_ID: runId,
+      AI_CALL_AGENT_TEST_DB_IDENTITY: '/run/application.json', NODE_OPTIONS: '',
+      AI_CALL_AGENT_TEST_OWNER_URL: identities.owner.connectionString,
+      AI_CALL_AGENT_TEST_OWNER_IDENTITY: '/run/owner.json',
+      AI_CALL_AGENT_TEST_ANON_URL: identities.anon.connectionString,
+      AI_CALL_AGENT_TEST_ANON_IDENTITY: '/run/anon.json',
+      AI_CALL_AGENT_TEST_AUTHENTICATED_URL: identities.authenticated.connectionString,
+      AI_CALL_AGENT_TEST_AUTHENTICATED_IDENTITY: '/run/authenticated.json'
     });
     runner = await runnerImage.withName(`${resourceName}-runner`).withNetworkMode(resourceName)
       .withEnvironment(env)
-      .withCopyContentToContainer([{ content: JSON.stringify(identity), target: '/run/test-identity.json', mode: 0o600 }])
+      .withCopyContentToContainer(Object.entries(identities).map(([purpose, identity]) => ({
+        content: JSON.stringify(identity), target: `/run/${purpose}.json`, mode: 0o600
+      })))
       .start();
+    if (process.env.AI_CALL_AGENT_TEST_RESOURCE_FILE) {
+      fs.writeFileSync(process.env.AI_CALL_AGENT_TEST_RESOURCE_FILE,
+        JSON.stringify({ resourceName, cleaned: false }));
+    }
     const runnerInspect = dockerJson(['inspect', runner.getId(), '--format', '{{json .NetworkSettings.Networks}}']);
     if (!runnerInspect[resourceName]) throw new Error('test runner is not attached to owned internal network');
+    if (process.env.AI_CALL_AGENT_TEST_INJECT_FAILURE === 'migration') {
+      throw new Error('injected outer migration failure');
+    }
+    const holdMs = Number(process.env.AI_CALL_AGENT_TEST_HOLD_MS || 0);
+    if (holdMs > 0) {
+      const held = await runner.exec(['node', '-e', `setTimeout(() => {}, ${Math.min(holdMs, 60_000)})`]);
+      if (!interrupted && held.exitCode !== 0) throw new Error(`held workload exited ${held.exitCode}`);
+      if (interrupted) throw new Error('test run interrupted');
+    }
     for (let attempt = 1; attempt <= 2; attempt += 1) {
-      const migrated = await runner.exec(['node', 'scripts/test-migrate.js'], { workingDir: '/app', env });
+      const migrated = await runner.exec(['node', 'scripts/test-migrate.js'], { workingDir: '/app', env: ownerEnv });
       process.stdout.write(migrated.output);
       if (migrated.exitCode !== 0) throw new Error(`test migration attempt ${attempt} exited ${migrated.exitCode}`);
     }
+    const provisioned = await runner.exec(['node', 'scripts/test-roles.js'], {
+      workingDir: '/app', env: ownerEnv
+    });
+    process.stdout.write(provisioned.output);
+    if (provisioned.exitCode !== 0) throw new Error(`test role provisioning exited ${provisioned.exitCode}`);
     const tested = await runner.exec(
       ['node', '--test', '--test-reporter=spec', ...selected], { workingDir: '/app', env }
     );
@@ -197,11 +320,7 @@ async function runDatabase(requestedFile) {
   } finally {
     process.removeListener('SIGINT', markInterrupted);
     process.removeListener('SIGTERM', markInterrupted);
-    if (runner) await runner.stop().catch(() => {});
-    if (container) await container.stop().catch(() => {});
-    if (network) await network.stop().catch(() => {});
-    fs.rmSync(identityDir, { recursive: true, force: true });
-    if (stageDir) fs.rmSync(stageDir, { recursive: true, force: true });
+    await cleanup();
   }
 }
 
@@ -225,4 +344,6 @@ async function main() {
 
 if (require.main === module) main().catch((error) => { console.error(error.message); process.exitCode = 1; });
 
-module.exports = { UNIT_FILES, DB_FILES, auditManifest, minimalEnvironment, parseArgs };
+module.exports = {
+  UNIT_FILES, DB_FILES, auditManifest, minimalEnvironment, parseArgs, stageAllowedSource
+};

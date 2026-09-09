@@ -103,7 +103,9 @@ async function initializeDatabase() {
   try {
     const connectionString = resolveDatabaseUrl();
     if (process.env.NODE_ENV === 'test') {
-      require('./test/support/database').assertOwnedTestDatabase(connectionString);
+      require('./test/support/database').assertOwnedTestDatabase(
+        connectionString, process.env, 'application'
+      );
     }
     pool = new Pool({
       connectionString,

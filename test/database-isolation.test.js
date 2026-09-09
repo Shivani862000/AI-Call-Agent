@@ -7,12 +7,13 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { assertOwnedTestDatabase } = require('./support/database');
+const { minimalEnvironment, stageAllowedSource } = require('../scripts/test-isolated');
 
 function identityEnv(overrides = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'db-identity-unit-'));
   const file = path.join(dir, 'identity.json');
   const identity = {
-    runId: 'owned-run', connectionString: 'postgres://owned:secret@127.0.0.1:25432/owned_db',
+    runId: 'owned-run', purpose: 'application', connectionString: 'postgres://owned:secret@127.0.0.1:25432/owned_db',
     host: '127.0.0.1', port: 25432, database: 'owned_db', user: 'owned'
   };
   fs.writeFileSync(file, JSON.stringify(identity), { mode: 0o600 });
@@ -53,8 +54,72 @@ test('db and migration rejection construct zero clients', () => {
   assert.deepEqual(JSON.parse(result.stdout), { pools: 0, clients: 0 });
 });
 
+test('omitted migration validator and test CLI still reject before Client construction', () => {
+  const owned = identityEnv();
+  const identityPath = owned.env.AI_CALL_AGENT_TEST_DB_IDENTITY;
+  const identity = JSON.parse(fs.readFileSync(identityPath, 'utf8'));
+  identity.purpose = 'migration-owner';
+  fs.writeFileSync(identityPath, JSON.stringify(identity), { mode: 0o600 });
+  const program = `
+    const pg = require('pg'); let clients = 0;
+    pg.Client = class { constructor() { clients++; } };
+    require('./scripts/migrate').runMigrations({
+      connectionString: 'postgres://other:secret@127.0.0.1:25432/other_db',
+      migrationsDir: '.', expectedVersion: '0019'
+    }).catch(() => process.stdout.write(String(clients)));
+  `;
+  try {
+    const direct = spawnSync(process.execPath, ['-e', program], {
+      cwd: path.join(__dirname, '..'), encoding: 'utf8', env: { PATH: process.env.PATH, ...owned.env }
+    });
+    assert.equal(direct.status, 0, direct.stderr);
+    assert.equal(direct.stdout, '0');
+    const cli = spawnSync(process.execPath, ['scripts/migrate.js'], {
+      cwd: path.join(__dirname, '..'), encoding: 'utf8',
+      env: { PATH: process.env.PATH, NODE_ENV: 'test' }
+    });
+    assert.equal(cli.status, 1);
+    assert.match(cli.stderr, /Unsafe test database configuration|is not set/);
+  } finally { fs.rmSync(owned.dir, { recursive: true, force: true }); }
+});
+
 test('an exact private runner identity is accepted', () => {
   const owned = identityEnv();
   try { assert.equal(assertOwnedTestDatabase(owned.env.DATABASE_URL, owned.env).runId, 'owned-run'); }
   finally { fs.rmSync(owned.dir, { recursive: true, force: true }); }
+});
+
+test('sanitized staging rejects nested secrets, archives, and symlink escapes', () => {
+  for (const sentinel of ['.env.local', 'synthetic-service-account.json', 'fixture.backup']) {
+    const source = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-source-'));
+    const target = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-target-'));
+    try {
+      fs.mkdirSync(path.join(source, 'safe'));
+      fs.writeFileSync(path.join(source, 'safe', 'module.js'), 'module.exports = true;');
+      fs.writeFileSync(path.join(source, 'safe', sentinel), 'synthetic sentinel');
+      assert.throws(() => stageAllowedSource(source, target, [], ['safe']), /staging rejects/);
+    } finally {
+      fs.rmSync(source, { recursive: true, force: true });
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+  }
+  const source = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-source-'));
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-target-'));
+  try {
+    fs.mkdirSync(path.join(source, 'safe'));
+    fs.symlinkSync(os.tmpdir(), path.join(source, 'safe', 'escape'));
+    assert.throws(() => stageAllowedSource(source, target, [], ['safe']), /symlink/);
+  } finally {
+    fs.rmSync(source, { recursive: true, force: true });
+    fs.rmSync(target, { recursive: true, force: true });
+  }
+});
+
+test('synthetic startup environment disables the implemented background work', () => {
+  const env = minimalEnvironment();
+  assert.equal(env.DISABLE_SCHEDULER, 'true');
+  assert.equal(env.DISABLE_OWNER_DIGEST, 'true');
+  assert.equal(env.DISABLE_INBOUND_CALLS, 'true');
+  assert.equal(env.DISABLE_DIGEST, undefined);
+  assert.equal(env.DISABLE_OUTBOUND_CALLS, undefined);
 });

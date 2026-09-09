@@ -7,7 +7,13 @@ async function runMigrations({ connectionString, migrationsDir, expectedVersion,
   if (!connectionString) throw new Error('connectionString is required');
   if (!migrationsDir) throw new Error('migrationsDir is required');
   if (!expectedVersion) throw new Error('expectedVersion is required');
-  if (validateConnection) validateConnection(connectionString);
+  if (process.env.NODE_ENV === 'test') {
+    require('../test/support/database').assertOwnedTestDatabase(
+      connectionString, process.env, 'migration-owner'
+    );
+  } else if (validateConnection) {
+    validateConnection(connectionString);
+  }
 
   const { Client } = require('pg');
   const client = new Client({ connectionString, connectionTimeoutMillis: 20000 });
@@ -56,7 +62,7 @@ async function runMigrations({ connectionString, migrationsDir, expectedVersion,
 }
 
 async function main() {
-  require('dotenv').config();
+  if (process.env.NODE_ENV !== 'test') require('dotenv').config();
   const { resolveDatabaseUrl, databaseUrlVarName } = require('../src/config');
   const { EXPECTED_SCHEMA_VERSION } = require('../db');
   const connectionString = resolveDatabaseUrl();

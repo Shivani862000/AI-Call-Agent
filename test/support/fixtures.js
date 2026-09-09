@@ -8,17 +8,19 @@
  */
 const TEST_NAME_PREFIX = 'zztest-';
 
-async function removeTestPatient(patientId) {
+async function removeTestPatient(patientId, { callIds = [] } = {}) {
   const { dbRun, dbAll } = require('../../db');
   const entries = await dbAll('SELECT id FROM customers WHERE patient_id = ?', [patientId]);
-  const calls = await dbAll(
+  const ownedCalls = await dbAll(
     'SELECT id FROM calls WHERE patient_id = ? OR customer_id = ANY(?)',
     [patientId, entries.map((entry) => entry.id)]
   );
+  const calls = [...new Set([...callIds, ...ownedCalls.map((call) => call.id)])];
 
-  for (const call of calls) {
-    await dbRun('DELETE FROM call_supervisor_events WHERE call_id = ?', [call.id]);
-    await dbRun('DELETE FROM feedback WHERE call_id = ?', [call.id]);
+  for (const callId of calls) {
+    await dbRun('DELETE FROM call_supervisor_events WHERE call_id = ?', [callId]);
+    await dbRun('DELETE FROM feedback WHERE call_id = ?', [callId]);
+    await dbRun('DELETE FROM calls WHERE id = ?', [callId]);
   }
   for (const entry of entries) await dbRun('DELETE FROM feedback WHERE customer_id = ?', [entry.id]);
   await dbRun('DELETE FROM calls WHERE patient_id = ?', [patientId]);
@@ -34,15 +36,20 @@ async function withTestPatient(run) {
   const { dbRun } = require('../../db');
   const id = require('node:crypto').randomUUID();
   const phone = `000${id.replace(/\D/g, '').padEnd(7, '0').slice(0, 7)}`;
+  const callIds = [];
   const patient = await dbRun(
     'INSERT INTO patients (first_name, phone, normalized_phone) VALUES (?, ?, ?)',
     [`${TEST_NAME_PREFIX}${phone}`, phone, phone]
   );
 
   try {
-    return await run({ patientId: patient.lastID, phone });
+    return await run({
+      patientId: patient.lastID,
+      phone,
+      trackCallId(callId) { if (callId != null) callIds.push(callId); return callId; }
+    });
   } finally {
-    await removeTestPatient(patient.lastID);
+    await removeTestPatient(patient.lastID, { callIds });
   }
 }
 

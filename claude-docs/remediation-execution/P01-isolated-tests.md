@@ -4,7 +4,7 @@
 **Architecture:** An audited test manifest, import-safe migrations and a runner-owned database identity guard. Use pinned Testcontainers for lifecycle and an internal Docker network for the database test workload; sanitized disposable source staging must exclude environment files, credentials and archived databases.
 **Tech stack:** CommonJS, node:test, pg, Docker Desktop/Linux CI, pinned Testcontainers.
 **Spec:** [Application remediation contract](../2026-09-08-APPLICATION_GAP_REMEDIATION_PLAN.md).
-**Status:** Complete in `fe84465`; verification recorded below.
+**Status:** Complete through review fix round 1; verification recorded below.
 
 ## Global Constraints
 
@@ -70,3 +70,18 @@ Rollback: revert this isolated infrastructure commit without database migration;
 - `npm run test:browser`: fails explicitly with `browser harness is unavailable until P17`.
 - Docker inspection after runs found no owned `ai-call-agent-test-*` containers or networks.
 - Full execution detail and limitations: `.superpowers/sdd/P01-isolated-tests/task-1-a7ed436f-report.md`.
+
+### Review fix round 1
+
+- Test migrations now require a runner-owned `migration-owner` identity even when a direct caller omits the validator. Test CLI execution suppresses dotenv.
+- Disposable bootstrap creates a distinct `NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS` trusted application login with explicit grants. All application DB regressions run through it.
+- Disposable anon/authenticated equivalents are `NOSUPERUSER NOBYPASSRLS`; probes confirm base-table RLS returns no rows and DDL/owner-role escalation is denied. These synthetic roles do not claim deployed Supabase grant equivalence.
+- Recursive staging rejects nested environment, credential/service-account/OAuth, key, archive/backup, and database files, plus every symlink. Synthetic sentinel tests cover nested rejected paths and a symlink escape.
+- Shared fixture cleanup accepts captured call IDs, deletes their dependents and calls, and is proven when both durable call ownership links are deliberately cleared before an injected assertion failure.
+- SIGINT/SIGTERM actively stop all owned resources with bounded operations. Cleanup attempts every resource, reports failures, and writes synthetic orchestration evidence when requested.
+- `npm run test:unit -- --file test/database-isolation.test.js`: 6 passed, zero failures/skips.
+- `npm run test:db`: 20 passed through the trusted application role, zero failures/skips; fresh 19 migrations and zero-migration repeat.
+- `npm run test:db -- --file test/role-isolation.test.js`: 3 passed, zero failures/skips after the final application-role attribute probe.
+- Injected outer migration failure: expected exit 1; marker recorded `cleaned: true`; Docker inspection found no owned container/network.
+- Direct SIGINT during a 60-second held workload: expected exit 1 with `Received SIGINT` and `test run interrupted`; marker recorded `cleaned: true`, `failures: []`; Docker inspection found no owned container/network.
+- Known boundary: `customer_queue` remains a `SECURITY DEFINER` view. This task does not alter migrations or claim Data API/view safety; P04/next append-only schema release owns that production correction.

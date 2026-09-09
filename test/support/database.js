@@ -11,7 +11,7 @@ function fail(message) {
   throw error;
 }
 
-function readOwnedDatabaseIdentity(env = process.env) {
+function readOwnedDatabaseIdentity(env = process.env, expectedPurpose) {
   if (env.NODE_ENV !== 'test') fail('NODE_ENV must be test');
   const identityPath = env[IDENTITY_ENV];
   if (!identityPath || !path.isAbsolute(identityPath)) fail(`${IDENTITY_ENV} must be an absolute path`);
@@ -26,6 +26,9 @@ function readOwnedDatabaseIdentity(env = process.env) {
   }
   if (!stat.isFile() || (stat.mode & 0o077) !== 0) fail('runner identity permissions are not private');
   if (!identity.runId || identity.runId !== env.AI_CALL_AGENT_TEST_RUN_ID) fail('run identity does not match');
+  if (!identity.purpose || (expectedPurpose && identity.purpose !== expectedPurpose)) {
+    fail(`connection purpose does not match${expectedPurpose ? ` ${expectedPurpose}` : ''}`);
+  }
   if (!identity.connectionString || identity.connectionString !== env.DATABASE_URL) fail('DATABASE_URL does not match runner identity');
 
   let url;
@@ -47,8 +50,8 @@ function readOwnedDatabaseIdentity(env = process.env) {
   return Object.freeze({ ...identity });
 }
 
-function assertOwnedTestDatabase(connectionString, env = process.env) {
-  const identity = readOwnedDatabaseIdentity(env);
+function assertOwnedTestDatabase(connectionString, env = process.env, expectedPurpose) {
+  const identity = readOwnedDatabaseIdentity(env, expectedPurpose);
   if (connectionString !== identity.connectionString) fail('requested connection does not match runner identity');
   return identity;
 }
