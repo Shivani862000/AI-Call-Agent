@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { withTestPatient } = require('./support/fixtures');
 
-test('schema 0021 keeps contact revisions and attempts durable across queue changes', async () => {
+test('schema 0022 keeps contact revisions, attempts and event quarantine durable across queue changes', async () => {
   const { initializeDatabase, dbRun, dbGet, dbTx, closeDatabase } = require('../db');
   const { reserveOutboundAttempt, recordAttemptSubmission, recordContactDecision } = require('../services/outbound-admission');
   await initializeDatabase();
@@ -57,6 +57,15 @@ test('schema 0021 keeps contact revisions and attempts durable across queue chan
       assert.equal(row.decision, 'refused');
       assert.equal(Number(row.new_revision), 1);
       assert.equal(Number(row.attempt_id), Number(attempt.lastID));
+      await dbRun(
+        `INSERT INTO call_event_inbox
+          (event_key, provider_scope, provider_call_id, attempt_id, event_name, match_state, match_reason, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)`,
+        [`event-${patientId}`, 'icallmate', `provider-${patientId}`, attempt.lastID, 'callback', 'matched', 'attempt_id', JSON.stringify({ attempt_id: attempt.lastID })]
+      );
+      const eventRow = await dbGet('SELECT match_state, attempt_id FROM call_event_inbox WHERE event_key = ?', [`event-${patientId}`]);
+      assert.equal(eventRow.match_state, 'matched');
+      assert.equal(Number(eventRow.attempt_id), Number(attempt.lastID));
       await assert.rejects(
         recordContactDecision({
           dbTx,
@@ -82,6 +91,7 @@ test('schema 0021 keeps contact revisions and attempts durable across queue chan
         /duplicate key|unique/i
       );
       await dbRun('DELETE FROM calls WHERE id = ?', [call.lastID]);
+      await dbRun('DELETE FROM call_event_inbox WHERE event_key = ?', [`event-${patientId}`]);
       await dbRun('DELETE FROM contact_events WHERE source_attempt_id = ?', [attempt.lastID]);
       await dbRun('DELETE FROM call_attempts WHERE id = ?', [attempt.lastID]);
       await dbRun('DELETE FROM customers WHERE id = ?', [customer.lastID]);

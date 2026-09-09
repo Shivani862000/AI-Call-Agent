@@ -533,6 +533,8 @@ async function triggerScheduledCalls() {
           customerPhone: customer.phone,
           customerName: customer.name,
           customerId: customer.id,
+          attemptId,
+          requestKey: admission.requestKey,
           clientName: agentConfig?.client_name || CLIENT_NAME,
           agentId: agentConfig?.id || null,
           callType: customer.call_type

@@ -46,6 +46,8 @@ router.post('/initiate/:customerId', async (req, res) => {
         {
           baseUrl,
           callType,
+          attemptId,
+          requestKey: admission.requestKey,
           wsurl: `${baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:')}/icallmate/media`,
           callbackapi: buildIcallMateCallbackUrl(baseUrl)
         }

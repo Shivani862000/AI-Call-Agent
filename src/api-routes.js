@@ -80,6 +80,7 @@ const { getAgentConfigById, getDefaultAgentConfig } = require('./prompt-builder'
 const { buildCallAnalysis, storeCallAnalysis } = require('../services/call-analysis');
 const { initiateCall, buildMasterPostPayload } = require('../services/icallmate');
 const { reserveOutboundAttempt, recordAttemptSubmission } = require('../services/outbound-admission');
+const { EVENT_MATCH_STATES, extractEventIdentity, matchCallEvent, buildEventKey, safeEventPayload } = require('./call-events');
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
 const {
   buildIcallMateCallbackUrl,
@@ -348,6 +349,8 @@ module.exports = function mountApiRoutes(app) {
           customerPhone,
           customerName: customer.name || customerName,
           customerId: customer.id,
+          attemptId,
+          requestKey: admission.requestKey,
           clientName,
           agentId: agentConfig?.id || null,
           callType
@@ -657,6 +660,8 @@ module.exports = function mountApiRoutes(app) {
           customerPhone: customer.phone,
           customerName: customer.name,
           customerId: customer.id,
+          attemptId,
+          requestKey: admission.requestKey,
           clientName: agentConfig?.client_name || CLIENT_NAME,
           agentId: agentConfig?.id || null,
           callType
@@ -923,52 +928,91 @@ module.exports = function mountApiRoutes(app) {
           notes: payload.recording_filename ? 'Callback received with recording' : 'Callback received'
         });
       } else {
-        const phone = payload.phoneno || payload.customer_number || '';
         const mappedOutcome = status === 'completed' ? 'completed' : 'no_answer';
+        const identity = extractEventIdentity(payload);
+        let attempts = [];
+        if (identity.attemptId && /^\\d+$/.test(identity.attemptId)) {
+          attempts = await dbAll('SELECT id, request_key, provider_call_id, destination_snapshot, state FROM call_attempts WHERE id = ?', [identity.attemptId]);
+        } else if (identity.requestKey) {
+          attempts = await dbAll('SELECT id, request_key, provider_call_id, destination_snapshot, state FROM call_attempts WHERE request_key = ?', [identity.requestKey]);
+        } else if (identity.providerId) {
+          attempts = await dbAll(`SELECT id, request_key, provider_call_id, destination_snapshot, state
+            FROM call_attempts WHERE LOWER(provider_call_id) = LOWER(?)`, [identity.providerId]);
+        }
+        const match = matchCallEvent({ event: payload, attempts });
+        const matchedAttempt = match.attempt || null;
+        const eventKey = buildEventKey(payload);
+        try {
+          await dbRun(
+            `INSERT INTO call_event_inbox
+              (event_key, provider_scope, provider_call_id, attempt_id, request_key, event_name, match_state, match_reason, payload_json, matched_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'matched' THEN now() ELSE NULL END)
+             ON CONFLICT (provider_scope, event_key) DO NOTHING`,
+            [
+              eventKey,
+              'icallmate',
+              identity.providerId,
+              matchedAttempt?.id || null,
+              identity.requestKey || matchedAttempt?.request_key || null,
+              String(eventName || 'callback'),
+              match.state,
+              match.reason,
+              JSON.stringify(safeEventPayload(payload)),
+              match.state
+            ]
+          );
+        } catch (inboxError) {
+          logger.error('ICALLMATE_CALLBACK_INBOX_UNAVAILABLE', { reason: 'event_quarantined_without_persistence' });
+          return res.json({ success: true, matched: false, state: EVENT_MATCH_STATES.UNMATCHED, reason: 'inbox_unavailable' });
+        }
+        if (match.state !== EVENT_MATCH_STATES.MATCHED) {
+          logger.warn('ICALLMATE_CALLBACK_UNMATCHED', { reason: match.reason, providerCallId: identity.providerId || 'missing' });
+          return res.json({ success: true, matched: false, state: match.state, reason: match.reason });
+        }
 
-        if (phone) {
-          const cleanPhone = phone.replace(/^\\+91/, '').slice(-10);
-          const callRecord = await dbGet(`
-            SELECT calls.* FROM calls
-            JOIN customer_queue ON customer_queue.id = calls.customer_id
-            WHERE customer_queue.phone LIKE '%' || ? AND calls.call_direction = 'outbound'
-            ORDER BY calls.id DESC LIMIT 1
-          `, [cleanPhone]);
+        if (identity.providerId && !matchedAttempt.provider_call_id) {
+          await dbRun(
+            `UPDATE call_attempts
+                SET provider_call_id = ?, updated_at = now()
+              WHERE id = ? AND provider_call_id IS NULL`,
+            [identity.providerId, matchedAttempt.id]
+          );
+        }
 
-          if (callRecord) {
-            await dbRun('UPDATE calls SET outcome = ?, status = ?, outcome_detail = ?, recording_url = COALESCE(NULLIF(?, \'\'), recording_url) WHERE id = ?', [
-              mappedOutcome,
-              mappedOutcome,
-              payload.call_status || 'callback',
-              payload.recording_filename || '',
-              callRecord.id
-            ]);
+        const callRecord = await dbGet('SELECT calls.* FROM calls WHERE calls.attempt_id = ? ORDER BY calls.id DESC LIMIT 1', [matchedAttempt.id]);
+        if (callRecord) {
+          await dbRun('UPDATE calls SET outcome = ?, status = ?, outcome_detail = ?, recording_url = COALESCE(NULLIF(?, \'\'), recording_url) WHERE id = ?', [
+            mappedOutcome,
+            mappedOutcome,
+            payload.call_status || 'callback',
+            payload.recording_filename || '',
+            callRecord.id
+          ]);
 
-            if (mappedOutcome === 'completed' && payload.recording_filename) {
-              setTimeout(() => {
-                runInBackground('POST CALL PIPELINE ERROR', async () => {
-                  const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: callRecord.provider_call_id, callId: callRecord.id });
-                  if (result.ok) {
-                    console.log(`[POST CALL PIPELINE] Processed call ${callRecord.provider_call_id} with feedback ${result.feedbackId}`);
-                  } else {
-                    console.log(`[POST CALL PIPELINE] Skipped call ${callRecord.provider_call_id}: ${result.reason}`);
-                  }
-                });
-              }, 1500);
-            }
-
-            const customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [callRecord.customer_id]);
-            if (customer) {
-              await applyCallOutcomeWorkflow({
-                dbGet,
-                dbRun,
-                dbTx,
-                callRecord: { ...callRecord, outcome: mappedOutcome },
-                customer,
-                providerStatus: payload.call_status || mappedOutcome,
-                inferredOutcome: mappedOutcome
+          if (mappedOutcome === 'completed' && payload.recording_filename) {
+            setTimeout(() => {
+              runInBackground('POST CALL PIPELINE ERROR', async () => {
+                const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: callRecord.provider_call_id, callId: callRecord.id });
+                if (result.ok) {
+                  console.log(`[POST CALL PIPELINE] Processed call ${callRecord.provider_call_id} with feedback ${result.feedbackId}`);
+                } else {
+                  console.log(`[POST CALL PIPELINE] Skipped call ${callRecord.provider_call_id}: ${result.reason}`);
+                }
               });
-            }
+            }, 1500);
+          }
+
+          const customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [callRecord.customer_id]);
+          if (customer) {
+            await applyCallOutcomeWorkflow({
+              dbGet,
+              dbRun,
+              dbTx,
+              callRecord: { ...callRecord, outcome: mappedOutcome },
+              customer,
+              providerStatus: payload.call_status || mappedOutcome,
+              inferredOutcome: mappedOutcome
+            });
           }
         }
       }
@@ -1165,7 +1209,10 @@ module.exports = function mountApiRoutes(app) {
           customerName: customer.name || customerName,
           clientName: agentConfig?.client_name || CLIENT_NAME,
           agentId: agentConfig?.id || null,
-          callType
+          callType,
+          customerId: customer.id,
+          attemptId,
+          requestKey: admission.requestKey
         });
       } catch (providerError) {
         const state = await recordAttemptSubmission({ dbTx, attemptId, error: providerError });

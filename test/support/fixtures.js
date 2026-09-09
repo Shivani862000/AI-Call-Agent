@@ -23,6 +23,7 @@ async function removeTestPatient(patientId, { callIds = [] } = {}) {
     await dbRun('DELETE FROM calls WHERE id = ?', [callId]);
   }
   await dbRun('DELETE FROM contact_events WHERE patient_id = ?', [patientId]);
+  await dbRun('DELETE FROM call_event_inbox WHERE attempt_id IN (SELECT id FROM call_attempts WHERE patient_id = ?)', [patientId]);
   await dbRun('DELETE FROM call_attempts WHERE patient_id = ?', [patientId]);
   for (const entry of entries) await dbRun('DELETE FROM feedback WHERE customer_id = ?', [entry.id]);
   await dbRun('DELETE FROM calls WHERE patient_id = ?', [patientId]);

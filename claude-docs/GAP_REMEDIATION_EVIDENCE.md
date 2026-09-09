@@ -185,3 +185,11 @@ Date: 9 September 2026. Dependencies: schema-free P08 policy; durable attempt/co
 - Focused verification: `node --test test/outbound-admission.test.js` — **5 passed, 0 failed, 0 skipped**. Tests are pure and use no provider or database boundary.
 
 The durable follow-up added migration `0021_contact_and_call_attempts.sql`, `reserveOutboundAttempt`/`recordAttemptSubmission`, and routed `/call/start`, `/api/calls/initiate/:customerId`, `/api/icallmate/outgoing-call`, the legacy `routes/calls.js` initiator and the scheduler through the reservation. Focused disposable PostgreSQL verification passed **1/1**; the audited database suite passed **36/36** and the isolated unit suite passed **355/355**. Two-worker race proof, provider replay/uncertainty reconciliation and event/media identity remain open; P09 is not complete.
+
+## P10 — Exact call-event correlation (partial)
+
+Date: 9 September 2026. Dependencies: P09 durable attempts and provider capability evidence.
+
+- Added `src/call-events.js` with exact attempt/request/provider matching. Supplied unknown IDs remain unmatched; phone-only compatibility is off by default and only accepts one eligible candidate when explicitly enabled.
+- Added `0022_call_event_inbox.sql` and routed the authenticated iCallMate callback through durable event quarantine before matched call updates. Outbound provider extra parameters now carry the attempt/request identity, and outbound media hydration prefers those identifiers over phone recency.
+- Verification: identity tests **7/7**, isolated unit suite **362/362**, isolated PostgreSQL suite **36/36** on schema `0022`. Transport/disposition transition fencing, provider-ID historical audit and restart/timeout reconciliation remain open; P10 is not complete.

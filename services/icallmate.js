@@ -195,6 +195,8 @@ function buildOutboundCampaignPayload(customerPhone, customerId, options = {}) {
         extraparam: JSON.stringify({
           callDirection: 'outbound',
           customerId: customerId || null,
+          attemptId: options.attemptId || null,
+          requestKey: options.requestKey || null,
           customerName: options.customerName || '',
           clientName: options.clientName || '',
           callType: options.callType || 'REVIEW_CALL'
@@ -227,6 +229,8 @@ function buildMasterPostPayload(customerPhone, leadId, options = {}) {
         extraparam: JSON.stringify({
           callDirection: 'outbound',
           customerId: options.customerId || null,
+          attemptId: options.attemptId || null,
+          requestKey: options.requestKey || null,
           customerName: options.customerName || '',
           clientName: options.clientName || '',
           callType: options.callType || 'REVIEW_CALL',

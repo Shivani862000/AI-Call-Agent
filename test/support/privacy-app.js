@@ -41,7 +41,7 @@ async function servePrivacyApp(t, options = {}) {
       effects.push('dbAll');
       return options.dbAll ? options.dbAll(sql, params) : [];
     },
-    dbRun: options.dbRun || fail('dbRun'), dbTx: fail('dbTx')
+    dbRun: options.dbRun || (async (sql) => sql.includes('call_event_inbox') ? { lastID: 1, changes: 1 } : fail('dbRun')()), dbTx: fail('dbTx')
   };
   const stubs = {
     './config': config, '../db': db, fs: { existsSync: fail('filesystem') },
@@ -57,7 +57,7 @@ async function servePrivacyApp(t, options = {}) {
     '../services/supabase-storage': options.storage || { createSignedUrl: fail('signed URL') },
     '../services/recording-fetch': { ...require('../../services/recording-fetch'), validateRecordingUrl: value => require('../../services/recording-fetch').validateRecordingUrl(value, options.env || {}), ...options.recording }
   };
-  const files = new Set(['src/auth.js', 'src/api-routes.js', 'src/helpers.js',
+  const files = new Set(['src/auth.js', 'src/api-routes.js', 'src/helpers.js', 'src/call-events.js',
     'src/patient-rules.js', 'src/contact-policy.js', 'src/call-serialization.js', 'src/icallmate-webhook.js']);
   const modules = new Map();
   function load(relative) {
@@ -70,7 +70,7 @@ async function servePrivacyApp(t, options = {}) {
       process: { env: { NODE_ENV: 'test', AUTH_SIGNING_SECRET: 'synthetic-privacy-test-signing-secret-at-least-32-bytes', ...options.env } },
       setTimeout: fail('timer'), AbortController, fetch: options.fetch || fail('network'),
       require(name) {
-        if (name === 'crypto' || name === 'bcrypt' || name === 'node:stream/promises') return require(name);
+        if (name === 'crypto' || name === 'node:crypto' || name === 'bcrypt' || name === 'node:stream/promises') return require(name);
         if (Object.hasOwn(stubs, name)) return stubs[name];
         if (name === '../routes/support-tickets') return () => express.Router();
         if (name.startsWith('../routes/')) return express.Router();
