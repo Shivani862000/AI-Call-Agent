@@ -1,12 +1,15 @@
 const express = require('express');
 const router = express.Router();
-const { dbRun, dbGet, dbAll } = require('../db');
+const { dbRun, dbGet, dbAll, dbTx } = require('../db');
 const { initiateCall } = require('../services/icallmate');
+const { normalizeOutboundCallType } = require('../src/helpers');
+const { reserveOutboundAttempt, recordAttemptSubmission } = require('../services/outbound-admission');
 const { buildIcallMateCallbackUrl } = require('../src/icallmate-webhook');
 const logger = require('../services/system-logger');
 
 // Initiate call to a customer
 router.post('/initiate/:customerId', async (req, res) => {
+  let attemptId = null;
   try {
     const { customerId } = req.params;
 
@@ -19,25 +22,51 @@ router.post('/initiate/:customerId', async (req, res) => {
     // Get the base URL for callbacks (for production, use ngrok or actual domain)
     const baseUrl = process.env.WEBHOOK_URL || `http://localhost:${process.env.PORT || 3000}`;
 
-    const call = await initiateCall(
-      customer.phone,
+    const callType = normalizeOutboundCallType(customer.call_type || 'REVIEW_CALL');
+    const admission = await reserveOutboundAttempt({
+      dbTx,
       customerId,
-      {
-        baseUrl,
-        callType: customer.call_type || 'REVIEW_CALL',
-        wsurl: `${baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:')}/icallmate/media`,
-        callbackapi: buildIcallMateCallbackUrl(baseUrl)
-      }
-    );
+      callType,
+      requestKey: req.get('Idempotency-Key') || req.body?.requestKey,
+      writerId: req.adminSession?.username || 'legacy-calls-router'
+    });
+    if (admission.outcome === 'duplicate') {
+      return res.json({ message: 'Call already admitted', attemptId: admission.attemptId, sid: admission.attempt?.provider_call_id || null, idempotent: true });
+    }
+    if (admission.outcome !== 'accepted') {
+      return res.status(admission.outcome === 'conflict' ? 409 : 422).json({ error: admission.reason, code: 'CALL_ADMISSION_REJECTED', requestKey: admission.requestKey });
+    }
+    attemptId = admission.attemptId;
+
+    let call;
+    try {
+      call = await initiateCall(
+        customer.phone,
+        customerId,
+        {
+          baseUrl,
+          callType,
+          wsurl: `${baseUrl.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:')}/icallmate/media`,
+          callbackapi: buildIcallMateCallbackUrl(baseUrl)
+        }
+      );
+    } catch (providerError) {
+      const state = await recordAttemptSubmission({ dbTx, attemptId, error: providerError });
+      return res.status(202).json({ error: 'Provider submission is unresolved; do not retry automatically', code: state.state.toUpperCase(), attemptId });
+    }
+    const submission = await recordAttemptSubmission({ dbTx, attemptId, response: call });
+    if (submission.state !== 'submitted') {
+      return res.status(submission.state === 'rejected' ? 502 : 202).json({ error: submission.reason, code: submission.state.toUpperCase(), attemptId });
+    }
 
     // Save call record
     const result = await dbRun(
-      'INSERT INTO calls (customer_id, outcome, provider_call_id, called_at, call_direction, call_source, call_type) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [customerId, 'initiated', call.sid, new Date().toISOString(), 'outbound', 'icallmate', customer.call_type || 'REVIEW_CALL']
+      'INSERT INTO calls (customer_id, patient_id, attempt_id, outcome, provider_call_id, called_at, call_direction, call_source, call_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [customerId, customer.patient_id, attemptId, 'initiated', call.sid, new Date().toISOString(), 'outbound', 'icallmate', callType]
     );
 
     // Update customer status
-    await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['initiated', customerId]);
+    await dbRun('UPDATE customers SET status = ?, locked_at = NULL WHERE id = ?', ['called', customerId]);
 
     res.json({
       message: 'Call initiated',
@@ -45,6 +74,10 @@ router.post('/initiate/:customerId', async (req, res) => {
       sid: call.sid
     });
   } catch (error) {
+    if (attemptId) {
+      logger.error('CALL_ATTEMPT_REQUIRES_RECONCILIATION', { customerId: req.params.customerId, attemptId, reason: error.message });
+      return res.status(202).json({ error: 'Call admission was recorded but completion needs reconciliation', code: 'ATTEMPT_RECONCILIATION_REQUIRED', attemptId });
+    }
     console.error('Error initiating call:', error);
 
     res.status(500).json({ error: error.message });

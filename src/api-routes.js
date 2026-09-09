@@ -61,7 +61,6 @@ const {
 
 const {
   ensureCustomerForCall,
-  claimCustomerForOutboundCall,
   releaseCustomerOutboundClaim,
   hydratePreCallIntelligence,
   shouldBlockCustomerCall,
@@ -287,6 +286,7 @@ module.exports = function mountApiRoutes(app) {
 
   app.post('/call/start', async (req, res) => {
     let customer = null;
+    let attemptId = null;
     try {
       const customerPhone = req.body.customerPhone || process.env.CUSTOMER_PHONE;
       const customerName = req.body.customerName || process.env.CUSTOMER_NAME;
@@ -312,10 +312,20 @@ module.exports = function mountApiRoutes(app) {
         return res.status(409).json({ success: false, error: blockedReason.reason, code: blockedReason.code });
       }
 
-      const claimed = await claimCustomerForOutboundCall(customer.id);
-      if (!claimed) {
-        return res.status(409).json({ success: false, error: 'A call for this customer is already in progress' });
+      const admission = await reserveOutboundAttempt({
+        dbTx,
+        customerId: customer.id,
+        callType,
+        requestKey: req.get('Idempotency-Key') || req.body?.requestKey,
+        writerId: req.adminSession?.username || 'call-start'
+      });
+      if (admission.outcome === 'duplicate') {
+        return res.json({ success: true, message: 'Call already admitted', attemptId: admission.attemptId, sid: admission.attempt?.provider_call_id || null, idempotent: true });
       }
+      if (admission.outcome !== 'accepted') {
+        return res.status(admission.outcome === 'conflict' ? 409 : 422).json({ success: false, error: admission.reason, code: 'CALL_ADMISSION_REJECTED', requestKey: admission.requestKey });
+      }
+      attemptId = admission.attemptId;
 
       console.log(
         `[CALL REQUEST] to=${logger.maskPhone(customerPhone)} serviceNo=${process.env.ICALLMATE_SERVICE_NO || ''} baseUrl=${PUBLIC_BASE_URL} ` +
@@ -332,23 +342,32 @@ module.exports = function mountApiRoutes(app) {
         `ICALLMATE_IVR_TEMPLATE_ID=${process.env.ICALLMATE_IVR_TEMPLATE_ID || ''} ` +
         `TZ=${process.env.TZ || ''}`
       );
-      const call = await placeRealtimeCall({
-        customerPhone,
-        customerName: customer.name || customerName,
-        customerId: customer.id,
-        clientName,
-        agentId: agentConfig?.id || null,
-        callType
-      });
+      let call;
+      try {
+        call = await placeRealtimeCall({
+          customerPhone,
+          customerName: customer.name || customerName,
+          customerId: customer.id,
+          clientName,
+          agentId: agentConfig?.id || null,
+          callType
+        });
+      } catch (providerError) {
+        const state = await recordAttemptSubmission({ dbTx, attemptId, error: providerError });
+        return res.status(202).json({ success: false, error: 'Provider submission is unresolved; do not retry automatically', code: state.state.toUpperCase(), attemptId });
+      }
+      await recordAttemptSubmission({ dbTx, attemptId, response: call });
 
       const result = await dbRun(
         `INSERT INTO calls (
-        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
+        customer_id, patient_id, attempt_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
         consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
         provider_payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
+          customer.patient_id,
+          attemptId,
           agentConfig?.id || null,
           'initiated',
           call.sid,
@@ -363,7 +382,7 @@ module.exports = function mountApiRoutes(app) {
           JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
         ]
       );
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      await dbRun('UPDATE customers SET status = ?, locked_at = NULL WHERE id = ?', ['called', customer.id]);
       
       const callsTodayRow = await dbGet(
         `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND (c.called_at AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
@@ -391,7 +410,7 @@ module.exports = function mountApiRoutes(app) {
       });
       res.json({ success: true, sid: call.sid, callId: result.lastID, customerId: customer.id, agentId: agentConfig?.id || null });
     } catch (error) {
-      if (customer?.id) {
+      if (customer?.id && !attemptId) {
         try {
           await releaseCustomerOutboundClaim(customer.id, customer.status || 'pending');
         } catch (releaseError) {
@@ -1075,6 +1094,7 @@ module.exports = function mountApiRoutes(app) {
 
   app.post('/api/icallmate/outgoing-call', async (req, res) => {
     let customer = null;
+    let attemptId = null;
     try {
       const fieldpairs = Array.isArray(req.body.fieldpairs) ? req.body.fieldpairs : [];
       const firstFieldPair = fieldpairs[0] || {};
@@ -1118,31 +1138,51 @@ module.exports = function mountApiRoutes(app) {
         return res.status(409).json({ error: blockedReason.reason, code: blockedReason.code });
       }
 
-      const claimed = await claimCustomerForOutboundCall(customer.id);
-      if (!claimed) {
-        return res.status(409).json({ error: 'A call for this customer is already in progress' });
-      }
-
-      const call = await initiateCall(phone, customer.id, {
-        provider: 'masterpost',
-        campid,
-        leadid: leadId,
-        wsurl,
-        callbackapi,
-        customerName: customer.name || customerName,
-        clientName: agentConfig?.client_name || CLIENT_NAME,
-        agentId: agentConfig?.id || null,
-        callType
+      const admission = await reserveOutboundAttempt({
+        dbTx,
+        customerId: customer.id,
+        callType,
+        requestKey: req.get('Idempotency-Key') || req.body?.requestKey,
+        providerScope: 'icallmate-masterpost',
+        writerId: req.adminSession?.username || 'icallmate-outgoing'
       });
+      if (admission.outcome === 'duplicate') {
+        return res.json({ success: true, message: 'Call already admitted', attemptId: admission.attemptId, sid: admission.attempt?.provider_call_id || null, idempotent: true });
+      }
+      if (admission.outcome !== 'accepted') {
+        return res.status(admission.outcome === 'conflict' ? 409 : 422).json({ error: admission.reason, code: 'CALL_ADMISSION_REJECTED', requestKey: admission.requestKey });
+      }
+      attemptId = admission.attemptId;
+
+      let call;
+      try {
+        call = await initiateCall(phone, customer.id, {
+          provider: 'masterpost',
+          campid,
+          leadid: leadId,
+          wsurl,
+          callbackapi,
+          customerName: customer.name || customerName,
+          clientName: agentConfig?.client_name || CLIENT_NAME,
+          agentId: agentConfig?.id || null,
+          callType
+        });
+      } catch (providerError) {
+        const state = await recordAttemptSubmission({ dbTx, attemptId, error: providerError });
+        return res.status(202).json({ error: 'Provider submission is unresolved; do not retry automatically', code: state.state.toUpperCase(), attemptId });
+      }
+      await recordAttemptSubmission({ dbTx, attemptId, response: call });
 
       const result = await dbRun(
         `INSERT INTO calls (
-        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
+        customer_id, patient_id, attempt_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
         consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source,
         provider_payload_json, call_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
+          customer.patient_id,
+          attemptId,
           agentConfig?.id || null,
           'initiated',
           call.sid,
@@ -1158,7 +1198,7 @@ module.exports = function mountApiRoutes(app) {
         ]
       );
 
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      await dbRun('UPDATE customers SET status = ?, locked_at = NULL WHERE id = ?', ['called', customer.id]);
       logger.info('CALL_STARTED', {
         callId: result.lastID,
         customerId: customer.id,
@@ -1187,7 +1227,7 @@ module.exports = function mountApiRoutes(app) {
         payload
       });
     } catch (error) {
-      if (customer?.id) {
+      if (customer?.id && !attemptId) {
         try {
           await releaseCustomerOutboundClaim(customer.id, customer.status || 'pending');
         } catch (releaseError) {

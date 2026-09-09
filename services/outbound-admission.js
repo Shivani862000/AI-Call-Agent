@@ -65,6 +65,9 @@ function evaluateAdmission({
       : { outcome: ADMISSION_OUTCOMES.CONFLICT, reason: 'request_key_payload_conflict', requestKey: key };
   }
   if (paused) return { outcome: ADMISSION_OUTCOMES.REJECTED, reason: 'outbound_paused', requestKey: key };
+  if (['calling', 'in_progress'].includes(String(customer.status || '').toLowerCase())) {
+    return { outcome: ADMISSION_OUTCOMES.REJECTED, reason: 'customer_call_active', requestKey: key };
+  }
   const contact = canContactPatient({
     ...patient,
     ...customer,

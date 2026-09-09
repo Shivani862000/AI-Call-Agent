@@ -30,6 +30,7 @@ test('pause, capacity, daily limits and cooldown reject without a provider reque
   assert.equal(evaluateAdmission({ patient, customer, activeReservations: 2, maxActiveReservations: 2 }).reason, 'capacity_exhausted');
   assert.equal(evaluateAdmission({ patient, customer, attemptsToday: 3 }).reason, 'daily_attempt_limit');
   assert.equal(evaluateAdmission({ patient, customer, latestAttemptAt: '2026-09-09T09:00:00.000Z', now: '2026-09-09T10:00:00.000Z' }).reason, 'cooldown_active');
+  assert.equal(evaluateAdmission({ patient, customer: { ...customer, status: 'calling' } }).reason, 'customer_call_active');
 });
 
 test('same request key is idempotent and changed payload conflicts', () => {

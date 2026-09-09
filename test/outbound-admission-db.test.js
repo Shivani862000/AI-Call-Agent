@@ -11,7 +11,7 @@ test('schema 0021 keeps contact revisions and attempts durable across queue chan
   try {
     await withTestPatient(async ({ patientId }) => {
       const customer = await dbRun(
-        'INSERT INTO customers (patient_id, status) VALUES (?, ?)', [patientId, 'calling']
+        'INSERT INTO customers (patient_id, status) VALUES (?, ?)', [patientId, 'pending']
       );
       const admitted = await reserveOutboundAttempt({
         dbTx,

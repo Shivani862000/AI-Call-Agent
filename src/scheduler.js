@@ -7,7 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { dbGet, dbRun, dbAll } = require('../db');
+const { dbGet, dbRun, dbAll, dbTx } = require('../db');
 const { CLIENT_NAME, CALL_TYPES } = require('./config');
 const { createSettingsStore } = require('./app-settings');
 const { selectPatientsToQueue } = require('./queue-rules');
@@ -33,6 +33,7 @@ const { computePriorityScore, getCurrentSlotLabel } = require('../services/call-
 const { buildOwnerDashboardData } = require('../services/reporting');
 const logger = require('../services/system-logger');
 const { ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE } = require('../services/icallmate');
+const { reserveOutboundAttempt, recordAttemptSubmission } = require('../services/outbound-admission');
 
 let ownerDigestRunning = false;
 let schedulerRunning = false;
@@ -467,6 +468,7 @@ async function triggerScheduledCalls() {
   console.log(`[SCHEDULER] Found ${hydratedCustomers.length} eligible customer(s) due at ${currentSlot}`);
 
   for (const customer of hydratedCustomers) {
+    let attemptId = null;
     try {
       const agentConfig = customer.default_agent_id ? await getAgentConfigById(customer.default_agent_id) : await getDefaultAgentConfig();
       const blockedReason = await shouldBlockCustomerCall(customer);
@@ -497,31 +499,25 @@ async function triggerScheduledCalls() {
       }
 
       const idempotencyKey = `${customer.id}-${customer.attempt_count || 0}-${customer.scheduled_datetime || customer.next_retry_at || 'now'}`;
-      const existingCall = await dbGet('SELECT 1 FROM calls WHERE idempotency_key = ?', [idempotencyKey]);
-      if (existingCall) {
-        logger.warn('CALL_START_BLOCKED_DUPLICATE', { phone: customer.phone, reason: 'Already calling' });
-        // Fix: Advance the attempt_count to break out of infinite loop for this idempotency key
-        await dbRun('UPDATE customers SET attempt_count = COALESCE(attempt_count, 0) + 1 WHERE id = ?', [customer.id]);
+      const admission = await reserveOutboundAttempt({
+        dbTx,
+        customerId: customer.id,
+        callType: normalizeOutboundCallType(customer.call_type),
+        requestKey: idempotencyKey,
+        providerScope: 'icallmate',
+        writerId: 'scheduler'
+      });
+      if (admission.outcome === 'duplicate') {
+        logger.warn('CALL_START_BLOCKED_DUPLICATE', { phone: customer.phone, reason: 'Already admitted', attemptId: admission.attemptId });
         continue;
       }
-
-      const claimResult = await dbRun(
-        `UPDATE customers
-            SET status = ?,
-                last_called_at = ?,
-                locked_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-            AND COALESCE(status, 'pending') IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')
-            AND (locked_at IS NULL OR locked_at <= (now() - interval '10 minutes'))`,
-        ['calling', new Date().toISOString(), customer.id]
-      );
-
-      if (!claimResult.changes) {
-        logger.warn('CALL_START_BLOCKED_DUPLICATE', { phone: customer.phone, reason: 'Already calling or locked' });
+      if (admission.outcome !== 'accepted') {
+        logger.warn('CALL_ADMISSION_REJECTED', { customerId: customer.id, phone: customer.phone, reason: admission.reason });
         continue;
       }
+      attemptId = admission.attemptId;
 
-      logger.info('CALL_LOCK_ACQUIRED', { callId: customer.id, lockedAt: new Date().toISOString() });
+      logger.info('CALL_LOCK_ACQUIRED', { callId: customer.id, attemptId, lockedAt: new Date().toISOString() });
       logger.info('CALL_PENDING', {
         customerId: customer.id,
         patient: customer.name,
@@ -543,45 +539,42 @@ async function triggerScheduledCalls() {
         });
       } catch (error) {
         logger.error('CALL_PROVIDER_FAILED', { callId: customer.id, provider: 'icallmate', reason: error.message || 'provider unavailable' });
-
-        const mediaEndpointUnavailable = error.code === ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE;
-        const retryDelayMs = mediaEndpointUnavailable
-          ? Math.max(Number(process.env.ICALLMATE_PREFLIGHT_RETRY_MS || 60000) || 60000, 10000)
-          : require('./config').MIN_RETRY_GAP_MINUTES * 60 * 1000;
-        const nextRetry = new Date(Date.now() + retryDelayMs);
-
-        if (!mediaEndpointUnavailable) {
+        await recordAttemptSubmission({ dbTx, attemptId, error });
+        if (error.code !== ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE) {
           global.providerFailureCooldownUntil = Date.now() + 15 * 60 * 1000;
-          logger.error('SCHEDULER_PAUSED_PROVIDER_DOWN', { reason: 'Provider failed, pausing scheduler for 15 minutes' });
+          logger.error('SCHEDULER_PAUSED_PROVIDER_DOWN', { reason: 'Provider submission unresolved; scheduler paused for 15 minutes' });
         }
+        logger.warn('CALL_SUBMISSION_UNRESOLVED', { callId: customer.id, attemptId, reason: 'provider_submission_unknown' });
+        continue;
+      }
 
+      const submission = await recordAttemptSubmission({ dbTx, attemptId, response: call });
+      if (submission.state === 'rejected') {
+        const nextRetry = new Date(Date.now() + (require('./config').MIN_RETRY_GAP_MINUTES * 60 * 1000));
         await dbRun(
           `UPDATE customers
-              SET status = ?,
-                  next_retry_at = ?,
-                  attempt_count = COALESCE(attempt_count, 0) + ?,
-                  locked_at = NULL
+              SET status = ?, next_retry_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1, locked_at = NULL
             WHERE id = ?`,
-          ['retry_scheduled', nextRetry.toISOString(), mediaEndpointUnavailable ? 0 : 1, customer.id]
+          ['retry_scheduled', nextRetry.toISOString(), customer.id]
         );
-        logger.info('CALL_RETRY_SCHEDULED', {
-          callId: customer.id,
-          nextAttemptAt: logger.formatHumanDateTime(nextRetry),
-          attempt: (customer.attempt_count || 0) + (mediaEndpointUnavailable ? 0 : 1),
-          reason: mediaEndpointUnavailable ? 'public_media_endpoint_unavailable' : 'provider_failure'
-        });
-        logger.info('CALL_LOCK_RELEASED', { callId: customer.id });
+        logger.info('CALL_RETRY_SCHEDULED', { callId: customer.id, attemptId, nextAttemptAt: logger.formatHumanDateTime(nextRetry), reason: 'provider_rejected' });
+        continue;
+      }
+      if (submission.state !== 'submitted') {
+        logger.warn('CALL_SUBMISSION_UNRESOLVED', { callId: customer.id, attemptId, reason: submission.reason });
         continue;
       }
 
       const insertResult = await dbRun(
         `INSERT INTO calls (
-          customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
+          customer_id, patient_id, attempt_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
           consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
           provider_payload_json, idempotency_key
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
+          customer.patient_id,
+          attemptId,
           agentConfig?.id || null,
           'scheduled_initiated',
           call.sid,
@@ -597,7 +590,7 @@ async function triggerScheduledCalls() {
           idempotencyKey
         ]
       );
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      await dbRun('UPDATE customers SET status = ?, locked_at = NULL WHERE id = ?', ['called', customer.id]);
 
       const callsTodayRow = await dbGet(
         `SELECT COUNT(*) as count FROM calls c
@@ -630,6 +623,14 @@ async function triggerScheduledCalls() {
           : `[SCHEDULER] Scheduled call started for customerId=${customer.id} (${call.sid})`
       );
     } catch (error) {
+      if (attemptId) {
+        logger.error('CALL_ATTEMPT_REQUIRES_RECONCILIATION', {
+          customerId: customer.id,
+          attemptId,
+          reason: error.message
+        });
+        continue;
+      }
       const retryAt = new Date(Date.now() + (5 * 60 * 1000)).toISOString();
       logger.error('CALL_FAILED', {
         customerId: customer.id,
