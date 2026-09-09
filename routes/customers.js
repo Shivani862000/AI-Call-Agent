@@ -4,7 +4,7 @@ const { dbRun, dbGet, dbAll } = require('../db');
 const { normalizePhoneLookupValue } = require('../src/helpers');
 const { resolvePatientId } = require('../src/patient-link');
 const { serializeQueueRow } = require('../src/patient-rules');
-const { parseScheduleInstant, sameScheduleInstant } = require('../src/schedule-time');
+const { parseScheduleInstant, scheduleInstantParts, sameScheduleInstant } = require('../src/schedule-time');
 
 const roleOf = (req) => String(req.adminSession?.role || '').toUpperCase();
 const multer = require('multer');
@@ -98,20 +98,17 @@ function buildScheduledDateTime(dateValue, timeValue) {
     return null;
   }
 
-  const scheduled = new Date(`${datePart}T${timePart}:00`);
-  return Number.isNaN(scheduled.getTime()) ? null : scheduled;
+  return parseScheduleInstant(`${datePart}T${timePart}:00+05:30`);
 }
 
 function normalizeScheduledDate(payload = {}) {
   const directDate = String(payload.scheduled_date || payload.call_date || payload.callDate || '').trim();
   if (directDate) return directDate;
 
-  const scheduledDateTime = String(payload.scheduled_datetime || payload.scheduledDateTime || '').trim();
-  if (scheduledDateTime) {
-    const parsed = new Date(scheduledDateTime);
-    if (!Number.isNaN(parsed.getTime())) {
-      return getLocalDateValue(parsed);
-    }
+  const scheduledDateTime = payload.scheduled_datetime ?? payload.scheduledDateTime;
+  if (String(scheduledDateTime == null ? '' : scheduledDateTime).trim()) {
+    const parts = scheduleInstantParts(scheduledDateTime);
+    if (parts) return parts.date;
   }
 
   return '';
@@ -134,12 +131,10 @@ function normalizePreferredSlot(payload = {}) {
 
   const callTime = String(payload.callTime || '').trim();
   if (!callTime) {
-    const scheduledDateTime = String(payload.scheduled_datetime || payload.scheduledDateTime || '').trim();
-    if (scheduledDateTime) {
-      const parsed = new Date(scheduledDateTime);
-      if (!Number.isNaN(parsed.getTime())) {
-        return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
-      }
+    const scheduledDateTime = payload.scheduled_datetime ?? payload.scheduledDateTime;
+    if (String(scheduledDateTime == null ? '' : scheduledDateTime).trim()) {
+      const parts = scheduleInstantParts(scheduledDateTime);
+      if (parts) return parts.time;
     }
     return '';
   }
@@ -167,6 +162,7 @@ function normalizeCustomerPayload(payload = {}) {
     preferred_slot: preferredSlot,
     scheduled_datetime: scheduled ? scheduled.toISOString() : null,
     invalid_scheduled_datetime: hasSuppliedInstant && !directScheduled,
+    has_supplied_scheduled_datetime: hasSuppliedInstant,
     call_type: normalizeCallType(payload.call_type || payload.callType),
     customer_value: String(payload.customer_value || 'standard').trim().toLowerCase() || 'standard',
     urgency_level: String(payload.urgency_level || 'normal').trim().toLowerCase() || 'normal',
@@ -217,23 +213,29 @@ function validateCustomerPayload(payload) {
     errors.scheduled_date = 'Scheduled date must be in YYYY-MM-DD format';
   }
 
-  const scheduled = buildScheduledDateTime(payload.scheduled_date, payload.preferred_slot);
+  const scheduled = parseScheduleInstant(payload.scheduled_datetime);
   if (payload.invalid_scheduled_datetime) {
     errors.scheduled_datetime = 'Scheduled date and time are invalid';
   }
   if (!errors.scheduled_date && !errors.preferred_slot && !scheduled) {
     errors.scheduled_datetime = 'Scheduled date and time are invalid';
   } else if (scheduled && scheduled.getTime() <= Date.now()) {
-    if (payload.scheduled_date === getLocalDateValue()) {
+    if (scheduleInstantParts(scheduled)?.date === scheduleInstantParts(new Date())?.date) {
       errors.preferred_slot = 'Choose a future time for today';
     } else {
       errors.scheduled_date = 'Choose today or a future date';
     }
   }
 
-  if (scheduled) {
-    const hours = scheduled.getHours();
-    if (hours < 7 || hours >= 21) {
+  const canonicalParts = scheduleInstantParts(scheduled);
+  if (scheduled && payload.has_supplied_scheduled_datetime
+      && canonicalParts
+      && (canonicalParts.date !== payload.scheduled_date || canonicalParts.time !== payload.preferred_slot)) {
+    errors.scheduled_datetime = 'Scheduled date and time do not match';
+  }
+
+  if (canonicalParts) {
+    if (canonicalParts.hour < 7 || canonicalParts.hour >= 21) {
       errors.preferred_slot = 'Calls can only be scheduled between 7:00 AM and 9:00 PM.';
       logger.warn('CALL_SCHEDULE_BLOCKED_QUIET_HOURS', {
         phone: payload.phone,

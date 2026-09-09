@@ -8,6 +8,7 @@ const { randomUUID } = require('node:crypto');
 let server;
 let baseUrl;
 let db;
+let routeApp;
 const patientIds = [];
 
 async function jsonRequest(method, path, body, username = 'import-admin') {
@@ -63,15 +64,15 @@ async function seedPatient(overrides = {}) {
 test.before(async () => {
   db = require('../db');
   await db.initializeDatabase();
-  const app = express();
-  app.use(express.json());
-  app.use((req, res, next) => {
+  routeApp = express();
+  routeApp.use(express.json());
+  routeApp.use((req, res, next) => {
     req.adminSession = { username: req.get('x-test-user') || 'import-admin', role: 'ADMIN' };
     next();
   });
-  app.use('/api/patients', require('../routes/patients'));
-  app.use((error, req, res, next) => res.status(error.status || 500).json({ error: 'test route error' }));
-  server = http.createServer(app);
+  routeApp.use('/api/patients', require('../routes/patients'));
+  routeApp.use((error, req, res, next) => res.status(error.status || 500).json({ error: 'test route error' }));
+  server = http.createServer(routeApp);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
@@ -200,4 +201,47 @@ test('a newly conflicting create identity fails safely without becoming an updat
   assert.equal(updateCommit.status, 409);
   const unchanged = await db.dbGet('SELECT first_name, phone FROM patients WHERE id = ?', [updateTarget.id]);
   assert.deepEqual(unchanged, { first_name: updateTarget.first_name, phone: updateTarget.phone });
+});
+
+test('a failure after the real row write rolls that row back and allows the next row to commit', async () => {
+  const rolledBack = await seedPatient({ notes: 'rollback-original', updated_by: 'original-user' });
+  const successful = await seedPatient({ notes: 'success-original' });
+  const before = await db.dbGet(
+    `SELECT first_name, phone, normalized_phone, notes, updated_by, updated_at, xmin::text AS version
+       FROM patients WHERE id = ?`, [rolledBack.id]
+  );
+  const preview = await previewCsv([
+    'First Name,Mobile Number,Notes',
+    `Must Roll Back,${rolledBack.phone},rollback-new`,
+    `Must Commit,${successful.phone},success-new`
+  ].join('\n'));
+  assert.equal(preview.body.summary.updates, 2);
+  routeApp.locals.patientImportTestAdapter = {
+    afterWrite({ row }) {
+      if (row === 2) throw new Error('injected secret database detail');
+    }
+  };
+  try {
+    const committed = await jsonRequest('POST', '/api/patients/import/commit', { token: preview.body.token });
+    assert.equal(committed.status, 409);
+    assert.deepEqual(committed.body, {
+      created: 0,
+      updated: 1,
+      failures: [{
+        row: 2,
+        message: 'This row could not be saved. Check the file and preview it again.'
+      }],
+      error: 'Some rows could not be imported. Preview the file again before retrying.'
+    });
+    assert.doesNotMatch(JSON.stringify(committed.body), /injected secret database detail/);
+    assert.deepEqual(await db.dbGet(
+      `SELECT first_name, phone, normalized_phone, notes, updated_by, updated_at, xmin::text AS version
+         FROM patients WHERE id = ?`, [rolledBack.id]
+    ), before);
+    assert.deepEqual(await db.dbGet(
+      'SELECT first_name, notes FROM patients WHERE id = ?', [successful.id]
+    ), { first_name: 'Must Commit', notes: 'success-new' });
+  } finally {
+    delete routeApp.locals.patientImportTestAdapter;
+  }
 });

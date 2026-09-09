@@ -596,6 +596,7 @@
     $('commitBtn').onclick = async function commit() {
       if (!importToken) return;
       this.disabled = true;
+      let needsNewPreview = false;
       try {
         const result = await AppShell.fetchJson('/api/patients/import/commit', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -609,9 +610,10 @@
         load();
       } catch (error) {
         banner(error.message, false);
+        needsNewPreview = true;
+        importToken = null;
         const failures = error.payload?.failures || [];
         if (failures.length) {
-          importToken = null;
           const heading = document.createElement('p');
           const strong = document.createElement('strong');
           strong.textContent = 'Rows not saved — upload the file again for a fresh preview:';
@@ -627,7 +629,7 @@
           $('commitBtn').disabled = true;
           $('importResult').hidden = false;
         }
-      } finally { this.disabled = false; }
+      } finally { this.disabled = needsNewPreview || !importToken; }
     };
 
     $('discardBtn').onclick = () => {

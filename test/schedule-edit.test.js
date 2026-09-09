@@ -128,3 +128,54 @@ test('a changed future instant reschedules while invalid and past inputs write n
     await db.dbRun('DELETE FROM patients WHERE id = ?', [patient.lastID]);
   }
 });
+
+test('the canonical persisted instant controls component, past, calendar and calling-hour validation', async () => {
+  const marker = randomUUID();
+  const phone = `004${marker.replace(/\D/g, '').padEnd(7, '0').slice(0, 7)}`;
+  const patient = await db.dbRun(
+    'INSERT INTO patients (first_name, phone, normalized_phone) VALUES (?, ?, ?)',
+    [`zztest-${marker}`, phone, phone]
+  );
+  const initial = '2099-01-05T06:30:00.000Z';
+  const customer = await db.dbRun(
+    `INSERT INTO customers (patient_id, scheduled_datetime, status, next_retry_at, attempt_count,
+      is_manual, locked_at, customer_value, urgency_level, call_type)
+     VALUES (?, ?, 'retry_scheduled', ?, 6, 0, now(), 'standard', 'normal', 'REVIEW_CALL')`,
+    [patient.lastID, initial, initial]
+  );
+  const selectState = () => db.dbGet(
+    `SELECT scheduled_datetime, status, next_retry_at, attempt_count, is_manual, locked_at,
+            customer_value, urgency_level, call_type
+       FROM customers WHERE id = ?`, [customer.lastID]
+  );
+  const body = {
+    name: `zztest-${marker}`, patient_id: patient.lastID,
+    customer_value: 'high', urgency_level: 'normal', call_type: 'REVIEW_CALL'
+  };
+  try {
+    const before = await selectState();
+    const rejected = [
+      { candidate: {
+        scheduled_date: '2099-01-01', preferred_slot: '10:00',
+        scheduled_datetime: '2020-01-01T10:00:00Z'
+      }, field: 'scheduled_date' },
+      { candidate: {
+        scheduled_date: '2099-01-01', preferred_slot: '10:00',
+        scheduled_datetime: '2099-01-01T00:00:00Z'
+      }, field: 'preferred_slot' },
+      { candidate: {
+        scheduled_date: '2099-03-02', preferred_slot: '15:30',
+        scheduled_datetime: '2099-02-30T10:00:00Z'
+      }, field: 'scheduled_datetime' }
+    ];
+    for (const { candidate, field } of rejected) {
+      const response = await request('PUT', `/api/customers/${customer.lastID}`, { ...body, ...candidate });
+      assert.equal(response.status, 400, JSON.stringify({ candidate, response: response.body }));
+      assert.ok(response.body.fieldErrors[field], JSON.stringify({ candidate, response: response.body }));
+      assert.deepEqual(await selectState(), before, JSON.stringify(candidate));
+    }
+  } finally {
+    await db.dbRun('DELETE FROM customers WHERE id = ?', [customer.lastID]);
+    await db.dbRun('DELETE FROM patients WHERE id = ?', [patient.lastID]);
+  }
+});

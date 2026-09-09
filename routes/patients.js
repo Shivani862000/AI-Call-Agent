@@ -118,7 +118,7 @@ async function transactionMatches(tx, identity) {
   return { byReference, byPhone };
 }
 
-async function commitImportCreate(entry, username) {
+async function commitImportCreate(entry, username, afterWrite) {
   return dbTx(async (tx) => {
     const matches = await transactionMatches(tx, {
       reference_id: entry.payload.reference_id,
@@ -126,14 +126,16 @@ async function commitImportCreate(entry, username) {
     });
     if (matches.byReference || matches.byPhone) throw staleImportError();
     const columns = [...IMPORT_WRITE_FIELDS, 'created_by', 'updated_by'];
-    return tx.run(
+    const created = await tx.run(
       `INSERT INTO patients (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
       [...IMPORT_WRITE_FIELDS.map((field) => entry.payload[field]), username, username]
     );
+    if (afterWrite) await afterWrite({ action: 'create', row: entry.row, patientId: created.lastID });
+    return created;
   });
 }
 
-async function commitImportUpdate(entry, username) {
+async function commitImportUpdate(entry, username, afterWrite) {
   return dbTx(async (tx) => {
     const current = await tx.get(
       `SELECT ${COLUMNS}, xmin::text AS version FROM patients WHERE id = ? FOR UPDATE`, [entry.id]
@@ -151,6 +153,7 @@ async function commitImportUpdate(entry, username) {
         WHERE id = ?`,
       [...fields.map((field) => entry.patch[field]), username, entry.id]
     );
+    if (afterWrite) await afterWrite({ action: 'update', row: entry.row, patientId: entry.id });
   });
 }
 
@@ -530,6 +533,8 @@ router.post('/import/commit', async (req, res, next) => {
     let created = 0;
     let updated = 0;
     const failures = [];
+    const afterWrite = process.env.NODE_ENV === 'test'
+      ? req.app.locals.patientImportTestAdapter?.afterWrite : null;
 
     const operations = [
       ...entry.plan.creates.map((row) => ({ action: 'create', row })),
@@ -538,10 +543,10 @@ router.post('/import/commit', async (req, res, next) => {
     for (const operation of operations) {
       try {
         if (operation.action === 'create') {
-          await commitImportCreate(operation.row, username);
+          await commitImportCreate(operation.row, username, afterWrite);
           created += 1;
         } else {
-          await commitImportUpdate(operation.row, username);
+          await commitImportUpdate(operation.row, username, afterWrite);
           updated += 1;
         }
       } catch (error) {

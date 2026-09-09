@@ -39,3 +39,11 @@ Rollback: revert the application change; no migration or live data rewrite is in
 - GREEN: `npm run test:unit` reported 315 passed / 0 failed, including the focused 17 import tests and the authorization/privacy regressions. The initial sandboxed run produced loopback `listen EPERM`; the authorized rerun passed.
 - GREEN: `npm run test:db -- --file test/patient-import-route.test.js` reported 5 passed / 0 failed, and `npm run test:db -- --file test/schedule-edit.test.js` reported 2 passed / 0 failed. Both ran against fresh internal-network PostgreSQL 17.6 containers at schema `0019`, with migrations applied twice and resources cleaned by the audited runner.
 - JavaScript syntax checks and `git diff --check` passed. No direct PostgreSQL client, environment file, shared database, provider, call, notification, migration, push, merge, or deployment was used.
+
+### Fix round 1
+
+- Base: `c1fba27e996c6f03d7ebffd1a5e994b374ace307`.
+- RED: the focused schedule database file reported 2 passed / 1 failed when a past canonical timestamp was accepted behind future date/slot components. The focused import database file reported 5 passed / 1 failed before its new post-write fault adapter was wired; this was a coverage gap around the existing real `dbTx` rollback, not evidence of a production rollback defect.
+- GREEN: `npm run test:db -- --file test/schedule-edit.test.js` reported 3 passed / 0 failed, covering the exact persisted instant, mismatched components, past time, impossible calendar dates, Asia/Kolkata calling hours, valid offsets, real rescheduling, and exact no-write state.
+- GREEN: `npm run test:db -- --file test/patient-import-route.test.js` reported 6 passed / 0 failed. A fault after the real transactional row write restored exact persisted state including `updated_at`/`xmin`, returned a sanitized failure, and allowed the next row to commit.
+- The consumed-token UI state now remains disabled until a new preview; the changed inline script parses successfully. The accepted import unit file and syntax/diff checks remain the final focused gates.
