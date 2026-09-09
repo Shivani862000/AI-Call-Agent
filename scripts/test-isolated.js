@@ -26,6 +26,7 @@ const UNIT_FILES = [
   'test/deepgram-transcript.test.js', 'test/digest.test.js',
   'test/followup-call-script.test.js', 'test/gmail-transport.test.js',
   'test/health-endpoint.test.js', 'test/icallmate-config.test.js',
+  'test/icallmate-log-privacy.test.js',
   'test/icallmate-preflight.test.js', 'test/icallmate-protocol.test.js',
   'test/icallmate-webhook.test.js', 'test/inbound-disabled.test.js',
   'test/legacy-callback-auth.test.js', 'test/log-sink.test.js',

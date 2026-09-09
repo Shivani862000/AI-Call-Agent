@@ -59,3 +59,9 @@
 3. Verify actual route/service paths with inert providers. Record the bounded audited coverage and any outstanding operational log/rotation questions. Commit separately after review; never rotate or disclose live credentials as a side effect of testing.
 
 Rollback: dependency/image changes revert to the prior reviewed local revision; no schema change. Preserve prior image/config identities for P03's release runner. Reverting to a vulnerable package is an emergency operational decision, not a completed remediation state.
+
+#### Task 3 bounded implementation evidence — 9 September 2026
+
+- `services/icallmate.js` now recursively removes secret-bearing provider fields such as `ukey`, tokens, API keys and authorization values from request/response metadata before callers persist or log them. URL query credentials are replaced with `[redacted]`; callback and media URL sanitizers remain in the same path.
+- Added `test/icallmate-log-privacy.test.js` with synthetic ukey, callback, media, storage and nested API-key values. Focused verification passed; no provider, storage, database or notification boundary was contacted.
+- This closes the local provider metadata redaction slice. A historical log/image exposure assessment and live credential rotation decision remain operational scope for P03/P06 and were not performed.

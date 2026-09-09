@@ -168,3 +168,11 @@ Date: 9 September 2026. Prerequisites: reviewed P01/P07; durable contact revisio
 - Focused verification: `node --test test/contact-policy.test.js test/queue-rules.test.js test/patient-rules.test.js test/call-orchestration.test.js` — **28 passed, 0 failed, 0 skipped**. These tests are pure and use no database, provider, storage, notification or network boundary.
 
 Task 1's real database refusal/stale-completion race, rollback after a dependent-write failure, durable pending-retry cancellation and provider-no-submit assertion remain open. Task 2 will be implemented with P09/P10's versioned contact-event and attempt lifecycle in `0021`; this section does not claim P08 complete.
+
+## P06 — Provider metadata log redaction follow-up
+
+Date: 9 September 2026. Prerequisite: dependency/runtime work reviewed at `5eaa886`.
+
+- `services/icallmate.js` now removes secret-bearing request/response fields (`ukey`, token, secret, API-key and authorization variants) recursively before metadata is returned to call routes for persistence or logging. Signed URL query values are replaced with `[redacted]`; existing callback/media URL handling is preserved.
+- `node --test test/icallmate-log-privacy.test.js` passed **1/1** using synthetic credentials only. No provider, storage, database, mail or notification boundary was contacted.
+- Historical system logs/image layers and live credential rotation remain operational assessments; this local change does not claim past exposure did or did not occur.
