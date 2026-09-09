@@ -4,6 +4,7 @@ const { dbRun, dbGet, dbAll } = require('../db');
 const { normalizePhoneLookupValue } = require('../src/helpers');
 const { resolvePatientId } = require('../src/patient-link');
 const { serializeQueueRow } = require('../src/patient-rules');
+const { parseScheduleInstant, sameScheduleInstant } = require('../src/schedule-time');
 
 const roleOf = (req) => String(req.adminSession?.role || '').toUpperCase();
 const multer = require('multer');
@@ -154,7 +155,10 @@ function normalizePreferredSlot(payload = {}) {
 function normalizeCustomerPayload(payload = {}) {
   const preferredSlot = normalizePreferredSlot(payload);
   const scheduledDate = normalizeScheduledDate(payload);
-  const scheduled = buildScheduledDateTime(scheduledDate, preferredSlot);
+  const suppliedInstant = payload.scheduled_datetime ?? payload.scheduledDateTime;
+  const hasSuppliedInstant = String(suppliedInstant == null ? '' : suppliedInstant).trim() !== '';
+  const directScheduled = hasSuppliedInstant ? parseScheduleInstant(suppliedInstant) : null;
+  const scheduled = hasSuppliedInstant ? directScheduled : buildScheduledDateTime(scheduledDate, preferredSlot);
   return {
     name: String(payload.name || payload.patientName || '').trim(),
     patient_id: Number(payload.patient_id) || null,
@@ -162,6 +166,7 @@ function normalizeCustomerPayload(payload = {}) {
     scheduled_date: scheduledDate,
     preferred_slot: preferredSlot,
     scheduled_datetime: scheduled ? scheduled.toISOString() : null,
+    invalid_scheduled_datetime: hasSuppliedInstant && !directScheduled,
     call_type: normalizeCallType(payload.call_type || payload.callType),
     customer_value: String(payload.customer_value || 'standard').trim().toLowerCase() || 'standard',
     urgency_level: String(payload.urgency_level || 'normal').trim().toLowerCase() || 'normal',
@@ -213,6 +218,9 @@ function validateCustomerPayload(payload) {
   }
 
   const scheduled = buildScheduledDateTime(payload.scheduled_date, payload.preferred_slot);
+  if (payload.invalid_scheduled_datetime) {
+    errors.scheduled_datetime = 'Scheduled date and time are invalid';
+  }
   if (!errors.scheduled_date && !errors.preferred_slot && !scheduled) {
     errors.scheduled_datetime = 'Scheduled date and time are invalid';
   } else if (scheduled && scheduled.getTime() <= Date.now()) {
@@ -499,8 +507,7 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
-    const slotChanged = payload.preferred_slot !== (existing.preferred_slot || '10:00')
-      || payload.scheduled_datetime !== (existing.scheduled_datetime || null);
+    const slotChanged = !sameScheduleInstant(payload.scheduled_datetime, existing.scheduled_datetime);
     const existingStatus = String(existing.status || '').toLowerCase();
     const shouldRescheduleStatus = slotChanged && RESCHEDULABLE_STATUSES.has(existingStatus);
     const nextRetryAt = shouldRescheduleStatus
@@ -525,8 +532,8 @@ router.put('/:id', async (req, res) => {
               service_interest = ?,
               call_type = ?,
               attempt_count = ?,
-              is_manual = 1,
-              locked_at = NULL
+              is_manual = ?,
+              locked_at = ?
         WHERE id = ?`,
       [
         payload.scheduled_datetime,
@@ -542,6 +549,8 @@ router.put('/:id', async (req, res) => {
         payload.service_interest || null,
         payload.call_type,
         shouldRescheduleStatus ? 0 : (existing.attempt_count || 0),
+        shouldRescheduleStatus ? 1 : existing.is_manual,
+        shouldRescheduleStatus ? null : existing.locked_at,
         req.params.id
       ]
     );

@@ -30,3 +30,12 @@
 8. Run the affected audited unit/DB files and the existing remediation authorization/privacy suite. Record exact commands and counts, and run `git diff --check`. Update this Tier 2 plan with prerequisite/evidence. Commit only this task's named files. The controller owns the main plan/evidence register and will arrange a separate review; do not spawn subagents.
 
 Rollback: revert the application change; no migration or live data rewrite is involved. Existing preview tokens may expire/restart normally. Distributed import recovery and admission concurrency remain separate tasks, so this change does not claim those guarantees.
+
+## Task 1 evidence
+
+- Dispatch base: `5ff850e44a677357a3b631b1cb324a905118f0fd` on `codex/remediation-fixes`.
+- Verified P01 disposable-harness prerequisite: `ed9a3e6`.
+- RED: `npm run test:unit -- --file test/patient-import.test.js` reported 12 passed / 5 failed for the new import contracts; `npm run test:db -- --file test/schedule-edit.test.js` reported 0 passed / 2 failed; `npm run test:db -- --file test/patient-import-route.test.js` reported 0 passed / 5 failed after the synthetic fixture was corrected.
+- GREEN: `npm run test:unit` reported 315 passed / 0 failed, including the focused 17 import tests and the authorization/privacy regressions. The initial sandboxed run produced loopback `listen EPERM`; the authorized rerun passed.
+- GREEN: `npm run test:db -- --file test/patient-import-route.test.js` reported 5 passed / 0 failed, and `npm run test:db -- --file test/schedule-edit.test.js` reported 2 passed / 0 failed. Both ran against fresh internal-network PostgreSQL 17.6 containers at schema `0019`, with migrations applied twice and resources cleaned by the audited runner.
+- JavaScript syntax checks and `git diff --check` passed. No direct PostgreSQL client, environment file, shared database, provider, call, notification, migration, push, merge, or deployment was used.

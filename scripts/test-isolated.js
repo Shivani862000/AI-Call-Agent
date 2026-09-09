@@ -37,11 +37,11 @@ const UNIT_FILES = [
 ];
 const DB_FILES = [
   'test/daily-call-limit.test.js', 'test/fixture-cleanup.test.js',
-  'test/outbound-context.test.js', 'test/retention.test.js', 'test/role-isolation.test.js',
-  'test/schema-triggers.test.js'
+  'test/outbound-context.test.js', 'test/patient-import-route.test.js', 'test/retention.test.js', 'test/role-isolation.test.js',
+  'test/schema-triggers.test.js', 'test/schedule-edit.test.js'
 ];
 const STAGED_FILES = ['package.json', 'package-lock.json', 'db.js'];
-const STAGED_DIRECTORIES = ['prompts', 'scripts', 'services', 'src', 'supabase', 'test'];
+const STAGED_DIRECTORIES = ['prompts', 'public', 'routes', 'scripts', 'services', 'src', 'supabase', 'test'];
 
 function assertSafeStageEntry(sourceRoot, sourcePath) {
   const relative = path.relative(sourceRoot, sourcePath);
@@ -262,8 +262,8 @@ async function runDatabase(requestedFile) {
     fs.writeFileSync(path.join(stageDir, 'Dockerfile.test'), [
       'FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e', 'WORKDIR /app',
       'COPY package.json package-lock.json ./', 'RUN npm ci --ignore-scripts',
-      'COPY db.js ./', 'COPY prompts ./prompts', 'COPY scripts ./scripts',
-      'COPY services ./services', 'COPY src ./src', 'COPY supabase ./supabase',
+      'COPY db.js ./', 'COPY prompts ./prompts', 'COPY public ./public', 'COPY routes ./routes',
+      'COPY scripts ./scripts', 'COPY services ./services', 'COPY src ./src', 'COPY supabase ./supabase',
       'COPY test ./test', 'CMD ["tail", "-f", "/dev/null"]', ''
     ].join('\n'));
     const runnerImage = await GenericContainer.fromDockerfile(stageDir, 'Dockerfile.test')

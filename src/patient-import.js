@@ -26,6 +26,11 @@ const COLUMN_ALIASES = {
 };
 
 const REQUIRED_COLUMNS = ['first_name', 'phone'];
+const IMPORT_FIELDS = new Set(Object.keys(COLUMN_ALIASES));
+const NULLABLE_FIELDS = new Set([
+  'reference_id', 'last_name', 'email', 'preferred_call_slot', 'date_of_birth',
+  'gender', 'blood_group', 'last_donation_date', 'last_test_date', 'notes'
+]);
 
 /** `First Name` / `first_name` / `FirstName` all reduce to `first name`. */
 function canonicalizeHeader(value) {
@@ -89,6 +94,39 @@ function cellToField(field, value) {
   return value == null ? '' : String(value).trim();
 }
 
+function updatePatch(raw, present, normalized) {
+  const patch = {};
+  for (const field of present) {
+    if (!IMPORT_FIELDS.has(field)) continue;
+    patch[field] = NULLABLE_FIELDS.has(field) && (raw[field] === '' || raw[field] == null)
+      ? null : normalized[field];
+  }
+  if (present.has('phone')) patch.normalized_phone = normalized.normalized_phone;
+  return patch;
+}
+
+function updateErrors(raw, present, patch) {
+  const errors = validatePatientPayload({
+    ...normalizePatientPayload({ first_name: 'placeholder', phone: '9999999999' }),
+    ...patch
+  });
+  if (present.has('preferred_language') && !String(raw.preferred_language || '').trim()) {
+    errors.preferred_language = 'Preferred language is required';
+  }
+  return errors;
+}
+
+function matchResult(result) {
+  if (!result) return { existing: null, conflict: false };
+  if (result.id != null) return { existing: result, conflict: false };
+  const byReference = result.byReference || null;
+  const byPhone = result.byPhone || null;
+  if (byReference && byPhone && Number(byReference.id) !== Number(byPhone.id)) {
+    return { existing: null, conflict: true };
+  }
+  return { existing: byReference || byPhone, conflict: false };
+}
+
 /**
  * Builds the import plan.
  *
@@ -103,14 +141,25 @@ function buildImportPlan({ rows = [], headerMap = {}, findExisting = () => null 
   rows.forEach((cells, index) => {
     const rowNumber = index + 2; // +1 for the header, +1 for 1-based sheets
     const raw = {};
+    const present = new Set();
     Object.entries(headerMap).forEach(([columnIndex, field]) => {
+      if (!IMPORT_FIELDS.has(field)) return;
+      present.add(field);
       raw[field] = cellToField(field, cells[Number(columnIndex)]);
     });
 
     if (Object.values(raw).every((value) => value === '' || value == null)) return;
 
     const payload = normalizePatientPayload(raw);
-    const errors = validatePatientPayload(payload);
+    const matched = matchResult(findExisting(payload, index));
+    const patch = updatePatch(raw, present, payload);
+    const errors = matched.existing
+      ? updateErrors(raw, present, patch)
+      : validatePatientPayload(payload);
+
+    if (matched.conflict) {
+      errors.identity = 'The reference and mobile number match different patients';
+    }
 
     if (Object.keys(errors).length > 0) {
       plan.problems.push({
@@ -121,18 +170,24 @@ function buildImportPlan({ rows = [], headerMap = {}, findExisting = () => null 
       return;
     }
 
-    const existing = findExisting(payload, index);
-    if (existing) plan.updates.push({ row: rowNumber, id: existing.id, payload });
+    const existing = matched.existing;
+    if (existing) plan.updates.push({
+      row: rowNumber, id: existing.id, version: existing.version, patch,
+      identity: { reference_id: payload.reference_id, normalized_phone: payload.normalized_phone },
+      before: existing,
+      payload
+    });
     else plan.creates.push({ row: rowNumber, payload });
   });
 
   // A file listing the same person twice would otherwise insert both and hit
   // the unique index halfway through the import.
-  const seen = new Set();
+  const seenPhones = new Set();
+  const seenReferences = new Set();
   plan.creates = plan.creates.filter((entry) => {
-    const key = entry.payload.normalized_phone;
-    if (!key) return true;
-    if (seen.has(key)) {
+    const phone = entry.payload.normalized_phone;
+    const reference = String(entry.payload.reference_id || '').toLowerCase();
+    if (phone && seenPhones.has(phone)) {
       plan.problems.push({
         row: entry.row,
         name: entry.payload.first_name,
@@ -140,8 +195,32 @@ function buildImportPlan({ rows = [], headerMap = {}, findExisting = () => null 
       });
       return false;
     }
-    seen.add(key);
+    if (reference && seenReferences.has(reference)) {
+      plan.problems.push({
+        row: entry.row,
+        name: entry.payload.first_name,
+        messages: ['This reference appears more than once in the file']
+      });
+      return false;
+    }
+    if (phone) seenPhones.add(phone);
+    if (reference) seenReferences.add(reference);
     return true;
+  });
+
+  const seenTargets = new Set();
+  plan.updates = plan.updates.filter((entry) => {
+    const target = String(entry.id);
+    if (!seenTargets.has(target)) {
+      seenTargets.add(target);
+      return true;
+    }
+    plan.problems.push({
+      row: entry.row,
+      name: entry.payload.first_name,
+      messages: ['This patient appears more than once in the file']
+    });
+    return false;
   });
 
   return plan;
