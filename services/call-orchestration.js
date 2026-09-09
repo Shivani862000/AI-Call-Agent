@@ -1,4 +1,6 @@
 
+const { normalizeConsentStatus, patientTurns, hasSpeakerLabels } = require('../src/contact-policy');
+
 const VALUE_SCORES = {
   vip: 95,
   high: 80,
@@ -92,7 +94,8 @@ function inferPreferredDialect(customer = {}, history = []) {
 function computePriorityScore(customer = {}) {
   const valueBand = normalizeEnum(customer.customer_value, Object.keys(VALUE_SCORES), 'standard');
   const urgencyBand = normalizeEnum(customer.urgency_level, Object.keys(URGENCY_SCORES), 'normal');
-  const consentBonus = customer.consent_status === 'granted' ? 8 : customer.consent_status === 'denied' ? -25 : 0;
+  const consent = normalizeConsentStatus(customer.consent_status) || 'unknown';
+  const consentBonus = consent === 'granted' ? 8 : consent === 'refused' ? -25 : 0;
   const retryPenalty = Math.min(Number(customer.retry_count) || 0, 4) * 5;
   const reviewPenalty = customer.admin_review_required ? 30 : 0;
   const dndPenalty = customer.do_not_call ? 100 : 0;
@@ -179,10 +182,17 @@ function getSmartRetryIso(outcome, now = new Date()) {
 }
 
 function detectConversationOutcome({ analysisSummary = '', reportExcerpt = '', reviewText = '', transcriptText = '' } = {}) {
-  const haystack = `${analysisSummary} ${reportExcerpt} ${reviewText} ${transcriptText}`.toLowerCase();
+  const transcriptPatientText = patientTurns(transcriptText);
+  const transcriptEvidence = transcriptPatientText
+    || (!hasSpeakerLabels(transcriptText) ? transcriptText : '');
+  const haystack = `${transcriptEvidence || `${analysisSummary} ${reportExcerpt} ${reviewText}`}`.toLowerCase();
 
   if (/\bwrong number|galat number|wrong person|not.*ramesh|number.*galat\b/.test(haystack)) {
     return 'wrong_number';
+  }
+
+  if (/\bnot interested|interest nahin|nahi chahiye|don t call|do not call|no thanks\b/.test(haystack)) {
+    return 'not_interested';
   }
 
   if (/\bcall back|callback|baad mein call|later call|busy now|abhi busy\b/.test(haystack)) {
@@ -191,10 +201,6 @@ function detectConversationOutcome({ analysisSummary = '', reportExcerpt = '', r
 
   if (/\binterested|very interested|hot lead|follow up|send details|share details\b/.test(haystack)) {
     return 'interested';
-  }
-
-  if (/\bnot interested|interest nahin|nahi chahiye|don t call|do not call|no thanks\b/.test(haystack)) {
-    return 'not_interested';
   }
 
   return 'completed';
@@ -275,7 +281,7 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
     wrong_number_flag: customer?.wrong_number_flag || 0,
     admin_review_required: customer?.admin_review_required || 0,
     callback_requested_at: customer?.callback_requested_at || null,
-    consent_status: customer?.consent_status || 'unknown',
+    consent_status: normalizeConsentStatus(customer?.consent_status) || 'unknown',
     auto_retry_enabled: customer?.auto_retry_enabled !== undefined ? customer.auto_retry_enabled : 0
   };
 
@@ -354,20 +360,18 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
   } else if (normalized === 'completed' || normalized === 'answered' || normalized === 'consent_given') {
     customerUpdates.status = 'completed';
     customerUpdates.auto_retry_enabled = 0;
-    if (normalized === 'consent_given') {
-      customerUpdates.consent_status = 'granted';
-    }
   } else if (['ringing', 'in_progress', 'queued', 'initiated', 'voicemail'].includes(normalized)) {
     customerUpdates.status = normalized;
   }
 
-  // Consent belongs to the person, not the call attempt, so an opt-out given
-  // on one call still applies on the next.
-  if (customerUpdates.consent_status) {
+  // Transport completion never grants consent. Restrictive patient outcomes
+  // are monotonic until the durable contact-event workflow authorizes a reset.
+  if (normalized === 'wrong_number' || normalized === 'not_interested') {
     await dbRun(
-      `UPDATE patients SET consent_status = ?, consent_updated_at = now(), updated_at = now()
-        WHERE id = (SELECT patient_id FROM customers WHERE id = ?)`,
-      [customerUpdates.consent_status, customer.id]
+      `UPDATE patients SET do_not_call = 1, consent_status = 'refused', consent_updated_at = now(), updated_at = now()
+        WHERE id = (SELECT patient_id FROM customers WHERE id = ?)
+          AND (COALESCE(do_not_call, 0) <> 1 OR consent_status IS DISTINCT FROM 'refused')`,
+      [customer.id]
     );
   }
 

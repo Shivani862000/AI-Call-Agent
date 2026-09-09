@@ -401,7 +401,7 @@ async function triggerScheduledCalls() {
      WHERE COALESCE(c.do_not_call, 0) = 0
        AND COALESCE(c.wrong_number_flag, 0) = 0
        AND COALESCE(c.admin_review_required, 0) = 0
-       AND COALESCE(c.consent_status, 'unknown') != 'denied'
+       AND COALESCE(c.consent_status, 'unknown') != 'refused'
        AND c.status IN ('pending', 'scheduled', 'retry_scheduled', 'callback_scheduled')
        AND (c.locked_at IS NULL OR c.locked_at <= (now() - interval '10 minutes'))
        AND (

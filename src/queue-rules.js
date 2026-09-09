@@ -10,10 +10,17 @@
  */
 
 /** Reasons a patient can never be queued, whatever the caller wants. */
+const { canContactPatient, normalizeConsentStatus } = require('./contact-policy');
+
 function blockingReason(patient) {
   if (!patient) return 'Patient not found';
-  if (Number(patient.do_not_call) === 1) return 'This patient is marked do not call';
-  if (String(patient.consent_status) === 'refused') return 'This patient has refused consent';
+  const contactDecision = canContactPatient({
+    ...patient,
+    consent_status: normalizeConsentStatus(patient.consent_status) || 'unknown'
+  });
+  if (contactDecision.reason === 'do_not_call') return 'This patient is marked do not call';
+  if (contactDecision.reason === 'wrong_number') return 'This patient is marked as a wrong number';
+  if (contactDecision.reason === 'refused') return 'This patient has refused consent';
   if (String(patient.status) !== 'active') return 'This patient is not on the calling list';
   if (!patient.normalized_phone) return 'This patient has no usable mobile number';
   return null;

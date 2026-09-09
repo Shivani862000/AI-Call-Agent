@@ -10,6 +10,7 @@ const roleOf = (req) => String(req.adminSession?.role || '').toUpperCase();
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const logger = require('../services/system-logger');
+const { normalizeConsentStatus, restrictionRestoreAttempt } = require('../src/contact-policy');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -169,7 +170,7 @@ function normalizeCustomerPayload(payload = {}) {
     preferred_language: String(payload.preferred_language || 'hi').trim().toLowerCase() || 'hi',
     preferred_dialect: String(payload.preferred_dialect || '').trim(),
     do_not_call: toBooleanFlag(payload.do_not_call),
-    consent_status: String(payload.consent_status || 'unknown').trim().toLowerCase() || 'unknown',
+    consent_status: normalizeConsentStatus(payload.consent_status),
     outstanding_issues: String(payload.outstanding_issues || '').trim(),
     pending_follow_ups: String(payload.pending_follow_ups || '').trim(),
     revenue_stage: String(payload.revenue_stage || 'unassigned').trim().toLowerCase() || 'unassigned',
@@ -257,8 +258,8 @@ function validateCustomerPayload(payload) {
     errors.preferred_language = 'Preferred language must be hi, en, mixed, or hinglish';
   }
 
-  if (!['unknown', 'granted', 'denied', 'pending'].includes(payload.consent_status)) {
-    errors.consent_status = 'Consent status must be unknown, granted, denied, or pending';
+  if (!payload.consent_status) {
+    errors.consent_status = 'Consent status must be unknown, granted, or refused';
   }
 
   if (!ALLOWED_CALL_TYPES.has(payload.call_type)) {
@@ -585,10 +586,24 @@ router.patch('/:id/workflow', async (req, res) => {
       do_not_call: req.body.do_not_call === undefined ? existing.do_not_call : toBooleanFlag(req.body.do_not_call),
       wrong_number_flag: req.body.wrong_number_flag === undefined ? existing.wrong_number_flag : toBooleanFlag(req.body.wrong_number_flag),
       admin_review_required: req.body.admin_review_required === undefined ? existing.admin_review_required : toBooleanFlag(req.body.admin_review_required),
-      consent_status: req.body.consent_status ? String(req.body.consent_status).trim().toLowerCase() : existing.consent_status,
+      consent_status: req.body.consent_status === undefined ? normalizeConsentStatus(existing.consent_status) : normalizeConsentStatus(req.body.consent_status),
       next_retry_at: req.body.next_retry_at === undefined ? existing.next_retry_at : req.body.next_retry_at,
       pending_follow_ups: req.body.pending_follow_ups === undefined ? existing.pending_follow_ups : String(req.body.pending_follow_ups || '').trim()
     };
+
+    if (req.body.consent_status !== undefined && !patch.consent_status) {
+      return res.status(400).json({
+        error: 'Consent status must be unknown, granted, or refused',
+        fieldErrors: { consent_status: 'Consent status must be unknown, granted, or refused' }
+      });
+    }
+    const restrictedField = restrictionRestoreAttempt(existing, patch);
+    if (restrictedField) {
+      return res.status(409).json({
+        error: 'Contact restrictions can only be changed through the reviewed restoration workflow',
+        fieldErrors: { [restrictedField]: 'This restriction is authoritative and cannot be relaxed here' }
+      });
+    }
 
     // do-not-call and consent describe the person and must outlive this call
     // attempt; the rest is queue state.

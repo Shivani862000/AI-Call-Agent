@@ -30,6 +30,7 @@ const {
 const { hourInCallTimezone } = require('./helpers');
 const { resolvePatientId } = require('./patient-link');
 const { buildIcallMateCallbackUrl } = require('./icallmate-webhook');
+const { canContactPatient } = require('./contact-policy');
 
 // ── Call Initiation ────────────────────────────────────────────────────────────
 
@@ -347,16 +348,13 @@ async function hydratePreCallIntelligence(customer) {
 }
 
 async function shouldBlockCustomerCall(customer) {
-  if (customer.do_not_call) {
-    return { code: 'BLOCKED', reason: 'Customer is on DND / do-not-call' };
-  }
-
-  if (customer.wrong_number_flag) {
-    return { code: 'BLOCKED', reason: 'Customer is flagged as wrong number' };
-  }
-
-  if (String(customer.consent_status || '').toLowerCase() === 'denied') {
-    return { code: 'BLOCKED', reason: 'Consent denied for this customer' };
+  const decision = canContactPatient(customer);
+  if (!decision.allowed) {
+    return { code: 'BLOCKED', reason: decision.reason === 'do_not_call'
+      ? 'Customer is on DND / do-not-call'
+      : decision.reason === 'wrong_number'
+        ? 'Customer is flagged as wrong number'
+        : 'Consent refused for this customer' };
   }
 
   if (customer.phone) {

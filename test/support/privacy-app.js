@@ -57,7 +57,7 @@ async function servePrivacyApp(t, options = {}) {
     '../services/recording-fetch': { ...require('../../services/recording-fetch'), validateRecordingUrl: value => require('../../services/recording-fetch').validateRecordingUrl(value, options.env || {}), ...options.recording }
   };
   const files = new Set(['src/auth.js', 'src/api-routes.js', 'src/helpers.js',
-    'src/patient-rules.js', 'src/call-serialization.js', 'src/icallmate-webhook.js']);
+    'src/patient-rules.js', 'src/contact-policy.js', 'src/call-serialization.js', 'src/icallmate-webhook.js']);
   const modules = new Map();
   function load(relative) {
     if (modules.has(relative)) return modules.get(relative).exports;

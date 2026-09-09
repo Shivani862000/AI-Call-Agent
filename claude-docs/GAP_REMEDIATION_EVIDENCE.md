@@ -156,4 +156,15 @@ Pinned csv-parse 7.0.2, Multer 2.3.0 and Nodemailer 9.1.1, plus a documented qs 
 
 The CSV prototype regression failed against 5.6.0 and passed after update. Actual CSV/XLSX import, production form/query parsers, customer upload bounds and captured mail composition passed. Final audited unit suite: **342/342** on local Node 22.22.2. The owned Node24/PostgreSQL17 harness initially passed seven patient import tests; review added exact malformed and over-5MiB patient Multer checks, bringing that focused suite to **9/9**, with no returned token, count change or sentinel mutation/version change. Dependency audit and full unit suite were not repeated for this test-only follow-up.
 
-No production adapters, framework-major change, live DB/provider/SMTP operation or deployment was needed. Full Node24 production-image/representative-operation evidence is Task2; expected diagnostic-output cleanup is Task3.
+No production adapters, framework-major change, live DB/provider/SMTP operation or deployment was needed. Node24 production-image, context exclusion and representative-operation evidence is recorded in the P06 execution plan and was completed at `5eaa886`; provider/log-path inventory and historical exposure assessment remain Task 3.
+
+## P08 — Contact policy, refusal precedence and schema-free suppression (Task 1 partial)
+
+Date: 9 September 2026. Prerequisites: reviewed P01/P07; durable contact revisions and attempt admission remain P09/P10 work in migration `0021`.
+
+- Added `src/contact-policy.js` as the shared compatibility boundary. Canonical consent is `unknown|granted|refused`; legacy `denied` maps to `refused` and `pending` to `unknown`. Boolean parsing treats string `false`, `0` and `off` as false, avoiding truthiness-based do-not-call writes.
+- Conversation outcome detection now uses patient/customer/user transcript turns when speaker labels exist, evaluates wrong-number and refusal phrases before callbacks and positive-interest phrases, and does not use assistant-only wording as patient permission. The previous pure reproduction (`CUSTOMER: I am not interested.` → `interested`) is covered by the fixed regression.
+- Queue rules, scheduler filtering and manual call admission all honor refused consent, do-not-call and wrong-number restrictions. Ordinary customer/patient edits reject invalid consent and cannot relax an existing restriction; `applyCallOutcomeWorkflow` no longer turns `consent_given` or ordinary completion into a consent grant. Wrong-number/not-interested outcomes persist a monotonic patient restriction using a null-safe predicate.
+- Focused verification: `node --test test/contact-policy.test.js test/queue-rules.test.js test/patient-rules.test.js test/call-orchestration.test.js` — **28 passed, 0 failed, 0 skipped**. These tests are pure and use no database, provider, storage, notification or network boundary.
+
+Task 1's real database refusal/stale-completion race, rollback after a dependent-write failure, durable pending-retry cancellation and provider-no-submit assertion remain open. Task 2 will be implemented with P09/P10's versioned contact-event and attempt lifecycle in `0021`; this section does not claim P08 complete.

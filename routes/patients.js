@@ -15,6 +15,7 @@ const {
 const { mapHeaders, buildImportPlan, COLUMN_ALIASES } = require('../src/patient-import');
 const { blockingReason } = require('../src/queue-rules');
 const { countOutboundCallsToday, MAX_CALLS_PER_DAY } = require('../src/call-management');
+const { restrictionRestoreAttempt } = require('../src/contact-policy');
 
 const MAX_IMPORT_ROWS = 5000;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -258,6 +259,13 @@ router.put('/:id(\\d+)', async (req, res, next) => {
       : { ...req.body, phone: existing.phone, email: existing.email };
 
     const payload = normalizePatientPayload(merged);
+    const restrictedField = restrictionRestoreAttempt(existing, payload);
+    if (restrictedField) {
+      return res.status(409).json({
+        error: 'Contact restrictions can only be changed through the reviewed restoration workflow',
+        fieldErrors: { [restrictedField]: 'This restriction is authoritative and cannot be relaxed here' }
+      });
+    }
     const fieldErrors = validatePatientPayload(payload);
     if (Object.keys(fieldErrors).length > 0) {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });

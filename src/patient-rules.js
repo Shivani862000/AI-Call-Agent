@@ -1,6 +1,7 @@
 'use strict';
 
 const { normalizePhoneLookupValue } = require('./helpers');
+const { normalizeConsentStatus, parseBooleanFlag } = require('./contact-policy');
 
 /**
  * Validation, normalisation and role-aware masking for patient records.
@@ -94,9 +95,8 @@ function normalizePatientPayload(input = {}) {
     blood_group: BLOOD_GROUPS.has(bloodGroup) ? bloodGroup : 'unknown',
     last_donation_date: cleanText(input.last_donation_date, 10),
     last_test_date: cleanText(input.last_test_date, 10),
-    do_not_call: input.do_not_call ? 1 : 0,
-    consent_status: CONSENT.has(String(input.consent_status || '').toLowerCase())
-      ? String(input.consent_status).toLowerCase() : 'unknown',
+    do_not_call: parseBooleanFlag(input.do_not_call),
+    consent_status: normalizeConsentStatus(input.consent_status) || 'unknown',
     status: STATUSES.has(String(input.status || '').toLowerCase())
       ? String(input.status).toLowerCase() : 'active',
     notes: cleanText(input.notes, 2000)
