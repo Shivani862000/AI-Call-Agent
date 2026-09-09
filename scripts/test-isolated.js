@@ -46,6 +46,7 @@ const UNIT_FILES = [
 const DB_FILES = [
   'test/daily-call-limit.test.js', 'test/fixture-cleanup.test.js',
   'test/customer-pagination-db.test.js',
+  'test/patient-pagination-db.test.js',
   'test/outbound-admission-db.test.js', 'test/outbound-context.test.js', 'test/patient-import-route.test.js', 'test/retention.test.js', 'test/role-isolation.test.js',
   'test/post-call-jobs-db.test.js',
   'test/feedback-patient-ownership-db.test.js',

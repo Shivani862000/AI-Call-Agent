@@ -18,6 +18,8 @@ const { countOutboundCallsToday, MAX_CALLS_PER_DAY } = require('../src/call-mana
 const { restrictionRestoreAttempt } = require('../src/contact-policy');
 
 const MAX_IMPORT_ROWS = 5000;
+const PATIENT_PAGE_DEFAULT = 50;
+const PATIENT_PAGE_MAX = 100;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const COLUMNS = `id, reference_id, first_name, last_name, phone, normalized_phone, email,
@@ -43,6 +45,34 @@ const router = express.Router();
 
 function roleOf(req) {
   return String(req.adminSession?.role || '').toUpperCase();
+}
+
+function parsePatientPageSize(value) {
+  if (value == null || value === '') return PATIENT_PAGE_DEFAULT;
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!/^\d+$/.test(String(raw))) return null;
+  const size = Number(raw);
+  return Number.isSafeInteger(size) && size > 0 && size <= PATIENT_PAGE_MAX ? size : null;
+}
+
+function encodePatientCursor(row) {
+  return Buffer.from(JSON.stringify({
+    firstName: String(row.first_name || '').toLowerCase(),
+    lastName: String(row.last_name || '').toLowerCase(),
+    id: Number(row.id)
+  })).toString('base64url');
+}
+
+function decodePatientCursor(value) {
+  if (typeof value !== 'string' || !value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+    if (typeof parsed.firstName !== 'string' || typeof parsed.lastName !== 'string'
+        || !Number.isSafeInteger(parsed.id) || parsed.id < 1) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function isAdmin(req) {
@@ -181,6 +211,16 @@ router.get('/', async (req, res, next) => {
   try {
     const search = String(req.query.search || '').trim();
     const status = String(req.query.status || 'all').toLowerCase();
+    const paginationRequested = req.query.cursor != null
+      || req.query.page_size != null
+      || req.query.pageSize != null;
+    const pageSize = parsePatientPageSize(req.query.page_size ?? req.query.pageSize);
+    if (paginationRequested && !pageSize) {
+      return res.status(400).json({ error: `page_size must be an integer from 1 to ${PATIENT_PAGE_MAX}` });
+    }
+    if (Array.isArray(req.query.cursor)) return res.status(400).json({ error: 'cursor must be a single value' });
+    const cursor = req.query.cursor == null ? null : decodePatientCursor(req.query.cursor);
+    if (req.query.cursor != null && !cursor) return res.status(400).json({ error: 'cursor is invalid or expired' });
     const params = [];
     const where = [];
 
@@ -199,13 +239,34 @@ router.get('/', async (req, res, next) => {
       params.push(status);
     }
 
+    if (cursor) {
+      where.push(`(
+        lower(first_name) > ?
+        OR (lower(first_name) = ? AND (
+          lower(coalesce(last_name, '')) > ?
+          OR (lower(coalesce(last_name, '')) = ? AND id > ?)
+        ))
+      )`);
+      params.push(cursor.firstName, cursor.firstName, cursor.lastName, cursor.lastName, cursor.id);
+    }
+
     const rows = await dbAll(
       `SELECT ${COLUMNS} FROM patients
        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-       ORDER BY lower(first_name), lower(coalesce(last_name, '')) LIMIT 500`,
-      params
+       ORDER BY lower(first_name), lower(coalesce(last_name, '')), id
+       LIMIT ?`,
+      paginationRequested ? [...params, pageSize + 1] : [...params, 500]
     );
-    res.json({ patients: rows.map((row) => serializePatient(row, roleOf(req))) });
+    if (!paginationRequested) {
+      return res.json({ patients: rows.map((row) => serializePatient(row, roleOf(req))) });
+    }
+    const hasMore = rows.length > pageSize;
+    const items = rows.slice(0, pageSize);
+    return res.json({
+      patients: items.map((row) => serializePatient(row, roleOf(req))),
+      nextCursor: hasMore ? encodePatientCursor(items[items.length - 1]) : null,
+      hasMore
+    });
   } catch (error) { next(error); }
 });
 

@@ -13,7 +13,7 @@ Date: 9 September 2026. Prerequisite: durable queue/customer rows and campaign c
 ## Verification
 
 - `npm run test:unit`: **371/371 passed**.
-- `npm run test:db`: **43/43 passed** through schema `0026`; database files run sequentially against the owned test database to prevent fixture races.
+- `npm run test:db`: **44/44 passed** through schema `0026`; database files run sequentially against the owned test database to prevent fixture races.
 - Syntax checks for the changed customer and reporting routes passed.
 
 ## Remaining before P15 completion

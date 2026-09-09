@@ -202,7 +202,7 @@ Date: 9 September 2026. Prerequisite: P09/P10 local lifecycle slices. [Execution
 
 - Migration `0023_post_call_jobs.sql` adds revisioned, RLS-protected stage-job rows with retry state, due indexes, claim leases/tokens and call-delete cascade.
 - `services/post-call-jobs.js` provides deterministic input revisions, bounded retry delays, row-locked claims and token-fenced completion/failure transitions. The post-call pipeline claims before work and records blocked/retry state for missing input or processing errors.
-- Verification: isolated unit suite **371/371** and isolated PostgreSQL suite **43/43** passed after migrating through schema `0026`. Focused regressions cover duplicate claims, wrong-token completion, retry state, cascade cleanup, bounded recovery scanning and patient-level admission serialization.
+- Verification: isolated unit suite **371/371** and isolated PostgreSQL suite **44/44** passed after migrating through schema `0026`. Focused regressions cover duplicate claims, wrong-token completion, retry state, cascade cleanup, bounded recovery scanning and patient-level admission serialization.
 
 Stage-specific recovery, token-fenced final effects, lease renewal, notification outbox delivery and legacy backfill/reconciliation remain open. This is durable job ownership plus due-job rediscovery, not a claim of exactly-once completion. No provider, notification, storage or deployment boundary was used.
 
@@ -242,7 +242,7 @@ Date: 9 September 2026. Prerequisite: durable customer/queue identity. [Executio
 
 - Migration `0025_campaign_identity.sql` adds and backfills `customers.campaign_id`, keeps legacy names compatible through a trigger, and indexes the identity for reporting. Migration `0026_call_campaign_snapshot.sql` adds and backfills call-level campaign ID/name snapshots and appends the ID to the queue view.
 - Customer writes accept a campaign ID, and campaign reporting resolves configuration name and spend by durable ID while retaining the historical queue/call label.
-- Verification: isolated unit suite **371/371** and PostgreSQL suite **43/43** passed through schema `0026`; the focused database regression covers call snapshots, queue-view projection, rename continuity and exact spend/pipeline attribution.
+- Verification: isolated unit suite **371/371** and PostgreSQL suite **44/44** passed through schema `0026`; the focused database regression covers call snapshots, queue-view projection, rename continuity and exact spend/pipeline attribution.
 
 Import/attempt/UI propagation, ambiguous-name review and production backfill remain open; P15 is not complete.
 
@@ -254,7 +254,9 @@ Date: 9 September 2026. Prerequisite: P07 import limits and durable queue identi
 - The cursor carries priority, creation time and ID, matching the endpoint's descending ordering and preventing duplicate/omitted rows across page traversal with tied priorities.
 - The isolated PostgreSQL regression passed **1/1**, covering three pages, complete unique coverage, legacy response compatibility, malformed cursor rejection and the maximum page size.
 
-Browser load-more consumption, patient-list pagination, bounded import batching and representative workload measurement remain open; P16 is not complete.
+- The patient endpoint now has the same opt-in cursor contract while retaining `{patients: [...]}` for existing callers. Its isolated PostgreSQL regression passes **1/1** with search/status filters, complete page coverage, legacy compatibility and malformed-input checks.
+
+Browser load-more consumption, bounded import batching and representative workload measurement remain open; P16 is not complete.
 
 ## P18 — Scheduling-modal keyboard boundary (partial)
 
