@@ -147,3 +147,13 @@ The real pipeline download and authenticated playback share exact-origin HTTPS r
 Initial regressions reproduced arbitrary pipeline/playback destinations and malformed callbacks reaching processing. Final audited `npm run test:unit`: **336 passed**, no failures, cancellations or skips; includes ten retrieval, seven actual consumer/callback and four storage boundary tests. Diff checks passed. No DB schema/query changed, so no repeated DB suite was needed. Expected test diagnostics remain a nonblocking fixture cleanup item for P06/final review.
 
 Controller verified preserved ADMIN media/transcript/analysis guards and scalar-secret legacy authentication. Provider origins and representative fixtures are still unavailable: empty origins deny retrieval and redirects default disabled. This is local boundary verification, not provider compatibility or rollout evidence. P10 replay/correlation and P12 successful-audio lifetime/recovery remain separate work. No live provider, storage or database access, deployment or notification was used.
+
+## P06 — Dependency compatibility and audit
+
+Date: 9 September 2026. Implementation `3089b35`, scoped review fix `f47f739`; independent spec/quality review approved. [Execution plan and initial evidence](remediation-execution/P06-runtime-packaging.md). Schema remains `0019`.
+
+Pinned csv-parse 7.0.2, Multer 2.3.0 and Nodemailer 9.1.1, plus a documented qs 6.16.0 override. Express stays at 4.22.2 with body-parser 1.20.6. The fresh baseline audit reported six vulnerable package entries (four moderate, two high); the final unchanged dependency graph reports **zero vulnerabilities**. This is the audit result at verification time, not a guarantee against later advisories.
+
+The CSV prototype regression failed against 5.6.0 and passed after update. Actual CSV/XLSX import, production form/query parsers, customer upload bounds and captured mail composition passed. Final audited unit suite: **342/342** on local Node 22.22.2. The owned Node24/PostgreSQL17 harness initially passed seven patient import tests; review added exact malformed and over-5MiB patient Multer checks, bringing that focused suite to **9/9**, with no returned token, count change or sentinel mutation/version change. Dependency audit and full unit suite were not repeated for this test-only follow-up.
+
+No production adapters, framework-major change, live DB/provider/SMTP operation or deployment was needed. Full Node24 production-image/representative-operation evidence is Task2; expected diagnostic-output cleanup is Task3.
