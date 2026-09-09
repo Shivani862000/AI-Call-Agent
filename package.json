@@ -14,7 +14,9 @@
     "test:hotfix": "node --test test/authorization-routes.test.js test/auth-security.test.js test/user-rules.test.js test/csp-http-deployment.test.js",
     "test:remediation": "node --test --test-reporter=spec test/config-redaction.test.js test/config-database-url.test.js test/legacy-callback-auth.test.js test/icallmate-webhook.test.js test/call-response-privacy.test.js test/auth-session-state.test.js test/authorization-routes.test.js test/auth-security.test.js test/user-rules.test.js test/csp-http-deployment.test.js",
     "users": "node scripts/manage-users.js",
-    "migrate": "node scripts/migrate.js"
+    "migrate": "node scripts/migrate.js",
+    "test:packaging": "node scripts/test-isolated.js packaging",
+    "test:runtime": "node scripts/test-isolated.js runtime"
   },
   "dependencies": {
     "@google/genai": "^1.36.0",
@@ -37,5 +39,8 @@
   },
   "devDependencies": {
     "@testcontainers/postgresql": "11.7.2"
+  },
+  "engines": {
+    "node": ">=24.20.0 <25"
   }
 }

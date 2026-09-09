@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { assertOwnedTestDatabase } = require('./support/database');
-const { minimalEnvironment, stageAllowedSource } = require('../scripts/test-isolated');
+const { minimalEnvironment, stageAllowedSource, stageUatTemplateFlag } = require('../scripts/test-isolated');
 
 function identityEnv(overrides = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'db-identity-unit-'));
@@ -94,7 +94,7 @@ test('sanitized staging rejects nested secrets, archives, and symlink escapes', 
     '.env.local', 'synthetic-service-account.json', 'SYNTHETIC_SERVICE_ACCOUNT.JSON',
     'client_secret-demo.json', 'CLIENT-SECRET-demo.JSON', 'gmail-key.json',
     'GMAIL_KEY.JSON', 'fixture.backup', 'feedback.db.archived-20260830',
-    'FEEDBACK.DB.ARCHIVE_20260830'
+    'FEEDBACK.DB.ARCHIVE_20260830', 'id_rsa', 'id_ed25519', 'archive-2026', 'backups'
   ]) {
     const source = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-source-'));
     const target = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-target-'));
@@ -127,4 +127,22 @@ test('synthetic startup environment disables the implemented background work', (
   assert.equal(env.DISABLE_INBOUND_CALLS, 'true');
   assert.equal(env.DISABLE_DIGEST, undefined);
   assert.equal(env.DISABLE_OUTBOUND_CALLS, undefined);
+});
+
+
+test('unit template staging carries only the actual boolean flag, never other environment values', () => {
+  const source = fs.mkdtempSync(path.join(os.tmpdir(), 'template-source-'));
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'template-target-'));
+  try {
+    for (const flag of ['true', 'false', 'invalid']) {
+      fs.writeFileSync(path.join(source, '.env.uat.example'),
+        `SECRET=SYNTHETIC_DO_NOT_COPY\nDISABLE_INBOUND_CALLS=${flag}\n`);
+      stageUatTemplateFlag(source, target);
+      assert.equal(fs.readFileSync(path.join(target, '.env.uat.example'), 'utf8'),
+        flag === 'invalid' ? '' : `DISABLE_INBOUND_CALLS=${flag}\n`);
+    }
+  } finally {
+    fs.rmSync(source, { recursive: true, force: true });
+    fs.rmSync(target, { recursive: true, force: true });
+  }
 });

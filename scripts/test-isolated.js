@@ -42,8 +42,10 @@ const DB_FILES = [
   'test/outbound-context.test.js', 'test/patient-import-route.test.js', 'test/retention.test.js', 'test/role-isolation.test.js',
   'test/schema-triggers.test.js', 'test/schedule-edit.test.js'
 ];
-const STAGED_FILES = ['package.json', 'package-lock.json', 'db.js'];
-const STAGED_DIRECTORIES = ['prompts', 'public', 'routes', 'scripts', 'services', 'src', 'supabase', 'test'];
+const PACKAGING_FILES = ['test/image-context.test.js'];
+const RUNTIME_FILES = ['test/production-runtime.test.js'];
+const STAGED_FILES = ['package.json', 'package-lock.json', 'index.js', 'db.js'];
+const STAGED_DIRECTORIES = ['prompts', 'public', 'routes', 'scripts', 'services', 'src', 'utils', 'supabase', 'test'];
 
 function assertSafeStageEntry(sourceRoot, sourcePath) {
   const relative = path.relative(sourceRoot, sourcePath);
@@ -52,6 +54,7 @@ function assertSafeStageEntry(sourceRoot, sourcePath) {
   if (stat.isSymbolicLink()) throw new Error(`staging rejects symlink: ${relative}`);
   const name = path.basename(sourcePath).toLowerCase();
   if (name.startsWith('.env')
+      || /^(?:id_(?:rsa|dsa|ecdsa|ed25519)|backups?|archives?)(?:[._-]|$)/i.test(name)
       || /(?:credential|service[-_]account|oauth|client[-_]secret|gmail[-_]key)/i.test(name)
       || /\.(?:pem|key|p12|pfx|db|sqlite|sqlite3|bak|backup|archive|archived|zip|tgz|tar|gz)$/i.test(name)
       || /\.(?:db|sqlite|sqlite3)[._-](?:archive|archived|backup|bak)(?:[._-]|$)/i.test(name)) {
@@ -82,10 +85,20 @@ function stageAllowedSource(sourceRoot, targetRoot, files = STAGED_FILES, direct
   }
 }
 
+// Existing unit coverage reads one flag from the tracked UAT example. Project
+// only a strict boolean assignment; never copy an environment file payload.
+function stageUatTemplateFlag(sourceRoot, targetRoot) {
+  const source = path.join(sourceRoot, '.env.uat.example');
+  if (!fs.lstatSync(source).isFile()) throw new Error('UAT template must be a regular file');
+  const flags = fs.readFileSync(source, 'utf8').split(/\r?\n/)
+    .filter((line) => /^DISABLE_INBOUND_CALLS=(?:true|false)$/.test(line));
+  fs.writeFileSync(path.join(targetRoot, '.env.uat.example'), flags.map((line) => `${line}\n`).join(''));
+}
+
 function auditManifest() {
   const discovered = fs.readdirSync(path.join(ROOT, 'test'))
     .filter((name) => name.endsWith('.test.js')).map((name) => `test/${name}`).sort();
-  const classified = [...UNIT_FILES, ...DB_FILES].sort();
+  const classified = [...UNIT_FILES, ...DB_FILES, ...PACKAGING_FILES, ...RUNTIME_FILES].sort();
   if (!discovered.length || JSON.stringify(discovered) !== JSON.stringify(classified)) {
     const missing = discovered.filter((file) => !classified.includes(file));
     const stale = classified.filter((file) => !discovered.includes(file));
@@ -126,7 +139,7 @@ function dockerJson(args) {
   return JSON.parse(execFileSync('docker', args, { encoding: 'utf8' }));
 }
 
-async function runDatabase(requestedFile) {
+async function runDatabase(requestedFile, { runtime = false, full = false } = {}) {
   auditManifest();
   const selected = requestedFile ? [requestedFile] : DB_FILES;
   for (const file of selected) {
@@ -159,6 +172,7 @@ async function runDatabase(requestedFile) {
   let network;
   let container;
   let runner;
+  let production;
   let stageDir;
   let interrupted = false;
   let cleanupPromise;
@@ -196,6 +210,10 @@ async function runDatabase(requestedFile) {
         } finally { clearTimeout(timer); }
         return cleaned;
       };
+      if (production) {
+        const owned = production;
+        if (await attempt('production image cleanup', () => owned.stop()) && production === owned) production = undefined;
+      }
       if (runner) {
         const owned = runner;
         if (await attempt('test runner cleanup', () => owned.stop()) && runner === owned) runner = undefined;
@@ -261,12 +279,13 @@ async function runDatabase(requestedFile) {
     }), (raw) => new StartedNetwork(client, resourceName, raw), (owned) => { network = owned; });
     stageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-call-agent-stage-'));
     stageAllowedSource(ROOT, stageDir);
+    stageUatTemplateFlag(ROOT, stageDir);
     fs.writeFileSync(path.join(stageDir, 'Dockerfile.test'), [
       'FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e', 'WORKDIR /app',
       'COPY package.json package-lock.json ./', 'RUN npm ci --ignore-scripts',
-      'COPY db.js ./', 'COPY prompts ./prompts', 'COPY public ./public', 'COPY routes ./routes',
+      'COPY db.js index.js .env.uat.example ./', 'COPY prompts ./prompts', 'COPY public ./public', 'COPY routes ./routes',
       'COPY scripts ./scripts', 'COPY services ./services', 'COPY src ./src', 'COPY supabase ./supabase',
-      'COPY test ./test', 'CMD ["tail", "-f", "/dev/null"]', ''
+      'COPY utils ./utils', 'COPY test ./test', 'CMD ["tail", "-f", "/dev/null"]', ''
     ].join('\n'));
     const runnerImage = await GenericContainer.fromDockerfile(stageDir, 'Dockerfile.test')
       .withCache(false).build(`ai-call-agent-test-runner:${runId}`, { deleteOnExit: true });
@@ -357,11 +376,78 @@ async function runDatabase(requestedFile) {
     });
     process.stdout.write(provisioned.output);
     if (provisioned.exitCode !== 0) throw new Error(`test role provisioning exited ${provisioned.exitCode}`);
-    const tested = await runner.exec(
-      ['node', '--test', '--test-reporter=spec', ...selected], { workingDir: '/app', env }
-    );
-    process.stdout.write(tested.output);
-    if (tested.exitCode !== 0) throw new Error(`database test process exited ${tested.exitCode}`);
+    if (!runtime || full) {
+      const tested = await runner.exec(
+        ['node', '--test', '--test-reporter=spec', ...selected], { workingDir: '/app', env }
+      );
+      process.stdout.write(tested.output);
+      if (tested.exitCode !== 0) throw new Error(`database test process exited ${tested.exitCode}`);
+    }
+    if (full) {
+      const version = await runner.exec(['node', '-p', 'process.version']);
+      if (version.exitCode !== 0 || !/^v24\./.test(version.output.trim())) throw new Error('unit runner must use Node24');
+      console.log(`Audited unit runner: ${version.output.trim()}`);
+      const unit = await runner.exec(['node', 'scripts/test-isolated.js', 'unit'], {
+        workingDir: '/app', env: { NODE_ENV: 'test', NODE_OPTIONS: '', DATABASE_URL: '' }
+      });
+      process.stdout.write(unit.output);
+      if (unit.exitCode !== 0) throw new Error(`Node24 unit process exited ${unit.exitCode}`);
+    }
+    if (runtime) {
+      const productionStage = path.join(stageDir, 'production-context');
+      stageAllowedSource(ROOT, productionStage,
+        ['Dockerfile', '.dockerignore', 'package.json', 'package-lock.json', 'index.js', 'db.js'],
+        ['prompts', 'public', 'routes', 'scripts', 'services', 'src', 'utils', 'supabase']);
+      const productionTag = `ai-call-agent-production-test:${runId}`;
+      const productionImage = await GenericContainer.fromDockerfile(productionStage)
+        .withBuildkit().withPlatform('linux/amd64').build(productionTag, { deleteOnExit: true });
+      stopIfInterrupted();
+      const imageInfo = dockerJson(['image', 'inspect', productionTag])[0];
+      if (imageInfo.Architecture !== 'amd64' || imageInfo.Os !== 'linux') throw new Error('production target must be linux/amd64');
+      console.log(`Production build identity: ${imageInfo.Id}; target ${imageInfo.Os}/${imageInfo.Architecture}`);
+      console.log(`Docker host: ${execFileSync('docker', ['info', '--format', '{{.OSType}}/{{.Architecture}}'], { encoding: 'utf8' }).trim()}; non-amd64 hosts use emulation`);
+      const adminPassword = crypto.randomBytes(24).toString('hex');
+      const seeded = await runner.exec(['node', 'test/support/runtime-seed.js'], {
+        workingDir: '/app', env: { ...env, RUNTIME_ADMIN_PASSWORD: adminPassword }
+      });
+      process.stdout.write(seeded.output);
+      if (seeded.exitCode !== 0) throw new Error('runtime administrator seeding failed');
+      const productionEnv = {
+        NODE_ENV: 'production', DATABASE_URL: identities.application.connectionString,
+        AI_CALL_AGENT_TEST_RUN_ID: runId, AI_CALL_AGENT_TEST_DB_IDENTITY: '/run/application.json',
+        RUNTIME_ADMIN_PASSWORD: adminPassword, AI_PROVIDER: 'gemini',
+        GEMINI_API_KEY: 'synthetic-gemini', DEEPGRAM_API_KEY: 'synthetic-deepgram',
+        AUTH_SIGNING_SECRET: crypto.randomBytes(32).toString('hex'),
+        ICALLMATE_WEBHOOK_SECRET: crypto.randomBytes(32).toString('hex'),
+        ICALLMATE_MEDIA_SHARED_SECRET: crypto.randomBytes(32).toString('hex'),
+        APP_BASE_URL: 'http://127.0.0.1:3000', CLIENT_NAME: 'Synthetic runtime lab',
+        DISABLE_SCHEDULER: 'true', DISABLE_OWNER_DIGEST: 'true', DISABLE_INBOUND_CALLS: 'true',
+        NODE_OPTIONS: '--require=/app/test/support/runtime-provider-fakes.js'
+      };
+      let startupOutput = '';
+      try {
+        await assignOwned('production', productionImage.withPlatform('linux/amd64')
+          .withName(`${resourceName}-production`).withNetworkMode(resourceName)
+          .withEnvironment(productionEnv)
+          .withLogConsumer((stream) => stream.on('data', (chunk) => { startupOutput = (startupOutput + chunk).slice(-8000); }))
+          .withCopyDirectoriesToContainer([{ source: path.join(stageDir, 'test'), target: '/app/test' }])
+          .withCopyContentToContainer([{ content: JSON.stringify(identities.application), target: '/run/application.json', mode: 0o600 }])
+          .withWaitStrategy(Wait.forLogMessage('[SERVER] Running on port 3000 (0.0.0.0)'))
+          .withStartupTimeout(120_000).start(), (owned) => owned, (owned) => { production = owned; });
+      } catch (error) {
+        console.error(startupOutput);
+        throw error;
+      }
+      const info = dockerJson(['inspect', production.getId()])[0];
+      if (Object.keys(info.NetworkSettings.Networks).join() !== resourceName
+          || Object.values(info.NetworkSettings.Ports).some((ports) => ports?.length)
+          || info.Mounts.length) throw new Error('production workload isolation failed');
+      const checked = await production.exec(['node', '--test', '--test-reporter=spec', ...RUNTIME_FILES], {
+        workingDir: '/app', env: { NODE_OPTIONS: '' }
+      });
+      process.stdout.write(checked.output);
+      if (checked.exitCode !== 0) throw new Error(`production runtime checks exited ${checked.exitCode}`);
+    }
     if (interrupted) throw new Error('test run interrupted');
   } finally {
     process.removeListener('SIGINT', markInterrupted);
@@ -383,7 +469,13 @@ async function main() {
   const { mode, file } = parseArgs(process.argv.slice(2));
   if (mode === 'unit') runUnit(file);
   else if (mode === 'db') await runDatabase(file);
-  else if (mode === 'isolated') { runUnit(); await runDatabase(file); }
+  else if (mode === 'packaging') { auditManifest(); runNodeTests(PACKAGING_FILES, minimalEnvironment({ AI_CALL_AGENT_CONTEXT_TEST: '1', NODE_OPTIONS: '' })); }
+  else if (mode === 'runtime') await runDatabase(file, { runtime: true });
+  else if (mode === 'isolated') {
+    auditManifest();
+    runNodeTests(PACKAGING_FILES, minimalEnvironment({ AI_CALL_AGENT_CONTEXT_TEST: '1', NODE_OPTIONS: '' }));
+    await runDatabase(file, { runtime: true, full: true });
+  }
   else if (mode === 'browser') throw new Error('browser harness is unavailable until P17');
   else throw new Error(`unknown test group: ${mode}`);
 }
@@ -391,5 +483,5 @@ async function main() {
 if (require.main === module) main().catch((error) => { console.error(error.message); process.exitCode = 1; });
 
 module.exports = {
-  UNIT_FILES, DB_FILES, auditManifest, minimalEnvironment, parseArgs, stageAllowedSource
+  UNIT_FILES, DB_FILES, PACKAGING_FILES, RUNTIME_FILES, auditManifest, minimalEnvironment, parseArgs, stageAllowedSource, stageUatTemplateFlag
 };
