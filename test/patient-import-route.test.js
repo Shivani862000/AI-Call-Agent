@@ -1,7 +1,6 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const express = require('express');
 const http = require('node:http');
 const { randomUUID } = require('node:crypto');
 const ExcelJS = require('exceljs');
@@ -32,6 +31,32 @@ async function previewFile(content, filename, type, username = 'import-admin') {
     method: 'POST', headers: { 'x-test-user': username }, body: form
   });
   return { status: response.status, body: await response.json() };
+}
+
+async function patientCount() {
+  const row = await db.dbGet('SELECT COUNT(*)::int AS count FROM patients');
+  return row.count;
+}
+
+async function patientSnapshot(id) {
+  return db.dbGet(
+    `SELECT first_name, phone, normalized_phone, notes, updated_by, updated_at,
+            xmin::text AS version
+       FROM patients WHERE id = ?`,
+    [id]
+  );
+}
+
+async function captureServerError(request) {
+  const captured = [];
+  const original = console.error;
+  console.error = (...args) => { captured.push(args); };
+  try {
+    const response = await request();
+    return { response, captured };
+  } finally {
+    console.error = original;
+  }
 }
 
 test('actual XLSX preview and commit preserve workbook values', async () => {
@@ -100,14 +125,22 @@ async function seedPatient(overrides = {}) {
 test.before(async () => {
   db = require('../db');
   await db.initializeDatabase();
-  routeApp = express();
-  routeApp.use(express.json());
-  routeApp.use((req, res, next) => {
-    req.adminSession = { username: req.get('x-test-user') || 'import-admin', role: 'ADMIN' };
-    next();
+  const pass = (req, res, next) => next();
+  routeApp = require('../src/app')({
+    publicBaseUrl: 'http://localhost:3000',
+    auth: {
+      PROTECTED_HTML_PATHS: [],
+      requireAdminAuth(req, res, next) {
+        req.adminSession = { username: req.get('x-test-user') || 'import-admin', role: 'ADMIN' };
+        next();
+      },
+      requireRole: () => pass,
+      basicAuth: pass
+    },
+    mountApiRoutes(app) {
+      app.use('/api/patients', require('../routes/patients'));
+    }
   });
-  routeApp.use('/api/patients', require('../routes/patients'));
-  routeApp.use((error, req, res, next) => res.status(error.status || 500).json({ error: 'test route error' }));
   server = http.createServer(routeApp);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -120,6 +153,69 @@ test.after(async () => {
   }
   await new Promise((resolve) => server.close(resolve));
   await db.closeDatabase();
+});
+
+test('patient preview rejects malformed multipart without a token or database effect', async () => {
+  const sentinel = await seedPatient();
+  const countBefore = await patientCount();
+  const snapshotBefore = await patientSnapshot(sentinel.id);
+  const boundary = 'patient-import-malformed-boundary';
+  const { response, captured } = await captureServerError(() => fetch(
+    baseUrl + '/api/patients/import/preview',
+    {
+      method: 'POST',
+      headers: {
+        'content-type': `multipart/form-data; boundary=${boundary}`,
+        'x-test-user': 'import-admin'
+      },
+      body: [
+        `--${boundary}`,
+        'Content-Disposition: form-data; name="file"; filename="patients.csv"',
+        'Content-Type: text/csv',
+        '',
+        'First Name,Mobile Number',
+        `Changed by malformed upload,${sentinel.phone}`
+      ].join('\r\n')
+    }
+  ));
+  const body = await response.json();
+
+  assert.equal(response.status, 500, JSON.stringify(body));
+  assert.equal(body.error, 'An internal server error occurred. Please try again later.');
+  assert.equal(typeof body.reqId, 'string');
+  assert.equal(captured.length, 1);
+  assert.match(captured[0][1].message, /unexpected end of form/i);
+  assert.equal(Object.hasOwn(body, 'token'), false);
+  assert.equal(await patientCount(), countBefore);
+  assert.deepEqual(await patientSnapshot(sentinel.id), snapshotBefore);
+});
+
+test('patient preview rejects files over 5 MiB without a token or database effect', async () => {
+  const sentinel = await seedPatient();
+  const countBefore = await patientCount();
+  const snapshotBefore = await patientSnapshot(sentinel.id);
+  const prefix = Buffer.from([
+    'First Name,Mobile Number',
+    `Changed by oversized upload,${sentinel.phone}`,
+    ''
+  ].join('\n'));
+  const oversized = Buffer.concat([
+    prefix,
+    Buffer.alloc((5 * 1024 * 1024) + 1 - prefix.length, 0x61)
+  ]);
+  const { response, captured } = await captureServerError(() => previewFile(
+    oversized, 'patients.csv', 'text/csv'
+  ));
+
+  assert.equal(response.status, 500, JSON.stringify(response.body));
+  assert.equal(response.body.error, 'An internal server error occurred. Please try again later.');
+  assert.equal(typeof response.body.reqId, 'string');
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0][1].code, 'LIMIT_FILE_SIZE');
+  assert.equal(captured[0][1].field, 'file');
+  assert.equal(Object.hasOwn(response.body, 'token'), false);
+  assert.equal(await patientCount(), countBefore);
+  assert.deepEqual(await patientSnapshot(sentinel.id), snapshotBefore);
 });
 
 test('actual preview and commit preserve omitted and protected patient fields', async () => {
