@@ -176,3 +176,12 @@ Date: 9 September 2026. Prerequisite: dependency/runtime work reviewed at `5eaa8
 - `services/icallmate.js` now removes secret-bearing request/response fields (`ukey`, token, secret, API-key and authorization variants) recursively before metadata is returned to call routes for persistence or logging. Signed URL query values are replaced with `[redacted]`; existing callback/media URL handling is preserved.
 - `node --test test/icallmate-log-privacy.test.js` passed **1/1** using synthetic credentials only. No provider, storage, database, mail or notification boundary was contacted.
 - Historical system logs/image layers and live credential rotation remain operational assessments; this local change does not claim past exposure did or did not occur.
+
+## P09 — Outbound admission contract (partial)
+
+Date: 9 September 2026. Dependencies: schema-free P08 policy; durable attempt/contact lifecycle remains P09/P10 migration `0021` work.
+
+- Added `services/outbound-admission.js` with deterministic attempt request keys, same-key idempotency, mismatched-payload conflict detection, current contact restriction checks, pause/capacity/daily-limit/cooldown decisions and explicit provider `submitted`, `rejected` and `submission_unknown` states. Unknown provider results are retained rather than treated as safe retries.
+- Focused verification: `node --test test/outbound-admission.test.js` — **5 passed, 0 failed, 0 skipped**. Tests are pure and use no provider or database boundary.
+
+This is a contract slice only. It does not claim P09 completion: no durable reservation table, transaction-backed shared admission, multi-worker race proof or provider replay/uncertainty reconciliation has shipped yet.

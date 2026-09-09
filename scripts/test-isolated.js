@@ -33,6 +33,7 @@ const UNIT_FILES = [
   'test/mailer-config.test.js', 'test/media-auth.test.js',
   'test/media-bridge-auth.test.js', 'test/no-dropped-column-writes.test.js',
   'test/no-sqlite-sql.test.js', 'test/patient-import.test.js',
+  'test/outbound-admission.test.js',
   'test/patient-rules.test.js', 'test/queue-rules.test.js',
   'test/review-call-script.test.js', 'test/slack-alerts.test.js',
   'test/sql-compat.test.js', 'test/supabase-storage-config.test.js',
