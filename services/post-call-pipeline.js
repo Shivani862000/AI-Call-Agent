@@ -13,28 +13,24 @@ const {
 } = require('./call-orchestration');
 const { syncCallToCrm, sendHotLeadAlert } = require('./crm-sync');
 
-const RECORDINGS_DIR = path.join('/tmp', 'feedback-call-recordings');
+const os = require('node:os');
+const { pipeline } = require('node:stream/promises');
+const { fetchRecording } = require('./recording-fetch');
 
-async function ensureRecordingsDir() {
-  await fs.promises.mkdir(RECORDINGS_DIR, { recursive: true });
-}
-
-async function downloadRecording(recordingUrl, callSid) {
-  if (!recordingUrl) {
-    return null;
+async function downloadRecording(recordingUrl) {
+  if (!recordingUrl) return null;
+  const recording = await fetchRecording(recordingUrl);
+  let directory;
+  try {
+    directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), `feedback-recording-${process.pid}-`));
+    const targetPath = path.join(directory, 'audio.mp3');
+    await pipeline(recording.stream, fs.createWriteStream(targetPath, { flags: 'wx', mode: 0o600 }));
+    return targetPath;
+  } catch {
+    recording.cancel();
+    if (directory) await fs.promises.rm(directory, { recursive: true, force: true });
+    throw new Error('Recording unavailable');
   }
-
-  await ensureRecordingsDir();
-  const response = await fetch(recordingUrl);
-
-  if (!response.ok) {
-    throw new Error(`Recording download failed with status ${response.status}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  const targetPath = path.join(RECORDINGS_DIR, `${callSid || Date.now()}.mp3`);
-  await fs.promises.writeFile(targetPath, Buffer.from(arrayBuffer));
-  return targetPath;
 }
 
 function convertPlainTranscriptToTurns(transcriptText = '') {
@@ -166,7 +162,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   let recordingLocalPath = null;
   if (!callRecord.recording_object_key && callRecord.recording_url) {
     try {
-      recordingLocalPath = await downloadRecording(callRecord.recording_url, callRecord.provider_call_id);
+      recordingLocalPath = await downloadRecording(callRecord.recording_url);
       const objectKey = `calls/${callRecord.id}/${path.basename(recordingLocalPath)}`;
       const { uploadObject, isStorageConfigured } = require('./supabase-storage');
       if (isStorageConfigured()) {

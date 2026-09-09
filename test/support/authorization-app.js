@@ -23,7 +23,10 @@ function createAuthorizationApp(publicBaseUrl = 'http://localhost:3000') {
     module,
     process: { env: {} },
     require(name) {
-      if (name === './icallmate-webhook') return require('../../src/icallmate-webhook');
+      if (name === './icallmate-webhook') {
+        const webhook = require('../../src/icallmate-webhook');
+        return { ...webhook, hasValidIcallMateWebhookSecret: req => webhook.hasValidIcallMateWebhookSecret(req, { ICALLMATE_WEBHOOK_SECRET: 'synthetic-authorization-provider-secret' }) };
+      }
       if (name === '../routes/support-tickets') return () => router(name);
       if (name.startsWith('../routes/')) return router(name);
       if (name === '../services/slack-support') return { createSlackSupportNotifier: () => () => {} };
@@ -89,7 +92,8 @@ async function serveAuthorizationApp(t, publicBaseUrl) {
     const req = http.request({
       hostname: '127.0.0.1', port: fixture.server.address().port,
       method, path: requestPath,
-      headers: role ? { 'x-test-role': role } : {}
+      headers: { ...(role ? { 'x-test-role': role } : {}),
+        ...(method === 'POST' && requestPath === '/api/icallmate/callback' ? { 'x-webhook-secret': 'synthetic-authorization-provider-secret' } : {}) }
     }, res => {
       let body = '';
       res.on('data', chunk => { body += chunk; });

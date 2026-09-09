@@ -9,6 +9,7 @@ const { execFileSync, spawnSync } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 const UNIT_FILES = [
+  'test/storage-boundaries.test.js', 'test/recording-boundaries.test.js', 'test/recording-fetch.test.js',
   'test/agent-prompt-override.test.js', 'test/app-settings.test.js',
   'test/audio-drain.test.js', 'test/auth-security.test.js',
   'test/auth-session-state.test.js', 'test/authorization-routes.test.js',

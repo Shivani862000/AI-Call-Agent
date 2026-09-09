@@ -6,6 +6,8 @@
 'use strict';
 
 const fs = require('fs');
+const { pipeline } = require('node:stream/promises');
+const { fetchRecording } = require('../services/recording-fetch');
 const customersRouter = require('../routes/customers');
 const campaignsRouter = require('../routes/campaigns');
 const feedbackRouter = require('../routes/feedback');
@@ -82,7 +84,8 @@ const { processCompletedCallPipeline } = require('../services/post-call-pipeline
 const {
   buildIcallMateCallbackUrl,
   hasValidIcallMateWebhookSecret,
-  requireLegacyCallWebhook
+  requireLegacyCallWebhook,
+  validateCallback
 } = require('./icallmate-webhook');
 const logger = require('../services/system-logger');
 const { generateCallAnalysisPDF } = require('../services/pdf');
@@ -418,7 +421,7 @@ module.exports = function mountApiRoutes(app) {
   //   res.type('text/xml').send(buildScriptedRatingResponse(req));
   // });
 
-  app.all('/call/status', requireLegacyCallWebhook, async (req, res) => {
+  app.all('/call/status', requireLegacyCallWebhook, validateCallback, async (req, res) => {
     try {
       const providerStatus = pickRequestValue(req, ['CallStatus', 'Status', 'status']);
       const providerCallSid = pickRequestValue(req, ['CallSid', 'call_sid', 'Sid', 'sid']);
@@ -456,9 +459,7 @@ module.exports = function mountApiRoutes(app) {
         if (providerStatus === 'voicemail') mappedOutcome = 'voicemail';
         if (providerStatus === 'canceled' || providerStatus === 'cancelled') mappedOutcome = 'cancelled';
 
-        const normalizedRecordingUrl = providerRecordingUrl
-          ? String(providerRecordingUrl).endsWith('.mp3') ? providerRecordingUrl : `${providerRecordingUrl}.mp3`
-          : null;
+        const normalizedRecordingUrl = providerRecordingUrl || null;
 
         if (normalizedRecordingUrl || providerRecordingSid) {
           await dbRun(
@@ -531,12 +532,12 @@ module.exports = function mountApiRoutes(app) {
     }
   });
 
-  app.post('/call/recording-status', requireLegacyCallWebhook, async (req, res) => {
+  app.post('/call/recording-status', requireLegacyCallWebhook, validateCallback, async (req, res) => {
     try {
       const callSid = req.body.CallSid;
       const recordingSid = req.body.RecordingSid;
       const recordingStatus = req.body.RecordingStatus;
-      const recordingUrl = req.body.RecordingUrl ? `${req.body.RecordingUrl}.mp3` : null;
+      const recordingUrl = req.body.RecordingUrl || null;
 
       console.log(`[RECORDING STATUS] ${recordingStatus} | Call SID: ${callSid} | Recording SID: ${recordingSid}`);
 
@@ -807,19 +808,15 @@ module.exports = function mountApiRoutes(app) {
     });
   });
 
-  app.post('/api/icallmate/callback', async (req, res) => {
-    // An outbound-only deployment (UAT) shares the DID with production and must
-    // not process inbound call events for it.
+  app.post('/api/icallmate/callback', (req, res, next) => {
+    if (!hasValidIcallMateWebhookSecret(req)) return res.status(401).json({ error: 'Invalid webhook secret' });
+    next();
+  }, validateCallback, async (req, res) => {
     if (DISABLE_INBOUND_CALLS && String(req.body?.event || '').toLowerCase().includes('incoming')) {
       logger.warn('INBOUND_REJECTED', { reason: 'inbound calls are disabled on this deployment' });
       return res.status(403).json({ error: 'Inbound calls are not handled by this deployment' });
     }
-
     try {
-      if (!hasValidIcallMateWebhookSecret(req)) {
-        return res.status(401).json({ error: 'Invalid webhook secret' });
-      }
-
       const payload = req.body || {};
       const key = String(payload.ref_no || payload.leadid || payload.phoneno || `${Date.now()}`);
       const callType = String(payload.call_type || '').toLowerCase();
@@ -923,8 +920,8 @@ module.exports = function mountApiRoutes(app) {
 
       res.json({ success: true });
     } catch (error) {
-      console.error('[ICALLMATE CALLBACK ERROR]', error.message);
-      res.status(500).json({ error: error.message });
+      console.error('[ICALLMATE CALLBACK ERROR] Callback processing failed');
+      res.status(500).json({ error: 'Callback processing failed' });
     }
   });
 
@@ -1563,37 +1560,34 @@ module.exports = function mountApiRoutes(app) {
   });
 
   app.get('/api/calls/:callId/recording', async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    res.once('close', cancel);
     try {
       const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status, recording_object_key FROM calls WHERE id = ?', [req.params.callId]);
-
-      // Stored in Supabase: hand back a short-lived signed URL rather than
-      // proxying the audio through this process.
-      if (call?.recording_object_key && call.recording_status === 'stored') {
-        const { createSignedUrl } = require('../services/supabase-storage');
-        return res.redirect(await createSignedUrl(call.recording_object_key, 60));
-      }
-
-      if (!call?.recording_url && !call?.provider_call_id) {
+      if (controller.signal.aborted) return;
+      if (!call?.recording_url && !(call?.recording_object_key && call.recording_status === 'stored')) {
         return res.status(404).json({ error: 'Recording not available yet' });
       }
-
-      let playbackUrl = call.recording_url || null;
-      let response = playbackUrl
-        ? await fetch(playbackUrl)
-        : null;
-
-      if (!response || !response.ok) {
-        const statusCode = response?.status || 404;
-        return res.status(statusCode).json({ error: `Unable to fetch recording (${statusCode})` });
+      // Express routes HEAD through GET. Do not fetch or mint a URL for HEAD.
+      if (req.method === 'HEAD') return res.status(200).end();
+      if (call.recording_object_key && call.recording_status === 'stored') {
+        const { createSignedUrl } = require('../services/supabase-storage');
+        const url = await createSignedUrl(call.recording_object_key, 60, { signal: controller.signal });
+        if (!controller.signal.aborted) return res.redirect(url);
+        return;
       }
-
-      const arrayBuffer = await response.arrayBuffer();
-      res.setHeader('Content-Type', response.headers.get('content-type') || 'audio/mpeg');
-      res.setHeader('Cache-Control', 'private, no-store');
-      res.send(Buffer.from(arrayBuffer));
-    } catch (error) {
-      console.error('[RECORDING PROXY ERROR]', error.message);
-      res.status(500).json({ error: 'Failed to stream recording' });
+      const recording = await fetchRecording(call.recording_url, { signal: controller.signal });
+      res.setHeader('Content-Type', recording.contentType);
+      await pipeline(recording.stream, res);
+    } catch {
+      console.error('[RECORDING PROXY ERROR] Recording unavailable');
+      if (!res.headersSent && !res.destroyed) res.status(502).json({ error: 'Recording unavailable' });
+      else res.destroy();
+    } finally {
+      controller.abort();
+      res.removeListener('close', cancel);
     }
   });
 

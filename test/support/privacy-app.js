@@ -41,7 +41,7 @@ async function servePrivacyApp(t, options = {}) {
       effects.push('dbAll');
       return options.dbAll ? options.dbAll(sql, params) : [];
     },
-    dbRun: fail('dbRun'), dbTx: fail('dbTx')
+    dbRun: options.dbRun || fail('dbRun'), dbTx: fail('dbTx')
   };
   const stubs = {
     './config': config, '../db': db, fs: { existsSync: fail('filesystem') },
@@ -53,7 +53,8 @@ async function servePrivacyApp(t, options = {}) {
     '../services/post-call-pipeline': { processCompletedCallPipeline: fail('pipeline') },
     '../services/system-logger': { info() {}, warn() {}, error() {} },
     '../services/pdf': { generateCallAnalysisPDF: fail('pdf') },
-    '../services/supabase-storage': { createSignedUrl: fail('signed URL') }
+    '../services/supabase-storage': options.storage || { createSignedUrl: fail('signed URL') },
+    '../services/recording-fetch': { ...require('../../services/recording-fetch'), validateRecordingUrl: value => require('../../services/recording-fetch').validateRecordingUrl(value, options.env || {}), ...options.recording }
   };
   const files = new Set(['src/auth.js', 'src/api-routes.js', 'src/helpers.js',
     'src/patient-rules.js', 'src/call-serialization.js', 'src/icallmate-webhook.js']);
@@ -66,9 +67,9 @@ async function servePrivacyApp(t, options = {}) {
     vm.runInNewContext(fs.readFileSync(path.join(root, relative), 'utf8'), {
       module, exports: module.exports, Buffer, URL, Date: Clock, console: options.console || console,
       process: { env: { NODE_ENV: 'test', AUTH_SIGNING_SECRET: 'synthetic-privacy-test-signing-secret-at-least-32-bytes', ...options.env } },
-      setTimeout: fail('timer'), fetch: fail('network'),
+      setTimeout: fail('timer'), AbortController, fetch: options.fetch || fail('network'),
       require(name) {
-        if (name === 'crypto' || name === 'bcrypt') return require(name);
+        if (name === 'crypto' || name === 'bcrypt' || name === 'node:stream/promises') return require(name);
         if (Object.hasOwn(stubs, name)) return stubs[name];
         if (name === '../routes/support-tickets') return () => express.Router();
         if (name.startsWith('../routes/')) return express.Router();
@@ -85,13 +86,13 @@ async function servePrivacyApp(t, options = {}) {
     server.listen(0, '127.0.0.1', resolve);
   });
   t.after(() => new Promise(resolve => server.close(resolve)));
-  function request(method, target, token) {
+  function request(method, target, token, payload, { disconnectOnData = false } = {}) {
     return new Promise((resolve, reject) => {
       const req = http.request({ hostname: '127.0.0.1', port: server.address().port,
-        method, path: target, headers: token ? { cookie: `${auth.AUTH_COOKIE_NAME}=${token}` } : {}
+        method, path: target, headers: { ...(token ? { cookie: `${auth.AUTH_COOKIE_NAME}=${token}` } : {}), ...(payload ? { 'content-type': 'application/json' } : {}) }
       }, res => {
         let text = '';
-        res.on('data', chunk => { text += chunk; });
+        res.on('data', chunk => { text += chunk; if (disconnectOnData) { req.destroy(); resolve({ status: res.statusCode, headers: res.headers, body: text }); } });
         res.on('end', () => {
           let body;
           try { body = JSON.parse(text); } catch { body = text; }
@@ -100,7 +101,7 @@ async function servePrivacyApp(t, options = {}) {
       });
       req.setTimeout(3000, () => req.destroy(new Error('Synthetic request timed out')));
       req.on('error', reject);
-      req.end();
+      req.end(payload ? JSON.stringify(payload) : undefined);
     });
   }
   return { request, auth, account, accounts, effects, config, advance: ms => { now += ms; }, load };

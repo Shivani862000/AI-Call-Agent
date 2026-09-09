@@ -35,6 +35,11 @@ function createAuthorizationRouter({ requireAdminAuth, requireRole, basicAuth })
     res.setHeader('Expires', '0');
     next();
   });
+  // Private media errors must receive the same cache policy before authentication.
+  router.get('/api/calls/:id/recording', (req, res, next) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    next();
+  });
   // Session inspection must use current account state, like protected APIs.
   router.post(['/api/auth/login', '/api/auth/logout'], publicRoute);
   // The callback handler verifies its provider secret. Other methods and
