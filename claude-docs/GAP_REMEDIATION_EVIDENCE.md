@@ -265,3 +265,11 @@ Date: 9 September 2026. Scope: the shared scheduling modal mounted by the authen
 - `node --check public/app-shell.js` and `node --test test/modal-accessibility.test.js` passed; no browser or screen-reader boundary was used.
 
 Search/listbox semantics, full keyboard journey, field-error announcements, visual reflow/contrast and human screen-reader assessment remain open; P18 is not complete.
+
+## P19 — CSP string-evaluation removal (partial)
+
+Date: 9 September 2026. Scope: Helmet's application-wide script policy. [Execution plan](remediation-execution/P19-csp-script-eval.md).
+
+- Repository inventory found no `eval()`, `new Function()` or equivalent string-evaluation consumer in application/public source.
+- Removed `unsafe-eval` from `script-src` and added a regression that rejects the directive if it returns.
+- `unsafe-inline`, inline event attributes and browser enforcement remain open; this slice does not close F25.

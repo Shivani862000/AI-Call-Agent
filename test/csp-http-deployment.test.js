@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { serveAuthorizationApp } = require('./support/authorization-app');
 
 test('plain HTTP pages do not force unavailable HTTPS connections', async t => {
@@ -18,4 +20,9 @@ test('HTTPS pages retain transport security headers after app extraction', async
   assert.equal(response.status, 200);
   assert.match(response.headers['content-security-policy'], /upgrade-insecure-requests/);
   assert.ok(response.headers['strict-transport-security']);
+});
+
+test('scripts cannot be evaluated from strings', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src/app.js'), 'utf8');
+  assert.doesNotMatch(source, /unsafe-eval/);
 });
