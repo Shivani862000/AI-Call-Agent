@@ -378,6 +378,12 @@
     }
 
     /* Recording controls within advanced */
+    .recording-empty {
+      margin: 0;
+      font-size: 13px;
+      color: var(--analysis-muted);
+    }
+
     .recording-controls {
       display: flex;
       align-items: center;
@@ -634,12 +640,15 @@
 
     function renderRecording(call) {
       const container = document.getElementById('recordingContainer');
-      const hasRecording = true; // Always show the recording section
+      // Only a stored object or a provider URL can actually be played. Rendering
+      // a player for anything else points it at an endpoint that 404s, which
+      // reads as "the recording is broken" on calls that never had audio.
+      const hasRecording = Boolean(call.recording_object_key || call.recording_url);
 
-      setSectionVisible('recordingSection', hasRecording);
+      setSectionVisible('recordingSection', true);
 
       if (!hasRecording) {
-        container.innerHTML = '';
+        container.innerHTML = '<p class="recording-empty">No recording was captured for this call.</p>';
         return;
       }
 
