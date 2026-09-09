@@ -1,26 +1,25 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
 
-require('dotenv').config();
-const { resolveDatabaseUrl } = require('../src/config');
-const HAS_DB = /^postgres/i.test(resolveDatabaseUrl());
-
-test('calls.status mirrors calls.outcome via trigger', { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
+test('calls.status mirrors calls.outcome via trigger', async () => {
   const { initializeDatabase, dbRun, dbGet, closeDatabase } = require('../db');
   await initializeDatabase();
 
-  const marker = `trigger-test-${Date.now()}`;
+  const marker = `nondialable:${randomUUID()}`;
   const patient = await dbRun(
     'INSERT INTO patients (first_name, phone) VALUES (?, ?)', [marker, marker]
   );
-  const customer = await dbRun(
-    'INSERT INTO customers (patient_id, status) VALUES (?, ?)', [patient.lastID, 'pending']
-  );
+  let customer;
+  let created;
 
   try {
+    customer = await dbRun(
+      'INSERT INTO customers (patient_id, status) VALUES (?, ?)', [patient.lastID, 'pending']
+    );
     // Insert with an outcome and no status: the insert trigger fills status in.
-    const created = await dbRun(
+    created = await dbRun(
       'INSERT INTO calls (customer_id, outcome) VALUES (?, ?)',
       [customer.lastID, 'completed']
     );
@@ -32,8 +31,13 @@ test('calls.status mirrors calls.outcome via trigger', { skip: !HAS_DB && 'no Su
     call = await dbGet('SELECT status FROM calls WHERE id = ?', [created.lastID]);
     assert.equal(call.status, 'no-answer');
   } finally {
-    // Cascade removes the call row with the customer.
-    await dbRun('DELETE FROM customers WHERE id = ?', [customer.lastID]);
+    if (created?.lastID) {
+      await dbRun('DELETE FROM feedback WHERE call_id = ?', [created.lastID]);
+      await dbRun('DELETE FROM call_supervisor_events WHERE call_id = ?', [created.lastID]);
+      await dbRun('DELETE FROM calls WHERE id = ?', [created.lastID]);
+    }
+    await dbRun('DELETE FROM calls WHERE patient_id = ?', [patient.lastID]);
+    if (customer?.lastID) await dbRun('DELETE FROM customers WHERE id = ?', [customer.lastID]);
     await dbRun('DELETE FROM patients WHERE id = ?', [patient.lastID]);
     await closeDatabase();
   }
@@ -42,12 +46,13 @@ test('calls.status mirrors calls.outcome via trigger', { skip: !HAS_DB && 'no Su
 // Removing one scheduled call used to delete every call that patient had ever
 // had, recordings and feedback included, because calls and feedback cascaded
 // from the queue entry. A call belongs to the patient now.
-test('deleting a queue entry keeps the calls and feedback', { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
+test('deleting a queue entry keeps the calls and feedback', async () => {
   const { initializeDatabase, dbRun, dbGet, closeDatabase } = require('../db');
   await initializeDatabase();
 
   const { withTestPatient } = require('./support/fixtures');
-  await withTestPatient(async ({ patientId }) => {
+  try {
+    await withTestPatient(async ({ patientId }) => {
   const patient = { lastID: patientId };
   const customer = await dbRun(
     'INSERT INTO customers (patient_id, status) VALUES (?, ?)', [patientId, 'pending']
@@ -74,18 +79,19 @@ test('deleting a queue entry keeps the calls and feedback', { skip: !HAS_DB && '
 
   const survivingFeedback = await dbGet('SELECT id, call_id FROM feedback WHERE call_id = ?', [call.lastID]);
   assert.ok(survivingFeedback, 'the feedback was deleted with the queue entry');
-  });
-  await closeDatabase();
+    });
+  } finally { await closeDatabase(); }
 });
 
 // A patient may have several calls scheduled at once; scheduling one used to
 // overwrite the last, because patient_id was unique on the queue.
-test('a patient can have more than one call scheduled', { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
+test('a patient can have more than one call scheduled', async () => {
   const { initializeDatabase, dbRun, dbAll, closeDatabase } = require('../db');
   await initializeDatabase();
 
   const { withTestPatient } = require('./support/fixtures');
-  await withTestPatient(async ({ patientId }) => {
+  try {
+    await withTestPatient(async ({ patientId }) => {
   const patient = { lastID: patientId };
   const first = await dbRun(
     'INSERT INTO customers (patient_id, status, scheduled_datetime) VALUES (?, ?, now())',
@@ -105,6 +111,6 @@ test('a patient can have more than one call scheduled', { skip: !HAS_DB && 'no S
   const remaining = await dbAll('SELECT id FROM customers WHERE patient_id = ?', [patient.lastID]);
   assert.equal(remaining.length, 1);
   assert.equal(Number(remaining[0].id), Number(second.lastID));
-  });
-  await closeDatabase();
+    });
+  } finally { await closeDatabase(); }
 });

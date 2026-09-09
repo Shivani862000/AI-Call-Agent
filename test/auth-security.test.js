@@ -13,7 +13,6 @@ const {
   readAuthSession,
   requireRole
 } = require('../src/auth');
-const { isAdminOnlyRequest } = require('../src/authorization');
 
 function requestForToken(token) {
   return {
@@ -104,31 +103,4 @@ test('admin role middleware denies agents and permits admins', () => {
     () => { nextCalled = true; }
   );
   assert.equal(nextCalled, true);
-});
-
-test('route policy protects sensitive operations while retaining agent workflows', () => {
-  const protectedRequests = [
-    { method: 'GET', path: '/feedback.html' },
-    { method: 'GET', path: '/api/feedback' },
-    { method: 'GET', path: '/api/logs' },
-    { method: 'POST', path: '/call/start' },
-    { method: 'POST', path: '/api/calls/initiate/42' },
-    { method: 'DELETE', path: '/api/customers/42' },
-    { method: 'POST', path: '/api/customers/csv' },
-    { method: 'PUT', path: '/api/campaigns/3' },
-    { method: 'GET', path: '/api/icallmate/config' }
-  ];
-  protectedRequests.forEach((request) => assert.equal(isAdminOnlyRequest(request), true));
-
-  const agentRequests = [
-    { method: 'POST', path: '/api/icallmate/callback' },
-    { method: 'GET', path: '/admin.html' },
-    { method: 'GET', path: '/customers.html' },
-    { method: 'GET', path: '/api/customers' },
-    { method: 'POST', path: '/api/customers' },
-    { method: 'PUT', path: '/api/customers/42' },
-    { method: 'POST', path: '/api/customers/42/retry' },
-    { method: 'GET', path: '/api/calls/recent' }
-  ];
-  agentRequests.forEach((request) => assert.equal(isAdminOnlyRequest(request), false));
 });

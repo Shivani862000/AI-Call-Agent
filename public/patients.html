@@ -229,6 +229,7 @@
 
           <div id="importResult" hidden>
             <div class="import-summary" id="importSummary"></div>
+            <div id="importPreview"></div>
             <div id="importProblems"></div>
             <button type="button" id="commitBtn">Import them</button>
             <button type="button" id="discardBtn" class="secondary">Start over</button>
@@ -528,6 +529,7 @@
         importToken = payload.token;
         const s = payload.summary;
         $('importSummary').replaceChildren(...[
+          ['Rows in file', s.total, false],
           ['New patients', s.new, false],
           ['Updates', s.updates, false],
           ['Problems', s.problems, s.problems > 0]
@@ -540,11 +542,41 @@
           return stat;
         }));
 
+        const preview = $('importPreview');
+        preview.replaceChildren();
+        const planned = s.new + s.updates;
+        if (payload.preview.length) {
+          const heading = document.createElement('p');
+          const strong = document.createElement('strong');
+          strong.textContent = `Planned changes (${payload.preview.length} of ${planned} rows shown):`;
+          heading.appendChild(strong);
+          const list = document.createElement('ul');
+          list.className = 'problems';
+          payload.preview.forEach((row) => {
+            const item = document.createElement('li');
+            if (row.action === 'new') {
+              item.textContent = `Row ${row.row}: create ${row.name}`;
+            } else if (!row.changes.length) {
+              item.textContent = `Row ${row.row} (${row.name}): no stored values change`;
+            } else {
+              const description = row.changes.map((change) => {
+                const value = change.clear ? 'clear the value' : `set to ${String(change.to)}`;
+                return `${change.field.replaceAll('_', ' ')}: ${value}`;
+              }).join('; ');
+              item.textContent = `Row ${row.row} (${row.name}): ${description}`;
+            }
+            list.appendChild(item);
+          });
+          preview.append(heading, list);
+        }
+
         const problems = $('importProblems');
         problems.replaceChildren();
         if (payload.problems.length) {
           const heading = document.createElement('p');
-          heading.innerHTML = '<strong>These rows will be skipped:</strong>';
+          const strong = document.createElement('strong');
+          strong.textContent = `These rows will be skipped (${payload.problems.length} of ${s.problems} shown):`;
+          heading.appendChild(strong);
           const list = document.createElement('ul');
           list.className = 'problems';
           payload.problems.forEach((problem) => {
@@ -564,6 +596,7 @@
     $('commitBtn').onclick = async function commit() {
       if (!importToken) return;
       this.disabled = true;
+      let needsNewPreview = false;
       try {
         const result = await AppShell.fetchJson('/api/patients/import/commit', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -575,7 +608,28 @@
         $('importFile').value = '';
         setPanel('toggleImport', 'importPanel', false);
         load();
-      } catch (error) { banner(error.message, false); } finally { this.disabled = false; }
+      } catch (error) {
+        banner(error.message, false);
+        needsNewPreview = true;
+        importToken = null;
+        const failures = error.payload?.failures || [];
+        if (failures.length) {
+          const heading = document.createElement('p');
+          const strong = document.createElement('strong');
+          strong.textContent = 'Rows not saved — upload the file again for a fresh preview:';
+          heading.appendChild(strong);
+          const list = document.createElement('ul');
+          list.className = 'problems';
+          failures.forEach((failure) => {
+            const item = document.createElement('li');
+            item.textContent = `Row ${failure.row}: ${failure.message}`;
+            list.appendChild(item);
+          });
+          $('importProblems').replaceChildren(heading, list);
+          $('commitBtn').disabled = true;
+          $('importResult').hidden = false;
+        }
+      } finally { this.disabled = needsNewPreview || !importToken; }
     };
 
     $('discardBtn').onclick = () => {

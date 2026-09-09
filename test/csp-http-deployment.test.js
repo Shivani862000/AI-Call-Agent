@@ -1,20 +1,28 @@
 'use strict';
+
 const test = require('node:test');
-const assert = require('node:assert');
+const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { serveAuthorizationApp } = require('./support/authorization-app');
 
-const source = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
-
-test('upgrade-insecure-requests is conditional on serving over HTTPS', () => {
-  // Emitted unconditionally, it breaks every plain-HTTP deployment: the page
-  // loads but its scripts and fetches are rewritten to a port nothing serves.
-  assert.match(source, /SERVES_OVER_HTTPS\s*=\s*\/\^https:\/i\.test/);
-  assert.match(source, /SERVES_OVER_HTTPS \? \{\} : \{ upgradeInsecureRequests: null \}/);
+test('plain HTTP pages do not force unavailable HTTPS connections', async t => {
+  const app = await serveAuthorizationApp(t, 'http://localhost:3000');
+  const response = await app.request('GET', '/login.html');
+  assert.equal(response.status, 200);
+  assert.doesNotMatch(response.headers['content-security-policy'], /upgrade-insecure-requests/);
+  assert.equal(response.headers['strict-transport-security'], undefined);
 });
 
-test('HSTS is also conditional', () => {
-  // A year-long HSTS pin against a host that cannot serve TLS is unrecoverable
-  // from the user's side.
-  assert.match(source, /hsts: SERVES_OVER_HTTPS/);
+test('HTTPS pages retain transport security headers after app extraction', async t => {
+  const app = await serveAuthorizationApp(t, 'https://example.test');
+  const response = await app.request('GET', '/login.html');
+  assert.equal(response.status, 200);
+  assert.match(response.headers['content-security-policy'], /upgrade-insecure-requests/);
+  assert.ok(response.headers['strict-transport-security']);
+});
+
+test('scripts cannot be evaluated from strings', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src/app.js'), 'utf8');
+  assert.doesNotMatch(source, /unsafe-eval/);
 });

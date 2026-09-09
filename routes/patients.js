@@ -4,7 +4,7 @@ const express = require('express');
 const crypto = require('crypto');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
-const { dbAll, dbGet, dbRun } = require('../db');
+const { dbAll, dbGet, dbRun, dbTx } = require('../db');
 const logger = require('../services/system-logger');
 const {
   serializePatient,
@@ -15,8 +15,11 @@ const {
 const { mapHeaders, buildImportPlan, COLUMN_ALIASES } = require('../src/patient-import');
 const { blockingReason } = require('../src/queue-rules');
 const { countOutboundCallsToday, MAX_CALLS_PER_DAY } = require('../src/call-management');
+const { restrictionRestoreAttempt } = require('../src/contact-policy');
 
 const MAX_IMPORT_ROWS = 5000;
+const PATIENT_PAGE_DEFAULT = 50;
+const PATIENT_PAGE_MAX = 100;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 const COLUMNS = `id, reference_id, first_name, last_name, phone, normalized_phone, email,
@@ -44,6 +47,34 @@ function roleOf(req) {
   return String(req.adminSession?.role || '').toUpperCase();
 }
 
+function parsePatientPageSize(value) {
+  if (value == null || value === '') return PATIENT_PAGE_DEFAULT;
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!/^\d+$/.test(String(raw))) return null;
+  const size = Number(raw);
+  return Number.isSafeInteger(size) && size > 0 && size <= PATIENT_PAGE_MAX ? size : null;
+}
+
+function encodePatientCursor(row) {
+  return Buffer.from(JSON.stringify({
+    firstName: String(row.first_name || '').toLowerCase(),
+    lastName: String(row.last_name || '').toLowerCase(),
+    id: Number(row.id)
+  })).toString('base64url');
+}
+
+function decodePatientCursor(value) {
+  if (typeof value !== 'string' || !value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+    if (typeof parsed.firstName !== 'string' || typeof parsed.lastName !== 'string'
+        || !Number.isSafeInteger(parsed.id) || parsed.id < 1) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 function isAdmin(req) {
   return roleOf(req) === 'ADMIN';
 }
@@ -60,15 +91,15 @@ function guardContactWrites(req, res) {
   return true;
 }
 
-async function findExistingPatient(payload) {
-  if (payload.reference_id) {
-    const byRef = await dbGet(
-      'SELECT id FROM patients WHERE lower(reference_id) = lower(?)', [payload.reference_id]
-    );
-    if (byRef) return byRef;
-  }
-  if (!payload.normalized_phone) return null;
-  return dbGet('SELECT id FROM patients WHERE normalized_phone = ?', [payload.normalized_phone]) || null;
+async function findPatientMatches(payload) {
+  const select = `SELECT ${COLUMNS}, xmin::text AS version FROM patients WHERE `;
+  const [byReference, byPhone] = await Promise.all([
+    payload.reference_id
+      ? dbGet(`${select}lower(reference_id) = lower(?)`, [payload.reference_id]) : null,
+    payload.normalized_phone
+      ? dbGet(`${select}normalized_phone = ?`, [payload.normalized_phone]) : null
+  ]);
+  return { byReference: byReference || null, byPhone: byPhone || null };
 }
 
 const FIELDS = [
@@ -95,12 +126,101 @@ async function updatePatient(id, payload, username, allowContact) {
   );
 }
 
+const IMPORT_WRITE_FIELDS = [
+  'reference_id', 'first_name', 'last_name', 'phone', 'normalized_phone', 'email',
+  'preferred_call_slot', 'preferred_language', 'date_of_birth', 'gender', 'blood_group',
+  'last_donation_date', 'last_test_date', 'notes'
+];
+const IMPORT_WRITE_FIELD_SET = new Set(IMPORT_WRITE_FIELDS);
+
+function staleImportError() {
+  const error = new Error('This row changed after the preview. Check the file and preview it again.');
+  error.code = 'IMPORT_PREVIEW_STALE';
+  return error;
+}
+
+async function transactionMatches(tx, identity) {
+  const byReference = identity.reference_id
+    ? await tx.get('SELECT id FROM patients WHERE lower(reference_id) = lower(?)', [identity.reference_id])
+    : null;
+  const byPhone = identity.normalized_phone
+    ? await tx.get('SELECT id FROM patients WHERE normalized_phone = ?', [identity.normalized_phone])
+    : null;
+  return { byReference, byPhone };
+}
+
+async function commitImportCreate(entry, username, afterWrite) {
+  return dbTx(async (tx) => {
+    const matches = await transactionMatches(tx, {
+      reference_id: entry.payload.reference_id,
+      normalized_phone: entry.payload.normalized_phone
+    });
+    if (matches.byReference || matches.byPhone) throw staleImportError();
+    const columns = [...IMPORT_WRITE_FIELDS, 'created_by', 'updated_by'];
+    const created = await tx.run(
+      `INSERT INTO patients (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+      [...IMPORT_WRITE_FIELDS.map((field) => entry.payload[field]), username, username]
+    );
+    if (afterWrite) await afterWrite({ action: 'create', row: entry.row, patientId: created.lastID });
+    return created;
+  });
+}
+
+async function commitImportUpdate(entry, username, afterWrite) {
+  return dbTx(async (tx) => {
+    const current = await tx.get(
+      `SELECT ${COLUMNS}, xmin::text AS version FROM patients WHERE id = ? FOR UPDATE`, [entry.id]
+    );
+    if (!current || String(current.version) !== String(entry.version)) throw staleImportError();
+    const matches = await transactionMatches(tx, entry.identity);
+    if ((matches.byReference && Number(matches.byReference.id) !== Number(entry.id))
+        || (matches.byPhone && Number(matches.byPhone.id) !== Number(entry.id))) {
+      throw staleImportError();
+    }
+    const fields = Object.keys(entry.patch).filter((field) => IMPORT_WRITE_FIELD_SET.has(field));
+    if (!fields.length) return;
+    await tx.run(
+      `UPDATE patients SET ${fields.map((field) => `${field} = ?`).join(', ')}, updated_by = ?, updated_at = now()
+        WHERE id = ?`,
+      [...fields.map((field) => entry.patch[field]), username, entry.id]
+    );
+    if (afterWrite) await afterWrite({ action: 'update', row: entry.row, patientId: entry.id });
+  });
+}
+
+function safeImportFailure(error) {
+  if (error?.code === 'IMPORT_PREVIEW_STALE' || error?.code === '23505') {
+    return 'This row no longer matches the preview. Check the file and preview it again.';
+  }
+  return 'This row could not be saved. Check the file and preview it again.';
+}
+
+function plannedChanges(entry) {
+  return Object.entries(entry.patch).flatMap(([field, to]) => {
+    if (field === 'normalized_phone') return [];
+    const from = entry.before?.[field] ?? null;
+    const fromValue = from instanceof Date ? from.toISOString() : from;
+    if (String(fromValue ?? '') === String(to ?? '')) return [];
+    return [{ field, from: fromValue, to, ...(to === null ? { clear: true } : {}) }];
+  });
+}
+
 // ── List and search ────────────────────────────────────────────────────────────
 
 router.get('/', async (req, res, next) => {
   try {
     const search = String(req.query.search || '').trim();
     const status = String(req.query.status || 'all').toLowerCase();
+    const paginationRequested = req.query.cursor != null
+      || req.query.page_size != null
+      || req.query.pageSize != null;
+    const pageSize = parsePatientPageSize(req.query.page_size ?? req.query.pageSize);
+    if (paginationRequested && !pageSize) {
+      return res.status(400).json({ error: `page_size must be an integer from 1 to ${PATIENT_PAGE_MAX}` });
+    }
+    if (Array.isArray(req.query.cursor)) return res.status(400).json({ error: 'cursor must be a single value' });
+    const cursor = req.query.cursor == null ? null : decodePatientCursor(req.query.cursor);
+    if (req.query.cursor != null && !cursor) return res.status(400).json({ error: 'cursor is invalid or expired' });
     const params = [];
     const where = [];
 
@@ -119,13 +239,34 @@ router.get('/', async (req, res, next) => {
       params.push(status);
     }
 
+    if (cursor) {
+      where.push(`(
+        lower(first_name) > ?
+        OR (lower(first_name) = ? AND (
+          lower(coalesce(last_name, '')) > ?
+          OR (lower(coalesce(last_name, '')) = ? AND id > ?)
+        ))
+      )`);
+      params.push(cursor.firstName, cursor.firstName, cursor.lastName, cursor.lastName, cursor.id);
+    }
+
     const rows = await dbAll(
       `SELECT ${COLUMNS} FROM patients
        ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-       ORDER BY lower(first_name), lower(coalesce(last_name, '')) LIMIT 500`,
-      params
+       ORDER BY lower(first_name), lower(coalesce(last_name, '')), id
+       LIMIT ?`,
+      paginationRequested ? [...params, pageSize + 1] : [...params, 500]
     );
-    res.json({ patients: rows.map((row) => serializePatient(row, roleOf(req))) });
+    if (!paginationRequested) {
+      return res.json({ patients: rows.map((row) => serializePatient(row, roleOf(req))) });
+    }
+    const hasMore = rows.length > pageSize;
+    const items = rows.slice(0, pageSize);
+    return res.json({
+      patients: items.map((row) => serializePatient(row, roleOf(req))),
+      nextCursor: hasMore ? encodePatientCursor(items[items.length - 1]) : null,
+      hasMore
+    });
   } catch (error) { next(error); }
 });
 
@@ -179,6 +320,13 @@ router.put('/:id(\\d+)', async (req, res, next) => {
       : { ...req.body, phone: existing.phone, email: existing.email };
 
     const payload = normalizePatientPayload(merged);
+    const restrictedField = restrictionRestoreAttempt(existing, payload);
+    if (restrictedField) {
+      return res.status(409).json({
+        error: 'Contact restrictions can only be changed through the reviewed restoration workflow',
+        fieldErrors: { [restrictedField]: 'This restriction is authoritative and cannot be relaxed here' }
+      });
+    }
     const fieldErrors = validatePatientPayload(payload);
     if (Object.keys(fieldErrors).length > 0) {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
@@ -404,21 +552,31 @@ router.post('/import/preview', upload.single('file'), async (req, res, next) => 
       Object.entries(map).forEach(([index, field]) => { raw[field] = cells[Number(index)]; });
       const payload = normalizePatientPayload(raw);
       existingByIndex.push(payload.normalized_phone || payload.reference_id
-        ? await findExistingPatient(payload) : null);
+        ? await findPatientMatches(payload) : null);
     }
     const plan = buildImportPlan({
       rows, headerMap: map, findExisting: (_payload, index) => existingByIndex[index]
     });
 
     const token = rememberImport(plan, req.adminSession?.username);
+    const previewRows = [
+      ...plan.creates.map((c) => ({
+        row: c.row, action: 'new',
+        name: [c.payload.first_name, c.payload.last_name].filter(Boolean).join(' '), changes: []
+      })),
+      ...plan.updates.map((u) => ({
+        row: u.row, action: 'update',
+        name: [u.payload.first_name, u.payload.last_name].filter(Boolean).join(' '),
+        changes: plannedChanges(u)
+      }))
+    ].sort((left, right) => left.row - right.row);
     res.json({
       token,
       summary: { new: plan.creates.length, updates: plan.updates.length, problems: plan.problems.length, total: plan.total },
       problems: plan.problems.slice(0, 50),
-      preview: [
-        ...plan.creates.slice(0, 20).map((c) => ({ row: c.row, action: 'new', name: [c.payload.first_name, c.payload.last_name].filter(Boolean).join(' ') })),
-        ...plan.updates.slice(0, 20).map((u) => ({ row: u.row, action: 'update', name: [u.payload.first_name, u.payload.last_name].filter(Boolean).join(' ') }))
-      ]
+      preview: previewRows.slice(0, 20),
+      previewLimit: 20,
+      previewed: Math.min(20, previewRows.length)
     });
   } catch (error) {
     if (error instanceof Error && /zip|corrupt|end of central/i.test(error.message)) {
@@ -444,18 +602,33 @@ router.post('/import/commit', async (req, res, next) => {
     let created = 0;
     let updated = 0;
     const failures = [];
+    const afterWrite = process.env.NODE_ENV === 'test'
+      ? req.app.locals.patientImportTestAdapter?.afterWrite : null;
 
-    for (const entryToCreate of entry.plan.creates) {
-      try { await insertPatient(entryToCreate.payload, username); created += 1; }
-      catch (error) { failures.push({ row: entryToCreate.row, message: error.message }); }
-    }
-    for (const entryToUpdate of entry.plan.updates) {
-      try { await updatePatient(entryToUpdate.id, entryToUpdate.payload, username, true); updated += 1; }
-      catch (error) { failures.push({ row: entryToUpdate.row, message: error.message }); }
+    const operations = [
+      ...entry.plan.creates.map((row) => ({ action: 'create', row })),
+      ...entry.plan.updates.map((row) => ({ action: 'update', row }))
+    ].sort((left, right) => left.row.row - right.row.row);
+    for (const operation of operations) {
+      try {
+        if (operation.action === 'create') {
+          await commitImportCreate(operation.row, username, afterWrite);
+          created += 1;
+        } else {
+          await commitImportUpdate(operation.row, username, afterWrite);
+          updated += 1;
+        }
+      } catch (error) {
+        failures.push({ row: operation.row.row, message: safeImportFailure(error) });
+      }
     }
 
     logger.warn('PATIENTS_IMPORTED', { created, updated, failed: failures.length, by: username });
-    res.json({ created, updated, failures: failures.slice(0, 20) });
+    const body = {
+      created, updated, failures: failures.slice(0, 20),
+      ...(failures.length ? { error: 'Some rows could not be imported. Preview the file again before retrying.' } : {})
+    };
+    res.status(failures.length ? 409 : 200).json(body);
   } catch (error) { next(error); }
 });
 

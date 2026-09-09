@@ -16,10 +16,40 @@ Node.js + Express voice agent for iCallMate inbound and outbound calls, with sel
 
 ## Setup
 
+Use Node 24 LTS. `.nvmrc` pins the verified available patch (24.20.0), and
+`package.json` declares the supported Node range. CI and migration jobs read `.nvmrc`.
+
 ```bash
-npm install
+nvm install
+nvm use
+npm ci
 cp .env.example .env
 ```
+
+The production Dockerfile pins the Node 24 OCI digest and installs only locked
+production dependencies, retaining bcrypt's native Linux binding. Debian Noto
+fonts provide the real Latin/Devanagari assets used by `services/pdf.js`; the
+historical empty repository font is not used. The deployment target is
+`linux/amd64`. Docker Desktop on ARM64 runs this target under emulation, which
+verifies compatibility but does not measure production throughput.
+
+Run `npm run test:isolated` with local Docker available for the audited Node 24
+unit and database suites plus production packaging/runtime verification.
+`npm run test:packaging` runs the synthetic context/all-layer sentinel check;
+`npm run test:runtime` runs just the owned database migration and production
+startup/operation rehearsal. The harness stages approved source files in a
+temporary context, uses generated credentials and an internal Docker network
+with no published workload ports, then removes its owned resources. The runtime
+check boots the real image entry point and exercises readiness, password login,
+authenticated XLSX preview/commit, embedded Unicode PDF fonts and a real media
+WebSocket connected to local provider fakes. Test support is copied into the
+disposable container after the production image is built.
+
+`.dockerignore` allows runtime assets and excludes nested secrets, private keys,
+database archives and development state. The layer test uses only fresh dummy
+files and verifies an unsafe positive control. These checks do not establish
+whether previously built images or historical logs exposed real credentials;
+that requires the separately scoped operational assessment.
 
 Required voice fields:
 

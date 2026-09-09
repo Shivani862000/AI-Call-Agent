@@ -6,6 +6,8 @@
 'use strict';
 
 const fs = require('fs');
+const { pipeline } = require('node:stream/promises');
+const { fetchRecording } = require('../services/recording-fetch');
 const customersRouter = require('../routes/customers');
 const campaignsRouter = require('../routes/campaigns');
 const feedbackRouter = require('../routes/feedback');
@@ -59,7 +61,6 @@ const {
 
 const {
   ensureCustomerForCall,
-  claimCustomerForOutboundCall,
   releaseCustomerOutboundClaim,
   hydratePreCallIntelligence,
   shouldBlockCustomerCall,
@@ -78,13 +79,18 @@ const { computePriorityScore, applyCallOutcomeWorkflow, createSupervisorEvent } 
 const { getAgentConfigById, getDefaultAgentConfig } = require('./prompt-builder');
 const { buildCallAnalysis, storeCallAnalysis } = require('../services/call-analysis');
 const { initiateCall, buildMasterPostPayload } = require('../services/icallmate');
+const { reserveOutboundAttempt, recordAttemptSubmission } = require('../services/outbound-admission');
+const { EVENT_MATCH_STATES, extractEventIdentity, matchCallEvent, buildEventKey, safeEventPayload } = require('./call-events');
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
 const {
   buildIcallMateCallbackUrl,
-  hasValidIcallMateWebhookSecret
+  hasValidIcallMateWebhookSecret,
+  requireLegacyCallWebhook,
+  validateCallback
 } = require('./icallmate-webhook');
 const logger = require('../services/system-logger');
 const { generateCallAnalysisPDF } = require('../services/pdf');
+const { serializeCall } = require('./call-serialization');
 
 module.exports = function mountApiRoutes(app) {
   /**
@@ -150,7 +156,7 @@ module.exports = function mountApiRoutes(app) {
   });
 
   app.get('/api/auth/session', (req, res) => {
-    const session = readAuthSession(req);
+    const session = req.adminSession;
     if (!session) {
       return res.status(401).json({ authenticated: false });
     }
@@ -281,6 +287,7 @@ module.exports = function mountApiRoutes(app) {
 
   app.post('/call/start', async (req, res) => {
     let customer = null;
+    let attemptId = null;
     try {
       const customerPhone = req.body.customerPhone || process.env.CUSTOMER_PHONE;
       const customerName = req.body.customerName || process.env.CUSTOMER_NAME;
@@ -306,10 +313,20 @@ module.exports = function mountApiRoutes(app) {
         return res.status(409).json({ success: false, error: blockedReason.reason, code: blockedReason.code });
       }
 
-      const claimed = await claimCustomerForOutboundCall(customer.id);
-      if (!claimed) {
-        return res.status(409).json({ success: false, error: 'A call for this customer is already in progress' });
+      const admission = await reserveOutboundAttempt({
+        dbTx,
+        customerId: customer.id,
+        callType,
+        requestKey: req.get('Idempotency-Key') || req.body?.requestKey,
+        writerId: req.adminSession?.username || 'call-start'
+      });
+      if (admission.outcome === 'duplicate') {
+        return res.json({ success: true, message: 'Call already admitted', attemptId: admission.attemptId, sid: admission.attempt?.provider_call_id || null, idempotent: true });
       }
+      if (admission.outcome !== 'accepted') {
+        return res.status(admission.outcome === 'conflict' ? 409 : 422).json({ success: false, error: admission.reason, code: 'CALL_ADMISSION_REJECTED', requestKey: admission.requestKey });
+      }
+      attemptId = admission.attemptId;
 
       console.log(
         `[CALL REQUEST] to=${logger.maskPhone(customerPhone)} serviceNo=${process.env.ICALLMATE_SERVICE_NO || ''} baseUrl=${PUBLIC_BASE_URL} ` +
@@ -326,23 +343,34 @@ module.exports = function mountApiRoutes(app) {
         `ICALLMATE_IVR_TEMPLATE_ID=${process.env.ICALLMATE_IVR_TEMPLATE_ID || ''} ` +
         `TZ=${process.env.TZ || ''}`
       );
-      const call = await placeRealtimeCall({
-        customerPhone,
-        customerName: customer.name || customerName,
-        customerId: customer.id,
-        clientName,
-        agentId: agentConfig?.id || null,
-        callType
-      });
+      let call;
+      try {
+        call = await placeRealtimeCall({
+          customerPhone,
+          customerName: customer.name || customerName,
+          customerId: customer.id,
+          attemptId,
+          requestKey: admission.requestKey,
+          clientName,
+          agentId: agentConfig?.id || null,
+          callType
+        });
+      } catch (providerError) {
+        const state = await recordAttemptSubmission({ dbTx, attemptId, error: providerError });
+        return res.status(202).json({ success: false, error: 'Provider submission is unresolved; do not retry automatically', code: state.state.toUpperCase(), attemptId });
+      }
+      await recordAttemptSubmission({ dbTx, attemptId, response: call });
 
       const result = await dbRun(
         `INSERT INTO calls (
-        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
+        customer_id, patient_id, attempt_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
         consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
         provider_payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
+          customer.patient_id,
+          attemptId,
           agentConfig?.id || null,
           'initiated',
           call.sid,
@@ -357,7 +385,7 @@ module.exports = function mountApiRoutes(app) {
           JSON.stringify({ request: call.requestPayload || null, response: call.raw || null })
         ]
       );
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      await dbRun('UPDATE customers SET status = ?, locked_at = NULL WHERE id = ?', ['called', customer.id]);
       
       const callsTodayRow = await dbGet(
         `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND (c.called_at AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
@@ -385,7 +413,7 @@ module.exports = function mountApiRoutes(app) {
       });
       res.json({ success: true, sid: call.sid, callId: result.lastID, customerId: customer.id, agentId: agentConfig?.id || null });
     } catch (error) {
-      if (customer?.id) {
+      if (customer?.id && !attemptId) {
         try {
           await releaseCustomerOutboundClaim(customer.id, customer.status || 'pending');
         } catch (releaseError) {
@@ -416,7 +444,7 @@ module.exports = function mountApiRoutes(app) {
   //   res.type('text/xml').send(buildScriptedRatingResponse(req));
   // });
 
-  app.all('/call/status', async (req, res) => {
+  app.all('/call/status', requireLegacyCallWebhook, validateCallback, async (req, res) => {
     try {
       const providerStatus = pickRequestValue(req, ['CallStatus', 'Status', 'status']);
       const providerCallSid = pickRequestValue(req, ['CallSid', 'call_sid', 'Sid', 'sid']);
@@ -425,7 +453,7 @@ module.exports = function mountApiRoutes(app) {
       const eventType = pickRequestValue(req, ['EventType', 'event_type']);
       console.log(
         `[CALL STATUS] method=${req.method} status=${providerStatus || ''} sid=${providerCallSid || ''} ` +
-        `query=${JSON.stringify(req.query || {})} bodyKeys=${JSON.stringify(Object.keys(req.body || {}))}`
+        `bodyKeys=${JSON.stringify(Object.keys(req.body || {}))}`
       );
 
       if (providerCallSid) {
@@ -454,9 +482,7 @@ module.exports = function mountApiRoutes(app) {
         if (providerStatus === 'voicemail') mappedOutcome = 'voicemail';
         if (providerStatus === 'canceled' || providerStatus === 'cancelled') mappedOutcome = 'cancelled';
 
-        const normalizedRecordingUrl = providerRecordingUrl
-          ? String(providerRecordingUrl).endsWith('.mp3') ? providerRecordingUrl : `${providerRecordingUrl}.mp3`
-          : null;
+        const normalizedRecordingUrl = providerRecordingUrl || null;
 
         if (normalizedRecordingUrl || providerRecordingSid) {
           await dbRun(
@@ -513,6 +539,7 @@ module.exports = function mountApiRoutes(app) {
             await applyCallOutcomeWorkflow({
               dbGet,
               dbRun,
+              dbTx,
               callRecord: { ...callRecord, outcome: mappedOutcome },
               customer,
               providerStatus: mappedOutcome,
@@ -529,12 +556,12 @@ module.exports = function mountApiRoutes(app) {
     }
   });
 
-  app.post('/call/recording-status', async (req, res) => {
+  app.post('/call/recording-status', requireLegacyCallWebhook, validateCallback, async (req, res) => {
     try {
       const callSid = req.body.CallSid;
       const recordingSid = req.body.RecordingSid;
       const recordingStatus = req.body.RecordingStatus;
-      const recordingUrl = req.body.RecordingUrl ? `${req.body.RecordingUrl}.mp3` : null;
+      const recordingUrl = req.body.RecordingUrl || null;
 
       console.log(`[RECORDING STATUS] ${recordingStatus} | Call SID: ${callSid} | Recording SID: ${recordingSid}`);
 
@@ -582,6 +609,7 @@ module.exports = function mountApiRoutes(app) {
 
   app.post('/api/calls/initiate/:customerId', async (req, res) => {
     let customer = null;
+    let attemptId = null;
     try {
       customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [req.params.customerId]);
       if (!customer) {
@@ -602,28 +630,62 @@ module.exports = function mountApiRoutes(app) {
         return res.status(409).json({ error: blockedReason.reason, code: blockedReason.code });
       }
 
-      const claimed = await claimCustomerForOutboundCall(customer.id);
-      if (!claimed) {
-        return res.status(409).json({ error: 'A call for this customer is already in progress' });
-      }
-
-      const call = await placeRealtimeCall({
-        customerPhone: customer.phone,
-        customerName: customer.name,
+      const admission = await reserveOutboundAttempt({
+        dbTx,
         customerId: customer.id,
-        clientName: agentConfig?.client_name || CLIENT_NAME,
-        agentId: agentConfig?.id || null,
-        callType
+        callType,
+        requestKey: req.get('Idempotency-Key') || req.body?.requestKey,
+        writerId: req.adminSession?.username || 'api-calls-initiate'
       });
+      if (admission.outcome === 'duplicate') {
+        return res.json({
+          message: 'Call already admitted',
+          attemptId: admission.attemptId,
+          sid: admission.attempt?.provider_call_id || null,
+          idempotent: true
+        });
+      }
+      if (admission.outcome !== 'accepted') {
+        return res.status(admission.outcome === 'conflict' ? 409 : 422).json({
+          error: admission.reason,
+          code: 'CALL_ADMISSION_REJECTED',
+          requestKey: admission.requestKey
+        });
+      }
+      attemptId = admission.attemptId;
+
+      let call;
+      try {
+        call = await placeRealtimeCall({
+          customerPhone: customer.phone,
+          customerName: customer.name,
+          customerId: customer.id,
+          attemptId,
+          requestKey: admission.requestKey,
+          clientName: agentConfig?.client_name || CLIENT_NAME,
+          agentId: agentConfig?.id || null,
+          callType
+        });
+      } catch (providerError) {
+        const state = await recordAttemptSubmission({ dbTx, attemptId, error: providerError });
+        return res.status(202).json({
+          error: 'Provider submission is unresolved; do not retry automatically',
+          code: state.state.toUpperCase(),
+          attemptId
+        });
+      }
+      await recordAttemptSubmission({ dbTx, attemptId, response: call });
 
       const result = await dbRun(
         `INSERT INTO calls (
-        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
+        customer_id, patient_id, attempt_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
         consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source, call_type,
         provider_payload_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
+          customer.patient_id,
+          attemptId,
           agentConfig?.id || null,
           'initiated',
           call.sid,
@@ -639,7 +701,7 @@ module.exports = function mountApiRoutes(app) {
         ]
       );
 
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      await dbRun('UPDATE customers SET status = ?, locked_at = NULL WHERE id = ?', ['called', customer.id]);
       
       const callsTodayRow = await dbGet(
         `SELECT COUNT(*) as count FROM calls c WHERE c.customer_id = ? AND (c.called_at AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date AND COALESCE(c.call_direction, 'outbound') = 'outbound'`,
@@ -666,7 +728,7 @@ module.exports = function mountApiRoutes(app) {
       });
       res.json({ message: 'Call initiated', callId: result.lastID, sid: call.sid, agentId: agentConfig?.id || null, agentName: agentConfig?.name || null });
     } catch (error) {
-      if (customer?.id) {
+      if (customer?.id && !attemptId) {
         try {
           await releaseCustomerOutboundClaim(customer.id, customer.status || 'pending');
         } catch (releaseError) {
@@ -721,7 +783,7 @@ module.exports = function mountApiRoutes(app) {
     ].sort((a, b) => new Date(b.updated_at || b.received_at || 0) - new Date(a.updated_at || a.received_at || 0));
 
     res.json({
-      calls,
+      calls: calls.map(call => serializeCall(call, req.adminSession?.role)),
       active_count: calls.filter((call) => call.status === 'active').length,
       missed_count: calls.filter((call) => call.status === 'missed').length,
       completed_count: calls.filter((call) => call.status === 'completed').length,
@@ -805,19 +867,15 @@ module.exports = function mountApiRoutes(app) {
     });
   });
 
-  app.post('/api/icallmate/callback', async (req, res) => {
-    // An outbound-only deployment (UAT) shares the DID with production and must
-    // not process inbound call events for it.
+  app.post('/api/icallmate/callback', (req, res, next) => {
+    if (!hasValidIcallMateWebhookSecret(req)) return res.status(401).json({ error: 'Invalid webhook secret' });
+    next();
+  }, validateCallback, async (req, res) => {
     if (DISABLE_INBOUND_CALLS && String(req.body?.event || '').toLowerCase().includes('incoming')) {
       logger.warn('INBOUND_REJECTED', { reason: 'inbound calls are disabled on this deployment' });
       return res.status(403).json({ error: 'Inbound calls are not handled by this deployment' });
     }
-
     try {
-      if (!hasValidIcallMateWebhookSecret(req)) {
-        return res.status(401).json({ error: 'Invalid webhook secret' });
-      }
-
       const payload = req.body || {};
       const key = String(payload.ref_no || payload.leadid || payload.phoneno || `${Date.now()}`);
       const callType = String(payload.call_type || '').toLowerCase();
@@ -870,59 +928,99 @@ module.exports = function mountApiRoutes(app) {
           notes: payload.recording_filename ? 'Callback received with recording' : 'Callback received'
         });
       } else {
-        const phone = payload.phoneno || payload.customer_number || '';
         const mappedOutcome = status === 'completed' ? 'completed' : 'no_answer';
+        const identity = extractEventIdentity(payload);
+        let attempts = [];
+        if (identity.attemptId && /^\\d+$/.test(identity.attemptId)) {
+          attempts = await dbAll('SELECT id, request_key, provider_call_id, destination_snapshot, state FROM call_attempts WHERE id = ?', [identity.attemptId]);
+        } else if (identity.requestKey) {
+          attempts = await dbAll('SELECT id, request_key, provider_call_id, destination_snapshot, state FROM call_attempts WHERE request_key = ?', [identity.requestKey]);
+        } else if (identity.providerId) {
+          attempts = await dbAll(`SELECT id, request_key, provider_call_id, destination_snapshot, state
+            FROM call_attempts WHERE LOWER(provider_call_id) = LOWER(?)`, [identity.providerId]);
+        }
+        const match = matchCallEvent({ event: payload, attempts });
+        const matchedAttempt = match.attempt || null;
+        const eventKey = buildEventKey(payload);
+        try {
+          await dbRun(
+            `INSERT INTO call_event_inbox
+              (event_key, provider_scope, provider_call_id, attempt_id, request_key, event_name, match_state, match_reason, payload_json, matched_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'matched' THEN now() ELSE NULL END)
+             ON CONFLICT (provider_scope, event_key) DO NOTHING`,
+            [
+              eventKey,
+              'icallmate',
+              identity.providerId,
+              matchedAttempt?.id || null,
+              identity.requestKey || matchedAttempt?.request_key || null,
+              String(eventName || 'callback'),
+              match.state,
+              match.reason,
+              JSON.stringify(safeEventPayload(payload)),
+              match.state
+            ]
+          );
+        } catch (inboxError) {
+          logger.error('ICALLMATE_CALLBACK_INBOX_UNAVAILABLE', { reason: 'event_quarantined_without_persistence' });
+          return res.json({ success: true, matched: false, state: EVENT_MATCH_STATES.UNMATCHED, reason: 'inbox_unavailable' });
+        }
+        if (match.state !== EVENT_MATCH_STATES.MATCHED) {
+          logger.warn('ICALLMATE_CALLBACK_UNMATCHED', { reason: match.reason, providerCallId: identity.providerId || 'missing' });
+          return res.json({ success: true, matched: false, state: match.state, reason: match.reason });
+        }
 
-        if (phone) {
-          const cleanPhone = phone.replace(/^\\+91/, '').slice(-10);
-          const callRecord = await dbGet(`
-            SELECT calls.* FROM calls
-            JOIN customer_queue ON customer_queue.id = calls.customer_id
-            WHERE customer_queue.phone LIKE '%' || ? AND calls.call_direction = 'outbound'
-            ORDER BY calls.id DESC LIMIT 1
-          `, [cleanPhone]);
+        if (identity.providerId && !matchedAttempt.provider_call_id) {
+          await dbRun(
+            `UPDATE call_attempts
+                SET provider_call_id = ?, updated_at = now()
+              WHERE id = ? AND provider_call_id IS NULL`,
+            [identity.providerId, matchedAttempt.id]
+          );
+        }
 
-          if (callRecord) {
-            await dbRun('UPDATE calls SET outcome = ?, status = ?, outcome_detail = ?, recording_url = COALESCE(NULLIF(?, \'\'), recording_url) WHERE id = ?', [
-              mappedOutcome,
-              mappedOutcome,
-              payload.call_status || 'callback',
-              payload.recording_filename || '',
-              callRecord.id
-            ]);
+        const callRecord = await dbGet('SELECT calls.* FROM calls WHERE calls.attempt_id = ? ORDER BY calls.id DESC LIMIT 1', [matchedAttempt.id]);
+        if (callRecord) {
+          await dbRun('UPDATE calls SET outcome = ?, status = ?, outcome_detail = ?, recording_url = COALESCE(NULLIF(?, \'\'), recording_url) WHERE id = ?', [
+            mappedOutcome,
+            mappedOutcome,
+            payload.call_status || 'callback',
+            payload.recording_filename || '',
+            callRecord.id
+          ]);
 
-            if (mappedOutcome === 'completed' && payload.recording_filename) {
-              setTimeout(() => {
-                runInBackground('POST CALL PIPELINE ERROR', async () => {
-                  const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: callRecord.provider_call_id, callId: callRecord.id });
-                  if (result.ok) {
-                    console.log(`[POST CALL PIPELINE] Processed call ${callRecord.provider_call_id} with feedback ${result.feedbackId}`);
-                  } else {
-                    console.log(`[POST CALL PIPELINE] Skipped call ${callRecord.provider_call_id}: ${result.reason}`);
-                  }
-                });
-              }, 1500);
-            }
-
-            const customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [callRecord.customer_id]);
-            if (customer) {
-              await applyCallOutcomeWorkflow({
-                dbGet,
-                dbRun,
-                callRecord: { ...callRecord, outcome: mappedOutcome },
-                customer,
-                providerStatus: payload.call_status || mappedOutcome,
-                inferredOutcome: mappedOutcome
+          if (mappedOutcome === 'completed' && payload.recording_filename) {
+            setTimeout(() => {
+              runInBackground('POST CALL PIPELINE ERROR', async () => {
+                const result = await processCompletedCallPipeline({ dbGet, dbRun, callSid: callRecord.provider_call_id, callId: callRecord.id });
+                if (result.ok) {
+                  console.log(`[POST CALL PIPELINE] Processed call ${callRecord.provider_call_id} with feedback ${result.feedbackId}`);
+                } else {
+                  console.log(`[POST CALL PIPELINE] Skipped call ${callRecord.provider_call_id}: ${result.reason}`);
+                }
               });
-            }
+            }, 1500);
+          }
+
+          const customer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [callRecord.customer_id]);
+          if (customer) {
+            await applyCallOutcomeWorkflow({
+              dbGet,
+              dbRun,
+              dbTx,
+              callRecord: { ...callRecord, outcome: mappedOutcome },
+              customer,
+              providerStatus: payload.call_status || mappedOutcome,
+              inferredOutcome: mappedOutcome
+            });
           }
         }
       }
 
       res.json({ success: true });
     } catch (error) {
-      console.error('[ICALLMATE CALLBACK ERROR]', error.message);
-      res.status(500).json({ error: error.message });
+      console.error('[ICALLMATE CALLBACK ERROR] Callback processing failed');
+      res.status(500).json({ error: 'Callback processing failed' });
     }
   });
 
@@ -1040,6 +1138,7 @@ module.exports = function mountApiRoutes(app) {
 
   app.post('/api/icallmate/outgoing-call', async (req, res) => {
     let customer = null;
+    let attemptId = null;
     try {
       const fieldpairs = Array.isArray(req.body.fieldpairs) ? req.body.fieldpairs : [];
       const firstFieldPair = fieldpairs[0] || {};
@@ -1083,31 +1182,54 @@ module.exports = function mountApiRoutes(app) {
         return res.status(409).json({ error: blockedReason.reason, code: blockedReason.code });
       }
 
-      const claimed = await claimCustomerForOutboundCall(customer.id);
-      if (!claimed) {
-        return res.status(409).json({ error: 'A call for this customer is already in progress' });
-      }
-
-      const call = await initiateCall(phone, customer.id, {
-        provider: 'masterpost',
-        campid,
-        leadid: leadId,
-        wsurl,
-        callbackapi,
-        customerName: customer.name || customerName,
-        clientName: agentConfig?.client_name || CLIENT_NAME,
-        agentId: agentConfig?.id || null,
-        callType
+      const admission = await reserveOutboundAttempt({
+        dbTx,
+        customerId: customer.id,
+        callType,
+        requestKey: req.get('Idempotency-Key') || req.body?.requestKey,
+        providerScope: 'icallmate-masterpost',
+        writerId: req.adminSession?.username || 'icallmate-outgoing'
       });
+      if (admission.outcome === 'duplicate') {
+        return res.json({ success: true, message: 'Call already admitted', attemptId: admission.attemptId, sid: admission.attempt?.provider_call_id || null, idempotent: true });
+      }
+      if (admission.outcome !== 'accepted') {
+        return res.status(admission.outcome === 'conflict' ? 409 : 422).json({ error: admission.reason, code: 'CALL_ADMISSION_REJECTED', requestKey: admission.requestKey });
+      }
+      attemptId = admission.attemptId;
+
+      let call;
+      try {
+        call = await initiateCall(phone, customer.id, {
+          provider: 'masterpost',
+          campid,
+          leadid: leadId,
+          wsurl,
+          callbackapi,
+          customerName: customer.name || customerName,
+          clientName: agentConfig?.client_name || CLIENT_NAME,
+          agentId: agentConfig?.id || null,
+          callType,
+          customerId: customer.id,
+          attemptId,
+          requestKey: admission.requestKey
+        });
+      } catch (providerError) {
+        const state = await recordAttemptSubmission({ dbTx, attemptId, error: providerError });
+        return res.status(202).json({ error: 'Provider submission is unresolved; do not retry automatically', code: state.state.toUpperCase(), attemptId });
+      }
+      await recordAttemptSubmission({ dbTx, attemptId, response: call });
 
       const result = await dbRun(
         `INSERT INTO calls (
-        customer_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
+        customer_id, patient_id, attempt_id, agent_id, outcome, provider_call_id, called_at, hot_lead_score,
         consent_message_played, call_script_version, supervisor_alert_level, call_direction, call_source,
         provider_payload_json, call_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customer.id,
+          customer.patient_id,
+          attemptId,
           agentConfig?.id || null,
           'initiated',
           call.sid,
@@ -1123,7 +1245,7 @@ module.exports = function mountApiRoutes(app) {
         ]
       );
 
-      await dbRun('UPDATE customers SET status = ? WHERE id = ?', ['called', customer.id]);
+      await dbRun('UPDATE customers SET status = ?, locked_at = NULL WHERE id = ?', ['called', customer.id]);
       logger.info('CALL_STARTED', {
         callId: result.lastID,
         customerId: customer.id,
@@ -1152,7 +1274,7 @@ module.exports = function mountApiRoutes(app) {
         payload
       });
     } catch (error) {
-      if (customer?.id) {
+      if (customer?.id && !attemptId) {
         try {
           await releaseCustomerOutboundClaim(customer.id, customer.status || 'pending');
         } catch (releaseError) {
@@ -1257,7 +1379,7 @@ module.exports = function mountApiRoutes(app) {
        LIMIT 25`
       );
 
-      res.json(rows);
+      res.json(rows.map(row => serializeCall(row, req.adminSession?.role)));
     } catch (error) {
       console.error('[RECENT CALLS ERROR]', error.message);
       res.status(500).json({ error: error.message });
@@ -1339,7 +1461,7 @@ module.exports = function mountApiRoutes(app) {
       const timelineEvents = safeJsonParse(row.timeline_events, analysis.timeline_events || []);
       const extractedEntities = safeJsonParse(row.extracted_entities, analysis.entities || {});
 
-      res.json({
+      res.json(serializeCall({
         ...row,
         summary: row.summary || row.analysis_summary || analysis.summary || null,
         analysis_summary: row.analysis_summary || row.summary || analysis.summary || null,
@@ -1362,7 +1484,7 @@ module.exports = function mountApiRoutes(app) {
           sentiment_score: Number(row.sentiment_score || analysis.sentiment_score || generatedAnalysis.sentiment_score || 0),
           quality_score: Number(row.quality_score || analysis.quality_score || generatedAnalysis.quality_score || 0)
         }
-      });
+      }, req.adminSession?.role));
     } catch (error) {
       console.error('[CALL DETAIL ERROR]', error.message);
       res.status(500).json({ error: error.message });
@@ -1518,7 +1640,7 @@ module.exports = function mountApiRoutes(app) {
           })
       ].sort((a, b) => new Date(b.started_at || 0) - new Date(a.started_at || 0));
 
-      res.json(mergedRows);
+      res.json(mergedRows.map(row => serializeCall(row, req.adminSession?.role)));
     } catch (error) {
       console.error('[LIVE CALLS ERROR]', error.message);
       res.status(500).json({ error: error.message });
@@ -1561,37 +1683,34 @@ module.exports = function mountApiRoutes(app) {
   });
 
   app.get('/api/calls/:callId/recording', async (req, res) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    res.once('close', cancel);
     try {
       const call = await dbGet('SELECT id, provider_call_id, recording_url, recording_status, recording_object_key FROM calls WHERE id = ?', [req.params.callId]);
-
-      // Stored in Supabase: hand back a short-lived signed URL rather than
-      // proxying the audio through this process.
-      if (call?.recording_object_key && call.recording_status === 'stored') {
-        const { createSignedUrl } = require('../services/supabase-storage');
-        return res.redirect(await createSignedUrl(call.recording_object_key, 60));
-      }
-
-      if (!call?.recording_url && !call?.provider_call_id) {
+      if (controller.signal.aborted) return;
+      if (!call?.recording_url && !(call?.recording_object_key && call.recording_status === 'stored')) {
         return res.status(404).json({ error: 'Recording not available yet' });
       }
-
-      let playbackUrl = call.recording_url || null;
-      let response = playbackUrl
-        ? await fetch(playbackUrl)
-        : null;
-
-      if (!response || !response.ok) {
-        const statusCode = response?.status || 404;
-        return res.status(statusCode).json({ error: `Unable to fetch recording (${statusCode})` });
+      // Express routes HEAD through GET. Do not fetch or mint a URL for HEAD.
+      if (req.method === 'HEAD') return res.status(200).end();
+      if (call.recording_object_key && call.recording_status === 'stored') {
+        const { createSignedUrl } = require('../services/supabase-storage');
+        const url = await createSignedUrl(call.recording_object_key, 60, { signal: controller.signal });
+        if (!controller.signal.aborted) return res.redirect(url);
+        return;
       }
-
-      const arrayBuffer = await response.arrayBuffer();
-      res.setHeader('Content-Type', response.headers.get('content-type') || 'audio/mpeg');
-      res.setHeader('Cache-Control', 'private, max-age=300');
-      res.send(Buffer.from(arrayBuffer));
-    } catch (error) {
-      console.error('[RECORDING PROXY ERROR]', error.message);
-      res.status(500).json({ error: 'Failed to stream recording' });
+      const recording = await fetchRecording(call.recording_url, { signal: controller.signal });
+      res.setHeader('Content-Type', recording.contentType);
+      await pipeline(recording.stream, res);
+    } catch {
+      console.error('[RECORDING PROXY ERROR] Recording unavailable');
+      if (!res.headersSent && !res.destroyed) res.status(502).json({ error: 'Recording unavailable' });
+      else res.destroy();
+    } finally {
+      controller.abort();
+      res.removeListener('close', cancel);
     }
   });
 
@@ -1638,7 +1757,7 @@ module.exports = function mountApiRoutes(app) {
         return res.status(404).json({ error: 'Transcript not available yet' });
       }
 
-      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.setHeader('Cache-Control', 'private, no-store');
 
       if (String(req.query.raw || '') === '1') {
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');

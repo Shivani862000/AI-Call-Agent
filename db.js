@@ -1,4 +1,4 @@
-require('dotenv').config();
+if (process.env.NODE_ENV !== 'test') require('dotenv').config();
 const { Pool, types } = require('pg');
 
 // pg returns int8 (bigint, and COUNT(*)) as a string to avoid precision loss.
@@ -14,9 +14,10 @@ types.setTypeParser(types.builtins.INT8, (value) => parseInt(value, 10));
 types.setTypeParser(types.builtins.DATE, (value) => value);
 const { toPgPlaceholders, withReturningId } = require('./src/sql-compat');
 const { resolveDatabaseUrl } = require('./src/config');
+const { databaseErrorSummary } = require('./src/database-error');
 
 /** Bump this when a migration is added. Checked against Supabase at boot. */
-const EXPECTED_SCHEMA_VERSION = '0019';
+const EXPECTED_SCHEMA_VERSION = '0026';
 
 let pool;
 
@@ -89,32 +90,45 @@ async function assertSchemaVersion() {
   );
   const applied = row?.version || '(none)';
   if (!applied.startsWith(EXPECTED_SCHEMA_VERSION)) {
-    throw new Error(
+    const error = new Error(
       `Schema version mismatch: database is at "${applied}", this code expects `
       + `"${EXPECTED_SCHEMA_VERSION}". Run "npx supabase db push" before starting.`
     );
+    error.code = 'SCHEMA_VERSION_MISMATCH';
+    throw error;
   }
 }
 
 async function initializeDatabase() {
-  const connectionString = resolveDatabaseUrl();
-  pool = new Pool({
-    connectionString,
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000
-  });
+  try {
+    const connectionString = resolveDatabaseUrl();
+    if (process.env.NODE_ENV === 'test') {
+      require('./test/support/database').assertOwnedTestDatabase(
+        connectionString, process.env, 'application'
+      );
+    }
+    pool = new Pool({
+      connectionString,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000
+    });
 
-  pool.on('error', (error) => {
-    console.error('[DATABASE POOL ERROR]', error.message);
-  });
+    pool.on('error', (error) => {
+      console.error('[DATABASE POOL ERROR]', databaseErrorSummary(error));
+    });
 
-  await pool.query('SELECT 1');
-  const host = new URL(connectionString).host;
-  console.log('Connected to Supabase Postgres:', host);
+    await pool.query('SELECT 1');
+    const host = new URL(connectionString).host;
+    console.log('Connected to Supabase Postgres:', host);
 
-  await assertSchemaVersion();
-  console.log(`✓ Schema version ${EXPECTED_SCHEMA_VERSION} verified`);
+    await assertSchemaVersion();
+    console.log(`✓ Schema version ${EXPECTED_SCHEMA_VERSION} verified`);
+  } catch (error) {
+    if (pool) await pool.end().catch(() => {});
+    pool = undefined;
+    throw new Error(`Database initialization failed: ${databaseErrorSummary(error)}`);
+  }
 }
 
 async function closeDatabase() {

@@ -4,11 +4,13 @@ const { dbRun, dbGet, dbAll } = require('../db');
 const { normalizePhoneLookupValue } = require('../src/helpers');
 const { resolvePatientId } = require('../src/patient-link');
 const { serializeQueueRow } = require('../src/patient-rules');
+const { parseScheduleInstant, scheduleInstantParts, sameScheduleInstant } = require('../src/schedule-time');
 
 const roleOf = (req) => String(req.adminSession?.role || '').toUpperCase();
 const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const logger = require('../services/system-logger');
+const { normalizeConsentStatus, restrictionRestoreAttempt } = require('../src/contact-policy');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -52,6 +54,45 @@ const RESCHEDULABLE_STATUSES = new Set([
   'cancelled',
   'rescheduled'
 ]);
+
+const CUSTOMER_PAGE_DEFAULT = 50;
+const CUSTOMER_PAGE_MAX = 100;
+
+function parseCustomerPageSize(value) {
+  if (value == null || value === '') return CUSTOMER_PAGE_DEFAULT;
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!/^\d+$/.test(String(raw))) return null;
+  const size = Number(raw);
+  return Number.isSafeInteger(size) && size > 0 && size <= CUSTOMER_PAGE_MAX ? size : null;
+}
+
+function encodeCustomerCursor(row) {
+  const createdAt = row.created_at instanceof Date
+    ? row.created_at.toISOString()
+    : String(row.created_at || '1970-01-01T00:00:00.000Z');
+  return Buffer.from(JSON.stringify({
+    priority: Number(row.priority_score) || 0,
+    createdAt,
+    id: Number(row.id)
+  })).toString('base64url');
+}
+
+function decodeCustomerCursor(value) {
+  if (typeof value !== 'string' || !value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+    if (!Number.isSafeInteger(parsed.priority)
+        || !Number.isSafeInteger(parsed.id)
+        || parsed.id < 1
+        || typeof parsed.createdAt !== 'string'
+        || Number.isNaN(Date.parse(parsed.createdAt))) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 /**
  * Coerces the many ways a flag arrives — boolean, 1/0, "1"/"0", "true"/"yes" —
  * into the integer the schema stores. Returns 0 for anything unrecognised
@@ -97,20 +138,17 @@ function buildScheduledDateTime(dateValue, timeValue) {
     return null;
   }
 
-  const scheduled = new Date(`${datePart}T${timePart}:00`);
-  return Number.isNaN(scheduled.getTime()) ? null : scheduled;
+  return parseScheduleInstant(`${datePart}T${timePart}:00+05:30`);
 }
 
 function normalizeScheduledDate(payload = {}) {
   const directDate = String(payload.scheduled_date || payload.call_date || payload.callDate || '').trim();
   if (directDate) return directDate;
 
-  const scheduledDateTime = String(payload.scheduled_datetime || payload.scheduledDateTime || '').trim();
-  if (scheduledDateTime) {
-    const parsed = new Date(scheduledDateTime);
-    if (!Number.isNaN(parsed.getTime())) {
-      return getLocalDateValue(parsed);
-    }
+  const scheduledDateTime = payload.scheduled_datetime ?? payload.scheduledDateTime;
+  if (String(scheduledDateTime == null ? '' : scheduledDateTime).trim()) {
+    const parts = scheduleInstantParts(scheduledDateTime);
+    if (parts) return parts.date;
   }
 
   return '';
@@ -133,12 +171,10 @@ function normalizePreferredSlot(payload = {}) {
 
   const callTime = String(payload.callTime || '').trim();
   if (!callTime) {
-    const scheduledDateTime = String(payload.scheduled_datetime || payload.scheduledDateTime || '').trim();
-    if (scheduledDateTime) {
-      const parsed = new Date(scheduledDateTime);
-      if (!Number.isNaN(parsed.getTime())) {
-        return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`;
-      }
+    const scheduledDateTime = payload.scheduled_datetime ?? payload.scheduledDateTime;
+    if (String(scheduledDateTime == null ? '' : scheduledDateTime).trim()) {
+      const parts = scheduleInstantParts(scheduledDateTime);
+      if (parts) return parts.time;
     }
     return '';
   }
@@ -154,7 +190,10 @@ function normalizePreferredSlot(payload = {}) {
 function normalizeCustomerPayload(payload = {}) {
   const preferredSlot = normalizePreferredSlot(payload);
   const scheduledDate = normalizeScheduledDate(payload);
-  const scheduled = buildScheduledDateTime(scheduledDate, preferredSlot);
+  const suppliedInstant = payload.scheduled_datetime ?? payload.scheduledDateTime;
+  const hasSuppliedInstant = String(suppliedInstant == null ? '' : suppliedInstant).trim() !== '';
+  const directScheduled = hasSuppliedInstant ? parseScheduleInstant(suppliedInstant) : null;
+  const scheduled = hasSuppliedInstant ? directScheduled : buildScheduledDateTime(scheduledDate, preferredSlot);
   return {
     name: String(payload.name || payload.patientName || '').trim(),
     patient_id: Number(payload.patient_id) || null,
@@ -162,17 +201,20 @@ function normalizeCustomerPayload(payload = {}) {
     scheduled_date: scheduledDate,
     preferred_slot: preferredSlot,
     scheduled_datetime: scheduled ? scheduled.toISOString() : null,
+    invalid_scheduled_datetime: hasSuppliedInstant && !directScheduled,
+    has_supplied_scheduled_datetime: hasSuppliedInstant,
     call_type: normalizeCallType(payload.call_type || payload.callType),
     customer_value: String(payload.customer_value || 'standard').trim().toLowerCase() || 'standard',
     urgency_level: String(payload.urgency_level || 'normal').trim().toLowerCase() || 'normal',
     preferred_language: String(payload.preferred_language || 'hi').trim().toLowerCase() || 'hi',
     preferred_dialect: String(payload.preferred_dialect || '').trim(),
     do_not_call: toBooleanFlag(payload.do_not_call),
-    consent_status: String(payload.consent_status || 'unknown').trim().toLowerCase() || 'unknown',
+    consent_status: normalizeConsentStatus(payload.consent_status),
     outstanding_issues: String(payload.outstanding_issues || '').trim(),
     pending_follow_ups: String(payload.pending_follow_ups || '').trim(),
     revenue_stage: String(payload.revenue_stage || 'unassigned').trim().toLowerCase() || 'unassigned',
     revenue_estimate: Number(payload.revenue_estimate || 0) || 0,
+    campaign_id: Number(payload.campaign_id) || null,
     campaign_name: String(payload.campaign_name || '').trim(),
     service_interest: String(payload.service_interest || '').trim()
   };
@@ -212,20 +254,29 @@ function validateCustomerPayload(payload) {
     errors.scheduled_date = 'Scheduled date must be in YYYY-MM-DD format';
   }
 
-  const scheduled = buildScheduledDateTime(payload.scheduled_date, payload.preferred_slot);
+  const scheduled = parseScheduleInstant(payload.scheduled_datetime);
+  if (payload.invalid_scheduled_datetime) {
+    errors.scheduled_datetime = 'Scheduled date and time are invalid';
+  }
   if (!errors.scheduled_date && !errors.preferred_slot && !scheduled) {
     errors.scheduled_datetime = 'Scheduled date and time are invalid';
   } else if (scheduled && scheduled.getTime() <= Date.now()) {
-    if (payload.scheduled_date === getLocalDateValue()) {
+    if (scheduleInstantParts(scheduled)?.date === scheduleInstantParts(new Date())?.date) {
       errors.preferred_slot = 'Choose a future time for today';
     } else {
       errors.scheduled_date = 'Choose today or a future date';
     }
   }
 
-  if (scheduled) {
-    const hours = scheduled.getHours();
-    if (hours < 7 || hours >= 21) {
+  const canonicalParts = scheduleInstantParts(scheduled);
+  if (scheduled && payload.has_supplied_scheduled_datetime
+      && canonicalParts
+      && (canonicalParts.date !== payload.scheduled_date || canonicalParts.time !== payload.preferred_slot)) {
+    errors.scheduled_datetime = 'Scheduled date and time do not match';
+  }
+
+  if (canonicalParts) {
+    if (canonicalParts.hour < 7 || canonicalParts.hour >= 21) {
       errors.preferred_slot = 'Calls can only be scheduled between 7:00 AM and 9:00 PM.';
       logger.warn('CALL_SCHEDULE_BLOCKED_QUIET_HOURS', {
         phone: payload.phone,
@@ -247,8 +298,8 @@ function validateCustomerPayload(payload) {
     errors.preferred_language = 'Preferred language must be hi, en, mixed, or hinglish';
   }
 
-  if (!['unknown', 'granted', 'denied', 'pending'].includes(payload.consent_status)) {
-    errors.consent_status = 'Consent status must be unknown, granted, denied, or pending';
+  if (!payload.consent_status) {
+    errors.consent_status = 'Consent status must be unknown, granted, or refused';
   }
 
   if (!ALLOWED_CALL_TYPES.has(payload.call_type)) {
@@ -292,8 +343,8 @@ async function saveCustomer(payload, isManual = false) {
       patient_id, scheduled_datetime, status,
       customer_value, urgency_level,
       outstanding_issues, pending_follow_ups, revenue_stage, revenue_estimate,
-      campaign_name, service_interest, call_type, is_manual
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      campaign_id, campaign_name, service_interest, call_type, is_manual
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       patientId,
       payload.scheduled_datetime,
@@ -304,6 +355,7 @@ async function saveCustomer(payload, isManual = false) {
       payload.pending_follow_ups || null,
       payload.revenue_stage,
       payload.revenue_estimate,
+      payload.campaign_id,
       payload.campaign_name || null,
       payload.service_interest || null,
       payload.call_type,
@@ -446,11 +498,62 @@ router.get('/search', async (req, res) => {
 // List all customers
 router.get('/', async (req, res) => {
   try {
-    const customers = await dbAll('SELECT * FROM customer_queue ORDER BY COALESCE(priority_score, 0) DESC, created_at DESC');
-    res.json(customers.map((row) => serializeQueueRow(row, roleOf(req))));
+    const paginationRequested = req.query.cursor != null
+      || req.query.page_size != null
+      || req.query.pageSize != null;
+    if (!paginationRequested) {
+      const customers = await dbAll('SELECT * FROM customer_queue ORDER BY COALESCE(priority_score, 0) DESC, created_at DESC');
+      return res.json(customers.map((row) => serializeQueueRow(row, roleOf(req))));
+    }
+
+    const pageSize = parseCustomerPageSize(req.query.page_size ?? req.query.pageSize);
+    if (!pageSize) return res.status(400).json({ error: `page_size must be an integer from 1 to ${CUSTOMER_PAGE_MAX}` });
+    if (Array.isArray(req.query.cursor)) return res.status(400).json({ error: 'cursor must be a single value' });
+    const cursor = req.query.cursor == null ? null : decodeCustomerCursor(req.query.cursor);
+    if (req.query.cursor != null && !cursor) return res.status(400).json({ error: 'cursor is invalid or expired' });
+
+    const requestedPatientId = req.query.patient_id ?? req.query.patientId;
+    if (Array.isArray(requestedPatientId)
+        || (requestedPatientId != null && !/^\d+$/.test(String(requestedPatientId)))) {
+      return res.status(400).json({ error: 'patient_id must be a positive integer' });
+    }
+    const patientId = requestedPatientId == null ? null : Number(requestedPatientId);
+    if (patientId != null && (!Number.isSafeInteger(patientId) || patientId < 1)) {
+      return res.status(400).json({ error: 'patient_id must be a positive integer' });
+    }
+
+    const cursorClause = cursor ? `
+      AND (
+        COALESCE(priority_score, 0) < ?
+        OR (COALESCE(priority_score, 0) = ? AND (
+          COALESCE(created_at, '1970-01-01T00:00:00.000Z') < ?
+          OR (COALESCE(created_at, '1970-01-01T00:00:00.000Z') = ? AND id < ?)
+        ))
+      )` : '';
+    const patientClause = patientId == null ? '' : ' AND patient_id = ?';
+    const params = [];
+    if (patientId != null) params.push(patientId);
+    if (cursor) params.push(cursor.priority, cursor.priority, cursor.createdAt, cursor.createdAt, cursor.id);
+    params.push(pageSize + 1);
+    const customers = await dbAll(
+      `SELECT * FROM customer_queue
+        WHERE 1 = 1${patientClause}${cursorClause}
+        ORDER BY COALESCE(priority_score, 0) DESC,
+                 COALESCE(created_at, '1970-01-01T00:00:00.000Z') DESC,
+                 id DESC
+        LIMIT ?`,
+      params
+    );
+    const hasMore = customers.length > pageSize;
+    const items = customers.slice(0, pageSize);
+    return res.json({
+      items: items.map((row) => serializeQueueRow(row, roleOf(req))),
+      nextCursor: hasMore ? encodeCustomerCursor(items[items.length - 1]) : null,
+      hasMore
+    });
   } catch (error) {
     console.error('Error fetching customers:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Unable to fetch customers' });
   }
 });
 
@@ -499,8 +602,7 @@ router.put('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Please fix the highlighted fields', fieldErrors });
     }
 
-    const slotChanged = payload.preferred_slot !== (existing.preferred_slot || '10:00')
-      || payload.scheduled_datetime !== (existing.scheduled_datetime || null);
+    const slotChanged = !sameScheduleInstant(payload.scheduled_datetime, existing.scheduled_datetime);
     const existingStatus = String(existing.status || '').toLowerCase();
     const shouldRescheduleStatus = slotChanged && RESCHEDULABLE_STATUSES.has(existingStatus);
     const nextRetryAt = shouldRescheduleStatus
@@ -521,12 +623,13 @@ router.put('/:id', async (req, res) => {
               next_retry_at = ?,
               revenue_stage = ?,
               revenue_estimate = ?,
+              campaign_id = ?,
               campaign_name = ?,
               service_interest = ?,
               call_type = ?,
               attempt_count = ?,
-              is_manual = 1,
-              locked_at = NULL
+              is_manual = ?,
+              locked_at = ?
         WHERE id = ?`,
       [
         payload.scheduled_datetime,
@@ -538,10 +641,13 @@ router.put('/:id', async (req, res) => {
         nextRetryAt,
         payload.revenue_stage,
         payload.revenue_estimate,
+        payload.campaign_id,
         payload.campaign_name || null,
         payload.service_interest || null,
         payload.call_type,
         shouldRescheduleStatus ? 0 : (existing.attempt_count || 0),
+        shouldRescheduleStatus ? 1 : existing.is_manual,
+        shouldRescheduleStatus ? null : existing.locked_at,
         req.params.id
       ]
     );
@@ -574,10 +680,24 @@ router.patch('/:id/workflow', async (req, res) => {
       do_not_call: req.body.do_not_call === undefined ? existing.do_not_call : toBooleanFlag(req.body.do_not_call),
       wrong_number_flag: req.body.wrong_number_flag === undefined ? existing.wrong_number_flag : toBooleanFlag(req.body.wrong_number_flag),
       admin_review_required: req.body.admin_review_required === undefined ? existing.admin_review_required : toBooleanFlag(req.body.admin_review_required),
-      consent_status: req.body.consent_status ? String(req.body.consent_status).trim().toLowerCase() : existing.consent_status,
+      consent_status: req.body.consent_status === undefined ? normalizeConsentStatus(existing.consent_status) : normalizeConsentStatus(req.body.consent_status),
       next_retry_at: req.body.next_retry_at === undefined ? existing.next_retry_at : req.body.next_retry_at,
       pending_follow_ups: req.body.pending_follow_ups === undefined ? existing.pending_follow_ups : String(req.body.pending_follow_ups || '').trim()
     };
+
+    if (req.body.consent_status !== undefined && !patch.consent_status) {
+      return res.status(400).json({
+        error: 'Consent status must be unknown, granted, or refused',
+        fieldErrors: { consent_status: 'Consent status must be unknown, granted, or refused' }
+      });
+    }
+    const restrictedField = restrictionRestoreAttempt(existing, patch);
+    if (restrictedField) {
+      return res.status(409).json({
+        error: 'Contact restrictions can only be changed through the reviewed restoration workflow',
+        fieldErrors: { [restrictedField]: 'This restriction is authoritative and cannot be relaxed here' }
+      });
+    }
 
     // do-not-call and consent describe the person and must outlive this call
     // attempt; the rest is queue state.

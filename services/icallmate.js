@@ -118,12 +118,30 @@ function redactMediaUrlToken(value) {
   }
 }
 
+const SECRET_FIELD_PATTERN = /^(?:ukey|token|secret|password|authorization|api[_-]?key|access[_-]?key|private[_-]?key)$/i;
+const URL_SECRET_PATTERN = /([?&](?:token|secret|ukey|signature|sig|access_token|api_key)=)[^&#\s]+/gi;
+
+function redactProviderPayload(value, key = '') {
+  if (SECRET_FIELD_PATTERN.test(String(key))) return undefined;
+  if (typeof value === 'string') return value.replace(URL_SECRET_PATTERN, '$1[redacted]');
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactProviderPayload(entry)).filter((entry) => entry !== undefined);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).flatMap(([entryKey, entryValue]) => {
+      const redacted = redactProviderPayload(entryValue, entryKey);
+      return redacted === undefined ? [] : [[entryKey, redacted]];
+    }));
+  }
+  return value;
+}
+
 function redactRequestPayload(payload) {
   if (!payload || typeof payload !== 'object') {
     return payload;
   }
 
-  const copy = JSON.parse(JSON.stringify(payload));
+  const copy = redactProviderPayload(JSON.parse(JSON.stringify(payload)));
   if (Array.isArray(copy.msisdnlist)) {
     copy.msisdnlist.forEach((entry) => {
       if (entry?.wsurl) entry.wsurl = redactMediaUrlToken(entry.wsurl);
@@ -177,6 +195,8 @@ function buildOutboundCampaignPayload(customerPhone, customerId, options = {}) {
         extraparam: JSON.stringify({
           callDirection: 'outbound',
           customerId: customerId || null,
+          attemptId: options.attemptId || null,
+          requestKey: options.requestKey || null,
           customerName: options.customerName || '',
           clientName: options.clientName || '',
           callType: options.callType || 'REVIEW_CALL'
@@ -209,6 +229,8 @@ function buildMasterPostPayload(customerPhone, leadId, options = {}) {
         extraparam: JSON.stringify({
           callDirection: 'outbound',
           customerId: options.customerId || null,
+          attemptId: options.attemptId || null,
+          requestKey: options.requestKey || null,
           customerName: options.customerName || '',
           clientName: options.clientName || '',
           callType: options.callType || 'REVIEW_CALL',
@@ -306,7 +328,7 @@ async function initiateMasterPostCall(customerPhone, customerId, options = {}) {
     status,
     providerReturnedSid,
     providerReason,
-    raw: parsed,
+    raw: redactProviderPayload(parsed),
     requestPayload: payload
   };
 }
@@ -379,7 +401,7 @@ async function initiateCall(customerPhone, customerId, options = {}) {
   return {
     sid,
     status: 'queued',
-    raw: parsed,
+    raw: redactProviderPayload(parsed),
     requestPayload: redactRequestPayload(payload)
   };
 }
@@ -392,5 +414,7 @@ module.exports = {
   assertPublicMediaEndpointReachable,
   ICALLMATE_MEDIA_ENDPOINT_UNAVAILABLE,
   redactMediaUrlToken,
+  redactProviderPayload,
+  redactRequestPayload,
   initiateCall,
 };

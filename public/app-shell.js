@@ -353,6 +353,68 @@
       nameDropdown: `${fieldPrefix}NameDropdown`
     };
 
+    let previousFocus = null;
+    let inertBackground = [];
+
+    function setBackgroundInert(isInert) {
+      if (isInert) {
+        const backdrop = getEl('backdrop');
+        let topLevel = backdrop;
+        while (topLevel?.parentElement && topLevel.parentElement !== document.body) {
+          topLevel = topLevel.parentElement;
+        }
+        inertBackground = [...document.body.children]
+          .filter((element) => element !== topLevel)
+          .map((element) => ({
+            element,
+            inert: element.inert,
+            ariaHidden: element.getAttribute('aria-hidden')
+          }));
+        inertBackground.forEach(({ element }) => {
+          element.inert = true;
+          element.setAttribute('aria-hidden', 'true');
+        });
+        return;
+      }
+
+      inertBackground.forEach(({ element, inert, ariaHidden }) => {
+        element.inert = inert;
+        if (ariaHidden == null) element.removeAttribute('aria-hidden');
+        else element.setAttribute('aria-hidden', ariaHidden);
+      });
+      inertBackground = [];
+    }
+
+    function modalFocusableElements() {
+      const panel = getEl('backdrop')?.querySelector('[role="dialog"]');
+      if (!panel) return [];
+      return [...panel.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), details summary, [tabindex]:not([tabindex="-1"])'
+      )].filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
+    }
+
+    function onModalKeydown(event) {
+      const backdrop = getEl('backdrop');
+      if (!backdrop?.classList.contains('open')) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        close();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = modalFocusableElements();
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
     mount.innerHTML = `
       <div id="${ids.backdrop}" class="modal-backdrop schedule-call-modal" aria-hidden="true">
         <div class="saas-modal-panel schedule-modal" role="dialog" aria-modal="true" aria-labelledby="${ids.panelTitle}">
@@ -370,20 +432,20 @@
 
           <div id="${ids.selectionBody}" class="saas-modal-body" style="padding-bottom:24px;">
             <div class="saas-selection-cards">
-              <div id="${ids.existingPatientBtn}" class="saas-selection-card">
+              <button id="${ids.existingPatientBtn}" class="saas-selection-card" type="button">
                 <div class="saas-selection-card-icon">
                   <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 017.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
                 </div>
                 <div class="saas-selection-card-title">Existing Patient</div>
                 <div class="saas-selection-card-subtitle">Schedule follow-up for a returning patient</div>
-              </div>
-              <div id="${ids.newPatientBtn}" class="saas-selection-card">
+              </button>
+              <button id="${ids.newPatientBtn}" class="saas-selection-card" type="button">
                 <div class="saas-selection-card-icon">
                   <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
                 </div>
                 <div class="saas-selection-card-title">New Patient</div>
                 <div class="saas-selection-card-subtitle">Add their full record, then schedule a call</div>
-              </div>
+              </button>
             </div>
           </div>
 
@@ -425,11 +487,11 @@
             <div class="saas-form-section">
               <div class="saas-section-title">Call Configuration</div>
               
-              <div class="saas-field">
-                <label style="margin-bottom: 8px;">Call Type</label>
+              <fieldset class="saas-field saas-call-type-field">
+                <legend>Call Type</legend>
                 <div class="saas-campaign-cards">
                   <label class="saas-campaign-card selected">
-                    <input type="radio" name="${ids.callType}" value="REVIEW_CALL" checked style="display:none;">
+                    <input class="saas-call-type-radio visually-hidden" type="radio" name="${ids.callType}" value="REVIEW_CALL" checked>
                     <div class="saas-card-content">
                       <strong>Review Calling</strong>
                     </div>
@@ -438,7 +500,7 @@
                     </div>
                   </label>
                   <label class="saas-campaign-card">
-                    <input type="radio" name="${ids.callType}" value="THREE_MONTH_FOLLOWUP" style="display:none;">
+                    <input class="saas-call-type-radio visually-hidden" type="radio" name="${ids.callType}" value="THREE_MONTH_FOLLOWUP">
                     <div class="saas-card-content">
                       <strong>3 Month Follow-up</strong>
                     </div>
@@ -448,7 +510,7 @@
                   </label>
                 </div>
                 <span class="error-text" id="${ids.callType}Error"></span>
-              </div>
+              </fieldset>
 
               <details id="${ids.careToggle}" class="saas-accordion additional-care-details optional-notes-section">
                 <summary>Additional Care Details (Optional)</summary>
@@ -906,14 +968,23 @@
         showSelectionView();
       }
 
+      previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       getEl('backdrop').classList.add('open');
       getEl('backdrop').setAttribute('aria-hidden', 'false');
+      setBackgroundInert(true);
       syncMobileOptionalSections();
+      requestAnimationFrame(() => {
+        const first = modalFocusableElements()[0];
+        if (first) first.focus();
+      });
     }
 
     function close() {
       getEl('backdrop').classList.remove('open');
       getEl('backdrop').setAttribute('aria-hidden', 'true');
+      setBackgroundInert(false);
+      if (previousFocus && document.contains(previousFocus)) previousFocus.focus();
+      previousFocus = null;
     }
 
     getEl('close').addEventListener('click', close);
@@ -1023,11 +1094,7 @@
     document.querySelectorAll(`input[name="${ids.callType}"]`).forEach((input) => {
       input.addEventListener('change', () => setCallTypeSelection(input.value));
     });
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && getEl('backdrop').classList.contains('open')) {
-        close();
-      }
-    });
+    document.addEventListener('keydown', onModalKeydown);
     syncMobileOptionalSections();
     window.addEventListener('resize', syncMobileOptionalSections);
 

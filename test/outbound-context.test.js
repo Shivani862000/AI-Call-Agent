@@ -3,10 +3,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-require('dotenv').config();
-const { resolveDatabaseUrl } = require('../src/config');
-const HAS_DB = /^postgres/i.test(resolveDatabaseUrl());
-
 // Hydration matches an incoming media stream to the call that was placed. It
 // looked up a queue entry for the number and then searched that entry for a
 // recent call, which stopped working the moment a patient could have more than
@@ -14,8 +10,7 @@ const HAS_DB = /^postgres/i.test(resolveDatabaseUrl());
 // never found. The failure is silent and total -- the session stays "incoming",
 // so the outbound script is never used, and the call is never marked completed
 // or given a transcript.
-test('the outbound call is found even when the patient has several queue entries',
-  { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
+test('the outbound call is found even when the patient has several queue entries', async () => {
   const { initializeDatabase, dbRun, closeDatabase } = require('../db');
   const { findRecentOutboundCallContextByPhone } = require('../src/call-management');
   const { withTestPatient } = require('./support/fixtures');
@@ -56,8 +51,7 @@ test('the outbound call is found even when the patient has several queue entries
   }
 });
 
-test('an unknown number yields no context',
-  { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
+test('an unknown number yields no context', async () => {
   const { initializeDatabase, closeDatabase } = require('../db');
   const { findRecentOutboundCallContextByPhone } = require('../src/call-management');
   await initializeDatabase();

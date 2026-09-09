@@ -12,29 +12,32 @@ const {
   createSupervisorEvent
 } = require('./call-orchestration');
 const { syncCallToCrm, sendHotLeadAlert } = require('./crm-sync');
+const { dbTx } = require('../db');
+const {
+  buildInputRevision,
+  claimPostCallJob,
+  completePostCallJob,
+  failPostCallJob
+} = require('./post-call-jobs');
 
-const RECORDINGS_DIR = path.join('/tmp', 'feedback-call-recordings');
+const os = require('node:os');
+const { pipeline } = require('node:stream/promises');
+const { fetchRecording } = require('./recording-fetch');
 
-async function ensureRecordingsDir() {
-  await fs.promises.mkdir(RECORDINGS_DIR, { recursive: true });
-}
-
-async function downloadRecording(recordingUrl, callSid) {
-  if (!recordingUrl) {
-    return null;
+async function downloadRecording(recordingUrl) {
+  if (!recordingUrl) return null;
+  const recording = await fetchRecording(recordingUrl);
+  let directory;
+  try {
+    directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), `feedback-recording-${process.pid}-`));
+    const targetPath = path.join(directory, 'audio.mp3');
+    await pipeline(recording.stream, fs.createWriteStream(targetPath, { flags: 'wx', mode: 0o600 }));
+    return targetPath;
+  } catch {
+    recording.cancel();
+    if (directory) await fs.promises.rm(directory, { recursive: true, force: true });
+    throw new Error('Recording unavailable');
   }
-
-  await ensureRecordingsDir();
-  const response = await fetch(recordingUrl);
-
-  if (!response.ok) {
-    throw new Error(`Recording download failed with status ${response.status}`);
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  const targetPath = path.join(RECORDINGS_DIR, `${callSid || Date.now()}.mp3`);
-  await fs.promises.writeFile(targetPath, Buffer.from(arrayBuffer));
-  return targetPath;
 }
 
 function convertPlainTranscriptToTurns(transcriptText = '') {
@@ -143,30 +146,44 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     return { ok: false, reason: 'already_processed' };
   }
 
-  const claimResult = await dbRun(
+  const inputRevision = buildInputRevision(callRecord);
+  const claim = await claimPostCallJob({ dbTx, callId: callRecord.id, inputRevision });
+  if (claim.state === 'completed') return { ok: false, reason: 'already_processed' };
+  if (claim.state === 'busy') return { ok: false, reason: 'already_processing' };
+  if (claim.state !== 'claimed') return { ok: false, reason: claim.state };
+
+  const jobId = claim.job.id;
+  const claimToken = claim.token;
+  await dbRun(
     `UPDATE calls
-        SET transcript_status = ?,
-            analysis_status = ?
-      WHERE id = ?
-        AND COALESCE(analysis_status, 'pending') NOT IN ('processing', 'completed')`,
+        SET transcript_status = ?, analysis_status = ?
+      WHERE id = ? AND COALESCE(analysis_status, 'pending') <> 'completed'`,
     ['processing', 'processing', callRecord.id]
   );
 
-  if (!claimResult.changes) {
-    return { ok: false, reason: 'already_processing' };
-  }
-
-  logger.info('FEEDBACK_ANALYSIS_STARTED', {
+  let recordingLocalPath = null;
+  try {
+    logger.info('FEEDBACK_ANALYSIS_STARTED', {
     callId: callRecord.id,
     customerId: callRecord.customer_id,
     patient: callRecord.customer_name,
     phone: callRecord.customer_phone
-  });
+    });
 
-  let recordingLocalPath = null;
-  if (!callRecord.recording_object_key && callRecord.recording_url) {
+  let transcriptText = callRecord.transcript_text || '';
+  if (!transcriptText && callRecord.recording_object_key && callRecord.recording_status === 'stored') {
     try {
-      recordingLocalPath = await downloadRecording(callRecord.recording_url, callRecord.provider_call_id);
+      const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), `feedback-recording-${process.pid}-`));
+      recordingLocalPath = path.join(directory, 'audio.mp3');
+      const { downloadObjectToFile } = require('./supabase-storage');
+      await downloadObjectToFile(callRecord.recording_object_key, recordingLocalPath);
+    } catch (error) {
+      await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['download_failed', 'blocked', callRecord.id]);
+      throw error;
+    }
+  } else if (!callRecord.recording_object_key && callRecord.recording_url) {
+    try {
+      recordingLocalPath = await downloadRecording(callRecord.recording_url);
       const objectKey = `calls/${callRecord.id}/${path.basename(recordingLocalPath)}`;
       const { uploadObject, isStorageConfigured } = require('./supabase-storage');
       if (isStorageConfigured()) {
@@ -175,7 +192,6 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
           "UPDATE calls SET recording_object_key = ?, recording_status = 'stored' WHERE id = ?",
           [objectKey, callRecord.id]
         );
-        fs.promises.unlink(recordingLocalPath).catch(() => {});
       }
     } catch (error) {
       await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['download_failed', 'blocked', callRecord.id]);
@@ -183,7 +199,6 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     }
   }
 
-  let transcriptText = callRecord.transcript_text || '';
   let transcriptSource = transcriptText ? 'live_stream' : null;
 
   if (recordingLocalPath) {
@@ -199,6 +214,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
 
   if (!transcriptText) {
     await dbRun('UPDATE calls SET transcript_status = ?, analysis_status = ? WHERE id = ?', ['missing', 'blocked', callRecord.id]);
+    await failPostCallJob({ dbTx, jobId, claimToken, attemptCount: claim.job.attempt_count, errorCode: 'no_transcript_available' });
     logger.warn('FEEDBACK_PENDING', {
       callId: callRecord.id,
       customerId: callRecord.customer_id,
@@ -356,6 +372,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   const workflowResult = await applyCallOutcomeWorkflow({
     dbGet,
     dbRun,
+    dbTx,
     callRecord: refreshedCall,
     customer: refreshedCustomer,
     providerStatus: refreshedCall.outcome,
@@ -424,6 +441,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     );
   }
 
+  await completePostCallJob({ dbTx, jobId, claimToken });
   return {
     ok: true,
     callId: callRecord.id,
@@ -432,6 +450,18 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     feedbackId: feedbackResult.feedbackId,
     workflowResult
   };
+  } catch (error) {
+    await failPostCallJob({
+      dbTx,
+      jobId,
+      claimToken,
+      attemptCount: claim.job.attempt_count,
+      errorCode: error.code || error.name || 'post_call_failed'
+    }).catch(() => {});
+    throw error;
+  } finally {
+    if (recordingLocalPath) await fs.promises.rm(path.dirname(recordingLocalPath), { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 module.exports = {

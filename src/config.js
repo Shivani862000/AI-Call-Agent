@@ -138,7 +138,8 @@ function logConfigSnapshot(scope = 'CONFIG') {
     ICALLMATE_MEDIA_SHARED_SECRET_PRESENT: Boolean(process.env.ICALLMATE_MEDIA_SHARED_SECRET),
     GEMINI_API_KEY_PRESENT: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
     DEEPGRAM_API_KEY_PRESENT: Boolean(process.env.DEEPGRAM_API_KEY),
-    DATABASE_URL: process.env.DATABASE_URL || ''
+    DATABASE_URL_SOURCE: databaseUrlVarName(),
+    DATABASE_URL_PRESENT: Boolean(resolveDatabaseUrl())
   };
 
   console.log(`[${scope}] ${JSON.stringify(snapshot)}`);

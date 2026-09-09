@@ -3,10 +3,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-require('dotenv').config();
-const { resolveDatabaseUrl } = require('../src/config');
-const HAS_DB = /^postgres/i.test(resolveDatabaseUrl());
-
 const { MAX_CALLS_PER_DAY, countOutboundCallsToday } = require('../src/call-management');
 
 test('the daily limit is a stated number, not a magic one', () => {
@@ -15,8 +11,7 @@ test('the daily limit is a stated number, not a magic one', () => {
 
 // current_date is UTC, so the counter reset at 05:30 IST rather than midnight:
 // calls made on an Indian evening counted against the next morning's allowance.
-test('the day is India\'s day, not the server\'s',
-  { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
+test('the day is India\'s day, not the server\'s', async () => {
   const { initializeDatabase, dbRun, closeDatabase } = require('../db');
   const { withTestPatient } = require('./support/fixtures');
   await initializeDatabase();

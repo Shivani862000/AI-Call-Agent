@@ -103,8 +103,8 @@ async function listUnifiedFeedback() {
       f.id,
       f.customer_id,
       f.call_id,
-      c.name AS customer_name,
-      c.phone AS customer_phone,
+      concat_ws(' ', p.first_name, p.last_name) AS customer_name,
+      p.phone AS customer_phone,
       f.review_text,
       f.category,
       f.stars,
@@ -123,7 +123,7 @@ async function listUnifiedFeedback() {
       calls.transcript_status,
       CASE WHEN COALESCE(calls.transcript_text, '') != '' THEN 1 ELSE 0 END AS transcript_available
     FROM feedback f
-    JOIN customer_queue c ON c.id = f.customer_id
+    JOIN patients p ON p.id = f.patient_id
     LEFT JOIN calls ON calls.id = f.call_id
     ORDER BY f.submitted_at DESC
     LIMIT 500
@@ -134,8 +134,8 @@ async function listUnifiedFeedback() {
       SELECT 
         calls.id AS call_id,
         calls.customer_id,
-        customer_queue.name AS customer_name,
-        customer_queue.phone AS customer_phone,
+        concat_ws(' ', p.first_name, p.last_name) AS customer_name,
+        p.phone AS customer_phone,
         calls.extracted_review_text,
         calls.analysis_summary,
         calls.summary,
@@ -153,7 +153,7 @@ async function listUnifiedFeedback() {
         calls.transcript_status,
         CASE WHEN COALESCE(calls.transcript_text, '') != '' THEN 1 ELSE 0 END AS transcript_available
       FROM calls
-      JOIN customer_queue ON customer_queue.id = calls.customer_id
+      JOIN patients p ON p.id = calls.patient_id
       WHERE calls.extracted_rating IS NOT NULL 
          OR calls.sentiment IS NOT NULL 
          OR calls.analysis_summary IS NOT NULL
@@ -287,14 +287,14 @@ router.get('/', async (req, res) => {
 router.get('/analytics', async (req, res) => {
   try {
     const feedback = await dbAll(`
-      SELECT f.*, c.name as customer_name, c.phone as customer_phone
+      SELECT f.*, concat_ws(' ', p.first_name, p.last_name) as customer_name, p.phone as customer_phone
       FROM feedback f
-      LEFT JOIN customer_queue c ON f.customer_id = c.id
+      LEFT JOIN patients p ON f.patient_id = p.id
     `);
     const recentCalls = await dbAll(`
-      SELECT calls.*, c.name as customer_name, c.phone as customer_phone
+      SELECT calls.*, concat_ws(' ', p.first_name, p.last_name) as customer_name, p.phone as customer_phone
       FROM calls
-      LEFT JOIN customer_queue c ON calls.customer_id = c.id
+      LEFT JOIN patients p ON calls.patient_id = p.id
       ORDER BY calls.created_at DESC LIMIT 500
     `);
 

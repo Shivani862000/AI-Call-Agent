@@ -6,26 +6,41 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
-    "test": "node --test test/*.test.js",
+    "test": "npm run test:unit",
+    "test:unit": "node scripts/test-isolated.js unit",
+    "test:db": "node scripts/test-isolated.js db",
+    "test:browser": "node scripts/test-isolated.js browser",
+    "test:isolated": "node scripts/test-isolated.js isolated",
+    "test:hotfix": "node --test test/authorization-routes.test.js test/auth-security.test.js test/user-rules.test.js test/csp-http-deployment.test.js",
+    "test:remediation": "node --test --test-reporter=spec test/config-redaction.test.js test/config-database-url.test.js test/legacy-callback-auth.test.js test/icallmate-webhook.test.js test/call-response-privacy.test.js test/auth-session-state.test.js test/authorization-routes.test.js test/auth-security.test.js test/user-rules.test.js test/csp-http-deployment.test.js",
     "users": "node scripts/manage-users.js",
-    "migrate": "node scripts/migrate.js"
+    "migrate": "node scripts/migrate.js",
+    "test:packaging": "node scripts/test-isolated.js packaging",
+    "test:runtime": "node scripts/test-isolated.js runtime"
   },
   "dependencies": {
     "@google/genai": "^1.36.0",
     "bcrypt": "^6.0.0",
-    "csv-parse": "^5.5.0",
+    "csv-parse": "7.0.2",
     "dotenv": "^16.3.1",
     "exceljs": "^4.4.0",
     "express": "^4.22.2",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
-    "multer": "^2.2.0",
-    "nodemailer": "^9.0.6",
+    "multer": "2.3.0",
+    "nodemailer": "9.1.1",
     "pdfkit": "^0.13.0",
     "pg": "^8.23.0",
     "ws": "^8.21.3"
   },
   "overrides": {
+    "qs": "6.16.0",
     "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "11.7.2"
+  },
+  "engines": {
+    "node": ">=24.20.0 <25"
   }
 }

@@ -105,3 +105,80 @@ test('row matching stays aligned when earlier rows are invalid', () => {
   assert.strictEqual(p.creates.length, 1);
   assert.strictEqual(p.creates[0].payload.first_name, 'Aarti');
 });
+
+test('missing optional headers are omitted from an update patch', () => {
+  const headers = ['First Name', 'Mobile Number'];
+  const p = buildImportPlan({
+    rows: [['Aarti', '9876543210']],
+    headerMap: mapHeaders(headers).map,
+    findExisting: () => ({ byReference: null, byPhone: { id: 7, version: '12' } })
+  });
+  assert.deepStrictEqual(p.updates[0].patch, {
+    first_name: 'Aarti', phone: '9876543210', normalized_phone: '9876543210'
+  });
+});
+
+test('present blank nullable fields clear while blank required update fields fail', () => {
+  const nullable = buildImportPlan({
+    rows: [['Aarti', '9876543210', '', '', '']],
+    headerMap: mapHeaders(['First Name', 'Mobile Number', 'Email', 'Gender', 'Notes']).map,
+    findExisting: () => ({ byReference: null, byPhone: { id: 7, version: '12' } })
+  });
+  assert.deepStrictEqual(nullable.updates[0].patch, {
+    first_name: 'Aarti', phone: '9876543210', normalized_phone: '9876543210',
+    email: null, gender: null, notes: null
+  });
+  const explicitUnknown = buildImportPlan({
+    rows: [['Aarti', '9876543210', 'unknown']],
+    headerMap: mapHeaders(['First Name', 'Mobile Number', 'Gender']).map,
+    findExisting: () => ({ byReference: null, byPhone: { id: 7, version: '12' } })
+  });
+  assert.equal(explicitUnknown.updates[0].patch.gender, 'unknown');
+
+  const language = buildImportPlan({
+    rows: [['Aarti', '9876543210', '']],
+    headerMap: mapHeaders(['First Name', 'Mobile Number', 'Preferred Language']).map,
+    findExisting: () => ({ byReference: null, byPhone: { id: 7, version: '12' } })
+  });
+  assert.equal(language.updates.length, 0);
+  assert.match(language.problems[0].messages.join(' '), /Preferred language is required/);
+});
+
+test('different reference and phone matches are a row conflict', () => {
+  const p = buildImportPlan({
+    rows: [['REF-1', 'Aarti', '9876543210']],
+    headerMap: mapHeaders(['Reference ID', 'First Name', 'Mobile Number']).map,
+    findExisting: () => ({
+      byReference: { id: 7, version: '12' },
+      byPhone: { id: 8, version: '4' }
+    })
+  });
+  assert.equal(p.updates.length, 0);
+  assert.match(p.problems[0].messages.join(' '), /different patients/i);
+});
+
+test('duplicate update targets and duplicate create references are rejected', () => {
+  const updates = buildImportPlan({
+    rows: [['One', '9876543210'], ['Two', '9876543210']],
+    headerMap: mapHeaders(['First Name', 'Mobile Number']).map,
+    findExisting: () => ({ byReference: null, byPhone: { id: 7, version: '12' } })
+  });
+  assert.equal(updates.updates.length, 1);
+  assert.match(updates.problems[0].messages.join(' '), /patient appears more than once/i);
+
+  const creates = buildImportPlan({
+    rows: [['REF-1', 'One', '9876543210'], ['ref-1', 'Two', '9876543211']],
+    headerMap: mapHeaders(['Reference ID', 'First Name', 'Mobile Number']).map
+  });
+  assert.equal(creates.creates.length, 1);
+  assert.match(creates.problems[0].messages.join(' '), /reference.*more than once/i);
+});
+
+test('protected fields are ignored even in a directly supplied internal header map', () => {
+  const p = buildImportPlan({
+    rows: [['Aarti', '9876543210', 'active', 'granted', 0]],
+    headerMap: { 0: 'first_name', 1: 'phone', 2: 'status', 3: 'consent_status', 4: 'do_not_call' },
+    findExisting: () => ({ byReference: null, byPhone: { id: 7, version: '12' } })
+  });
+  assert.deepStrictEqual(Object.keys(p.updates[0].patch).sort(), ['first_name', 'normalized_phone', 'phone']);
+});

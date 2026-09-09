@@ -341,10 +341,11 @@ async function loadAccountState(username) {
     'SELECT username, role, is_active, password_changed_at FROM users WHERE lower(username) = lower(?)',
     [key]
   );
-  const state = row && Number(row.is_active) === 1
+  const role = normalizeRole(row?.role);
+  const state = row && Number(row.is_active) === 1 && role
     ? {
       active: true,
-      role: normalizeRole(row.role),
+      role,
       username: row.username,
       passwordChangedAt: row.password_changed_at ? new Date(row.password_changed_at).getTime() : 0
     }
@@ -352,6 +353,13 @@ async function loadAccountState(username) {
 
   accountCache.set(key, { state, expiresAt: Date.now() + ACCOUNT_CACHE_TTL_MS });
   return state;
+}
+
+// Mounted Express middleware trims req.path; originalUrl retains the family.
+// This chooses response format only. Authorization is enforced by route guards.
+function isApiRequest(req) {
+  const requestPath = String(req.originalUrl || req.path || '').split('?')[0];
+  return /^\/api(?:\/|$)/i.test(requestPath) || /^\/call\/start(?:\/|$)/i.test(requestPath);
 }
 
 async function requireAdminAuth(req, res, next) {
@@ -375,7 +383,7 @@ async function requireAdminAuth(req, res, next) {
 
     if (!account.active || stale) {
       clearAuthCookie(req, res);
-      if (req.path.startsWith('/api/') || req.path === '/call/start') {
+      if (isApiRequest(req)) {
         return res.status(401).json({
           error: stale ? 'Your password changed — please sign in again' : 'Account is no longer active'
         });
@@ -389,7 +397,7 @@ async function requireAdminAuth(req, res, next) {
     return next();
   }
 
-  if (req.path.startsWith('/api/') || req.path === '/call/start') {
+  if (isApiRequest(req)) {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
@@ -404,7 +412,7 @@ function requireRole(...allowedRoles) {
       return next();
     }
 
-    if (req.path.startsWith('/api/') || req.path === '/call/start') {
+    if (isApiRequest(req)) {
       return res.status(403).json({ error: 'Forbidden: Insufficient role' });
     }
 

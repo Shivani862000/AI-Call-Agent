@@ -30,6 +30,10 @@ const {
 const { hourInCallTimezone } = require('./helpers');
 const { resolvePatientId } = require('./patient-link');
 const { buildIcallMateCallbackUrl } = require('./icallmate-webhook');
+const { canContactPatient } = require('./contact-policy');
+const { extractEventIdentity } = require('./call-events');
+
+const ALLOW_IDLESS_CALL_MATCH = /^(1|true|yes|on)$/i.test(String(process.env.ALLOW_IDLESS_CALL_MATCH || 'false'));
 
 // ── Call Initiation ────────────────────────────────────────────────────────────
 
@@ -234,6 +238,48 @@ async function findRecentOutboundCallContextByPhone(phoneValue) {
   return { customer, call };
 }
 
+async function findOutboundCallContextByIdentity(identity = {}) {
+  const clauses = [];
+  const params = [];
+  if (identity.attemptId && /^\d+$/.test(String(identity.attemptId))) {
+    clauses.push('attempts.id = ?');
+    params.push(identity.attemptId);
+  } else if (identity.requestKey) {
+    clauses.push('attempts.request_key = ?');
+    params.push(identity.requestKey);
+  } else if (identity.providerId) {
+    clauses.push('LOWER(attempts.provider_call_id) = LOWER(?)');
+    params.push(identity.providerId);
+  } else {
+    return null;
+  }
+
+  return dbGet(
+    `SELECT calls.id AS call_id, calls.provider_call_id AS call_provider_call_id,
+            calls.call_type AS call_type, calls.agent_id AS call_agent_id,
+            attempts.id AS attempt_id, attempts.provider_call_id AS attempt_provider_call_id,
+            agents.client_name AS agent_client_name, customer_queue.*
+       FROM call_attempts attempts
+       LEFT JOIN calls ON calls.attempt_id = attempts.id
+       JOIN customer_queue ON customer_queue.id = attempts.customer_id
+       LEFT JOIN agents ON agents.id = calls.agent_id
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY calls.id DESC NULLS LAST
+      LIMIT 1`,
+    params
+  ).then((row) => row ? {
+    customer: row,
+    call: row.call_id ? {
+      id: row.call_id,
+      provider_call_id: row.call_provider_call_id,
+      call_type: row.call_type,
+      agent_id: row.call_agent_id,
+      agent_client_name: row.agent_client_name
+    } : null,
+    attempt: { id: row.attempt_id, provider_call_id: row.attempt_provider_call_id }
+  } : null);
+}
+
 async function hydrateIcallMateSessionContext(session, message = {}, extraParams = {}) {
   if (session.contextHydrated) {
     return;
@@ -244,19 +290,26 @@ async function hydrateIcallMateSessionContext(session, message = {}, extraParams
     return session._hydrationPromise;
   }
 
+  const identity = extractEventIdentity({ ...message, ...extraParams });
   if (extraParams.callDirection) {
     session.callDirection = normalizeCallDirection(extraParams.callDirection, session.callDirection);
     if (extraParams.callType || extraParams.call_type) {
       session.callType = normalizeOutboundCallType(extraParams.callType || extraParams.call_type);
     }
-    session.contextHydrated = true;
-    return;
+    if (session.callDirection !== 'outbound') {
+      session.contextHydrated = true;
+      return;
+    }
   }
 
   session.contextHydrating = true;
   session._hydrationPromise = (async () => {
     try {
-      const context = await findRecentOutboundCallContextByPhone(message.callerId || session.callerId);
+      const context = session.callDirection === 'outbound'
+        ? (identity.attemptId || identity.requestKey || identity.providerId
+          ? await findOutboundCallContextByIdentity(identity)
+          : (ALLOW_IDLESS_CALL_MATCH ? await findRecentOutboundCallContextByPhone(message.callerId || session.callerId) : null))
+        : await findRecentOutboundCallContextByPhone(message.callerId || session.callerId);
       if (!context) {
         return;
       }
@@ -264,14 +317,15 @@ async function hydrateIcallMateSessionContext(session, message = {}, extraParams
       session.contextHydrated = true;
       session.callDirection = 'outbound';
       session.customerName = context.customer.name || session.customerName || process.env.CUSTOMER_NAME || 'Customer';
-      session.clientName = context.call.agent_client_name || session.clientName || CLIENT_NAME;
+      session.clientName = context.call?.agent_client_name || session.clientName || CLIENT_NAME;
       session.customerId = context.customer.id;
-      session.callId = context.call.id;
-      session.providerCallId = context.call.provider_call_id || '';
-      session.callType = normalizeOutboundCallType(context.call.call_type || context.customer.call_type);
+      session.callId = context.call?.id || null;
+      session.attemptId = context.attempt?.id || null;
+      session.providerCallId = context.call?.provider_call_id || context.attempt?.provider_call_id || '';
+      session.callType = normalizeOutboundCallType(context.call?.call_type || context.customer.call_type);
       // The agent chosen when the call was placed. Its saved prompts, if it has
       // any, replace the built-in script.
-      session.agentConfig = context.call.agent_id
+      session.agentConfig = context.call?.agent_id
         ? await require('./prompt-builder').getAgentConfigById(context.call.agent_id)
         : null;
       // Read once per call rather than per turn: the prompt is rebuilt on every
@@ -347,16 +401,13 @@ async function hydratePreCallIntelligence(customer) {
 }
 
 async function shouldBlockCustomerCall(customer) {
-  if (customer.do_not_call) {
-    return { code: 'BLOCKED', reason: 'Customer is on DND / do-not-call' };
-  }
-
-  if (customer.wrong_number_flag) {
-    return { code: 'BLOCKED', reason: 'Customer is flagged as wrong number' };
-  }
-
-  if (String(customer.consent_status || '').toLowerCase() === 'denied') {
-    return { code: 'BLOCKED', reason: 'Consent denied for this customer' };
+  const decision = canContactPatient(customer);
+  if (!decision.allowed) {
+    return { code: 'BLOCKED', reason: decision.reason === 'do_not_call'
+      ? 'Customer is on DND / do-not-call'
+      : decision.reason === 'wrong_number'
+        ? 'Customer is flagged as wrong number'
+        : 'Consent refused for this customer' };
   }
 
   if (customer.phone) {
@@ -625,6 +676,7 @@ module.exports = {
   findCustomerByPhone,
   ensureIncomingCustomerForCall,
   findRecentOutboundCallContextByPhone,
+  findOutboundCallContextByIdentity,
   hydrateIcallMateSessionContext,
   getCustomerCallHistory,
   hydratePreCallIntelligence,

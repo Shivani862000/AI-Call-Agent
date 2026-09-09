@@ -18,7 +18,10 @@ const {
 } = require('./config');
 
 const { initializeDatabase } = require('../db');
+const { dbAll, dbGet, dbRun } = require('../db');
 const { runSchedulerTick, runOwnerDigestTick, runRetentionSweep } = require('./scheduler');
+const { recoverDuePostCallJobs } = require('../services/post-call-jobs');
+const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
 const { pruneLiveCallState } = require('./helpers');
 const { validateAuthConfig, assertAdminAccountExists } = require('./auth');
 
@@ -30,6 +33,18 @@ module.exports = function startServer(server) {
     await initializeDatabase();
     await assertAdminAccountExists();
     logConfigSnapshot('SERVER');
+
+    const runPostCallRecovery = () => recoverDuePostCallJobs({
+      dbAll,
+      processCall: (callId) => processCompletedCallPipeline({ dbGet, dbRun, callId })
+    }).catch((error) => {
+      console.error('[POST-CALL RECOVERY ERROR]', error.message);
+    });
+
+    if (!/^(1|true|yes|on)$/i.test(String(process.env.DISABLE_POST_CALL_RECOVERY || ''))) {
+      setInterval(runPostCallRecovery, 60000);
+      runPostCallRecovery();
+    }
 
     if (!DISABLE_SCHEDULER) {
       setInterval(() => {

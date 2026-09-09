@@ -68,13 +68,13 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const feedbackList = await dbAll(`
     SELECT 
       f.id,
-      c.name as customer_name,
+      concat_ws(' ', p.first_name, p.last_name) as customer_name,
       f.category,
       f.stars,
       SUBSTR(f.review_text, 1, 180) as review_excerpt,
       f.submitted_at
     FROM feedback f
-    JOIN customer_queue c ON f.customer_id = c.id
+    JOIN patients p ON f.patient_id = p.id
     WHERE f.submitted_at >= ? AND f.submitted_at <= ?
     ORDER BY f.submitted_at DESC
     LIMIT 20
@@ -83,8 +83,8 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const analyzedCalls = await dbAll(`
     SELECT
       calls.id,
-      c.name AS customer_name,
-      c.phone AS customer_phone,
+      concat_ws(' ', p.first_name, p.last_name) AS customer_name,
+      p.phone AS customer_phone,
       calls.called_at,
       calls.outcome,
       calls.call_type,
@@ -105,9 +105,13 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
       calls.objections_json,
       calls.competitor_mentions_json,
       calls.live_red_flag,
-      calls.supervisor_alert_level
+      calls.supervisor_alert_level,
+      COUNT(*) FILTER (
+        WHERE LOWER(COALESCE(calls.sentiment_label, '')) = 'negative'
+           OR (calls.extracted_rating IS NOT NULL AND calls.extracted_rating BETWEEN 1 AND 2)
+      ) OVER () AS service_recovery_total
     FROM calls
-    JOIN customer_queue c ON c.id = calls.customer_id
+    JOIN patients p ON p.id = calls.patient_id
     WHERE calls.called_at >= ? AND calls.called_at <= ?
     ORDER BY calls.called_at DESC
     LIMIT 25
@@ -116,7 +120,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const pendingItems = await dbAll(`
     SELECT
       calls.id,
-      c.name AS customer_name,
+      concat_ws(' ', p.first_name, p.last_name) AS customer_name,
       calls.called_at,
       calls.outcome,
       calls.recording_status,
@@ -124,7 +128,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
       calls.analysis_status,
       calls.follow_up_task
     FROM calls
-    JOIN customer_queue c ON c.id = calls.customer_id
+    JOIN patients p ON p.id = calls.patient_id
     WHERE calls.called_at >= ? AND calls.called_at <= ?
       AND (
         COALESCE(calls.recording_status, 'pending') != 'completed'
@@ -219,7 +223,11 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
     }));
 
   const serviceRecoveryQueue = analyzedCalls
-    .filter((call) => String(call.sentiment_label || '').toLowerCase() === 'negative' || Number(call.extracted_rating || 0) <= 2)
+    .filter((call) => {
+      const rating = Number(call.extracted_rating);
+      return String(call.sentiment_label || '').toLowerCase() === 'negative'
+        || (Number.isFinite(rating) && rating >= 1 && rating <= 2);
+    })
     .slice(0, 6)
     .map((call) => ({
       customer_name: call.customer_name,
@@ -241,7 +249,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (char) => char.toUpperCase());
   const effectiveHotLeadCount = Math.max(safeHotLeads, hotLeadQueue.length);
-  const serviceRecoveryCount = serviceRecoveryQueue.length;
+  const serviceRecoveryCount = Number(analyzedCalls[0]?.service_recovery_total) || serviceRecoveryQueue.length;
   const callbackBacklogCount = pendingItems.filter((item) => String(item.outcome || '').toLowerCase() === 'callback').length || safeCallbacksRequested;
 
   const priorityActions = [
@@ -378,8 +386,8 @@ async function buildOwnerDashboardData() {
     SELECT
       calls.id AS call_id,
       c.id AS customer_id,
-      c.name AS customer_name,
-      c.phone AS customer_phone,
+      concat_ws(' ', p.first_name, p.last_name) AS customer_name,
+      p.phone AS customer_phone,
       calls.called_at,
       calls.outcome,
       calls.call_type,
@@ -397,28 +405,60 @@ async function buildOwnerDashboardData() {
       c.pending_follow_ups,
       c.revenue_estimate
     FROM calls
-    JOIN customer_queue c ON c.id = calls.customer_id
+    JOIN patients p ON p.id = calls.patient_id
+    LEFT JOIN customer_queue c ON c.id = calls.customer_id
     WHERE calls.called_at >= (now() - interval '7 days')
     ORDER BY calls.called_at DESC
     LIMIT 40
   `);
 
+  // Keep the alert detail list bounded without letting its display limit change
+  // the dashboard totals. The list is a review queue; these counts describe the
+  // complete seven-day population behind it.
+  const ownerAlertCounts = await dbGet(`
+    SELECT
+      COUNT(*) FILTER (
+        WHERE calls.outcome IN ('interested', 'hot_lead')
+           OR COALESCE(calls.hot_lead_score, 0) >= 85
+      ) AS hot_leads,
+      COUNT(*) FILTER (
+        WHERE LOWER(COALESCE(calls.sentiment_label, '')) = 'negative'
+           OR COALESCE(calls.live_red_flag, 0) = 1
+      ) AS complaints,
+      COUNT(*) FILTER (WHERE calls.outcome = 'callback') AS callbacks,
+      COUNT(*) FILTER (
+        WHERE COALESCE(c.admin_review_required, 0) = 1
+           OR COALESCE(c.wrong_number_flag, 0) = 1
+      ) AS admin_reviews,
+      COUNT(*) FILTER (
+        WHERE calls.next_action_at IS NOT NULL
+          AND calls.next_action_at < now()
+      ) AS stale_followups
+    FROM calls
+    JOIN patients p ON p.id = calls.patient_id
+    LEFT JOIN customer_queue c ON c.id = calls.customer_id
+    WHERE calls.called_at >= (now() - interval '7 days')
+  `);
+
   const campaignConfigs = await dbAll(`
-    SELECT name, service_name, monthly_spend_inr, status
+    SELECT id, name, service_name, monthly_spend_inr, status
     FROM campaign_configs
-    WHERE COALESCE(status, 'active') = 'active'
     ORDER BY created_at DESC, name ASC
   `);
 
   const campaignPerformance = await dbAll(`
     SELECT
-      COALESCE(campaign_name, 'Unassigned') AS campaign_name,
+      COALESCE(cfg.name, raw_customer.campaign_name, queue.campaign_name, 'Unassigned') AS campaign_name,
+      raw_customer.campaign_id,
+      COALESCE(raw_customer.campaign_name, queue.campaign_name) AS campaign_snapshot_name,
       COUNT(*) AS total_customers,
-      SUM(CASE WHEN status IN ('hot_lead', 'completed', 'called', 'callback_scheduled') THEN 1 ELSE 0 END) AS active_leads,
-      SUM(CASE WHEN revenue_stage IN ('qualified', 'follow_up') THEN 1 ELSE 0 END) AS qualified_leads,
-      SUM(COALESCE(revenue_estimate, 0)) AS revenue_pipeline
-    FROM customer_queue
-    GROUP BY COALESCE(campaign_name, 'Unassigned')
+      SUM(CASE WHEN queue.status IN ('hot_lead', 'completed', 'called', 'callback_scheduled') THEN 1 ELSE 0 END) AS active_leads,
+      SUM(CASE WHEN queue.revenue_stage IN ('qualified', 'follow_up') THEN 1 ELSE 0 END) AS qualified_leads,
+      SUM(COALESCE(queue.revenue_estimate, 0)) AS revenue_pipeline
+    FROM customer_queue queue
+    LEFT JOIN customers raw_customer ON raw_customer.id = queue.id
+    LEFT JOIN campaign_configs cfg ON cfg.id = raw_customer.campaign_id
+    GROUP BY cfg.name, raw_customer.campaign_name, queue.campaign_name, raw_customer.campaign_id
     ORDER BY revenue_pipeline DESC, total_customers DESC
   `);
 
@@ -481,17 +521,20 @@ async function buildOwnerDashboardData() {
     })
     .slice(0, 12);
 
-  const complaintCount = normalizedAlerts.filter((item) => item.type === 'reputation').length;
-  const hotLeadCount = normalizedAlerts.filter((item) => item.type === 'hot_lead').length;
-  const callbackCount = normalizedAlerts.filter((item) => item.type === 'callback').length;
-  const staleLeadCount = normalizedAlerts.filter((item) => item.type === 'stale_followup').length;
+  const complaintCount = Number(ownerAlertCounts?.complaints) || 0;
+  const hotLeadCount = Number(ownerAlertCounts?.hot_leads) || 0;
+  const callbackCount = Number(ownerAlertCounts?.callbacks) || 0;
+  const staleLeadCount = Number(ownerAlertCounts?.stale_followups) || 0;
 
   const campaignRoi = campaignPerformance.map((campaign) => {
-    const config = campaignConfigs.find((item) => item.name === campaign.campaign_name);
+    const config = campaignConfigs.find((item) => Number(item.id) === Number(campaign.campaign_id))
+      || campaignConfigs.find((item) => item.name === campaign.campaign_name);
     const spend = Number(config?.monthly_spend_inr || 0);
     const pipeline = Number(campaign.revenue_pipeline || 0);
     return {
+      campaign_id: campaign.campaign_id == null ? null : Number(campaign.campaign_id),
       campaign_name: campaign.campaign_name,
+      historical_campaign_name: campaign.campaign_snapshot_name || null,
       service_name: config?.service_name || null,
       spend_inr: spend,
       active_leads: Number(campaign.active_leads || 0),
@@ -546,7 +589,7 @@ async function buildOwnerDashboardData() {
     },
     owner_cards: ownerCards,
     alerts: normalizedAlerts,
-    critical_alert_count: normalizedAlerts.filter((item) => item.severity === 'high').length,
+    critical_alert_count: complaintCount + hotLeadCount,
     campaign_roi: campaignRoi,
     stale_leads: staleLeads,
     weekly_summary: weekly.summary_text,
