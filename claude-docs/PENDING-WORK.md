@@ -43,17 +43,15 @@ that environment contains working links.
 
 ## Verification owed
 
-### 3. Confirm recording *capture* still works on a live call
+### 3. Confirm recording *capture* still works on a live call — DONE 2026-09-10
 
-The playback fix (CSP `media-src`, commit 7368394) is verified: a stored
-recording that was blocked now loads. Capture is **not** verified — there are no
-answered calls after 2026-09-07 to check against, so it is unknown whether new
-calls still produce audio.
+Verified by call 370 (2026-09-10 04:47 UTC): `recording_status = 'stored'`,
+transcript captured, analysis completed. The stored object is a valid 50.5s WAV
+matching the call's 51s duration, peak amplitude 28826/32767 with 59% audible
+samples — real conversation, not silence.
 
-**Done when:** after a successful deploy, one answered test call produces a row
-with `recording_status = 'stored'` and plays in the analysis page. If it does
-not, `[AUDIO RECORDER]` / `[RECORDING UPLOAD]` in the server log say where it
-broke.
+Capture was never broken. The whole of the reported defect was playback, and
+that is fixed in 7368394 — still undeployed at the time of writing, see item 1.
 
 ## Deferred defects
 
