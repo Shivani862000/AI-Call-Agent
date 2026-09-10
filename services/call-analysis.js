@@ -4,8 +4,11 @@ const {
   isAffirmativeReply,
   isNoReply,
   isNegativeOrBusyReply,
-  isUncertainReply
+  isUncertainReply,
+  foldNuqta
 } = require('../src/conversation-state');
+const { extractNumericRatingFromText } = require('./call-feedback');
+const { RATING_PROMPT_PATTERN } = require('../src/rating-question');
 
 const CALL_TYPES = Object.freeze({
   REVIEW_CALL: 'REVIEW_CALL',
@@ -13,7 +16,7 @@ const CALL_TYPES = Object.freeze({
 });
 
 function normalizeText(value) {
-  return String(value || '')
+  return foldNuqta(value)
     .toLowerCase()
     // \p{M} keeps Devanagari vowel signs. Without it every matra is stripped
     // as punctuation and Hindi words shatter -- "बुरा" becomes "ब र" -- so no
@@ -147,6 +150,19 @@ function isPatientTurn(turn) {
   return PATIENT_ROLES.has(String(turn?.role || '').toUpperCase());
 }
 
+/**
+ * The rating the donor said out loud, or null.
+ *
+ * Read back off the transcript the same way the redonation answer is, so the
+ * stored rating is the donor's own number and never one inferred for them.
+ */
+function detectSpokenRating(turns) {
+  const answer = findPatientAfter(turns, [RATING_PROMPT_PATTERN]);
+  if (!answer.trim()) return null;
+  const score = extractNumericRatingFromText(answer);
+  return Number.isInteger(score) && score >= 1 && score <= 5 ? score : null;
+}
+
 function detectSentiment(turns, entities, callType) {
   const patientText = normalizeText(turns.filter(isPatientTurn).map((turn) => turn.text).join(' '));
   const allText = normalizeText(formatTranscriptText(turns));
@@ -160,11 +176,13 @@ function detectSentiment(turns, entities, callType) {
   const NEGATED_COMPLAINT = /(?:koi |kuch |any )?(?:dikkat|problem|pareshani|takleef|shikayat|issue)\w*\s*(?:nahi|nahin|nhi|nai)\b|(?:कोई |कुछ )?(?:दिक्कत|परेशानी|समस्या|तकलीफ|शिकायत)\s*(?:नहीं|नही)/;
   const complaintText = patientText.replace(new RegExp(NEGATED_COMPLAINT, 'g'), ' ');
 
+  // Write Hindi keywords below WITHOUT a nuqta. normalizeText folds it out of
+  // the input, so a "ख़राब" here can never match anything -- "खराब" catches both.
   // "bekaar" is as common as "bura", and waiting is the single most frequent
   // complaint a blood centre gets. Neither was here, so a donor who said
   // "bahut bekaar" and described waiting a long time with nobody attending
   // scored neutral -- the exact call this analysis exists to catch.
-  const negativeSignals = /(problem|dikkat|issue|pain|chakkar|weak|bad|complaint|nahi hua|bura|buri|kharab|kharaab|ganda|bekar|bekaar|bakwas|pareshani|takleef|slow|late|rude|wait|intezar|intzar|der lag|der ho|नहीं ठीक|दिक्कत|बुरा|बुरी|ख़राब|खराब|बेकार|बकवास|परेशानी|तकलीफ|गंदा|दर्द|इंतजार|इंतज़ार|देर|कोई नहीं था)/.test(complaintText);
+  const negativeSignals = /(problem|dikkat|issue|pain|chakkar|weak|bad|complaint|nahi hua|bura|buri|kharab|kharaab|ganda|bekar|bekaar|bakwas|pareshani|takleef|slow|late|rude|wait|intezar|intzar|der lag|der ho|नहीं ठीक|दिक्कत|बुरा|बुरी|ख़राब|खराब|बेकार|बकवास|परेशानी|तकलीफ|गंदा|दर्द|इंतजार|इंतज़ार|देर|कोई नहीं था|चक्कर|बेहोश|कमजोर|उल्टी|सूजन)/.test(complaintText);
   // A negated complaint is itself a positive signal.
   // "haan ji" is dropped: it is how anyone confirms who they are at the start
   // of the call, not an opinion of the service.
@@ -335,10 +353,12 @@ function buildCallAnalysis(call = {}) {
   const redonation = detectRedonationInterest(turns);
   const reportedDonation = detectReportedDonation(turns);
   const intendedVisit = detectIntendedVisit(turns);
+  const rating = detectSpokenRating(turns);
   const timeline = buildTimeline(call, turns, Boolean(summary));
 
   return {
     summary,
+    rating,
     call_type: callType,
     call_type_label: formatCallType(callType),
     sentiment: sentiment.label,
@@ -468,6 +488,7 @@ module.exports = {
   formatCallType,
   normalizeCallType,
   parseTranscriptTurns,
+  detectSpokenRating,
   detectRedonationInterest,
   detectReportedDonation,
   detectIntendedVisit,

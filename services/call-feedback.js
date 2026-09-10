@@ -1,4 +1,5 @@
 const { categorizeFeedback } = require('./gemini');
+const { RATING_PROMPT_PATTERN } = require('../src/rating-question');
 
 const NUMBER_WORDS = new Map([
   ['one', 1],
@@ -119,7 +120,7 @@ function detectPromptType(promptText) {
     return 'consent';
   }
 
-  if (/(1 se 5|scale|rating|excellent|star|stars)/.test(normalized)) {
+  if (RATING_PROMPT_PATTERN.test(normalized)) {
     return 'rating';
   }
 
@@ -506,6 +507,7 @@ async function saveCallFeedbackFromTranscript({ dbGet, dbRun, callSid, callId, c
 }
 
 module.exports = {
+  extractNumericRatingFromText,
   extractCallFeedback,
   saveCallFeedbackFromTranscript
 };

@@ -7,7 +7,7 @@ const logger = require('./system-logger');
 const {
   detectConversationOutcome,
   detectObjectionsAndCompetitors,
-  deriveSentimentScore,
+  resolveSentiment,
   applyCallOutcomeWorkflow,
   createSupervisorEvent
 } = require('./call-orchestration');
@@ -119,6 +119,19 @@ async function upsertFeedbackFromAnalysis({ dbGet, dbRun, callRecord, reviewText
   return { feedbackId: result.lastID, category: categorization.category, updated: false };
 }
 
+/**
+ * The rating that goes on the record.
+ *
+ * A number the donor said out loud beats one the model inferred from the same
+ * transcript. Neither is invented: with no number anywhere, the call stays
+ * unrated, because nothing downstream can tell a guess from a real answer.
+ */
+function pickRating({ modelRating, spokenRating }) {
+  if (Number.isInteger(spokenRating)) return spokenRating;
+  if (Number.isInteger(modelRating)) return modelRating;
+  return null;
+}
+
 async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   const callRecord = await dbGet(
     `SELECT calls.*, customer_queue.name AS customer_name, customer_queue.phone AS customer_phone
@@ -221,6 +234,14 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     clientName: process.env.CLIENT_NAME,
     callType: callRecord.call_type
   });
+  if (analysis.degraded) {
+    logger.warn('FEEDBACK_ANALYSIS_DEGRADED', {
+      callId: callRecord.id,
+      customerId: callRecord.customer_id,
+      patient: callRecord.customer_name,
+      reason: analysis.degraded_reason || 'model_unavailable'
+    });
+  }
   const productAnalysis = buildCallAnalysis({
     ...callRecord,
     transcript_text: transcriptText
@@ -235,10 +256,18 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     transcriptText,
     analysisSummary: analysis.summary
   });
-  const sentimentLabel = analysis.customer_sentiment || 'neutral';
-  const sentimentScore = Number(productAnalysis.sentiment_score || 0) || deriveSentimentScore(sentimentLabel);
+  // The transcript reading decides, and its score comes with it. Reading the
+  // label off one analyser and the score off the other is what put "neutral"
+  // next to +0.8 on call 16.
+  const { label: sentimentLabel, score: sentimentScore } = resolveSentiment(
+    { label: productAnalysis.sentiment, score: productAnalysis.sentiment_score },
+    analysis.customer_sentiment
+  );
 
-  const mergedRating = Number.isInteger(analysis.rating) ? analysis.rating : heuristicExtraction.stars;
+  const mergedRating = pickRating({
+    modelRating: analysis.rating,
+    spokenRating: Number.isInteger(productAnalysis.rating) ? productAnalysis.rating : heuristicExtraction.stars
+  });
   const mergedReviewText = analysis.review_text || heuristicExtraction.reviewText || '';
 
   await dbRun(
@@ -285,8 +314,8 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
       mergedRating,
       mergedReviewText || null,
       outcome,
-      productAnalysis.sentiment || sentimentLabel,
-      productAnalysis.sentiment || sentimentLabel,
+      sentimentLabel,
+      sentimentLabel,
       sentimentScore,
       productAnalysis.metrics.total_duration,
       productAnalysis.metrics.ai_talk_time,
@@ -311,7 +340,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     analysis: {
       ...analysis,
       ...productAnalysis,
-      sentiment: productAnalysis.sentiment || sentimentLabel,
+      sentiment: sentimentLabel,
       sentiment_score: sentimentScore,
       product_analysis: productAnalysis
     }
@@ -331,7 +360,7 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     callRecord.id
   ]);
 
-  const finalSentimentLabel = productAnalysis.sentiment || sentimentLabel || 'neutral';
+  const finalSentimentLabel = sentimentLabel || 'neutral';
   const normalizedFinalSentiment = String(finalSentimentLabel || '').toLowerCase();
   const feedbackEvent = (Number(mergedRating || 0) >= 4 || normalizedFinalSentiment === 'positive')
     ? 'FEEDBACK_POSITIVE'
@@ -362,12 +391,12 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
     inferredOutcome: outcome
   });
 
-  if (sentimentLabel === 'negative' || objections.length > 0) {
+  if (finalSentimentLabel === 'negative' || objections.length > 0) {
     await createSupervisorEvent({
       dbRun,
       callId: refreshedCall.id,
       eventType: 'negative_signal_detected',
-      severity: sentimentLabel === 'negative' ? 'high' : 'medium',
+      severity: finalSentimentLabel === 'negative' ? 'high' : 'medium',
       payload: {
         objections,
         competitors,
@@ -435,5 +464,6 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
 }
 
 module.exports = {
+  pickRating,
   processCompletedCallPipeline
 };

@@ -45,6 +45,8 @@ function everySpokenLine() {
     buildReviewCallTurnInstruction('abhi busy hoon', freshState(), 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('hmm', freshState(), 'Client', 'Ankita'),
     buildReviewCallTurnInstruction('staff rude tha', { step: 'issue_detail' }, 'Client', 'Ankita'),
+    buildReviewCallTurnInstruction('paanch', { step: 'rating' }, 'Client', 'Ankita'),
+    buildReviewCallTurnInstruction('pata nahi', { step: 'rating' }, 'Client', 'Ankita'),
   ];
 }
 
@@ -101,16 +103,21 @@ test('a named closing still triggers the auto hangup', () => {
   assert.equal(shouldAutoHangupAfterAgentTurn(buildClosingLine('')), true);
 });
 
+// Both paths now pass through the rating question on the way out, so the
+// closing is one turn further along than it used to be.
 test('both the positive and the complaint path reach the closing', () => {
-  const positive = buildReviewCallTurnInstruction('bahut achha tha', verifiedState(), 'Client', 'Ankita');
+  const happy = verifiedState();
+  const positive = buildReviewCallTurnInstruction('bahut achha tha', happy, 'Client', 'Ankita');
   assert.match(positive, /Bahut achhi baat hai/);
-  assert.match(positive, /Aapka din shubh ho/);
+  assert.match(positive, /1 se 5/);
+  assert.match(buildReviewCallTurnInstruction('paanch', happy, 'Client', 'Ankita'), /Aapka din shubh ho/);
 
   const complaint = verifiedState();
   assert.match(buildReviewCallTurnInstruction('bahut bura tha', complaint, 'Client', 'Ankita'), /Kripya batayein aapko kya pareshani hui thi/);
   const afterIssue = buildReviewCallTurnInstruction('staff rude tha', complaint, 'Client', 'Ankita');
   assert.match(afterIssue, /sambandhit adhikari tak pahucha dungi/);
-  assert.match(afterIssue, /Aapka din shubh ho/);
+  assert.match(afterIssue, /1 se 5/);
+  assert.match(buildReviewCallTurnInstruction('do', complaint, 'Client', 'Ankita'), /Aapka din shubh ho/);
 });
 
 // The review call runs the day after a donation, when the donor cannot give
@@ -118,7 +125,9 @@ test('both the positive and the complaint path reach the closing', () => {
 // arranging a visit belongs to the follow-up call, which is placed when it is
 // actually actionable.
 test('the review call tells the donor when they are eligible but arranges nothing', () => {
-  const closing = buildReviewCallTurnInstruction('bahut achha tha', verifiedState(), 'Client', 'Ankita');
+  const state = verifiedState();
+  buildReviewCallTurnInstruction('bahut achha tha', state, 'Client', 'Ankita');
+  const closing = buildReviewCallTurnInstruction('paanch', state, 'Client', 'Ankita');
 
   assert.match(closing, new RegExp(`${eligibilityLabel(YESTERDAY)} aap dobara blood donate kar sakte hain, aapka swagat hai`));
   assert.doesNotMatch(closing, /kab aana|kis din|samay|abhi bata/i);

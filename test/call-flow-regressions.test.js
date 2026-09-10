@@ -85,7 +85,12 @@ test('the flow marks itself closing before the goodbye is spoken', () => {
 
   assert.equal(shouldIgnoreBargeIn({ state }), false, 'not closing yet');
 
+  // The rating question is asked before the closing, and a question still
+  // expects an answer, so that turn is not protected.
   buildReviewCallTurnInstruction('bahut achha tha', state, 'C', 'Ankita');
+  assert.equal(shouldIgnoreBargeIn({ state }), false, 'the rating question expects a reply');
+
+  buildReviewCallTurnInstruction('chaar', state, 'C', 'Ankita');
   assert.equal(shouldIgnoreBargeIn({ state }), true, 'the closing turn must be protected');
 });
 

@@ -1,5 +1,29 @@
+const { foldNuqta } = require('../src/conversation-state');
+
 const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+
+/** Used when GEMINI_MODEL names a model generateContent cannot call. */
+const DEFAULT_ANALYSIS_MODEL = 'gemini-2.5-flash';
+
+/**
+ * The model post-call analysis may use.
+ *
+ * GEMINI_MODEL names the model the *live call* streams over a WebSocket, and
+ * production had it set to gemini-3.1-flash-live-preview. The Live API models
+ * reject generateContent with a 400 telling you to use bidiGenerateContent, so
+ * every analysis since fell through to keyword matching -- silently, in about
+ * 450ms, with a plausible-looking sentiment on the record afterwards. The two
+ * calls need two models; GEMINI_ANALYSIS_MODEL sets this one explicitly.
+ */
+function resolveAnalysisModel(env = process.env) {
+  const explicit = String(env.GEMINI_ANALYSIS_MODEL || '').trim();
+  if (explicit) return explicit;
+
+  const configured = String(env.GEMINI_MODEL || '').trim();
+  if (!configured || /live|realtime|bidi/i.test(configured)) return DEFAULT_ANALYSIS_MODEL;
+  return configured;
+}
 
 function normalizeTurnText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -160,8 +184,31 @@ const NEGATIVE_SIGNALS = [
   'bura', 'buri', 'kharab', 'kharaab', 'ganda', 'bekar', 'bakwas',
   'pareshani', 'dikkat', 'samasya', 'shikayat', 'intezar', 'der',
   'bad', 'poor', 'slow', 'issue', 'problem', 'rude', 'dirty', 'complaint',
-  'बुरा', 'बुरी', 'खराब', 'गंदा', 'बेकार', 'परेशानी', 'दिक्कत', 'समस्या', 'शिकायत'
+  'chakkar', 'behosh', 'kamzor', 'kamjor', 'weakness', 'faint', 'dizzy', 'dard', 'pain', 'ulti',
+  'बुरा', 'बुरी', 'खराब', 'गंदा', 'बेकार', 'परेशानी', 'दिक्कत', 'समस्या', 'शिकायत',
+  'चक्कर', 'बेहोश', 'कमजोर', 'उल्टी', 'दर्द', 'सूजन', 'तकलीफ'
 ];
+
+/**
+ * Just the donor's turns.
+ *
+ * The keyword counts below used to run over the whole transcript. The agent's
+ * scripted question contains "achha" and its greeting contains "Good", so on
+ * call 16 the agent outvoted the only thing the donor said -- a complaint --
+ * and the call was filed as positive feedback. An unlabelled transcript (one
+ * recovered from the recording) has no way to tell the speakers apart, so it is
+ * scored whole, as before.
+ */
+function patientSpeechOnly(transcriptText) {
+  const lines = String(transcriptText || '').split('\n').map((line) => line.trim()).filter(Boolean);
+  const labelled = lines.filter((line) => /^(AGENT|AI|CUSTOMER|PATIENT)\s*:/i.test(line));
+  if (!labelled.length) return lines.join(' ');
+
+  return labelled
+    .filter((line) => /^(CUSTOMER|PATIENT)\s*:/i.test(line))
+    .map((line) => line.slice(line.indexOf(':') + 1).trim())
+    .join(' ');
+}
 
 /** Devanagari, or common Hindi words written in Roman script. */
 function isHindi(text) {
@@ -178,10 +225,10 @@ function isHindi(text) {
  * so an outage quietly filled the reports with invented numbers that nothing
  * downstream could tell apart from real ones.
  */
-function heuristicAnalysis(transcriptText) {
+function heuristicAnalysis(transcriptText, reason = '') {
   const text = String(transcriptText || '');
-  const normalized = text.toLowerCase();
-  const count = (words) => words.filter((word) => normalized.includes(word)).length;
+  const normalized = foldNuqta(patientSpeechOnly(text)).toLowerCase();
+  const count = (words) => words.filter((word) => normalized.includes(foldNuqta(word).toLowerCase())).length;
 
   const positive = count(POSITIVE_SIGNALS);
   const negative = count(NEGATIVE_SIGNALS);
@@ -203,7 +250,12 @@ function heuristicAnalysis(transcriptText) {
     language: isHindi(text) ? 'hi' : 'en',
     review_text: '',
     improvement_suggestions: [],
-    report_excerpt: 'Automatic analysis unavailable; transcript not yet reviewed.'
+    report_excerpt: 'Automatic analysis unavailable; transcript not yet reviewed.',
+    // Marks the record as a keyword guess rather than a reading. Without it the
+    // 400 that took the model offline for every call in production left nothing
+    // behind but a suspiciously fast timestamp.
+    degraded: true,
+    degraded_reason: reason || 'model_unavailable'
   };
 }
 
@@ -290,7 +342,7 @@ RULES:
       systemPrompt,
       userText: transcriptText || '(No transcript provided)',
       responseMimeType: 'application/json',
-      model: DEFAULT_GEMINI_MODEL,
+      model: resolveAnalysisModel(),
       maxTokens: 800
     });
 
@@ -310,7 +362,7 @@ RULES:
     };
   } catch (err) {
     console.error('[AI ANALYSIS ERROR]', err.message);
-    return heuristicAnalysis(transcriptText);
+    return heuristicAnalysis(transcriptText, err.message);
   }
 }
 
@@ -352,6 +404,9 @@ async function transcribeAudioFile(filePath, options = {}) {
 
 module.exports = {
   DEFAULT_GEMINI_MODEL,
+  DEFAULT_ANALYSIS_MODEL,
+  resolveAnalysisModel,
+  patientSpeechOnly,
   buildGeminiConversationContents,
   extractGeminiText,
   generateGeminiReply,

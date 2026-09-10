@@ -31,6 +31,29 @@ function deriveSentimentScore(sentimentLabel) {
   return 0;
 }
 
+/**
+ * One sentiment, with a score that agrees with its own label.
+ *
+ * Call 16 was stored as "neutral" with a score of +0.8: the label came from the
+ * transcript analyser and the score from the model's separate -- and different
+ * -- reading, because a neutral score of 0 is falsy and fell through a `||` to
+ * the other analyser's answer. A record that disagrees with itself is worse
+ * than either reading alone, so the label decides and the score follows it.
+ */
+function resolveSentiment(transcriptSentiment, modelLabel) {
+  const label = String(transcriptSentiment?.label || modelLabel || 'neutral').toLowerCase();
+  const score = transcriptSentiment?.label ? Number(transcriptSentiment.score) : NaN;
+
+  // A score is trusted only when it points the same way as the label it is
+  // stored next to.
+  const agrees = Number.isFinite(score)
+    && ((label === 'negative' && score < 0)
+      || (label === 'positive' && score > 0)
+      || (label === 'neutral' && score === 0));
+
+  return { label, score: agrees ? score : deriveSentimentScore(label) };
+}
+
 function getCurrentSlotLabel(date = new Date()) {
   return new Date(date).toTimeString().slice(0, 5);
 }
@@ -439,6 +462,7 @@ module.exports = {
   detectConversationOutcome,
   detectObjectionsAndCompetitors,
   deriveSentimentScore,
+  resolveSentiment,
   getCurrentSlotLabel,
   buildFollowUpTask,
   applyCallOutcomeWorkflow,

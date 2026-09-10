@@ -9,6 +9,7 @@ const { CALL_TYPES, LIVE_MAX_RESPONSE_TOKENS } = require('./config');
 const { normalizeOutboundCallType, formatOutboundCallTypeLabel } = require('./helpers');
 const { FINAL_CLOSING_LINE, buildClosingLine, spokenName } = require('../prompts/closing.ts');
 const { describeEligibility, describeVisit } = require('../prompts/review-calling.ts');
+const { RATING_QUESTION } = require('./rating-question');
 
 // ── Sentiment evaluation ───────────────────────────────────────────────────────
 
@@ -93,8 +94,22 @@ function estimateHangupDelayMs(text) {
 
 // ── Hindi/English text helpers ─────────────────────────────────────────────────
 
+/**
+ * Fold the nuqta out of Devanagari.
+ *
+ * Deepgram writes dizziness-and-trouble as "दिक़्क़त"; every keyword list in
+ * this codebase spells it "दिक्कत". The nuqta (U+093C) is a diacritic, not a
+ * different word, but it makes the two strings unequal, so a donor who
+ * complained was invisible to every Hindi classifier we have. NFD splits the
+ * precomposed letters (क़ is both U+0958 and क + U+093C) so either spelling
+ * folds to the same text.
+ */
+function foldNuqta(value) {
+  return String(value || '').normalize('NFD').replace(/़/g, '').normalize('NFC');
+}
+
 function normalizeHindiEnglishText(value) {
-  return String(value || '')
+  return foldNuqta(value)
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
@@ -116,7 +131,7 @@ function isQuestionReply(text) {
   if (/[?？]/.test(raw)) return true;
   const normalized = normalizeHindiEnglishText(raw);
   return /\b(kaun|kahan|kahaan|kyun|kyon|kaise|kab|kya aap|who is|where are|why are)\b/i.test(normalized)
-    || /कौन|कहाँ|कहां|क्यों|कैसे/.test(raw);
+    || /कौन|कहाँ|कहां|क्यों|कैसे/.test(normalized);
 }
 
 function isAffirmativeReply(text) {
@@ -126,19 +141,33 @@ function isAffirmativeReply(text) {
   return /(^|\b)(haan|han|ha|yes|yeah|ji|jee|okay|ok|theek|thik|sure)(\b|$)/i.test(normalized)
     // Anchored: "कहां" (where) contains "हां" (yes), so an unanchored
     // alternation read "where are you calling from" as agreement.
-    || /(^|[\s,।"'(])(हाँ|हां|जी|ठीक|बिलकुल|बिल्कुल)([\s,।?.!"')]|$)/.test(text);
+    || /(^|[\s,।"'(])(हाँ|हां|जी|ठीक|बिलकुल|बिल्कुल)([\s,।?.!"')]|$)/.test(normalized);
 }
+
+/**
+ * "baad mein" is a brush-off on its own and part of a story with something in
+ * front of it.
+ *
+ * A donor answered the experience question with "बहुत चक्कर आया उसके बाद में"
+ * -- I felt very dizzy afterwards -- and the unanchored "बाद में" read it as
+ * "call me later", so the agent said "Koi baat nahi" and hung up on a woman
+ * describing an adverse reaction. Hindi marks the difference with "ke"/"के" on
+ * the preceding word: "उसके बाद" and "dene ke baad" are "after that", while a
+ * deferral has nothing before it.
+ */
+const LATER_DEFERRAL = /(?<!\bke\s)(?<!के\s)(baad mein|bad mein|बाद में)/;
 
 function isNegativeOrBusyReply(text) {
   const normalized = normalizeHindiEnglishText(text);
-  return /(busy|baad mein|bad mein|later|not now|driving|meeting|stop|band|interested nahi)/i.test(normalized)
-    || /बाद में|व्यस्त|बंद/.test(text);
+  return /(busy|later|not now|driving|meeting|stop|band|interested nahi)/i.test(normalized)
+    || LATER_DEFERRAL.test(normalized)
+    || /व्यस्त|बंद/.test(normalized);
 }
 
 function isNoReply(text) {
   const normalized = normalizeHindiEnglishText(text);
   return /(^|\b)(nahi|nahin|no|nope|not yet|abhi nahi)(\b|$)/i.test(normalized)
-    || /नहीं|नही/.test(text);
+    || /नहीं|नही/.test(normalized);
 }
 
 /**
@@ -151,7 +180,7 @@ function isNoReply(text) {
 function isWrongPersonReply(text) {
   const normalized = normalizeHindiEnglishText(text);
   return /(galat number|galat no|wrong number|wrong no|koi aur|kaun bol|kaun hai|aap kaun|main nahi hoon|main nahin hoon|yahan nahi|ghar par nahi|available nahi|aisa koi nahi|is naam ka koi|not here|not available|speaking to)/i.test(normalized)
-    || /गलत नंबर|कोई और|कौन बोल/.test(text);
+    || /गलत नंबर|कोई और|कौन बोल/.test(normalized);
 }
 
 /**
@@ -163,7 +192,7 @@ function isWrongPersonReply(text) {
 function isGoodbyeReply(text) {
   const normalized = normalizeHindiEnglishText(text);
   return /\b(bye|goodbye|bye bye|rakhta hoon|rakhti hoon|rakhte hain|phone rakh|baad mein baat)\b/i.test(normalized)
-    || /अलविदा|रखता हूँ|रखती हूँ/.test(text);
+    || /अलविदा|रखता हूँ|रखती हूँ/.test(normalized);
 }
 
 function isPositiveExperienceReply(text) {
@@ -171,13 +200,23 @@ function isPositiveExperienceReply(text) {
   // "theek hai" is the commonest answer of all and matched nothing, in either
   // script, so the flow treated it as unintelligible and asked again.
   return /(ach+h?a|ac+h?a|badhiya|badiya|good|great|fine|excellent|smooth|sahi|satisfied|positive|bahut achhi|theek|thik)/i.test(normalized)
-    || /अच्छा|अच्छी|बढ़िया|सही|संतुष्ट|ठीक|बढिया/.test(text);
+    || /अच्छा|अच्छी|बढ़िया|सही|संतुष्ट|ठीक|बढिया/.test(normalized);
 }
 
+/**
+ * Fainting, dizziness, weakness, pain and nausea are the commonest reactions to
+ * giving blood, and catching them the next day is the whole reason this call is
+ * placed. None of them were on either list, so a donor who said "बहुत चक्कर
+ * आया" was treated as having given no clear answer.
+ */
 function isNegativeExperienceReply(text) {
   const normalized = normalizeHindiEnglishText(text);
   return /(kharab|bura|bekar|\bbad\b|\bpoor\b|not good|ach+h?a nahi|ac+h?a nahi|problem|dikkat|pareshani|complaint|unsatisfied|rude|dirty)/i.test(normalized)
-    || /खराब|बुरा|बेकार|समस्या|दिक्कत|परेशानी|शिकायत/.test(text);
+    || /(chakkar|behosh|behoshi|kamzor|kamjor|weakness|faint|dizzy|ulti|vomit|dard|\bpain\b|sujan|swelling|takleef)/i.test(normalized)
+    || /खराब|बुरा|बेकार|समस्या|दिक्कत|परेशानी|शिकायत/.test(normalized)
+    // Written without nuqta: normalizeHindiEnglishText folds it out of the
+    // input, so a "कमज़ोर" here could never match. "कमजोर" catches both.
+    || /चक्कर|बेहोश|कमजोर|उल्टी|दर्द|सूजन|तकलीफ/.test(normalized);
 }
 
 /**
@@ -189,7 +228,7 @@ function isNegativeExperienceReply(text) {
 function isUncertainReply(text) {
   const normalized = normalizeHindiEnglishText(text);
   return /(pata nahi|nahi pata|dekhte hain|dekhta hoon|dekhti hoon|dekh kar|shayad|maybe|not sure|pakka nahi|confirm nahi|baad mein bat|soch kar|sochta hoon|sochti hoon)/i.test(normalized)
-    || /पता नहीं|शायद|देखते हैं|सोच/.test(text);
+    || /पता नहीं|शायद|देखते हैं|सोच/.test(normalized);
 }
 
 /**
@@ -199,6 +238,18 @@ function isUncertainReply(text) {
  * promising a confirmation that would never arrive.
  */
 const VISIT_TIME_QUESTION = 'Aap kis din aur kis samay aana chahenge?';
+
+/**
+ * The spoken number, or null.
+ *
+ * Shares the parser the post-call extraction uses, so "chaar" heard live and
+ * "chaar" read back off the transcript can never disagree.
+ */
+function extractSpokenRating(text) {
+  const { extractNumericRatingFromText } = require('../services/call-feedback');
+  const score = extractNumericRatingFromText(text);
+  return Number.isInteger(score) && score >= 1 && score <= 5 ? score : null;
+}
 
 function captureIntendedVisit(customerReply, state, closing) {
   state.intendedVisitNote = String(customerReply || '').trim().slice(0, 200);
@@ -241,19 +292,23 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
   }
 
   if (state.step === 'experience') {
-    if (isNegativeOrBusyReply(customerReply)) {
-      markCompletedAfterReply();
-      return `Donor wants to stop or is busy. Say exactly: "Koi baat nahi. ${closing}" Then end the call.`;
-    }
-
+    // Checked before the busy branch. A complaint is an answer to the question
+    // that was asked; a busy signal is a refusal to answer it. When a reply
+    // reads as both -- "donate karne ke baad mein bahut dikkat hui" -- the
+    // answer is what the donor came to say.
     if (isNegativeExperienceReply(customerReply)) {
       state.step = 'issue_detail';
       return 'The donor reported a negative experience. Say exactly: "Maaf kijiye. Kripya batayein aapko kya pareshani hui thi?"';
     }
 
-    if (isPositiveExperienceReply(customerReply)) {
+    if (isNegativeOrBusyReply(customerReply)) {
       markCompletedAfterReply();
-      return `Say exactly: "Bahut achhi baat hai, sunkar khushi hui. ${invitation} ${closing}" Then end the call.`;
+      return `Donor wants to stop or is busy. Say exactly: "Koi baat nahi. ${closing}" Then end the call.`;
+    }
+
+    if (isPositiveExperienceReply(customerReply)) {
+      state.step = 'rating';
+      return `Say exactly: "Bahut achhi baat hai, sunkar khushi hui. ${RATING_QUESTION}"`;
     }
 
     // Asked once. The clarification had no counter, so a donor whose answer
@@ -268,8 +323,23 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
   }
 
   if (state.step === 'issue_detail') {
+    state.step = 'rating';
+    state.issueNote = String(customerReply || '').trim().slice(0, 300);
+    return `Capture the issue. Then say exactly: "Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge. ${RATING_QUESTION}"`;
+  }
+
+  // The number the donor puts on the experience. Asked once and never pressed:
+  // a donor who will not give one is closed out unrated rather than nudged,
+  // because an invented rating cannot be told from a real one downstream.
+  if (state.step === 'rating') {
     markCompletedAfterReply();
-    return `Capture the issue. Then say exactly: "Main aapki baat sambandhit adhikari tak pahucha dungi. Agli baar hum aur dhyan rakhenge. ${invitation} ${closing}" Then end the call.`;
+    const score = extractSpokenRating(customerReply);
+    if (score === null) {
+      return `The donor did not give a number. Do not ask again. Say exactly: "Koi baat nahi. ${invitation} ${closing}" Then end the call.`;
+    }
+    state.ratingGiven = score;
+    return `The donor rated the experience ${score} out of 5. Repeat the number back once. `
+      + `Say exactly: "Aapke feedback ke liye dhanyavaad. ${invitation} ${closing}" Then end the call.`;
   }
 
   markCompletedAfterReply();
@@ -431,6 +501,8 @@ function buildOutboundDemoTurnInstruction(callerText, state, clientName, custome
 }
 
 module.exports = {
+  RATING_QUESTION,
+  foldNuqta,
   evaluateLiveSentimentLabel,
   shouldAutoHangupAfterAgentTurn,
   shouldIgnoreBargeIn,
