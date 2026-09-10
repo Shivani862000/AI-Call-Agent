@@ -249,11 +249,35 @@
     return date.toLocaleDateString();
   }
 
+  /**
+   * Clock time with an explicit AM/PM.
+   *
+   * The locale is pinned rather than left to the browser: toLocaleTimeString([])
+   * gave 24-hour output to en-GB viewers and 12-hour to en-US ones, from the
+   * same build, so what a time meant depended on who was reading it.
+   *
+   * Display only. An <input type="time"> takes a 24-hour HH:MM value and
+   * silently ignores anything else, so keep building those separately.
+   */
+  function formatTime(value) {
+    if (!value) return '';
+
+    // Slot fields (preferred_slot, best_call_slot) hold a bare "HH:MM", which
+    // new Date() cannot parse. Anchor it to a date so it can be formatted.
+    const slot = /^(\d{1,2}):(\d{2})/.exec(String(value).trim());
+    const date = slot
+      ? new Date(2000, 0, 1, Number(slot[1]), Number(slot[2]))
+      : new Date(value);
+
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  }
+
   function formatDateTime(value) {
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return String(value);
-    return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    return `${date.toLocaleDateString()} ${formatTime(date)}`;
   }
 
   function formatCurrencyInr(value) {
@@ -1157,6 +1181,7 @@
     formatCurrencyInr,
     formatDate,
     formatDateTime,
+    formatTime,
     formatStatusLabel,
     formatStatus,
     formatName,
