@@ -21,3 +21,7 @@ gmail-key.json
 *-service-account*.json
 *.iam.gserviceaccount.com.json
 client_secret_*.json
+# Backfill backups. These hold production call transcripts and patient names,
+# and this repo is public. scripts/reanalyse-calls.js writes them before it
+# overwrites any analysis; keep them on the machine that ran it.
+scratch/reanalyse-backup-*.json
