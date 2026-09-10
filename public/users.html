@@ -177,7 +177,10 @@
 
     function formatDate(value) {
       if (!value) return 'Never';
-      return new Date(value).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      // en-GB renders the meridiem lowercase; the rest of the UI shows AM/PM.
+      return new Date(value)
+        .toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+        .replace(/\b(am|pm)\b/i, (match) => match.toUpperCase());
     }
 
     async function loadUsers() {

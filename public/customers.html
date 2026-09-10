@@ -421,7 +421,7 @@
         const failedCall = getLatestFailedCall(customer.id);
         if (failedCall) {
           const date = new Date(failedCall.called_at || failedCall.created_at);
-          return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+          return AppShell.formatTime(date);
         }
       }
       if (activeCustomerMetricFilter === 'completed' || getComputedCustomerStatus(customer) === 'completed') {
@@ -439,7 +439,7 @@
           }
         }
         if (dateVal) {
-          return `${String(dateVal.getHours()).padStart(2, '0')}:${String(dateVal.getMinutes()).padStart(2, '0')}`;
+          return AppShell.formatTime(dateVal);
         }
       }
       const scheduledValue = ['retry_scheduled', 'callback_scheduled'].includes(customer.status)
@@ -448,12 +448,12 @@
       if (scheduledValue) {
         const date = new Date(scheduledValue);
         if (!Number.isNaN(date.getTime())) {
-          return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+          return AppShell.formatTime(date);
         }
       }
 
       if (customer.preferred_slot) {
-        return customer.preferred_slot;
+        return AppShell.formatTime(customer.preferred_slot);
       }
 
       return '--';
