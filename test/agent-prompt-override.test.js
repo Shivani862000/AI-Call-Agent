@@ -26,7 +26,7 @@ test('a saved system prompt replaces the built-in script', () => {
     system_prompt: 'You are Meera from {{client_name}}. Speak to {{patient_name}}.'
   }, 'review_call', options);
 
-  assert.match(prompt, /^You are Meera from Apna Blood Centre\. Speak to Ankita\./);
+  assert.match(prompt, /^You are Meera from Apna Blood Bank\. Speak to Ankita\./);
   assert.doesNotMatch(prompt, /You are Priya/);
 });
 
@@ -38,7 +38,7 @@ test('the safety rules survive a saved prompt that omits them', () => {
   }, 'review_call', options);
 
   assert.match(prompt, /Rules that always apply/);
-  assert.match(prompt, /automated call/i);
+  assert.match(prompt, /AI call/);
   assert.match(prompt, /Confirm you are speaking to the right person/i);
   assert.match(prompt, /Never state a fact you were not given/i);
   assert.match(prompt, /never promise a callback/i);

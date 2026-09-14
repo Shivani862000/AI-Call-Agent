@@ -75,17 +75,28 @@ test('the review call never claims a video or message was sent', () => {
   }
 });
 
-test('the opening discloses that the call is automated and recorded', () => {
-  const opening = buildReviewCallingOpeningPrompt({ patientName: 'Ankita' });
-  assert.match(opening, /automated call/i);
-  assert.match(opening, /record ho rahi hai/i);
+// Patients hung up on an opening that led with "automated call ... record ho
+// rahi hai" and reached their name last.
+test('the opening asks for the patient by name and nothing else', () => {
+  assert.equal(buildReviewCallingOpeningPrompt({ patientName: 'Ankita Verma' }), '"Namaste, kya meri baat Ankita ji se ho rahi hai?"');
 });
 
-test('the patient is addressed by name when one is known', () => {
-  assert.match(buildReviewCallingOpeningPrompt({ patientName: 'Ankita' }), /Ankita ji/);
+test('once confirmed, the call says who is calling and that it is an AI call being recorded', () => {
+  const confirmed = buildReviewCallTurnInstruction('haan ji', { step: 'intro', lastVisitDate: YESTERDAY }, 'Client', 'Ankita');
+  assert.match(confirmed, /"Ankita ji, main Apna Blood Bank, Palwal se Priya bol rahi hoon\. Yeh AI call hai aur quality ke liye record ho rahi hai\. Aapne kal blood donate kiya tha/);
+});
+
+// With no name there is nobody to confirm, so the introduction cannot wait.
+test('with no name on file the opening introduces the call and asks for a moment', () => {
   const anonymous = buildReviewCallingOpeningPrompt({});
-  assert.equal(/ ji,/.test(anonymous), false);
-  assert.match(anonymous, /hai\. Aapne /);
+  assert.equal(/ ji\b/.test(anonymous), false);
+  assert.match(anonymous, /Apna Blood Bank, Palwal se Priya bol rahi hoon\. Yeh AI call hai/);
+  assert.match(anonymous, /Kya main aapse do minute baat kar sakti hoon\?/);
+  assert.doesNotMatch(anonymous, /donate/);
+
+  const confirmed = buildReviewCallTurnInstruction('haan', { step: 'intro', lastVisitDate: YESTERDAY }, 'Client', '');
+  assert.match(confirmed, /Say exactly: "Aapne kal blood donate kiya tha/);
+  assert.doesNotMatch(confirmed, /AI call/);
 });
 
 test('the donation date is described from the record, not assumed to be yesterday', () => {

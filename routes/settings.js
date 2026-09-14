@@ -97,6 +97,7 @@ router.get('/scripts/builtin', async (req, res, next) => {
     const { buildCallTypeSystemPrompt, buildCallTypeOpeningPrompt } = require('../src/prompt-builder');
     const { describeVisit, describeEligibility } = require('../prompts/review-calling.ts');
     const { getGreeting } = require('../utils/greeting');
+    const { CLIENT_NAME, CLIENT_CITY } = require('../prompts/client.ts');
 
     const callType = String(req.query.call_type || 'review_call');
     // Rendered with values chosen so they can be put back as placeholders.
@@ -105,8 +106,8 @@ router.get('/scripts/builtin', async (req, res, next) => {
     const options = { lastVisitDate };
 
     const values = {
-      client_name: process.env.CALL_PROMPT_CLIENT_NAME || 'Apna Blood Centre',
-      client_city: process.env.CALL_PROMPT_CLIENT_CITY === undefined ? 'Palwal' : process.env.CALL_PROMPT_CLIENT_CITY,
+      client_name: CLIENT_NAME,
+      client_city: CLIENT_CITY,
       patient_name: sampleName,
       greeting: getGreeting(),
       last_visit: describeVisit(lastVisitDate),

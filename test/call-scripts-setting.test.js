@@ -26,7 +26,7 @@ test('a script written in settings is used', () => {
     scripts({ system_prompt: 'You are Meera from {{client_name}}, {{client_city}}. Ask {{patient_name}} about their visit.' })
   ));
 
-  assert.match(prompt, /You are Meera from Apna Blood Centre, Palwal\. Ask Ankita about their visit\./);
+  assert.match(prompt, /You are Meera from Apna Blood Bank, Palwal\. Ask Ankita about their visit\./);
   assert.doesNotMatch(prompt, /You are Priya/);
 });
 
@@ -38,7 +38,7 @@ test('the safety rules are appended to whatever is written', () => {
   ));
 
   assert.match(prompt, /Rules that always apply/);
-  assert.match(prompt, /automated call/i);
+  assert.match(prompt, /AI call/);
   assert.match(prompt, /Confirm you are speaking to the right person/i);
   assert.match(prompt, /never promise a callback/i);
 });
@@ -88,7 +88,7 @@ test('every advertised placeholder actually resolves', () => {
     scripts({ system_prompt: template })
   ));
   assert.doesNotMatch(prompt, /\{\{/);
-  for (const value of ['Apna Blood Centre', 'Palwal', 'Ankita', 'kal']) {
+  for (const value of ['Apna Blood Bank', 'Palwal', 'Ankita', 'kal']) {
     assert.match(prompt, new RegExp(value), `placeholder did not resolve: ${value}`);
   }
 });
@@ -142,7 +142,8 @@ test('the editor is offered the template, not a rendered sample', async () => {
       const both = `${built.opening_prompt}\n${built.system_prompt}`;
 
       assert.match(both, /\{\{patient_name\}\}/, `${callType} lost the patient placeholder`);
-      assert.match(both, /\{\{greeting\}\}/, `${callType} lost the greeting placeholder`);
+      // Every call now opens with a fixed "Namaste"; no time of day to template.
+      assert.doesNotMatch(both, /Good (Morning|Afternoon|Evening)/i, `${callType} baked in a time-of-day greeting`);
       assert.match(both, /\{\{client_name\}\}/, `${callType} lost the client placeholder`);
 
       // The sample values must not survive into what an admin would save.

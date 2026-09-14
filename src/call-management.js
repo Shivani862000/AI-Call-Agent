@@ -591,24 +591,24 @@ async function upsertIcallMateCallFromMedia(message = {}, session = {}, patch = 
 function getScriptedCopy(language, customerName = process.env.CUSTOMER_NAME, clientName = CLIENT_NAME) {
   if (language === 'en') {
     return {
-      intro: `Hello, am I speaking with ${customerName}? This is Priya calling from Apna Blood Centre, Palwal. To continue in English, say English or press 2. Hindi mein baat karne ke liye Hindi boliye ya 1 dabaiye.`,
+      intro: `Hello, am I speaking with ${customerName}? This is Priya calling from Apna Blood Bank, Palwal. To continue in English, say English or press 2. Hindi mein baat karne ke liye Hindi boliye ya 1 dabaiye.`,
       noLanguageResponse: 'We did not receive your language preference. Thank you for your time. Goodbye.',
       consent: `Thank you. You donated blood some time ago. It has been around 3 months since your donation. Would you like to donate blood again? Please say yes or press 1 if you are interested.`,
       decline: 'No problem. Thank you for your time. Goodbye.',
       noConsentResponse: 'We did not receive a response. Thank you for your time. Goodbye.',
-      rating: 'Thank you. You can visit Apna Blood Centre, Palwal any day between 9 AM and 5 PM after having food. Did you face any problem after your previous blood donation? Please say yes or no.',
+      rating: 'Thank you. You can visit Apna Blood Bank, Palwal any day between 9 AM and 5 PM after having food. Did you face any problem after your previous blood donation? Please say yes or no.',
       noRatingResponse: 'We did not receive a response. Thank you for your time. Goodbye.',
       closing: 'Thank you. Your donation can help thalassemia patients, pregnant women, and children in need. Have a good day.'
     };
   }
 
   return {
-    intro: `Namaste. Kya main ${customerName} se baat kar rahi hoon? Main Priya bol rahi hoon, Apna Blood Centre, Palwal se. Hindi mein baat karne ke liye haan boliye ya 1 dabaiye.`,
+    intro: `Namaste. Kya main ${customerName} se baat kar rahi hoon? Main Priya bol rahi hoon, Apna Blood Bank, Palwal se. Hindi mein baat karne ke liye haan boliye ya 1 dabaiye.`,
     noLanguageResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
     consent: `Dhanyavaad. Aapne kuch time pehle blood donate kiya tha. Aapke blood donation ko lagbhag 3 months ho gaye hain. Kya aap phir se blood donate karna chahenge?`,
     decline: 'Koi baat nahin. Aapke samay ke liye dhanyavaad. Namaste.',
     noConsentResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
-    rating: 'Bahut dhanyavaad. Aap kisi bhi din khana khaane ke baad 9 AM se 5 PM ke beech Apna Blood Centre, Palwal aa sakte hain. Blood donate karne ke baad aapko koi problem ya dikkat hui thi?',
+    rating: 'Bahut dhanyavaad. Aap kisi bhi din khana khaane ke baad 9 AM se 5 PM ke beech Apna Blood Bank, Palwal aa sakte hain. Blood donate karne ke baad aapko koi problem ya dikkat hui thi?',
     noRatingResponse: 'Humein aapka jawab nahin mila. Dhanyavaad. Namaste.',
     closing: 'Dhanyavaad. Aapka donation thalassemia patients, garbhwati mahilaon, aur zaruratmand bachchon ki madad kar sakta hai. Aapka din shubh ho.'
   };

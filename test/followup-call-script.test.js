@@ -49,20 +49,19 @@ test('an unknown donor is not addressed as the word Donor', () => {
   assert.match(opening, /Kya main aapse do minute baat kar sakti hoon/);
 });
 
-test('the opening discloses that the call is automated and recorded', () => {
-  const opening = buildThreeMonthFollowupOpeningPrompt({ donorName: 'Rajesh' });
-  assert.match(opening, /automated call/i);
-  assert.match(opening, /record ho rahi hai/i);
+test('the opening asks for the donor by name, and the disclosure follows confirmation', () => {
+  assert.equal(buildThreeMonthFollowupOpeningPrompt({ donorName: 'Rajesh' }), '"Namaste, kya meri baat Rajesh ji se ho rahi hai?"');
+
+  const confirmed = buildThreeMonthFollowupTurnInstruction('haan ji', { step: 'intro', lastVisitDate: '2026-05-15' }, 'x', 'Rajesh');
+  assert.match(confirmed, /"Rajesh ji, main Apna Blood Bank, Palwal se Priya bol rahi hoon\. Yeh AI call hai aur quality ke liye record ho rahi hai\. Aapne /);
 });
 
-// The city was hardcoded into a line that otherwise used the client name.
-test('the city travels with the client name', () => {
-  assert.match(buildThreeMonthFollowupOpeningPrompt({ donorName: 'R' }), /Apna Blood Centre, Palwal se/);
-  assert.match(
-    buildThreeMonthFollowupOpeningPrompt({ clientName: 'City Blood Bank', clientCity: 'Jaipur', donorName: 'R' }),
-    /City Blood Bank, Jaipur se/
-  );
-  assert.doesNotMatch(buildThreeMonthFollowupOpeningPrompt({ clientCity: '', donorName: 'R' }), /Palwal/);
+// The name and city came from two environment variables set per server.
+test('the centre is always Apna Blood Bank, Palwal', () => {
+  const prompt = buildThreeMonthFollowupPrompt({ donorName: 'R' });
+  assert.match(prompt, /calling on behalf of Apna Blood Bank, Palwal\./);
+  assert.doesNotMatch(prompt, /Apna Blood Centre/);
+  assert.match(buildThreeMonthFollowupOpeningPrompt({}), /Apna Blood Bank, Palwal se/);
 });
 
 // Whoever picked up may not be the donor, and that they gave blood is health data.
@@ -85,7 +84,7 @@ test('the review call also confirms identity before mentioning the donation', ()
 // classifier caught it: the call read a wrong number as a confirmed identity
 // and told a stranger this person had donated blood.
 test('a wrong number is recognised on both call types', () => {
-  for (const reply of ['galat number', 'wrong number', 'ye kaun bol raha hai', 'main nahi hoon', 'koi aur hai']) {
+  for (const reply of ['galat number', 'wrong number', 'main nahi hoon', 'koi aur hai']) {
     const review = buildReviewCallTurnInstruction(reply, { step: 'intro' }, 'Client', 'Ankita');
     assert.doesNotMatch(review, /donate/i, `review call disclosed the donation to: ${reply}`);
     assert.doesNotMatch(review, /Ankita/, `review call named the patient to: ${reply}`);

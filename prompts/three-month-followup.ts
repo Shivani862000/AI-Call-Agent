@@ -1,19 +1,24 @@
 const { buildClosingLine, spokenName } = require('./closing.ts');
 const { describeVisit } = require('./review-calling.ts');
+const { CLIENT_WITH_CITY } = require('./client.ts');
+const {
+  SELF_INTRODUCTION,
+  lowerFirst,
+  joinSpoken,
+  identityQuestion,
+  buildOpeningLine,
+  buildConfirmedPreamble
+} = require('./identity.ts');
 
 function buildThreeMonthFollowupPrompt({
-  clientName = 'Apna Blood Centre',
-  clientCity = 'Palwal',
   donorName = '',
   lastVisitDate = ''
 } = {}) {
-  const client = clientName || 'Apna Blood Centre';
-  const city = String(clientCity || '').trim();
-  const where = city ? `${client}, ${city}` : client;
+  const client = CLIENT_WITH_CITY;
   // An empty name is left empty: the old default asked "Kya main Donor ji se
   // baat kar rahi hoon?" out loud.
   const name = spokenName(donorName);
-  const verify = name ? `Kya main ${name} ji se baat kar rahi hoon?` : 'Kya main aapse do minute baat kar sakti hoon?';
+  const question = identityQuestion(name);
   const when = describeVisit(lastVisitDate);
 
   return `
@@ -24,16 +29,16 @@ Check whether the donor has donated blood again since their last donation, and e
 
 Conversation Flow:
 
-Start:
-"[GREETING].
-Main ${where} se baat kar rahi hoon - yeh ek automated call hai, aur quality ke liye record ho rahi hai.
-${verify}"
+Start, already spoken when the call connects:
+"${buildOpeningLine(name)}"
 
 Wait for confirmation. Say nothing about the donation until they confirm.
+If they only say hello, or the answer is unclear: "Ji, ${lowerFirst(question)}" Ask it at most twice more; after that, close as for the wrong person.
+If they ask who is calling or where from: "${SELF_INTRODUCTION} ${question}"
 If it is the wrong person, or they cannot talk: say "Koi baat nahi." then the closing line, without mentioning the donation or the name.
 
-Continue:
-"Aapne ${when} blood donate kiya tha, uske liye dhanyavaad."
+Continue, once they confirm:
+"${joinSpoken(buildConfirmedPreamble(name), `Aapne ${when} blood donate kiya tha, uske liye dhanyavaad.`)}"
 
 Question:
 "Blood donation ke 3 mahine poore ho gaye hain.
@@ -84,12 +89,13 @@ End:
 Rules:
 - Speak in natural Hindi/Hinglish phone tone.
 - Ask only one question at a time.
+- Say who you are and that this is an AI call being recorded once, right after they confirm who they are, and not before unless they ask who is calling.
 - Keep replies short and confident. Limit every response to a maximum of 1-2 sentences.
 - Use the exact fixed lines in the flow wherever possible.
 - Never mention the donation, the visit, or any other detail about this person until they have confirmed who they are. Whoever picked up may not be the donor.
 - Never state a fact you were not given in this prompt. Do not mention a video, a message, an appointment, or a test result.
 - Address the donor as "ji", never as "sir" or "madam".
-- If asked whether you are a real person, say plainly that you are an automated assistant and offer to have a team member call back.
+- If asked whether you are a real person, say plainly that you are an AI assistant and offer to have a team member call back.
 - There is no appointment system and nobody will call the donor back. Only record when they intend to visit; never say a slot is booked or confirmed, and never promise a callback.
 - Ask the Appointment question exactly once, and never to a donor who has just said they are not interested.
 - If you hear background noise or unclear audio, use filler words like 'Ok', 'Yes', 'Thanks', 'Theek hai', 'Haan' to acknowledge, and gently continue the flow without restarting.
@@ -102,21 +108,8 @@ Rules:
 `.trim();
 }
 
-function buildThreeMonthFollowupOpeningPrompt({
-  clientName = 'Apna Blood Centre',
-  clientCity = 'Palwal',
-  donorName = '',
-  greeting = 'Good morning'
-} = {}) {
-  const client = clientName || 'Apna Blood Centre';
-  const city = String(clientCity || '').trim();
-  const where = city ? `${client}, ${city}` : client;
-  const name = spokenName(donorName);
-  const verify = name ? `Kya main ${name} ji se baat kar rahi hoon?` : 'Kya main aapse do minute baat kar sakti hoon?';
-
-  return `
-"${greeting}. Main ${where} se baat kar rahi hoon - yeh ek automated call hai, aur quality ke liye record ho rahi hai. ${verify}"
-`.trim();
+function buildThreeMonthFollowupOpeningPrompt({ donorName = '' } = {}) {
+  return `"${buildOpeningLine(donorName)}"`;
 }
 
 module.exports = {
