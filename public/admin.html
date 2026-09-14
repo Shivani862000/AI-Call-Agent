@@ -6,6 +6,134 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Operations Overview</title>
   <link rel="stylesheet" href="/app-shell.css">
+  <style>
+    .ov-section-label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 28px 0 10px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #64748b; }
+    /* The other sections cover fixed windows. A static chip, so they read as a
+       different kind of thing from the range picker and nobody expects it to move them. */
+    .window-chip { display: inline-flex; align-items: center; padding: 3px 9px; border: 1px solid #e2e8f0; border-radius: 999px; background: #fff; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: #64748b; }
+
+    /* At a glance: the range picker and the figures it drives share one panel. */
+    .glance-panel { margin-top: 4px; padding: 16px; border: 1px solid #dbe3ef; border-radius: 20px; background: #f3f7ff; }
+    .glance-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 14px; }
+    .glance-title { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #64748b; }
+    .range-tabs {
+      display: inline-flex; gap: 4px; max-width: 100%; padding: 4px; overflow-x: auto;
+      border-radius: 12px; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), inset 0 0 0 1px #e2e8f0;
+      scrollbar-width: none;
+    }
+    .range-tabs::-webkit-scrollbar { display: none; }
+    .range-tabs button {
+      flex: none; width: auto; min-height: 0; padding: 7px 12px; border: 0; border-radius: 9px; box-shadow: none;
+      background: transparent; color: #475569; font-size: 13px; font-weight: 600; white-space: nowrap; cursor: pointer;
+    }
+    .range-tabs button:hover { background: #eef2f7; color: #18233f; }
+    .range-tabs button[aria-checked="true"] { background: var(--blue); color: #fff; }
+    .range-tabs button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+    .glance-caption { width: 100%; font-size: 13px; color: #475569; }
+    .glance-caption strong { color: #18233f; }
+    .glance-panel .glance-grid { transition: opacity 0.15s; }
+    .glance-panel.is-loading .glance-grid { opacity: 0.45; }
+
+    /* At a glance */
+    .glance-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+    body.role-agent .glance-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .delta { display: inline-block; margin-left: 6px; font-size: 13px; font-weight: 700; }
+    .delta.up { color: #15803d; }
+    .delta.down { color: #b91c1c; }
+    .delta.flat { color: #64748b; }
+    .funnel { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-top: 10px; }
+    .funnel .metric-value { margin-top: 0; }
+    .funnel .arrow { color: #cbd5e1; font-size: 18px; }
+    .funnel small { font-size: 12px; font-weight: 600; color: #64748b; }
+    .split-bar { display: flex; height: 8px; margin-top: 12px; overflow: hidden; border-radius: 99px; background: #eef2f7; }
+    .split-bar span { display: block; height: 100%; }
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 12px; color: #64748b; }
+    .legend i { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 2px; }
+    .metric-card .metric-note b { color: #334155; }
+
+    /* Needs attention */
+    .attn-card { border-left: 4px solid var(--red); }
+    .attn-count {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 28px; height: 28px; padding: 0 8px; margin-right: 6px;
+      border-radius: 999px; background: #fee2e2; color: #b91c1c; font-size: 14px; font-weight: 800; vertical-align: middle;
+    }
+    .attn-count.calm { background: #dcfce7; color: #15803d; }
+    .attn-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+    .attn-list { display: grid; }
+    .attn-row {
+      display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: center; gap: 14px;
+      padding: 12px 0; border-top: 1px solid #eef2f7;
+    }
+    .attn-row:first-child { border-top: 0; padding-top: 0; }
+    .attn-row.is-hidden { opacity: 0.55; }
+    .attn-who { font-size: 15px; font-weight: 700; }
+    .attn-what { margin-top: 3px; font-size: 13px; color: #475569; }
+    .attn-when { margin-top: 3px; font-size: 12px; color: #94a3b8; }
+    .attn-when .late { color: #b91c1c; font-weight: 600; }
+    .attn-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
+    .attn-actions button, .attn-actions .button-link { padding: 8px 12px; font-size: 13px; }
+    button.link-button {
+      width: auto; min-height: 0; padding: 8px 10px; border: 0; box-shadow: none;
+      background: transparent; color: #64748b; font-size: 13px; font-weight: 600;
+    }
+    button.link-button:hover { color: #18233f; text-decoration: underline; }
+    .attn-empty { padding: 4px 0; font-size: 14px; color: #64748b; }
+    .attn-hidden-bar { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e2e8f0; font-size: 13px; color: #94a3b8; }
+
+    .chip { display: inline-flex; align-items: center; justify-self: start; padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .chip.complaint { background: #fee2e2; color: #b91c1c; }
+    .chip.callback { background: #dbeafe; color: #1d4ed8; }
+    .chip.wrong_number { background: #fef3c7; color: #b45309; }
+    .chip.overdue { background: #ede9fe; color: #6d28d9; }
+    .chip.muted { background: #e2e8f0; color: #475569; }
+
+    /* Donors */
+    .donor-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 16px; }
+    .donor-stats { display: grid; align-content: start; gap: 16px; }
+    .donor-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .donor-table-wrap { overflow-x: auto; }
+    .donor-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .donor-table th { padding: 0 8px 8px 0; text-align: left; font-size: 12px; font-weight: 700; color: #64748b; }
+    .donor-table td { padding: 10px 8px 10px 0; border-top: 1px solid #eef2f7; white-space: nowrap; }
+    .donor-table button { padding: 6px 12px; font-size: 13px; }
+    .blood { display: inline-block; min-width: 34px; padding: 2px 6px; border-radius: 6px; background: #fef2f2; color: #b91c1c; font-size: 12px; font-weight: 700; text-align: center; }
+
+    /* Health */
+    .health-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .health-item { display: flex; align-items: flex-start; gap: 12px; }
+    .dot { flex: none; width: 10px; height: 10px; margin-top: 5px; border-radius: 50%; background: #cbd5e1; }
+    .dot.ok { background: var(--green); }
+    .dot.warn { background: var(--orange); }
+    .health-item strong { display: block; font-size: 15px; }
+    .health-item span { display: block; margin-top: 3px; font-size: 13px; color: #64748b; }
+
+    /* Trend */
+    .trend { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; align-items: end; height: 190px; }
+    .trend-col { display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; height: 100%; text-align: center; }
+    .trend-total { margin-bottom: 4px; font-size: 12px; color: #64748b; }
+    .trend-bar { display: flex; flex-direction: column; overflow: hidden; border-radius: 4px 4px 0 0; }
+    .trend-bar .answered { background: var(--blue); }
+    .trend-bar .missed { background: #cbd5e1; }
+    .trend-day { margin-top: 6px; font-size: 12px; color: #64748b; }
+    .trend-col.today .trend-day, .trend-col.today .trend-total { font-weight: 700; color: #18233f; }
+
+    .ov-footer { margin: 22px 0 8px; font-size: 13px; color: #94a3b8; text-align: center; }
+
+    @media (max-width: 1100px) {
+      .glance-grid, body.role-agent .glance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .donor-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 720px) {
+      .glance-grid, body.role-agent .glance-grid, .health-strip, .donor-pair { grid-template-columns: 1fr; }
+      .attn-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+      .attn-actions { justify-content: flex-start; margin-top: 4px; }
+      .attn-card .poc-card-header { flex-direction: column; }
+      .trend { gap: 6px; height: 160px; }
+      .glance-panel { padding: 12px; border-radius: 16px; }
+    }
+  </style>
 </head>
 
 <body class="poc-page overview-page">
@@ -22,12 +150,8 @@
 
         <nav class="nav-list">
           <a href="/admin.html" class="nav-link active">Overview</a>
-          <!-- Incoming Calls page disabled. -->
-          <!-- <a href="/incoming-calls.html" class="nav-link">Incoming Calls</a> -->
           <a href="/customers.html" class="nav-link">Outbound Calls</a>
           <a href="/feedback.html" class="nav-link">Feedback</a>
-          <!-- Reports page disabled. -->
-          <!-- <a href="/reports.html" class="nav-link">Reports</a> -->
         </nav>
       </div>
     </aside>
@@ -36,24 +160,21 @@
       <section class="mobile-ops-header mobile-only">
         <div class="mobile-ops-bar">
           <div>
-            <div class="mobile-ops-title">Operations Overview</div>
-            <div class="mobile-ops-subtitle">Daily follow-up activity for KC Prashant Path Lab.</div>
+            <div class="mobile-ops-title" data-greeting>Overview</div>
+            <div class="mobile-ops-subtitle" data-today>India time (IST)</div>
           </div>
           <div class="mobile-ops-actions">
-            <button id="mobileOverviewMenuButton" class="mobile-icon-button" type="button"
-              aria-label="Open menu">...</button>
+            <button id="mobileOverviewMenuButton" class="mobile-icon-button" type="button" aria-label="Open menu">...</button>
           </div>
         </div>
       </section>
 
       <header class="page-header desktop-page-header">
         <div class="page-title-wrap">
-          <h2>Operations Overview</h2>
-          <div class="page-subtitle">Incoming calls are customer-to-lab. Outbound calls are lab-to-customer follow-ups.
-          </div>
+          <h2 data-greeting>Overview</h2>
+          <div class="page-subtitle" data-today>India time (IST)</div>
         </div>
         <div class="header-actions">
-          <!-- <button id="deleteAllAdminButton" class="danger desktop-only" type="button" style="background-color: var(--color-danger); color: white; margin-right: 8px;">Delete All Records</button> -->
           <button id="desktopOverviewNewCallButton" class="primary" type="button">Schedule New Call</button>
           <button id="logoutButton" class="secondary" type="button">Logout</button>
         </div>
@@ -61,174 +182,148 @@
 
       <div id="alertContainer" class="alert-stack"></div>
 
-      <section class="desktop-filter-strip desktop-only" aria-label="Overview filters">
-        <button class="desktop-filter-pill active" type="button" data-overview-filter="patients" aria-pressed="true">
-          <span class="desktop-filter-count" id="desktopMetricCustomers">0</span>
-          <span class="desktop-filter-label">Patients</span>
-        </button>
-        <button class="desktop-filter-pill" type="button" data-overview-filter="completed" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricCompleted">0</span>
-          <span class="desktop-filter-label">Completed</span>
-        </button>
-        <button class="desktop-filter-pill" type="button" data-overview-filter="scheduled" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricScheduled">0</span>
-          <span class="desktop-filter-label">Scheduled</span>
-        </button>
-        <button class="desktop-filter-pill" type="button" data-overview-filter="feedback" aria-pressed="false">
-          <span class="desktop-filter-count" id="desktopMetricFeedback">0</span>
-          <span class="desktop-filter-label">Feedback</span>
-        </button>
-      </section>
-
-      <section class="mobile-stat-strip mobile-only" aria-label="Overview stats">
-        <button class="mobile-stat-pill mobile-stat-pill-button active" type="button" data-overview-filter="patients"
-          aria-pressed="true">
-          <span class="mobile-stat-count" id="mobileMetricCustomers">0</span>
-          <span class="mobile-stat-label">Patients</span>
-        </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="completed"
-          aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricCompleted">0</span>
-          <span class="mobile-stat-label">Completed</span>
-        </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="scheduled"
-          aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricScheduled">0</span>
-          <span class="mobile-stat-label">Scheduled</span>
-        </button>
-        <button class="mobile-stat-pill mobile-stat-pill-button" type="button" data-overview-filter="feedback"
-          aria-pressed="false">
-          <span class="mobile-stat-count" id="mobileMetricFeedback">0</span>
-          <span class="mobile-stat-label">Feedback</span>
-        </button>
-      </section>
-
-      <!-- <section class="overview-mobile-compact-stats mobile-only" aria-label="Overview summary">
-        <div class="overview-mobile-stat-row">
-          <span>Patients</span>
-          <strong id="overviewMobileStatPatients">0</strong>
-        </div>
-        <div class="overview-mobile-stat-row">
-          <span>Completed</span>
-          <strong id="overviewMobileStatCompleted">0</strong>
-        </div>
-        <div class="overview-mobile-stat-row">
-          <span>Scheduled</span>
-          <strong id="overviewMobileStatScheduled">0</strong>
-        </div>
-        <div class="overview-mobile-stat-row">
-          <span>Feedback</span>
-          <strong id="overviewMobileStatFeedback">0</strong>
-        </div>
-      </section> -->
-
-      <section class="poc-metrics-grid">
-        <article class="metric-card">
-          <div class="metric-label">Total Patients</div>
-          <div class="metric-value" id="metricCustomers">0</div>
-          <div class="metric-note">Unique patients by normalized phone number.</div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-label">Calls Completed</div>
-          <div class="metric-value" id="metricCompleted">0</div>
-          <div class="metric-note">Finished calls with outcomes recorded.</div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-label">Scheduled Calls</div>
-          <div class="metric-value" id="metricScheduled">0</div>
-          <div class="metric-note">All call records waiting for outreach.</div>
-        </article>
-        <article class="metric-card">
-          <div class="metric-label">Feedback Captured</div>
-          <div class="metric-value" id="metricFeedback">0</div>
-          <div class="metric-note">Feedback captured from completed call analysis.</div>
-        </article>
-      </section>
-
-      <section class="mobile-overview-stack mobile-only">
-        <article class="poc-card mobile-overview-card mobile-overview-card--summary">
-          <div class="poc-card-header compact-overview-header">
-            <div>
-              <h3 id="mobileOverviewActivityTitle" class="poc-card-title">Patient Directory</h3>
-            </div>
+      <!-- 1. At a glance. The range picker drives everything inside this panel, and only this panel. -->
+      <section id="glancePanel" class="glance-panel" aria-labelledby="glanceTitle">
+        <div class="glance-toolbar">
+          <h3 id="glanceTitle" class="glance-title">At a glance</h3>
+          <div id="rangeTabs" class="range-tabs" role="radiogroup" aria-label="Time range for At a glance">
+            <button type="button" role="radio" data-range="today" aria-checked="true">Today</button>
+            <button type="button" role="radio" data-range="yesterday" aria-checked="false">Yesterday</button>
+            <button type="button" role="radio" data-range="24h" aria-checked="false">Last 24 hours</button>
+            <button type="button" role="radio" data-range="7d" aria-checked="false">Last 7 days</button>
+            <button type="button" role="radio" data-range="30d" aria-checked="false">Last 30 days</button>
+            <button type="button" role="radio" data-range="month" aria-checked="false">This month</button>
           </div>
-          <div id="mobileTodayActivityList" class="mobile-activity-list"></div>
+          <div class="glance-caption" aria-live="polite"><strong id="glanceWindow">Today</strong> <span id="glanceCompare"></span></div>
+        </div>
+
+        <div class="glance-grid">
+        <article class="metric-card">
+          <div class="metric-label">Calls</div>
+          <div class="funnel">
+            <span class="metric-value" id="gPlaced">–</span><small>placed</small>
+            <span class="arrow">→</span>
+            <span class="metric-value" id="gAnswered">–</span><small>answered</small>
+          </div>
+          <div class="split-bar">
+            <span id="barAnswered" style="background:var(--green)"></span>
+            <span id="barNoAnswer" style="background:#fca5a5"></span>
+            <span id="barBusy" style="background:#fcd34d"></span>
+            <span id="barOther" style="background:#cbd5e1"></span>
+          </div>
+          <div id="callsLegend" class="legend"></div>
+          <div id="callsNote" class="metric-note"></div>
         </article>
 
-        <article class="poc-card mobile-overview-card">
-          <div class="poc-card-header compact-overview-header">
-            <div>
-              <h3 class="poc-card-title">Recent Calls</h3>
-            </div>
-          </div>
-          <div id="mobileRecentCallActivity" class="mobile-recent-call-list"></div>
+        <article class="metric-card">
+          <div class="metric-label">Answer rate</div>
+          <div class="metric-value"><span id="gRate">–</span><span id="gRateDelta" class="delta"></span></div>
+          <div id="rateNote" class="metric-note"></div>
         </article>
+
+        <article class="metric-card">
+          <div class="metric-label">Avg. call length</div>
+          <div class="metric-value"><span id="gLength">–</span><span id="gLengthDelta" class="delta"></span></div>
+          <div id="lengthNote" class="metric-note"></div>
+        </article>
+
+        <article id="feedbackCard" class="metric-card">
+          <div class="metric-label">Feedback captured</div>
+          <div class="metric-value"><span id="gFeedback">–</span><span id="gFeedbackDelta" class="delta"></span></div>
+          <div class="split-bar">
+            <span id="barGood" style="background:var(--green)"></span>
+            <span id="barAverage" style="background:#cbd5e1"></span>
+            <span id="barPoor" style="background:var(--red)"></span>
+          </div>
+          <div id="feedbackLegend" class="legend"></div>
+          <div id="feedbackNote" class="metric-note"></div>
+        </article>
+        </div>
       </section>
 
-      <section class="poc-grid-2">
+      <!-- 2. Needs attention -->
+      <div class="ov-section-label">Needs attention <span class="window-chip">Open items · last 30 days</span></div>
+      <article class="poc-card attn-card">
+        <div class="poc-card-header">
+          <div>
+            <h3 class="poc-card-title"><span id="attnCount" class="attn-count">–</span>open</h3>
+            <div class="poc-card-subtitle">Calls where a person should step in. Hide an item once it's handled — it is hidden for everyone.</div>
+          </div>
+          <div id="attnFilters" class="attn-filters"></div>
+        </div>
+        <div id="attnList" class="attn-list"></div>
+        <div id="attnHiddenBar" class="attn-hidden-bar" hidden>
+          <span id="attnHiddenCount"></span>
+          <button id="attnToggleHidden" class="link-button" type="button">Show hidden</button>
+        </div>
+      </article>
+
+      <!-- 3. Donor re-engagement -->
+      <div class="ov-section-label">Donor re-engagement <span class="window-chip">Last 7 days</span></div>
+      <section class="donor-grid">
+        <div class="donor-stats">
+          <div class="donor-pair">
+            <article class="metric-card">
+              <div class="metric-label">Will donate again</div>
+              <div class="metric-value" id="dWillDonate">–</div>
+              <div class="metric-note">Said yes on a call.</div>
+            </article>
+            <article class="metric-card">
+              <div class="metric-label">Planning a visit</div>
+              <div class="metric-value" id="dPlanning">–</div>
+              <div class="metric-note">Said when they would come in.</div>
+            </article>
+          </div>
+          <article class="poc-card">
+            <div class="poc-card-header" style="margin-bottom:10px">
+              <h3 class="poc-card-title" style="font-size:16px">Upcoming visits</h3>
+            </div>
+            <div id="upcomingList" class="compact-list"></div>
+          </article>
+        </div>
+
         <article class="poc-card">
           <div class="poc-card-header">
             <div>
-              <h3 id="overviewActivityTitle" class="poc-card-title">Patient Directory</h3>
-              <div id="overviewActivitySubtitle" class="poc-card-subtitle">All unique patients currently stored in the
-                system.</div>
+              <h3 class="poc-card-title"><span id="dueCount" class="attn-count calm">–</span>due to donate</h3>
+              <div class="poc-card-subtitle">Last donation over 3 months ago, not called in the last 30 days, and nothing already queued.</div>
             </div>
+            <button id="queueAllButton" class="primary" type="button" hidden>Add all to queue</button>
           </div>
-          <div id="todayActivityList" class="compact-list"></div>
+          <div id="dueList" class="donor-table-wrap"></div>
         </article>
-
-        <div class="poc-stack">
-          <article class="poc-card">
-            <div class="poc-card-header">
-              <div>
-                <h3 class="poc-card-title">Quick Actions</h3>
-                <div class="poc-card-subtitle">Go directly to scheduling, call queue, or feedback review.</div>
-              </div>
-            </div>
-            <div class="quick-action-grid">
-              <button id="desktopQuickNewCallButton" class="primary" type="button">Schedule New Call</button>
-              <a href="/customers.html#queueSection" class="secondary button-link">Outbound Queue</a>
-              <a href="/feedback.html" class="secondary button-link">Review Feedback</a>
-            </div>
-          </article>
-
-          <article class="poc-card">
-            <div class="poc-card-header">
-              <div>
-                <h3 class="poc-card-title">Recent Call Activity</h3>
-                <div class="poc-card-subtitle">Most recent follow-up calls and outcomes.</div>
-              </div>
-            </div>
-            <div id="recentCallActivity" class="simple-call-list"></div>
-          </article>
-        </div>
       </section>
+
+      <!-- 4. System health -->
+      <div class="ov-section-label">Is everything working? <span class="window-chip">Last 24 hours</span></div>
+      <article class="poc-card">
+        <div id="healthStrip" class="health-strip"></div>
+      </article>
+
+      <!-- 5. Trend -->
+      <div class="ov-section-label">Calls per day <span class="window-chip">Last 7 days</span></div>
+      <article class="poc-card">
+        <div class="legend" style="margin:0 0 12px"><span><i style="background:var(--blue)"></i>Answered</span><span><i style="background:#cbd5e1"></i>Not answered</span></div>
+        <div id="trendChart" class="trend" role="img" aria-label="Calls per day for the last 7 days"></div>
+      </article>
+
+      <div id="ovFooter" class="ov-footer"></div>
     </main>
   </div>
 
-  <button id="mobileOverviewFloatingCta" class="mobile-floating-cta mobile-only" type="button"
-    aria-label="Schedule new call">+ New Call</button>
-
+  <button id="mobileOverviewFloatingCta" class="mobile-floating-cta mobile-only" type="button" aria-label="Schedule new call">+ New Call</button>
   <nav class="mobile-dock mobile-only" aria-label="Primary navigation">
     <a href="/admin.html" class="mobile-dock-link active">Overview</a>
-    <!-- Incoming Calls page disabled. -->
-    <!-- <a href="/incoming-calls.html" class="mobile-dock-link">Calls</a> -->
     <a href="/customers.html" class="mobile-dock-link">Outbound</a>
     <a href="/feedback.html" class="mobile-dock-link">Feedback</a>
-    <!-- Reports page disabled. -->
-    <!-- <a href="/reports.html" class="mobile-dock-link">Reports</a> -->
   </nav>
-
   <div id="overviewNewCallModalMount"></div>
-
   <div id="overviewMobileMenuSheet" class="modal-backdrop mobile-sheet-backdrop" aria-hidden="true">
-    <div class="modal-panel mobile-action-sheet" role="dialog" aria-modal="true"
-      aria-labelledby="overviewMobileMenuTitle">
+    <div class="modal-panel mobile-action-sheet" role="dialog" aria-modal="true" aria-labelledby="overviewMobileMenuTitle">
       <div class="mobile-sheet-handle"></div>
       <div class="mobile-sheet-title-row">
         <h3 id="overviewMobileMenuTitle" class="poc-card-title">Menu</h3>
-        <button id="closeOverviewMobileMenuSheet" class="secondary modal-close modal-close-icon" type="button"
-          aria-label="Close menu">&times;</button>
+        <button id="closeOverviewMobileMenuSheet" class="secondary modal-close modal-close-icon" type="button" aria-label="Close menu">&times;</button>
       </div>
       <div class="mobile-sheet-actions">
         <button id="overviewMobileMenuLogout" class="mobile-sheet-action" type="button">Logout</button>
@@ -238,651 +333,575 @@
 
   <script src="/app-shell.js"></script>
   <script>
-    let activeOverviewFilter = 'patients';
-    let overviewNewCallModal = null;
-    let overviewPatientSearch = '';
-    let overviewPatientPage = 1;
-    let overviewRecentCallsPage = 1;
+    const TIMEZONE = 'Asia/Kolkata';
+    // Always opens on Today. A remembered choice would silently show someone
+    // last week's figures under a heading they no longer look at.
+    const DEFAULT_RANGE = 'today';
 
-    let overviewState = {
-      customers: [],
-      recentCalls: [],
-      feedbackSummary: null,
-      // scheduledToday: 0,
-      completedToday: 0,
-      pendingCalls: 0,
-      uniquePatientCount: 0
+    const KIND_LABELS = { complaint: 'Complaint', callback: 'Callback', wrong_number: 'Wrong number', overdue: 'Overdue' };
+    const KIND_CHIP = {
+      complaint: ['complaint', 'complaints'],
+      callback: ['callback', 'callbacks'],
+      overdue: ['overdue', 'overdue'],
+      wrong_number: ['wrong number', 'wrong numbers']
     };
+    const bloodGroupLabel = (group) => String(group || '').replace('-', '−');
 
-    function setOverviewPatientPage(page) {
-      overviewPatientPage = page;
-      renderPatientDirectory(overviewState.customers);
+    let overview = null;
+    let currentRange = DEFAULT_RANGE;
+    let showHidden = false;
+    let loadSequence = 0;
+    let overviewNewCallModal = null;
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (value) => AppShell.escapeHtml(value == null ? '' : String(value));
+    const isAgent = () => String(window.AppShell.session?.role || '').toUpperCase() === 'AGENT';
+
+    // ── Formatting ───────────────────────────────────────────────────────────
+
+    const fmtCount = (value) => Math.round(Number(value) || 0).toLocaleString('en-IN');
+
+    function fmtDuration(seconds) {
+      if (seconds == null) return '–';
+      const total = Math.round(seconds);
+      return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, '0')}s`;
     }
-    window.setOverviewPatientPage = setOverviewPatientPage;
 
-    function setOverviewRecentCallsPage(page) {
-      overviewRecentCallsPage = page;
-      renderRecentCalls(overviewState.recentCalls, overviewState.feedbackSummary || { items: [] });
+    function fmtHour(hour) {
+      const h = ((hour % 24) + 24) % 24;
+      return `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? 'AM' : 'PM'}`;
     }
-    window.setOverviewRecentCallsPage = setOverviewRecentCallsPage;
 
-    function isToday(value) {
-      if (!value) return false;
+    const istDay = (value) => new Date(value).toLocaleDateString('en-CA', { timeZone: TIMEZONE });
+    const istTime = (value) => new Date(value).toLocaleTimeString('en-US', { timeZone: TIMEZONE, hour: 'numeric', minute: '2-digit', hour12: true });
+
+    /** "Today, 10:42 AM" / "Yesterday, 4:20 PM" / "12 Sep, 9:15 AM", in Indian time. */
+    function whenLabel(value) {
+      if (!value) return '';
       const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return false;
-      const now = new Date();
-      return date.toDateString() === now.toDateString();
+      if (Number.isNaN(date.getTime())) return '';
+      const today = istDay(new Date());
+      const yesterday = istDay(new Date(Date.now() - 86400000));
+      const day = istDay(date);
+      const prefix = day === today
+        ? 'Today'
+        : day === yesterday
+          ? 'Yesterday'
+          : date.toLocaleDateString('en-GB', { timeZone: TIMEZONE, day: 'numeric', month: 'short' });
+      return `${prefix}, ${istTime(date)}`;
     }
 
-    function normalizePatientPhone(value) {
-      const digits = String(value || '').replace(/\D/g, '');
-      if (!digits) return '';
-      return digits.slice(-10);
+    function fmtDate(day) {
+      if (!day) return '–';
+      return new Date(`${day}T00:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' });
     }
 
-    function buildUniquePatientCount(customers = []) {
-      const phones = new Set();
-      customers.forEach((customer) => {
-        const normalized = normalizePatientPhone(customer.phone);
-        if (normalized) phones.add(normalized);
-      });
-      return phones.size;
+    function pct(part, whole) {
+      return `${whole ? Math.max(0, (part / whole) * 100) : 0}%`;
     }
 
-    function formatPatientPhone(value) {
-      const normalized = normalizePatientPhone(value);
-      if (!normalized) return String(value || '--');
-      return `+91 ${normalized.slice(0, 5)} ${normalized.slice(5)}`;
-    }
+    /**
+     * The difference from the overall average: counts in %, the answer rate in
+     * points, call length in seconds. Blank when there is nothing to compare.
+     */
+    function setDelta(element, kind, value, average) {
+      element.className = 'delta';
+      element.textContent = '';
+      if (value == null || average == null) return;
+      if (kind === 'count' && average < 0.5) return;
 
-    function formatOverviewDateShort(value) {
-      if (!value) return '--';
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return '--';
-      return date.toLocaleDateString('en-GB');
-    }
+      const diff = value - average;
+      let magnitude;
+      let unit;
+      if (kind === 'count') { magnitude = Math.round(Math.abs(diff / average) * 100); unit = '%'; }
+      else if (kind === 'rate') { magnitude = Math.round(Math.abs(diff)); unit = magnitude === 1 ? ' pt' : ' pts'; }
+      else { magnitude = Math.round(Math.abs(diff)); unit = 's'; }
 
-    function formatOverviewCallDate(value) {
-      if (!value) return '--';
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return '--';
-      return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-    }
-
-
-
-    function buildUniquePatients(customers = []) {
-      const patientsByPhone = new Map();
-
-      customers.forEach((customer) => {
-        const normalizedPhone = normalizePatientPhone(customer.phone);
-        if (!normalizedPhone) return;
-
-        const existing = patientsByPhone.get(normalizedPhone);
-        const currentCreatedAt = new Date(customer.created_at || 0).getTime();
-        const existingCreatedAt = new Date(existing?.created_at || 0).getTime();
-
-        if (!existing) {
-          patientsByPhone.set(normalizedPhone, {
-            name: customer.name || 'Patient',
-            phone: formatPatientPhone(customer.phone),
-            normalizedPhone,
-            created_at: customer.created_at || ''
-          });
-          return;
-        }
-
-        if (!existing.name && customer.name) {
-          existing.name = customer.name;
-        }
-
-        if (
-          customer.created_at
-          && (!existing.created_at || currentCreatedAt < existingCreatedAt || Number.isNaN(existingCreatedAt))
-        ) {
-          existing.created_at = customer.created_at;
-        }
-      });
-
-      return [...patientsByPhone.values()].sort((a, b) => (
-        new Date(b.created_at || 0) - new Date(a.created_at || 0)
-      ));
-    }
-
-    function buildFeedbackSummary(feedbackItems = [], recentCalls = []) {
-      const callLinkedFeedbackItems = feedbackItems.filter((item) => (
-        Number(item.call_id || 0)
-        || ['call', 'analysis'].includes(String(item.source || '').toLowerCase())
-      ));
-      const feedbackByCallId = new Set(
-        callLinkedFeedbackItems
-          .map((item) => Number(item.call_id || 0))
-          .filter(Boolean)
-      );
-      const analysisFeedback = recentCalls
-        .filter((call) => (
-          String(call.outcome || '').toLowerCase() === 'completed'
-          && !feedbackByCallId.has(Number(call.id || 0))
-          && Number.isInteger(Number(call.extracted_rating))
-          && Number(call.extracted_rating) >= 1
-          && Number(call.extracted_rating) <= 5
-        ))
-        .map((call) => ({
-          id: `analysis-${call.id}`,
-          call_id: call.id,
-          customer_id: call.customer_id,
-          customer_name: call.customer_name,
-          review_text: call.extracted_review_text || call.analysis_summary || call.summary || 'Feedback captured from call analysis.',
-          stars: Number(call.extracted_rating),
-          submitted_at: call.ended_at || call.called_at,
-          source: 'analysis'
-        }));
-
-      const items = [...callLinkedFeedbackItems, ...analysisFeedback].filter((item) => {
-        const rating = Number(item.stars || 0);
-        return (rating >= 1 && rating <= 5) || String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP';
-      });
-      const positive = items.filter((item) => Number(item.stars || 0) >= 4).length;
-      const neutral = items.filter((item) => Number(item.stars || 0) === 3).length;
-      const negative = items.filter((item) => Number(item.stars || 0) <= 2).length;
-
-      return {
-        items,
-        positive,
-        neutral,
-        negative,
-        total: positive + neutral + negative
-      };
-    }
-
-    function openOverviewNewCallModal() {
-      if (!overviewNewCallModal) return;
-      overviewNewCallModal.open();
-    }
-
-    function openOverviewSheet(id) {
-      const element = document.getElementById(id);
-      if (!element) return;
-      element.classList.add('open');
-      element.setAttribute('aria-hidden', 'false');
-    }
-
-    function closeOverviewSheet(id) {
-      const element = document.getElementById(id);
-      if (!element) return;
-      element.classList.remove('open');
-      element.setAttribute('aria-hidden', 'true');
-    }
-
-    function updateOverviewFilterButtons() {
-      document.querySelectorAll('[data-overview-filter]').forEach((button) => {
-        const isActive = button.dataset.overviewFilter === activeOverviewFilter;
-        button.classList.toggle('active', isActive);
-        button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-      });
-    }
-
-    function renderActivityList({ /* scheduledToday, */ completedToday, pendingCalls, totalPatients, feedbackSummary }) {
-      const activityCards = {
-        patients: [
-          { label: 'Patients', value: totalPatients, note: 'Unique phone numbers in the patient follow-up queue.' },
-          { label: 'Completed', value: completedToday, note: 'Completed calls today.' },
-          { label: 'Scheduled', value: pendingCalls, note: 'Call records waiting for outreach.' },
-          { label: 'Feedback', value: feedbackSummary.total, note: 'Feedback captured from completed call analysis.' }
-        ],
-        completed: [
-          { label: 'Completed', value: completedToday, note: 'Calls that ended with a recorded outcome today.' },
-          { label: 'Patients', value: totalPatients, note: 'Unique patients represented in the queue.' },
-          { label: 'Feedback', value: feedbackSummary.total, note: 'Feedback captured after completed calls.' },
-          { label: 'Scheduled', value: pendingCalls, note: 'Call records still waiting.' }
-        ],
-        scheduled: [
-          { label: 'Scheduled', value: pendingCalls, note: 'Call records waiting for first call or retry.' },
-          // { label: 'Added Today', value: scheduledToday, note: 'Call records created or updated today.' },
-          { label: 'Patients', value: totalPatients, note: 'Unique patients in the follow-up queue.' },
-          { label: 'Completed', value: completedToday, note: 'Completed calls today.' }
-        ],
-        feedback: [
-          { label: 'Feedback', value: feedbackSummary.total, note: 'Positive + neutral + negative feedback.' },
-          { label: 'Positive', value: feedbackSummary.positive, note: 'Ratings 4 or 5.' },
-          { label: 'Neutral', value: feedbackSummary.neutral, note: 'Rating 3.' },
-          { label: 'Negative', value: feedbackSummary.negative, note: 'Ratings 1 or 2.' }
-        ]
-      };
-
-      const cards = activityCards[activeOverviewFilter] || activityCards.patients;
-      const isAgent = window.AppShell.session?.role === 'AGENT';
-      const visibleCards = isAgent ? cards.filter(item => item.label !== 'Feedback' && item.label !== 'Positive' && item.label !== 'Neutral' && item.label !== 'Negative') : cards;
-
-      document.getElementById('overviewActivityTitle').textContent = 'Today\'s Activity';
-      document.getElementById('overviewActivitySubtitle').textContent = 'A quick view of today\'s follow-up activity.';
-      document.getElementById('mobileOverviewActivityTitle').textContent = 'Today\'s Activity';
-      document.getElementById('todayActivityList').innerHTML = `
-        ${visibleCards.map((item) => `<div class="compact-row"><div><strong>${item.label}</strong><div class="muted">${item.note}</div></div><strong>${item.value}</strong></div>`).join('')}
-      `;
-
-      document.getElementById('mobileTodayActivityList').innerHTML = `
-        ${visibleCards.map((item) => `<div class="mobile-activity-row"><span>${item.label}</span><strong>${item.value}</strong></div>`).join('')}
-      `;
-      document.getElementById('mobileTodayActivityList').parentElement.style.display = 'none';
-      updateOverviewFilterButtons();
-    }
-
-    function renderPatientDirectory(customers = []) {
-      const patients = buildUniquePatients(customers);
-      const search = overviewPatientSearch.trim().toLowerCase();
-      const filteredPatients = patients.filter((patient) => (
-        !search
-        || `${patient.name} ${patient.phone} ${patient.normalizedPhone}`.toLowerCase().includes(search)
-      ));
-
-      // Calculate pagination slice
-      const paged = AppShell.Pagination.getPagedItems(filteredPatients, overviewPatientPage);
-      overviewPatientPage = paged.currentPage;
-      const paginatedPatients = paged.items;
-      const totalItems = paged.totalItems;
-
-      document.getElementById('overviewActivityTitle').textContent = 'Patient Directory';
-      document.getElementById('overviewActivitySubtitle').textContent = `${filteredPatients.length} of ${patients.length} unique patients`;
-      document.getElementById('mobileOverviewActivityTitle').textContent = 'Patient Directory';
-      document.getElementById('mobileTodayActivityList').parentElement.style.display = '';
-
-      const searchMarkup = `
-        <div class="overview-patient-directory-search">
-          <input
-            data-overview-patient-search
-            class="search-input"
-            type="search"
-            placeholder="Search patient or phone"
-            value="${AppShell.escapeHtml(overviewPatientSearch)}"
-            oninput="handleOverviewPatientSearch(this.value)"
-          >
-        </div>
-      `;
-
-      if (!patients.length || !filteredPatients.length) {
-        const emptyMarkup = `
-          ${searchMarkup}
-          <div class="empty-state">
-            <strong>No patients found.</strong>
-          </div>
-        `;
-        document.getElementById('todayActivityList').innerHTML = emptyMarkup;
-        document.getElementById('mobileTodayActivityList').innerHTML = emptyMarkup;
-        updateOverviewFilterButtons();
+      if (magnitude === 0) {
+        element.classList.add('flat');
+        element.textContent = '= avg';
         return;
       }
+      element.classList.add(diff > 0 ? 'up' : 'down');
+      element.textContent = `${diff > 0 ? '▲' : '▼'} ${magnitude}${unit}`;
+    }
 
-      document.getElementById('todayActivityList').innerHTML = `
-        ${searchMarkup}
-        <div class="overview-patient-directory-meta">${filteredPatients.length} unique patients</div>
-        <div class="table-wrap overview-patient-directory-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Patient Name</th>
-                <th>Phone Number</th>
-                <th>Created Date</th>
-              </tr>
-            </thead>
+    // ── Header ───────────────────────────────────────────────────────────────
+
+    /**
+     * A first name for the greeting. Accounts have no name field, only a login
+     * that is usually an email, so it is read off the part before the @:
+     * "vikrant@..." -> "Vikrant", "agent1@..." -> "Agent". Empty when nothing
+     * usable is left, and the greeting then stands on its own.
+     */
+    function greetingName(username) {
+      const local = String(username || '').split('@')[0];
+      const first = local.split(/[._+-]/)[0].replace(/\d+$/, '');
+      if (first.length < 2) return '';
+      return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+    }
+
+    function renderHeader() {
+      const hour = Number(new Date().toLocaleString('en-US', { timeZone: TIMEZONE, hour: 'numeric', hour12: false }));
+      const salutation = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+      const name = greetingName(window.AppShell.session?.username);
+      const greeting = name ? `${salutation}, ${name}` : salutation;
+      const today = new Date().toLocaleDateString('en-GB', { timeZone: TIMEZONE, weekday: 'long', day: 'numeric', month: 'short' });
+      document.querySelectorAll('[data-greeting]').forEach((el) => { el.textContent = greeting; });
+      document.querySelectorAll('[data-today]').forEach((el) => { el.textContent = `${today} · India time (IST)`; });
+    }
+
+    // ── At a glance ──────────────────────────────────────────────────────────
+
+    /** The exact span the figures cover, in Indian time, e.g. "Today, Mon 14 Sep · 12:00 AM – 6:10 PM". */
+    function rangeWindowLabel(range) {
+      const start = new Date(range.start);
+      const end = new Date(range.end);
+      const longDay = (date) => date.toLocaleDateString('en-GB', { timeZone: TIMEZONE, weekday: 'short', day: 'numeric', month: 'short' });
+      const shortDay = (date) => date.toLocaleDateString('en-GB', { timeZone: TIMEZONE, day: 'numeric', month: 'short' });
+      switch (range.key) {
+        case 'today': return `Today, ${longDay(start)} · 12:00 AM – ${istTime(end)}`;
+        case 'yesterday': return `Yesterday, ${longDay(start)}`;
+        case '24h': return `Last 24 hours: ${shortDay(start)} ${istTime(start)} – today ${istTime(end)}`;
+        default: return `${range.label}: ${shortDay(start)} – ${shortDay(end)}`;
+      }
+    }
+
+    function renderGlance(data) {
+      const g = data.glance;
+      const avg = data.average;
+      const nonWorking = data.range.working_days === 0;
+      $('glanceWindow').textContent = rangeWindowLabel(data.range);
+      $('glanceCompare').textContent = nonWorking
+        ? '· not a working day, so there is no average to compare with'
+        : `· compared ${data.range.compare.replace(/^vs /, 'with ')}`;
+
+      $('gPlaced').textContent = fmtCount(g.placed);
+      $('gAnswered').textContent = fmtCount(g.answered);
+      $('barAnswered').style.width = pct(g.answered, g.placed);
+      $('barNoAnswer').style.width = pct(g.no_answer, g.placed);
+      $('barBusy').style.width = pct(g.busy, g.placed);
+      $('barOther').style.width = pct(g.other, g.placed);
+      $('callsLegend').innerHTML = [
+        `<span><i style="background:var(--green)"></i>Answered <b>${fmtCount(g.answered)}</b></span>`,
+        `<span><i style="background:#fca5a5"></i>No answer <b>${fmtCount(g.no_answer)}</b></span>`,
+        `<span><i style="background:#fcd34d"></i>Busy <b>${fmtCount(g.busy)}</b></span>`,
+        g.other ? `<span><i style="background:#cbd5e1"></i>Failed / other <b>${fmtCount(g.other)}</b></span>` : ''
+      ].join('');
+
+      const placedDelta = document.createElement('span');
+      setDelta(placedDelta, 'count', g.placed, avg?.placed);
+      $('callsNote').innerHTML = !avg
+        ? 'Not enough history for an average yet.'
+        : nonWorking
+          ? 'Not a working day.'
+          : `Average: <b>${fmtCount(avg.placed)}</b> placed ${placedDelta.outerHTML}`;
+
+      $('gRate').textContent = g.answer_rate == null ? '–' : `${Math.round(g.answer_rate)}%`;
+      setDelta($('gRateDelta'), 'rate',
+        g.answer_rate == null ? null : Math.round(g.answer_rate),
+        avg?.answer_rate == null ? null : Math.round(avg.answer_rate));
+      const slot = g.best_slot
+        ? ` · Best slot: ${fmtHour(g.best_slot.hour)} – ${fmtHour(g.best_slot.hour + 1)} (${Math.round(g.best_slot.rate)}%)`
+        : '';
+      $('rateNote').innerHTML = avg?.answer_rate == null
+        ? `No history yet${slot}`
+        : `Average: <b>${Math.round(avg.answer_rate)}%</b>${slot}`;
+
+      $('gLength').textContent = fmtDuration(g.avg_seconds);
+      setDelta($('gLengthDelta'), 'seconds', g.avg_seconds, avg?.avg_seconds);
+      $('lengthNote').innerHTML = avg?.avg_seconds == null
+        ? 'Answered calls only.'
+        : `Average: <b>${fmtDuration(avg.avg_seconds)}</b> · answered calls only`;
+
+      const feedbackCard = $('feedbackCard');
+      feedbackCard.hidden = !g.feedback;
+      if (g.feedback) {
+        const f = g.feedback;
+        $('gFeedback').textContent = fmtCount(f.total);
+        setDelta($('gFeedbackDelta'), 'count', f.total, nonWorking ? null : avg?.feedback);
+        $('barGood').style.width = pct(f.good, f.total);
+        $('barAverage').style.width = pct(f.average, f.total);
+        $('barPoor').style.width = pct(f.poor, f.total);
+        $('feedbackLegend').innerHTML = [
+          `<span><i style="background:var(--green)"></i>Good <b>${fmtCount(f.good)}</b></span>`,
+          `<span><i style="background:#cbd5e1"></i>Average <b>${fmtCount(f.average)}</b></span>`,
+          `<span><i style="background:var(--red)"></i>Poor <b>${fmtCount(f.poor)}</b></span>`
+        ].join('');
+        $('feedbackNote').innerHTML = avg?.feedback == null
+          ? ''
+          : nonWorking ? 'Not a working day.' : `Average: <b>${fmtCount(avg.feedback)}</b> entries`;
+      }
+    }
+
+    // ── Needs attention ──────────────────────────────────────────────────────
+
+    function attentionWhat(item) {
+      if (item.detail) return item.detail;
+      if (item.kind === 'callback') return 'Asked to be called back.';
+      if (item.kind === 'wrong_number') return 'The person who answered said this is the wrong number. Calls to this number have been stopped.';
+      if (item.kind === 'overdue') return 'A retry was due but has not been placed.';
+      return 'The call was marked negative.';
+    }
+
+    function attentionWhen(item) {
+      const parts = [];
+      if (item.happened_at) parts.push(esc(whenLabel(item.happened_at)));
+      if (item.duration_seconds) parts.push(esc(`${fmtDuration(item.duration_seconds)} call`));
+      if (item.due_at && ['callback', 'overdue'].includes(item.kind)) {
+        const late = new Date(item.due_at).getTime() < Date.now();
+        parts.push(late
+          ? `<span class="late">was due ${esc(whenLabel(item.due_at))}</span>`
+          : `due ${esc(whenLabel(item.due_at))}`);
+      }
+      return parts.join(' · ');
+    }
+
+    function attentionActions(item) {
+      const actions = [];
+      if (item.has_recording && item.call_id) {
+        actions.push(`<a class="secondary button-link" href="/api/calls/${item.call_id}/recording" target="_blank" rel="noopener">Listen</a>`);
+      }
+      // The call detail page is admin-only; agents would get a 403.
+      if (!isAgent() && item.call_id) {
+        const primary = item.kind === 'complaint';
+        actions.push(`<a class="${primary ? 'primary' : 'secondary'} button-link" href="/feedback-analysis.html?callId=${item.call_id}">View details</a>`);
+      }
+      if (['callback', 'overdue'].includes(item.kind) && item.patient_id && !item.hidden) {
+        actions.push(`<button class="primary" type="button" data-action="call-now" data-key="${esc(item.key)}">Call now</button>`);
+      }
+      if (item.kind === 'wrong_number' && item.patient_id) {
+        actions.push(`<a class="primary button-link" href="/patients.html?patient=${item.patient_id}">Edit patient</a>`);
+      }
+      actions.push(item.hidden
+        ? `<button class="link-button" type="button" data-action="unhide" data-key="${esc(item.key)}">Unhide</button>`
+        : `<button class="link-button" type="button" data-action="hide" data-key="${esc(item.key)}">Hide</button>`);
+      return actions.join('');
+    }
+
+    function renderAttention() {
+      const items = overview?.attention || [];
+      const open = items.filter((item) => !item.hidden);
+      const hiddenCount = items.length - open.length;
+      const shown = showHidden ? items : open;
+
+      const count = $('attnCount');
+      count.textContent = open.length;
+      count.classList.toggle('calm', open.length === 0);
+
+      $('attnFilters').innerHTML = Object.entries(KIND_CHIP).map(([kind, [one, many]]) => {
+        const n = open.filter((item) => item.kind === kind).length;
+        return n ? `<span class="chip ${kind}">${n} ${n === 1 ? one : many}</span>` : '';
+      }).join('');
+
+      $('attnList').innerHTML = shown.length
+        ? shown.map((item) => {
+          const late = item.kind === 'callback' && item.due_at && new Date(item.due_at).getTime() < Date.now();
+          return `
+            <div class="attn-row${item.hidden ? ' is-hidden' : ''}">
+              <span class="chip ${item.hidden ? 'muted' : esc(item.kind)}">${esc(late ? 'Callback overdue' : KIND_LABELS[item.kind])}</span>
+              <div>
+                <div class="attn-who">${esc(AppShell.formatName(item.patient_name))}</div>
+                <div class="attn-what">${esc(attentionWhat(item))}</div>
+                <div class="attn-when">${attentionWhen(item)}</div>
+              </div>
+              <div class="attn-actions">${attentionActions(item)}</div>
+            </div>`;
+        }).join('')
+        : '<div class="attn-empty">Nothing needs attention right now.</div>';
+
+      $('attnHiddenBar').hidden = hiddenCount === 0;
+      $('attnHiddenCount').textContent = `${hiddenCount} hidden`;
+      $('attnToggleHidden').textContent = showHidden ? 'Hide them again' : 'Show hidden';
+    }
+
+    async function setHidden(key, hidden) {
+      const item = overview?.attention.find((entry) => entry.key === key);
+      if (!item) return;
+      item.hidden = hidden;
+      renderAttention();
+      try {
+        await AppShell.fetchJson(`${AppShell.API_BASE}/overview/attention/${hidden ? 'hide' : 'unhide'}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key })
+        });
+      } catch (error) {
+        item.hidden = !hidden;
+        renderAttention();
+        AppShell.showAlert(error.message, 'error');
+      }
+    }
+
+    async function scheduleCall(patientId, callType, button) {
+      if (button) button.disabled = true;
+      try {
+        await AppShell.fetchJson(`${AppShell.API_BASE}/patients/${patientId}/schedule-call`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(callType ? { call_type: callType } : {})
+        });
+        AppShell.showAlert('Call queued. It will go out within calling hours.');
+        await loadOverview();
+      } catch (error) {
+        if (button) button.disabled = false;
+        AppShell.showAlert(error.message, 'error');
+      }
+    }
+
+    // ── Donors ───────────────────────────────────────────────────────────────
+
+    function renderDonors() {
+      const d = overview.donors;
+      $('dWillDonate').textContent = fmtCount(d.will_donate);
+      $('dPlanning').textContent = fmtCount(d.planning_visit);
+
+      $('upcomingList').innerHTML = d.upcoming.length
+        ? d.upcoming.map((visit) => `
+            <div class="compact-row">
+              <div>
+                <strong>${esc(AppShell.formatName(visit.patient_name))}</strong>
+                <div class="muted">“${esc(visit.note)}”</div>
+              </div>
+              <span class="chip callback" title="When they said it">${esc(whenLabel(visit.called_at).split(',')[0])}</span>
+            </div>`).join('')
+        : '<div class="attn-empty">No visit plans mentioned in the last 30 days.</div>';
+
+      const due = d.due;
+      $('dueCount').textContent = fmtCount(due.total);
+      $('queueAllButton').hidden = due.patients.length === 0;
+      $('queueAllButton').textContent = due.total > due.patients.length
+        ? `Add first ${fmtCount(due.patients.length)} to queue`
+        : 'Add all to queue';
+
+      $('dueList').innerHTML = due.patients.length
+        ? `
+          <table class="donor-table">
+            <thead><tr><th>Patient</th><th>Blood</th><th>Last donated</th><th>Last called</th><th></th></tr></thead>
             <tbody>
-              ${paginatedPatients.map((patient) => `
+              ${due.patients.slice(0, 5).map((patient) => `
                 <tr>
-                  <td><strong>${AppShell.escapeHtml(AppShell.formatName(patient.name))}</strong></td>
-                  <td>${AppShell.escapeHtml(patient.phone || '--')}</td>
-                  <td>${AppShell.escapeHtml(AppShell.formatDate(patient.created_at) || '--')}</td>
-                </tr>
-              `).join('')}
+                  <td><a href="/patients.html?patient=${patient.patient_id}">${esc(AppShell.formatName(patient.patient_name))}</a></td>
+                  <td>${patient.blood_group && patient.blood_group !== 'unknown' ? `<span class="blood">${esc(bloodGroupLabel(patient.blood_group))}</span>` : '–'}</td>
+                  <td>${esc(fmtDate(patient.last_donation_date))}</td>
+                  <td>${patient.last_called_at ? esc(fmtDate(istDay(patient.last_called_at))) : 'Never'}</td>
+                  <td><button class="secondary" type="button" data-action="queue-donor" data-patient="${patient.patient_id}">Queue</button></td>
+                </tr>`).join('')}
             </tbody>
           </table>
-        </div>
-        ${AppShell.Pagination.renderControls(overviewPatientPage, totalItems, 'setOverviewPatientPage')}
-      `;
-
-      document.getElementById('mobileTodayActivityList').innerHTML = `
-        <div class="overview-mobile-directory-head">
-          ${searchMarkup}
-          <div class="overview-patient-directory-meta">${filteredPatients.length} unique patients</div>
-        </div>
-        <div class="overview-patient-card-list">
-          ${paginatedPatients.map((patient) => `
-            <article class="mobile-call-card overview-patient-card">
-              <strong>${AppShell.escapeHtml(AppShell.formatName(patient.name))}</strong>
-              <div class="mobile-subtext">${AppShell.escapeHtml(patient.phone || '--')}</div>
-              <div class="mobile-subtext">${AppShell.escapeHtml(formatOverviewDateShort(patient.created_at))}</div>
-            </article>
-          `).join('')}
-        </div>
-        ${AppShell.Pagination.renderControls(overviewPatientPage, totalItems, 'setOverviewPatientPage')}
-      `;
-
-      updateOverviewFilterButtons();
+          <div class="metric-note" style="margin-top:10px">Rare groups (O−, AB−, B−, A−) first, then longest since donating.
+            ${due.total > 5 ? `Showing 5 of ${fmtCount(due.total)}.` : ''} <a href="/patients.html">Patients →</a></div>`
+        : '<div class="attn-empty">No donors are due right now.</div>';
     }
 
-    function renderOverviewPrimaryContent() {
-      if (activeOverviewFilter === 'patients') {
-        renderPatientDirectory(overviewState.customers);
+    async function queueAllDonors(button) {
+      const ids = overview.donors.due.patients.map((patient) => patient.patient_id);
+      if (!ids.length) return;
+      if (!window.confirm(`Queue follow-up calls to ${ids.length} donor${ids.length === 1 ? '' : 's'}? They go out within calling hours.`)) return;
+
+      button.disabled = true;
+      try {
+        const result = await AppShell.fetchJson(`${AppShell.API_BASE}/patients/schedule-calls`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ patient_ids: ids, call_type: 'THREE_MONTH_FOLLOWUP' })
+        });
+        const skipped = result.skipped?.length || 0;
+        AppShell.showAlert(`${result.scheduled} queued${skipped ? `, ${skipped} skipped (already queued, do-not-call or daily limit)` : ''}.`);
+        await loadOverview();
+      } catch (error) {
+        AppShell.showAlert(error.message, 'error');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    // ── Health, trend, footer ────────────────────────────────────────────────
+
+    function renderHealth() {
+      const h = overview.health;
+      const item = (state, title, detail) => `
+        <div class="health-item">
+          <span class="dot ${state}"></span>
+          <div><strong>${esc(title)}</strong><span>${esc(detail)}</span></div>
+        </div>`;
+
+      if (h.answered === 0) {
+        $('healthStrip').innerHTML = item('', 'No answered calls', 'Nothing to check in the last 24 hours.');
         return;
       }
 
-      renderActivityList({
-        // scheduledToday: overviewState.scheduledToday,
-        completedToday: overviewState.completedToday,
-        pendingCalls: overviewState.pendingCalls,
-        totalPatients: overviewState.uniquePatientCount,
-        feedbackSummary: overviewState.feedbackSummary || { total: 0, positive: 0, neutral: 0, negative: 0 }
-      });
+      const notAnalysed = Math.max(h.answered - h.analysed, 0);
+      const analysisNotes = [
+        h.analysis_fallback ? `${h.analysis_fallback} used keyword fallback (AI unavailable or daily limit reached), so their sentiment may be wrong.` : '',
+        notAnalysed ? `${notAnalysed} not analysed yet.` : ''
+      ].filter(Boolean).join(' ');
+
+      $('healthStrip').innerHTML = [
+        item(analysisNotes ? 'warn' : 'ok',
+          `${h.analysed_by_ai} of ${h.answered} calls analysed by AI`,
+          analysisNotes || 'Every answered call has a real AI analysis.'),
+        item(h.recordings_stored >= h.answered ? 'ok' : 'warn',
+          `${h.recordings_stored} of ${h.answered} recordings stored`,
+          h.recordings_stored >= h.answered ? 'All answered calls have a recording.' : `${h.answered - h.recordings_stored} still uploading or missing.`),
+        item(h.transcripts >= h.answered ? 'ok' : 'warn',
+          `${h.transcripts} of ${h.answered} transcripts`,
+          h.transcripts >= h.answered ? 'All answered calls have a transcript.' : `${h.answered - h.transcripts} without a transcript.`)
+      ].join('');
     }
 
-    function renderRecentCalls(calls, feedbackSummary = { items: [] }) {
-      const container = document.getElementById('recentCallActivity');
-      const mobileContainer = document.getElementById('mobileRecentCallActivity');
-      const scheduledStatuses = new Set(['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled']);
-      let recent = [];
-
-      if (activeOverviewFilter === 'scheduled') {
-        const scheduledCustomers = overviewState.customers.filter((c) => scheduledStatuses.has(String(c.status || '').toLowerCase()));
-
-        const paged = AppShell.Pagination.getPagedItems(scheduledCustomers, overviewRecentCallsPage);
-        overviewRecentCallsPage = paged.currentPage;
-        const paginatedCustomers = paged.items;
-        const totalItems = paged.totalItems;
-
-        if (!paginatedCustomers.length) {
-          const emptyMarkup = `
-            <div class="empty-state">
-              <strong>No scheduled calls</strong>
-              <div class="supporting-text">There are currently no calls scheduled for follow-up.</div>
+    function renderTrend() {
+      const days = overview.trend;
+      const max = Math.max(1, ...days.map((day) => day.placed));
+      const today = overview.today;
+      $('trendChart').innerHTML = days.map((day) => {
+        const label = day.day === today
+          ? 'Today'
+          : new Date(`${day.day}T00:00:00Z`).toLocaleDateString('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric' });
+        const height = (day.placed / max) * 140;
+        const answeredShare = day.placed ? day.answered / day.placed : 0;
+        const total = day.placed ? day.placed : day.working ? '0' : 'Off';
+        return `
+          <div class="trend-col${day.day === today ? ' today' : ''}" title="${esc(label)}: ${day.placed} placed, ${day.answered} answered">
+            <div class="trend-total">${total}</div>
+            <div class="trend-bar" style="height:${height}px">
+              <span class="missed" style="flex:${1 - answeredShare}"></span>
+              <span class="answered" style="flex:${answeredShare}"></span>
             </div>
-          `;
-          container.innerHTML = emptyMarkup;
-          mobileContainer.innerHTML = emptyMarkup;
-          return;
-        }
-
-        const scheduledDesktopMarkup = paginatedCustomers.map((customer) => `
-          <div class="simple-call-item">
-            <div>
-              <strong>${AppShell.escapeHtml(AppShell.formatName(customer.name))}</strong>
-              <span>${AppShell.escapeHtml(customer.phone || '--')} · ${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type) || 'Follow-up')} · ${AppShell.formatDateTime(customer.scheduled_datetime || customer.next_retry_at || customer.created_at)}</span>
-            </div>
-            <span class="status-badge pending">Status: ${AppShell.formatStatusLabel(customer.status || 'scheduled')}</span>
-          </div>
-        `).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
-
-        const scheduledMobileMarkup = paginatedCustomers.map((customer) => `
-          <article class="mobile-recent-call-card">
-            <div>
-              <strong>${AppShell.escapeHtml(AppShell.formatName(customer.name))}</strong>
-              <div class="mobile-subtext">${formatOverviewCallDate(customer.scheduled_datetime || customer.next_retry_at || customer.created_at)} &bull; ${AppShell.escapeHtml(AppShell.formatCallType(customer.call_type) || 'Follow-up')}</div>
-            </div>
-            <span class="status-badge pending">Status: ${AppShell.formatStatusLabel(customer.status || 'scheduled')}</span>
-          </article>
-        `).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
-
-        container.innerHTML = scheduledDesktopMarkup;
-        mobileContainer.innerHTML = scheduledMobileMarkup;
-        return;
-      } else if (activeOverviewFilter === 'completed') {
-        recent = calls.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
-      } else if (activeOverviewFilter === 'feedback') {
-        const sourceItems = feedbackSummary.items;
-
-        const paged = AppShell.Pagination.getPagedItems(sourceItems, overviewRecentCallsPage);
-        overviewRecentCallsPage = paged.currentPage;
-        const paginatedItems = paged.items;
-        const totalItems = paged.totalItems;
-
-        if (!paginatedItems.length) {
-          const emptyMarkup = `
-            <div class="empty-state">
-              <strong>No matching feedback yet</strong>
-              <div class="supporting-text">Feedback entries will appear here as calls are reviewed.</div>
-            </div>
-          `;
-          container.innerHTML = emptyMarkup;
-          mobileContainer.innerHTML = emptyMarkup;
-          return;
-        }
-
-        const feedbackMarkup = paginatedItems.map((item) => {
-          if (String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP') {
-            const q1 = item.blood_donated_last_3_months || 'N/A';
-            const q2 = String(q1).toLowerCase() === 'no' ? (item.willing_to_donate_future || 'N/A') : null;
-            return `
-              <article class="mobile-recent-call-card">
-                <div>
-                  <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name))}</strong>
-                  <div class="mobile-subtext">Blood Donated: <strong>${AppShell.escapeHtml(q1)}</strong></div>
-                  ${q2 ? `<div class="mobile-subtext">Willing to Donate: <strong>${AppShell.escapeHtml(q2)}</strong></div>` : ''}
-                </div>
-              </article>
-            `;
-          }
-          const tone = Number(item.stars || 0) >= 4 ? 'positive' : Number(item.stars || 0) <= 2 ? 'negative' : 'neutral';
-          return `
-            <article class="mobile-recent-call-card">
-              <div>
-                <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name))}</strong>
-                <div class="mobile-subtext">${AppShell.escapeHtml(item.review_text || 'No review text available')}</div>
-              </div>
-              <span class="status-badge ${tone}">${item.stars || '--'}/5</span>
-            </article>
-          `;
-        }).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
-
-        const desktopFeedbackMarkup = paginatedItems.map((item) => {
-          if (String(item.call_type || '').toUpperCase() === 'THREE_MONTH_FOLLOWUP') {
-            const q1 = item.blood_donated_last_3_months || 'N/A';
-            const q2 = String(q1).toLowerCase() === 'no' ? (item.willing_to_donate_future || 'N/A') : null;
-            return `
-              <div class="simple-call-item">
-                <div>
-                  <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name))}</strong>
-                  <span>Blood Donated: <strong>${AppShell.escapeHtml(q1)}</strong> ${q2 ? `· Willing: <strong>${AppShell.escapeHtml(q2)}</strong>` : ''}</span>
-                </div>
-              </div>
-            `;
-          }
-          const tone = Number(item.stars || 0) >= 4 ? 'positive' : Number(item.stars || 0) <= 2 ? 'negative' : 'neutral';
-          return `
-            <div class="simple-call-item">
-              <div>
-                <strong>${AppShell.escapeHtml(AppShell.formatName(item.customer_name))}</strong>
-                <span>${AppShell.escapeHtml(item.review_text || 'No review text available')}</span>
-              </div>
-              <span class="status-badge ${tone}">${item.stars || '--'}/5</span>
-            </div>
-          `;
-        }).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
-
-        container.innerHTML = desktopFeedbackMarkup;
-        mobileContainer.innerHTML = feedbackMarkup;
-        return;
-      } else {
-        recent = calls;
-      }
-
-      const paged = AppShell.Pagination.getPagedItems(recent, overviewRecentCallsPage);
-      overviewRecentCallsPage = paged.currentPage;
-      const paginatedRecent = paged.items;
-      const totalItems = paged.totalItems;
-
-      if (!paginatedRecent.length) {
-        const emptyMarkup = `
-          <div class="empty-state">
-            <strong>No recent calls yet</strong>
-            <div class="supporting-text">Recent follow-up calls will appear here once calling activity starts.</div>
-          </div>
-        `;
-        container.innerHTML = emptyMarkup;
-        mobileContainer.innerHTML = emptyMarkup;
-        return;
-      }
-
-      container.innerHTML = paginatedRecent.map((call) => `
-        <div class="simple-call-item">
-          <div>
-            <strong>${AppShell.escapeHtml(AppShell.formatName(call.customer_name))}</strong>
-            <span>${AppShell.formatDateTime(call.called_at)} · ${AppShell.formatStatusLabel(call.call_direction || 'outbound')}</span>
-          </div>
-          <span class="status-badge ${AppShell.escapeHtml(String(call.outcome || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || 'pending')}</span>
-        </div>
-      `).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
-
-      mobileContainer.innerHTML = paginatedRecent.map((call) => `
-        <article class="mobile-recent-call-card">
-          <div>
-            <strong>${AppShell.escapeHtml(AppShell.formatName(call.customer_name))}</strong>
-            <div class="mobile-subtext">${formatOverviewCallDate(call.called_at)} &bull; ${AppShell.formatStatusLabel(call.call_direction || 'outbound')}</div>
-          </div>
-          <span class="status-badge ${AppShell.escapeHtml(String(call.outcome || 'pending').toLowerCase())}">${AppShell.formatStatusLabel(call.outcome || 'pending')}</span>
-        </article>
-      `).join('') + AppShell.Pagination.renderControls(overviewRecentCallsPage, totalItems, 'setOverviewRecentCallsPage');
+            <div class="trend-day">${esc(label)}</div>
+          </div>`;
+      }).join('');
     }
+
+    function renderFooter() {
+      const t = overview.totals;
+      $('ovFooter').textContent = [
+        `To date: ${fmtCount(t.patients)} patients`,
+        `${fmtCount(t.calls)} calls`,
+        t.feedback == null ? '' : `${fmtCount(t.feedback)} feedback entries`
+      ].filter(Boolean).join(' · ');
+    }
+
+    // ── Loading ──────────────────────────────────────────────────────────────
 
     async function loadOverview() {
-      const isAgent = window.AppShell.session?.role === 'AGENT';
-
-      const promises = [
-        AppShell.fetchJson(`${AppShell.API_BASE}/customers`),
-        AppShell.fetchJson(`${AppShell.API_BASE}/calls/recent`)
-      ];
-
-      if (!isAgent) {
-        promises.push(AppShell.fetchJson(`${AppShell.API_BASE}/feedback`));
+      const range = currentRange;
+      const sequence = ++loadSequence;
+      // Dim the figures while they are replaced, so a click visibly did something.
+      $('glancePanel').classList.add('is-loading');
+      let data;
+      try {
+        data = await AppShell.fetchJson(`${AppShell.API_BASE}/overview?range=${encodeURIComponent(range)}`);
+      } finally {
+        if (sequence === loadSequence) $('glancePanel').classList.remove('is-loading');
       }
+      // A slower response for a range the user has already moved away from.
+      if (sequence !== loadSequence) return;
 
-      const results = await Promise.all(promises);
-      let customers = Array.isArray(results[0]) ? results[0] : [];
-      let recentCalls = Array.isArray(results[1]) ? results[1] : [];
-      let feedback = !isAgent && Array.isArray(results[2]) ? results[2] : [];
-
-      const scheduledStatuses = new Set(['scheduled', 'pending', 'called', 'retry_scheduled', 'callback_scheduled']);
-      /*
-      const scheduledToday = customers.filter((customer) => (
-        scheduledStatuses.has(String(customer.status || '').toLowerCase())
-        && isToday(
-          ['retry_scheduled', 'callback_scheduled'].includes(String(customer.status || '').toLowerCase())
-            ? (customer.next_retry_at || customer.scheduled_datetime || customer.created_at)
-            : (customer.scheduled_datetime || customer.next_retry_at || customer.created_at)
-        )
-      )).length;
-      */
-      const completedRecords = customers.filter((customer) => String(customer.status || '').toLowerCase() === 'completed');
-      const completedCount = completedRecords.length;
-      const completedToday = completedRecords.filter((customer) => (
-        isToday(customer.last_called_at)
-        || isToday(customer.updated_at)
-        || isToday(customer.created_at)
-      )).length;
-      const pendingCalls = customers.filter((customer) => scheduledStatuses.has(String(customer.status || '').toLowerCase())).length;
-      const uniquePatientCount = buildUniquePatientCount(customers);
-      const feedbackSummary = buildFeedbackSummary(feedback, recentCalls);
-
-      document.getElementById('metricCustomers').textContent = uniquePatientCount;
-      document.getElementById('metricScheduled').textContent = pendingCalls;
-      document.getElementById('metricCompleted').textContent = completedCount;
-      document.getElementById('metricFeedback').textContent = feedbackSummary.total;
-      document.getElementById('desktopMetricCustomers').textContent = uniquePatientCount;
-      document.getElementById('desktopMetricScheduled').textContent = pendingCalls;
-      document.getElementById('desktopMetricCompleted').textContent = completedCount;
-      document.getElementById('desktopMetricFeedback').textContent = feedbackSummary.total;
-      document.getElementById('mobileMetricCustomers').textContent = uniquePatientCount;
-      document.getElementById('mobileMetricScheduled').textContent = pendingCalls;
-      document.getElementById('mobileMetricCompleted').textContent = completedCount;
-      document.getElementById('mobileMetricFeedback').textContent = feedbackSummary.total;
-      // document.getElementById('overviewMobileStatPatients').textContent = uniquePatientCount;
-      // document.getElementById('overviewMobileStatScheduled').textContent = pendingCalls;
-      // document.getElementById('overviewMobileStatCompleted').textContent = completedCount;
-      // document.getElementById('overviewMobileStatFeedback').textContent = feedbackSummary.total;
-
-      overviewState = {
-        customers,
-        recentCalls,
-        feedbackSummary,
-        // scheduledToday,
-        completedToday,
-        pendingCalls,
-        uniquePatientCount
-      };
-
-      renderOverviewPrimaryContent();
-      renderRecentCalls(recentCalls, feedbackSummary);
+      overview = data;
+      renderHeader();
+      renderGlance(data);
+      renderAttention();
+      renderDonors();
+      renderHealth();
+      renderTrend();
+      renderFooter();
     }
 
-    function applyOverviewFilter(filterName) {
-      activeOverviewFilter = filterName || 'patients';
-      renderOverviewPrimaryContent();
-      renderRecentCalls(overviewState.recentCalls, overviewState.feedbackSummary || { items: [] });
-    }
-
-    function handleOverviewPatientSearch(value) {
-      overviewPatientSearch = String(value || '');
-      overviewPatientPage = 1; // Reset to page 1 on search
-      const shouldRestoreFocus = document.activeElement?.matches?.('[data-overview-patient-search]');
-      renderPatientDirectory(overviewState.customers);
-      if (shouldRestoreFocus) {
-        window.requestAnimationFrame(() => {
-          const searchInputs = [...document.querySelectorAll('[data-overview-patient-search]')];
-          const visibleInput = searchInputs.find((input) => input.offsetParent !== null) || searchInputs[0];
-          if (!visibleInput) return;
-          visibleInput.focus();
-          visibleInput.setSelectionRange(visibleInput.value.length, visibleInput.value.length);
-        });
-      }
-    }
-
-    document.addEventListener('DOMContentLoaded', async () => {
-      await AppShell.ensureAuthenticatedSession();
-      overviewNewCallModal = AppShell.NewCallModal({
-        mountId: 'overviewNewCallModalMount',
-        modalId: 'overviewSharedNewCallModal',
-        onSaved: loadOverview
-      });
-      document.getElementById('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
-      document.getElementById('desktopOverviewNewCallButton').addEventListener('click', openOverviewNewCallModal);
-      // document.getElementById('deleteAllAdminButton').addEventListener('click', async () => {
-      //   if (!confirm('Are you sure you want to delete all patient and call records? This action cannot be undone.')) return;
-      //   try {
-      //     await AppShell.fetchJson(`${AppShell.API_BASE}/customers/bulk`, { method: 'DELETE' });
-      //     AppShell.showAlert('All records deleted successfully');
-      //     await loadOverview();
-      //   } catch (error) {
-      //     AppShell.showAlert(error.message, 'error');
-      //   }
-      // });
-      document.getElementById('desktopQuickNewCallButton').addEventListener('click', openOverviewNewCallModal);
-      document.getElementById('mobileOverviewFloatingCta').addEventListener('click', openOverviewNewCallModal);
-      document.getElementById('mobileOverviewMenuButton').addEventListener('click', () => openOverviewSheet('overviewMobileMenuSheet'));
-      document.querySelectorAll('[data-overview-filter]').forEach((button) => {
-        button.addEventListener('click', () => applyOverviewFilter(button.dataset.overviewFilter));
-      });
-      document.getElementById('closeOverviewMobileMenuSheet').addEventListener('click', () => closeOverviewSheet('overviewMobileMenuSheet'));
-      document.getElementById('overviewMobileMenuLogout').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
-      document.getElementById('overviewMobileMenuSheet').addEventListener('click', (event) => {
-        if (event.target.id === 'overviewMobileMenuSheet') closeOverviewSheet('overviewMobileMenuSheet');
-      });
-      document.addEventListener('keydown', (event) => {
-        if (event.key !== 'Escape') return;
-        if (document.getElementById('overviewMobileMenuSheet').classList.contains('open')) {
-          closeOverviewSheet('overviewMobileMenuSheet');
-        }
-      });
-
-      window.addEventListener('app:pagination:resize', () => {
-        renderOverviewPrimaryContent();
-        renderRecentCalls(overviewState.recentCalls, overviewState.feedbackSummary || { items: [] });
-      });
-
+    async function reload() {
       try {
         await loadOverview();
       } catch (error) {
         AppShell.showAlert(error.message, 'error');
       }
-    });
+    }
 
-    window.handleOverviewPatientSearch = handleOverviewPatientSearch;
+    function openSheet(id) {
+      const element = $(id);
+      element.classList.add('open');
+      element.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeSheet(id) {
+      const element = $(id);
+      element.classList.remove('open');
+      element.setAttribute('aria-hidden', 'true');
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await AppShell.ensureAuthenticatedSession();
+      document.body.classList.toggle('role-agent', isAgent());
+      renderHeader();
+
+      overviewNewCallModal = AppShell.NewCallModal({
+        mountId: 'overviewNewCallModalMount',
+        modalId: 'overviewSharedNewCallModal',
+        onSaved: reload
+      });
+      const openNewCall = () => overviewNewCallModal?.open();
+      $('desktopOverviewNewCallButton').addEventListener('click', openNewCall);
+      $('mobileOverviewFloatingCta').addEventListener('click', openNewCall);
+      $('logoutButton').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
+      $('overviewMobileMenuLogout').addEventListener('click', (event) => AppShell.logoutAdmin(event.currentTarget));
+      $('mobileOverviewMenuButton').addEventListener('click', () => openSheet('overviewMobileMenuSheet'));
+      $('closeOverviewMobileMenuSheet').addEventListener('click', () => closeSheet('overviewMobileMenuSheet'));
+      $('overviewMobileMenuSheet').addEventListener('click', (event) => {
+        if (event.target.id === 'overviewMobileMenuSheet') closeSheet('overviewMobileMenuSheet');
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeSheet('overviewMobileMenuSheet');
+      });
+
+      const rangeButtons = [...document.querySelectorAll('#rangeTabs [data-range]')];
+      const syncRangeButtons = () => rangeButtons.forEach((button) => {
+        const selected = button.dataset.range === currentRange;
+        button.setAttribute('aria-checked', String(selected));
+        button.tabIndex = selected ? 0 : -1;
+      });
+      const selectRange = (button) => {
+        if (!button || button.dataset.range === currentRange) return;
+        currentRange = button.dataset.range;
+        syncRangeButtons();
+        // On a phone the strip scrolls sideways; keep the chosen option in view.
+        button.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        reload();
+      };
+      syncRangeButtons();
+      $('rangeTabs').addEventListener('click', (event) => selectRange(event.target.closest('[data-range]')));
+      // Arrow keys move between options, as in any radio group.
+      $('rangeTabs').addEventListener('keydown', (event) => {
+        if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+        event.preventDefault();
+        const index = Math.max(rangeButtons.indexOf(document.activeElement), 0);
+        const step = event.key === 'ArrowRight' ? 1 : rangeButtons.length - 1;
+        const next = rangeButtons[(index + step) % rangeButtons.length];
+        next.focus();
+        selectRange(next);
+      });
+
+      $('attnToggleHidden').addEventListener('click', () => {
+        showHidden = !showHidden;
+        renderAttention();
+      });
+
+      $('attnList').addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        const item = overview?.attention.find((entry) => entry.key === button.dataset.key);
+        if (!item) return;
+        if (button.dataset.action === 'hide') setHidden(item.key, true);
+        if (button.dataset.action === 'unhide') setHidden(item.key, false);
+        if (button.dataset.action === 'call-now') scheduleCall(item.patient_id, item.call_type, button);
+      });
+
+      $('dueList').addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-action="queue-donor"]');
+        if (button) scheduleCall(Number(button.dataset.patient), 'THREE_MONTH_FOLLOWUP', button);
+      });
+      $('queueAllButton').addEventListener('click', (event) => queueAllDonors(event.currentTarget));
+
+      await reload();
+    });
   </script>
 </body>
 

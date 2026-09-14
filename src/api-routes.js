@@ -240,6 +240,7 @@ module.exports = function mountApiRoutes(app) {
   app.use('/api/agents', agentsRouter);
   app.use('/api/users', require('../routes/users'));
   app.use('/api/patients', require('../routes/patients'));
+  app.use('/api/overview', require('../routes/overview'));
   app.use('/api/settings', require('../routes/settings'));
   app.use('/api/test-call', testCallRouter);
   app.use('/api/test-ai-call', testAiCallRouter);
