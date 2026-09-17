@@ -6,6 +6,7 @@
 'use strict';
 
 const { getGreeting } = require('../utils/greeting');
+const { CLIENT_NAME, CLIENT_CITY } = require('../prompts/client.ts');
 const {
   buildReviewCallingPrompt,
   buildReviewCallingOpeningPrompt,
@@ -24,21 +25,10 @@ const { dbGet } = require('../db');
  * Written as {{client_name}}, {{patient_name}} and so on; anything unknown
  * resolves to an empty string rather than being left visible to the donor.
  */
-/**
- * The city named in the follow-up call's opening. It was hardcoded as "Palwal"
- * in a line that otherwise used the client name, so a second client would have
- * announced the wrong city. Set CALL_PROMPT_CLIENT_CITY to '' to drop it.
- */
-function promptClientCity() {
-  return process.env.CALL_PROMPT_CLIENT_CITY === undefined
-    ? 'Palwal'
-    : process.env.CALL_PROMPT_CLIENT_CITY;
-}
-
-function agentTemplateValues({ clientName, customerName, greeting, lastVisitDate }) {
+function agentTemplateValues({ customerName, greeting, lastVisitDate }) {
   return {
-    client_name: clientName,
-    client_city: promptClientCity(),
+    client_name: CLIENT_NAME,
+    client_city: CLIENT_CITY,
     patient_name: String(customerName || '').trim(),
     greeting,
     last_visit: describeVisit(lastVisitDate),
@@ -83,12 +73,9 @@ function agentPromptOverride(agentConfig, field, values) {
 
 function buildCallTypeSystemPrompt(callType, clientName, customerName, extraOptions = {}, agentConfig = null) {
   const normalizedCallType = normalizeOutboundCallType(callType);
-  const promptClientName = process.env.CALL_PROMPT_CLIENT_NAME || 'Apna Blood Centre';
   const greeting = getGreeting();
 
-  const values = agentTemplateValues({
-    clientName: promptClientName, customerName, greeting, lastVisitDate: extraOptions.lastVisitDate
-  });
+  const values = agentTemplateValues({ customerName, greeting, lastVisitDate: extraOptions.lastVisitDate });
 
   // The settings screen wins over an agent row: it is the one an admin edits.
   const fromSettings = customScript(extraOptions.callScripts, normalizedCallType, 'system_prompt', values);
@@ -99,15 +86,12 @@ function buildCallTypeSystemPrompt(callType, clientName, customerName, extraOpti
 
   if (normalizedCallType === CALL_TYPES.THREE_MONTH_FOLLOWUP) {
     return buildThreeMonthFollowupPrompt({
-      clientName: promptClientName,
-      clientCity: promptClientCity(),
       donorName: customerName,
       lastVisitDate: extraOptions.lastVisitDate
     }).replace(/\[GREETING\]/g, greeting);
   }
 
   return buildReviewCallingPrompt({
-    clientName: promptClientName,
     patientName: customerName,
     lastVisitDate: extraOptions.lastVisitDate
   }).replace(/\[GREETING\]/g, greeting);
@@ -115,12 +99,9 @@ function buildCallTypeSystemPrompt(callType, clientName, customerName, extraOpti
 
 function buildCallTypeOpeningPrompt(callType, clientName, customerName, extraOptions = {}, agentConfig = null) {
   const normalizedCallType = normalizeOutboundCallType(callType);
-  const promptClientName = process.env.CALL_PROMPT_CLIENT_NAME || 'Apna Blood Centre';
   const greeting = getGreeting();
 
-  const values = agentTemplateValues({
-    clientName: promptClientName, customerName, greeting, lastVisitDate: extraOptions.lastVisitDate
-  });
+  const values = agentTemplateValues({ customerName, greeting, lastVisitDate: extraOptions.lastVisitDate });
 
   const fromSettings = customScript(extraOptions.callScripts, normalizedCallType, 'opening_prompt', values);
   if (fromSettings) return fromSettings;
@@ -129,20 +110,10 @@ function buildCallTypeOpeningPrompt(callType, clientName, customerName, extraOpt
   if (override) return override;
 
   if (normalizedCallType === CALL_TYPES.THREE_MONTH_FOLLOWUP) {
-    return buildThreeMonthFollowupOpeningPrompt({
-      clientName: promptClientName,
-      clientCity: promptClientCity(),
-      donorName: customerName,
-      greeting
-    });
+    return buildThreeMonthFollowupOpeningPrompt({ donorName: customerName });
   }
 
-  return buildReviewCallingOpeningPrompt({
-    clientName: promptClientName,
-    greeting,
-    patientName: customerName,
-    lastVisitDate: extraOptions.lastVisitDate
-  });
+  return buildReviewCallingOpeningPrompt({ patientName: customerName });
 }
 
 function buildAgentSystemPrompt(clientName, customerName, agentConfig = null, callType = CALL_TYPES.REVIEW_CALL, extraOptions = {}) {

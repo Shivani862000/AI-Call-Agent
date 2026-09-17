@@ -66,11 +66,9 @@
     const preview = document.getElementById('aiPreviewText');
     if (!preview) return;
 
-    if (type === 'REVIEW_CALL') {
-      preview.innerHTML = `Good Morning.<br>Main Apna Blood Centre se baat kar rahi hoon.<br>Kya main <strong>${AppShell.escapeHtml(name)}</strong> ji se baat kar rahi hoon?`;
-    } else {
-      preview.innerHTML = `Namaste.<br>Apna Blood Centre se bol rahi hoon.<br>Kya main <strong>${AppShell.escapeHtml(name)}</strong> ji se baat kar rahi hoon? Aapka next visit due hai.`;
-    }
+    // Both call types open the same way: the patient's name first, then who is
+    // calling once they confirm (prompts/identity.ts).
+    preview.innerHTML = `Namaste, kya meri baat <strong>${AppShell.escapeHtml(name)}</strong> ji se ho rahi hai?`;
   }
 
   function clearFormErrors() {

@@ -68,8 +68,10 @@ test('post-donation adverse reactions read as a negative experience', () => {
 });
 
 test('the agent asks what went wrong instead of hanging up on a complaint', () => {
+  // A "Hello" no longer confirms identity, so the donor says yes first; the
+  // second "Hello" is the unclear answer to the experience question.
   const state = { step: 'intro', lastVisitDate: YESTERDAY };
-  buildReviewCallTurnInstruction('Hello.', state, 'Apna Blood Centre', 'ankita');
+  buildReviewCallTurnInstruction('Haan ji.', state, 'Apna Blood Centre', 'ankita');
   buildReviewCallTurnInstruction('Hello.', state, 'Apna Blood Centre', 'ankita');
 
   const instruction = buildReviewCallTurnInstruction(COMPLAINT, state, 'Apna Blood Centre', 'ankita');

@@ -9,6 +9,14 @@ const { CALL_TYPES, LIVE_MAX_RESPONSE_TOKENS } = require('./config');
 const { normalizeOutboundCallType, formatOutboundCallTypeLabel } = require('./helpers');
 const { FINAL_CLOSING_LINE, buildClosingLine, spokenName } = require('../prompts/closing.ts');
 const { describeEligibility, describeVisit } = require('../prompts/review-calling.ts');
+const { CLIENT_WITH_CITY } = require('../prompts/client.ts');
+const {
+  SELF_INTRODUCTION,
+  lowerFirst,
+  joinSpoken,
+  identityQuestion,
+  buildConfirmedPreamble
+} = require('../prompts/identity.ts');
 const { RATING_QUESTION } = require('./rating-question');
 
 // ── Sentiment evaluation ───────────────────────────────────────────────────────
@@ -117,7 +125,7 @@ function normalizeHindiEnglishText(value) {
 
 function isGreetingOnly(text) {
   const normalized = normalizeHindiEnglishText(text).replace(/[.,!?।]/g, '').trim();
-  return ['hello', 'helo', 'hi', 'haan hello', 'ji hello', 'namaste', 'हेलो', 'नमस्ते'].includes(normalized);
+  return ['hello', 'helo', 'hi', 'hello hello', 'hello ji', 'haan hello', 'ji hello', 'hello haan', 'namaste', 'हेलो', 'हेलो जी', 'हेलो हेलो', 'नमस्ते'].includes(normalized);
 }
 
 /**
@@ -177,10 +185,14 @@ function isNoReply(text) {
  * classifier caught it and the call read a wrong number as a confirmed
  * identity -- then told them this person had donated blood.
  */
+//
+// "kaun bol raha hai" used to be on this list. It is a question, not a denial,
+// and the commonest reply of all to "Kya meri baat Ankita ji se ho rahi hai?";
+// reading it as a wrong number hung up on the patient for asking who called.
 function isWrongPersonReply(text) {
   const normalized = normalizeHindiEnglishText(text);
-  return /(galat number|galat no|wrong number|wrong no|koi aur|kaun bol|kaun hai|aap kaun|main nahi hoon|main nahin hoon|yahan nahi|ghar par nahi|available nahi|aisa koi nahi|is naam ka koi|not here|not available|speaking to)/i.test(normalized)
-    || /गलत नंबर|कोई और|कौन बोल/.test(normalized);
+  return /(galat number|galat no|wrong number|wrong no|koi aur|main nahi hoon|main nahin hoon|yahan nahi|ghar par nahi|available nahi|aisa koi nahi|is naam ka koi|not here|not available)/i.test(normalized)
+    || /गलत नंबर|कोई और/.test(normalized);
 }
 
 /**
@@ -258,6 +270,72 @@ function captureIntendedVisit(customerReply, state, closing) {
     + `aap us din subah 9 baje se shaam 5 baje ke beech aa sakte hain. ${closing}" Then end the call.`;
 }
 
+// ── Identity check: the first step of every call ───────────────────────────────
+
+/**
+ * How many times the name question is asked again before the call gives up.
+ * The opening asks once, so a caller who only ever says "Hello" hears it three
+ * times in all.
+ */
+const IDENTITY_MAX_REASKS = 2;
+
+/**
+ * Whoever picked up saying that they are the person asked for.
+ *
+ * Anything that was not a refusal used to count, "Hello" included, so a caller
+ * who had not taken in the question was told about the donation.
+ */
+function isIdentityConfirmation(text) {
+  if (isGreetingOnly(text) || isQuestionReply(text)) return false;
+  const normalized = normalizeHindiEnglishText(text);
+  return isAffirmativeReply(text)
+    || /\b(bol rah[aie]|boliye|bolo|bataiye|batao|speaking|main hi)\b/i.test(normalized)
+    || /बोल रह|बोलिए|बोलो|बताइए|बताओ/.test(normalized);
+}
+
+function markCallCompleted(state) {
+  state.step = 'completed';
+  state.conversationState = 'COMPLETED';
+  state.conversationCompleted = true;
+  state.endCall = true;
+  state.endCallAfterNextReply = true;
+}
+
+/**
+ * The reply to the name question, for either call type.
+ *
+ * Returns { confirmed: true } once they say it is them; otherwise the
+ * instruction for this turn, none of which mention the donation or name the
+ * patient to someone who may not be them.
+ */
+function handleIdentityReply(customerReply, state, customerName) {
+  const question = identityQuestion(customerName);
+  // Deliberately the unnamed closing: saying "Dhanyavaad Ankita ji" to someone
+  // who just said they are not Ankita confirms whose number it is.
+  const close = `Say exactly: "Koi baat nahi. ${FINAL_CLOSING_LINE}" Then end the call. Do not mention the donation or the patient's name.`;
+
+  if (isWrongPersonReply(customerReply) || isNegativeOrBusyReply(customerReply) || isNoReply(customerReply)) {
+    markCallCompleted(state);
+    return { instruction: `Wrong person, or the donor cannot talk. ${close}` };
+  }
+  if (isIdentityConfirmation(customerReply)) {
+    return { confirmed: true };
+  }
+
+  state.identityReasks = (state.identityReasks || 0) + 1;
+  if (state.identityReasks > IDENTITY_MAX_REASKS) {
+    markCallCompleted(state);
+    return { instruction: `Nobody has confirmed who they are. ${close}` };
+  }
+  // "Kaun bol raha hai?" is answered with who is calling -- which the old
+  // opening told everyone anyway -- and the question is put back.
+  // "Hello?" ends in a question mark but is still only a hello.
+  if (isQuestionReply(customerReply) && !isGreetingOnly(customerReply)) {
+    return { instruction: `They asked who is calling. Do not mention the donation. Say exactly: "${SELF_INTRODUCTION} ${question}"` };
+  }
+  return { instruction: `They have not said who they are yet. Do not mention the donation. Say exactly: "Ji, ${lowerFirst(question)}"` };
+}
+
 // ── Review Call turn instruction builder ───────────────────────────────────────
 
 function buildReviewCallTurnInstruction(customerReply, state, clientName, customerName) {
@@ -269,26 +347,19 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
   // when they can and leaves it there. Arranging a visit belongs to the
   // three-month follow-up, which is placed when it is actually actionable.
   const invitation = `${describeEligibility(state.lastVisitDate)} aap dobara blood donate kar sakte hain, aapka swagat hai.`;
-  const markCompletedAfterReply = () => {
-    state.step = 'completed';
-    state.conversationState = 'COMPLETED';
-    state.conversationCompleted = true;
-    state.endCall = true;
-    state.endCallAfterNextReply = true;
-  };
+  const markCompletedAfterReply = () => markCallCompleted(state);
 
   // The opening only asks who picked up. Nothing about the donation is said
   // until they confirm, so a wrong number never learns that this person donated.
   if (state.step === 'intro') {
-    if (isWrongPersonReply(customerReply) || isNegativeOrBusyReply(customerReply) || isNoReply(customerReply)) {
-      markCompletedAfterReply();
-      // Deliberately the unnamed closing: saying "Dhanyavaad Ankita ji" to
-      // someone who just said they are not Ankita confirms whose number it is.
-      return `Wrong person, or the donor cannot talk. Say exactly: "Koi baat nahi. ${FINAL_CLOSING_LINE}" Then end the call. Do not mention the donation or the patient's name.`;
-    }
-
+    const identity = handleIdentityReply(customerReply, state, name);
+    if (!identity.confirmed) return identity.instruction;
     state.step = 'experience';
-    return `Identity confirmed. Say exactly: "Aapne ${describeVisit(state.lastVisitDate)} blood donate kiya tha, uske liye dhanyavaad. Aapka experience kaisa raha?"`;
+    const line = joinSpoken(
+      buildConfirmedPreamble(name),
+      `Aapne ${describeVisit(state.lastVisitDate)} blood donate kiya tha, uske liye dhanyavaad. Aapka experience kaisa raha?`
+    );
+    return `Identity confirmed. Say exactly: "${line}"`;
   }
 
   if (state.step === 'experience') {
@@ -351,26 +422,19 @@ function buildReviewCallTurnInstruction(customerReply, state, clientName, custom
 function buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName, customerName) {
   const name = spokenName(customerName);
   const closing = buildClosingLine(name);
-  const centre = clientName || 'Apna Blood Centre';
+  const centre = CLIENT_WITH_CITY;
   const slotQuestion = 'Kya aap agli baar aane ka samay abhi bata sakte hain?';
-  const markCompletedAfterReply = () => {
-    state.step = 'completed';
-    state.conversationState = 'COMPLETED';
-    state.conversationCompleted = true;
-    state.endCall = true;
-    state.endCallAfterNextReply = true;
-  };
+  const markCompletedAfterReply = () => markCallCompleted(state);
 
   if (state.step === 'intro') {
-    if (isWrongPersonReply(customerReply) || isNegativeOrBusyReply(customerReply) || isNoReply(customerReply)) {
-      markCompletedAfterReply();
-      // The unnamed closing: naming the donor to someone who just said they
-      // are not them confirms whose number this is.
-      return `Wrong person or donor declined. Say exactly: "Koi baat nahi. ${FINAL_CLOSING_LINE}" Then end the call. Do not mention the donation or the donor's name.`;
-    }
-
+    const identity = handleIdentityReply(customerReply, state, name);
+    if (!identity.confirmed) return identity.instruction;
     state.step = 'donated_again';
-    return `Donor confirmed identity. Say exactly: "Aapne ${describeVisit(state.lastVisitDate)} blood donate kiya tha, uske liye dhanyavaad. Blood donation ke 3 mahine poore ho gaye hain. Kya aapne uske baad dobara blood donate kiya hai?"`;
+    const line = joinSpoken(
+      buildConfirmedPreamble(name),
+      `Aapne ${describeVisit(state.lastVisitDate)} blood donate kiya tha, uske liye dhanyavaad. Blood donation ke 3 mahine poore ho gaye hain. Kya aapne uske baad dobara blood donate kiya hai?`
+    );
+    return `Donor confirmed identity. Say exactly: "${line}"`;
   }
 
   if (state.step === 'donated_again') {
@@ -396,7 +460,7 @@ function buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName
     if (isQuestionReply(customerReply)) {
       state.followupClarified = (state.followupClarified || 0) + 1;
       if (state.followupClarified <= 2) {
-        return `Answer their question in one short sentence -- you are an automated assistant from ${centre} -- then ask again, exactly: "Kya aapne 3 mahine ke baad dobara blood donate kiya hai?"`;
+        return `Answer their question in one short sentence -- you are an AI assistant from ${centre} -- then ask again, exactly: "Kya aapne 3 mahine ke baad dobara blood donate kiya hai?"`;
       }
     }
 
@@ -516,6 +580,7 @@ module.exports = {
   isNegativeExperienceReply,
   isUncertainReply,
   isWrongPersonReply,
+  isIdentityConfirmation,
   isGoodbyeReply,
   isQuestionReply,
   buildReviewCallTurnInstruction,
