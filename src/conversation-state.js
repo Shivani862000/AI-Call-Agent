@@ -18,6 +18,7 @@ const {
   buildConfirmedPreamble
 } = require('../prompts/identity.ts');
 const { RATING_QUESTION } = require('./rating-question');
+const { isFillerOnly } = require('./agent-speech');
 
 // ── Sentiment evaluation ───────────────────────────────────────────────────────
 
@@ -557,11 +558,57 @@ function buildOutboundDemoTurnInstruction(callerText, state, clientName, custome
     'Do not continue talking. Do not provide additional information. Immediately end the call.'
   ];
 
+  const repeat = repeatLineForGreeting(customerReply, state);
+  if (repeat) {
+    return `${prefix.join('\n')}\n${repeat}`;
+  }
+
   const instruction = normalizeOutboundCallType(callType) === CALL_TYPES.THREE_MONTH_FOLLOWUP
     ? buildThreeMonthFollowupTurnInstruction(customerReply, state, clientName, customerName)
     : buildReviewCallTurnInstruction(customerReply, state, clientName, customerName);
 
+  const spoken = [...instruction.matchAll(/Say exactly: "([^"]+)"/g)].pop();
+  if (spoken) state.lastSpokenLine = spoken[1];
+  state.lastAgentTurnInterrupted = false;
+
   return `${prefix.join('\n')}\n${instruction}`;
+}
+
+// Consecutive hellos met with the last line again before they are treated as
+// a reply like any other -- by then the line is bad, and each step already
+// knows how to give up.
+const GREETING_MAX_REPEATS = 2;
+
+/** The question at the end of a line, or the whole line when it asks none. */
+function questionOf(line) {
+  const sentences = String(line || '').split(/(?<=[.!?।])\s+/).filter(Boolean);
+  const last = sentences[sentences.length - 1] || '';
+  return /\?\s*$/.test(last) ? last : String(line || '').trim();
+}
+
+/**
+ * A caller who says only "hello" mid-call has not answered anything: they have
+ * lost the line, or did not hear the question. Taking it as the answer moved
+ * the call on to a question they had not heard the start of -- or, at the
+ * free-text steps, stored "hello" as the donation date.
+ *
+ * The identity step is left to its own handling, which already re-asks.
+ */
+function repeatLineForGreeting(customerReply, state) {
+  const greeting = isGreetingOnly(customerReply) || isFillerOnly(customerReply);
+  if (!greeting) {
+    state.greetingRepeats = 0;
+    return null;
+  }
+  if (!state.lastSpokenLine || state.step === 'intro' || state.step === 'completed') return null;
+  if ((state.greetingRepeats || 0) >= GREETING_MAX_REPEATS) return null;
+
+  state.greetingRepeats = (state.greetingRepeats || 0) + 1;
+  // If the line was cut off they missed more than the question, so it is said
+  // again in full.
+  const line = state.lastAgentTurnInterrupted ? state.lastSpokenLine : questionOf(state.lastSpokenLine);
+  state.lastAgentTurnInterrupted = false;
+  return `The caller only said hello; they may not have heard you. Do not move on and do not treat this as an answer. Say exactly: "Ji, main sun rahi hoon. ${line}"`;
 }
 
 module.exports = {

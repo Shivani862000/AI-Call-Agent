@@ -315,7 +315,8 @@ function buildMetrics(call, turns, responseTimes = []) {
     ai_talk_time: aiTalkTime,
     patient_talk_time: patientTalkTime,
     silence_duration: silenceDuration,
-    interruptions: 0,
+    // Lines the caller cut off are stored with this marker by the live bridge.
+    interruptions: turns.filter((turn) => turn.role === 'AI' && /\[interrupted\]/.test(turn.text)).length,
     questions_asked: questionsAsked,
     questions_answered: questionsAnswered,
     average_response_time_ms: averageResponseTime

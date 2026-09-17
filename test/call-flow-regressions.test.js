@@ -145,3 +145,62 @@ test('the follow-up gives up rather than repeating forever', () => {
   assert.match(last, /Koi baat nahi/);
   assert.equal(state.conversationCompleted, true);
 });
+
+// From prod: a donor who said "hello hello" after a question was taken to have
+// answered it. The experience step counted it as an unclear answer, the
+// capture steps stored "hello" as the donation date, and the call moved on to
+// a question the donor had not heard the start of.
+test('a hello mid-call repeats the question instead of moving on', () => {
+  const { buildOutboundDemoTurnInstruction } = require('../src/conversation-state');
+  const state = { step: 'intro' };
+
+  buildOutboundDemoTurnInstruction('haan main hi bol rahi hoon', state, 'x', 'Ankita');
+  assert.equal(state.step, 'experience');
+
+  const reply = buildOutboundDemoTurnInstruction('Hello? Hello?', state, 'x', 'Ankita');
+  assert.match(reply, /Say exactly: "Ji, main sun rahi hoon\. Aapka experience kaisa raha\?"/);
+  assert.equal(state.step, 'experience');
+  assert.notEqual(state.experienceClarified, true, 'a hello is not an unclear answer');
+});
+
+test('a hello after an interrupted line repeats the whole line', () => {
+  const { buildOutboundDemoTurnInstruction } = require('../src/conversation-state');
+  const state = { step: 'intro' };
+  buildOutboundDemoTurnInstruction('haan main hi bol rahi hoon', state, 'x', 'Ankita');
+  state.lastAgentTurnInterrupted = true;
+
+  const reply = buildOutboundDemoTurnInstruction('हेलो हेलो', state, 'x', 'Ankita');
+  assert.match(reply, /Say exactly: "Ji, main sun rahi hoon\. Ankita ji,.*blood donate kiya tha, uske liye dhanyavaad\. Aapka experience kaisa raha\?"/);
+});
+
+test('a hello is never captured as the answer to a free-text question', () => {
+  const { buildOutboundDemoTurnInstruction } = require('../src/conversation-state');
+  const { CALL_TYPES } = require('../src/config');
+  const state = { step: 'intro' };
+  const followup = (said) => buildOutboundDemoTurnInstruction(said, state, 'x', 'Rajesh', CALL_TYPES.THREE_MONTH_FOLLOWUP);
+
+  followup('haan main hi bol raha hoon');
+  followup('haan kiya hai');
+  assert.equal(state.step, 'donation_date');
+
+  const reply = followup('hello');
+  assert.match(reply, /Say exactly: "Ji, main sun rahi hoon\. Kab donate kiya tha\?"/);
+  assert.equal(state.step, 'donation_date');
+  assert.equal(state.reportedDonationDate, undefined);
+});
+
+test('repeated hellos stop being repeated and the call carries on as before', () => {
+  const { buildOutboundDemoTurnInstruction } = require('../src/conversation-state');
+  const state = { step: 'intro' };
+  buildOutboundDemoTurnInstruction('haan main hi bol rahi hoon', state, 'x', 'Ankita');
+
+  assert.match(buildOutboundDemoTurnInstruction('hello', state, 'x', 'Ankita'), /main sun rahi hoon/);
+  assert.match(buildOutboundDemoTurnInstruction('hello', state, 'x', 'Ankita'), /main sun rahi hoon/);
+  const third = buildOutboundDemoTurnInstruction('hello', state, 'x', 'Ankita');
+  assert.doesNotMatch(third, /main sun rahi hoon/);
+  assert.equal(state.experienceClarified, true);
+
+  // A real answer resets the count.
+  buildOutboundDemoTurnInstruction('achha tha', state, 'x', 'Ankita');
+  assert.equal(state.greetingRepeats, 0);
+});

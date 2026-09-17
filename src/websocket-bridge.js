@@ -58,6 +58,12 @@ const {
 const { AudioRecorder } = require('./audio-mixer');
 const { dequeueAudioFrame, calculateHangupDelayMs } = require('./audio-drain');
 const {
+  BYTES_PER_MS,
+  createAgentSpeechTracker,
+  decideBargeIn,
+  decideCallerTurn
+} = require('./agent-speech');
+const {
   shouldStartAiBridgeForEvent,
   buildReverseHangupEvent
 } = require('./icallmate-protocol');
@@ -220,6 +226,7 @@ module.exports = function setupWebSocketBridge(server) {
 
     if (buffer.length) {
       session.audioBuffer = Buffer.concat([session.audioBuffer, buffer]);
+      session.agentSpeech?.addAudio(buffer.length);
     }
 
     if (flush) {
@@ -256,6 +263,7 @@ module.exports = function setupWebSocketBridge(server) {
 
           session.outChunkCount++;
           session.lastAgentAudioSentAt = Date.now();
+          session.agentSpeech?.markSent(chunk.length);
           if (session.outChunkCount % 100 === 0) {
             console.log(`[STAGE 7: Audio Stream] Sending TTS audio chunk ${session.outChunkCount} back to Caller`);
           }
@@ -312,6 +320,9 @@ module.exports = function setupWebSocketBridge(server) {
           session.firstChunkSentAt = null;
           session.geminiLiveFirstAudioAt = null;
           session.sttProducedAt = null;
+          if (session.onAgentAudioIdle) session.onAgentAudioIdle({ drained: true });
+        } else if (session.onAgentAudioIdle) {
+          session.onAgentAudioIdle({ drained: false });
         }
       }, ICALLMATE_REVERSE_MEDIA_INTERVAL_MS);
     }
@@ -340,6 +351,16 @@ module.exports = function setupWebSocketBridge(server) {
     let completionPersisted = false;
     let finalResponseInProgress = false;
     let activeResponseId = null;
+    // The caller utterance in progress: how much agent audio was still to play
+    // when it started, and whether it has already cut the agent off.
+    let callerUtterance = null;
+    // A reply given while the agent was still talking, handed over once it stops.
+    let pendingCallerTurn = null;
+    // The transcript entry the current agent line is being written into, and
+    // the text it held before the line began.
+    let agentTranscriptTurn = null;
+    const speechCounts = { droppedOverAgent: 0, deferred: 0, talkOverIgnored: 0 };
+    let speechSummaryLogged = false;
     const transcript = [];
     const outboundDemoState = {
       step: 'intro',
@@ -355,7 +376,9 @@ module.exports = function setupWebSocketBridge(server) {
       flushDelayMs: DEEPGRAM_FINAL_FLUSH_MS,
       onTranscript: (merged) => {
         callerSpeechActive = false;
-        dispatchCallerTranscript(merged);
+        const utterance = callerUtterance;
+        callerUtterance = null;
+        handleCallerUtterance(merged, utterance);
       }
     });
 
@@ -376,6 +399,177 @@ module.exports = function setupWebSocketBridge(server) {
     const useGemini = () => AI_PROVIDER === 'gemini';
     const useGeminiLive = () => AI_PROVIDER === 'gemini-live';
     const useGeminiFamily = () => useGemini() || useGeminiLive();
+
+    session.agentSpeech = createAgentSpeechTracker();
+    session.onAgentAudioIdle = handleAgentAudioIdle;
+
+    /**
+     * Agent audio still to be played, in ms. A tail shorter than one reverse
+     * media chunk can sit in the queue until the turn completes, so it does not
+     * count as the agent still talking.
+     */
+    function agentRemainingMs() {
+      const queued = session.audioBuffer?.length || 0;
+      return queued >= ICALLMATE_REVERSE_MEDIA_CHUNK_BYTES ? Math.round(queued / BYTES_PER_MS) : 0;
+    }
+
+    function isProtectedTurn() {
+      return shouldIgnoreBargeIn({
+        hangupAfterAudioDrains: session.hangupAfterAudioDrains,
+        pendingHangup,
+        state: outboundDemoState,
+        openingInProgress: session.openingInProgress === true
+      });
+    }
+
+    /**
+     * Writes agent text to the transcript and to the speech tracker together,
+     * so an interruption can rewrite the entry to what was actually played.
+     */
+    function recordAgentText(text) {
+      const speech = session.agentSpeech;
+      // A line with nothing left to generate or play is over, even if no
+      // drain was signalled (the Deepgram TTS path never signals one).
+      if (speech.isActive() && !speech.isGenerating() && agentRemainingMs() === 0) {
+        finishAgentLine();
+      }
+      const startsLine = !speech.isActive();
+      const last = transcript[transcript.length - 1];
+      const baseText = last?.role === 'AGENT' ? last.text : '';
+      pushTranscriptTurn(transcript, 'AGENT', text);
+      speech.addText(text);
+      if (startsLine) {
+        agentTranscriptTurn = { turn: transcript[transcript.length - 1], baseText };
+      }
+    }
+
+    function finishAgentLine() {
+      const done = session.agentSpeech.finish();
+      agentTranscriptTurn = null;
+      if (done) {
+        debugLog('Agent line played', { streamId: getSessionLabel(), text: done.text, playedMs: done.playedMs });
+      }
+    }
+
+    /**
+     * Stops the agent mid-line and records how far it got.
+     *
+     * The transcript held every word the model generated, and generation runs
+     * ahead of playback -- so a line the caller cut off after three words was
+     * stored whole, and the call record showed a question the donor never
+     * heard.
+     */
+    function interruptAgentSpeech(trigger, callerText = '') {
+      const speech = session.agentSpeech;
+      const wasGenerating = speech.isGenerating();
+      const cut = speech.interrupt();
+      sendReverseMediaStop(ws, session);
+      if (!cut) {
+        agentTranscriptTurn = null;
+        return null;
+      }
+
+      // Gemini keeps streaming the rest of the line until it is told
+      // otherwise; queued again, it played on from further along than where
+      // the caller stopped it.
+      if (wasGenerating && useGeminiLive()) {
+        session.discardAgentAudio = true;
+        session.geminiLiveRawBuffer = Buffer.alloc(0);
+      }
+      if (ttsWs?.readyState === WebSocket.OPEN) {
+        ttsWs.send(JSON.stringify({ type: 'Clear' }));
+      }
+
+      const entry = agentTranscriptTurn;
+      agentTranscriptTurn = null;
+      if (entry) {
+        const heard = cut.spokenText ? `${cut.spokenText}… [interrupted]` : '';
+        entry.turn.text = [entry.baseText, heard].filter(Boolean).join(' ');
+        entry.turn.interrupted = true;
+        entry.turn.unheard = cut.unspokenText;
+      }
+      outboundDemoState.lastAgentTurnInterrupted = true;
+
+      logger.info('AGENT_SPEECH_INTERRUPTED', {
+        streamId: getSessionLabel(),
+        callId: session.callId,
+        trigger,
+        callerText,
+        heard: cut.spokenText,
+        unheard: cut.unspokenText,
+        playedMs: cut.playedMs,
+        generatedMs: cut.totalMs
+      });
+      return cut;
+    }
+
+    function handleCallerUtterance(text, utterance) {
+      const combined = pendingCallerTurn ? `${pendingCallerTurn.text} ${text}` : text;
+      // Once this utterance has stopped the agent it is never dropped: the
+      // caller would be left in silence.
+      const remainingMsAtSpeechStart = pendingCallerTurn
+        ? pendingCallerTurn.remainingMsAtSpeechStart
+        : (utterance?.stopped ? 0 : (utterance?.remainingMsAtSpeechStart || 0));
+      const action = decideCallerTurn({
+        callerText: combined,
+        remainingMsAtSpeechStart,
+        agentRemainingMs: agentRemainingMs()
+      });
+
+      if (action === 'drop') {
+        pendingCallerTurn = null;
+        speechCounts.droppedOverAgent += 1;
+        logger.info('CALLER_SPEECH_OVER_AGENT_IGNORED', {
+          streamId: getSessionLabel(),
+          callId: session.callId,
+          callerText: combined,
+          agentRemainingMs: agentRemainingMs()
+        });
+        return;
+      }
+      if (action === 'defer') {
+        if (!pendingCallerTurn) speechCounts.deferred += 1;
+        pendingCallerTurn = { text: combined, remainingMsAtSpeechStart, heldAt: pendingCallerTurn?.heldAt || Date.now() };
+        debugLog('Caller reply held until the agent finishes', {
+          streamId: getSessionLabel(),
+          text: combined,
+          agentRemainingMs: agentRemainingMs()
+        });
+        return;
+      }
+      pendingCallerTurn = null;
+      dispatchCallerTranscript(combined);
+    }
+
+    function handleAgentAudioIdle({ drained }) {
+      if (bridgeClosed) return;
+      if (drained && !session.agentSpeech.isGenerating()) {
+        finishAgentLine();
+      }
+      // Waits for the caller to finish too, but not forever: an utterance that
+      // never produced a final result would otherwise hold the reply back.
+      const callerStillTalking = callerSpeechActive && Date.now() - (pendingCallerTurn?.heldAt || 0) < 3000;
+      if (pendingCallerTurn && !callerStillTalking && agentRemainingMs() === 0) {
+        const held = pendingCallerTurn;
+        pendingCallerTurn = null;
+        if (pendingHangup || outboundDemoState.conversationState === 'COMPLETED') return;
+        dispatchCallerTranscript(held.text);
+      }
+    }
+
+    function logSpeechSummary() {
+      if (speechSummaryLogged || !session.callId) return;
+      speechSummaryLogged = true;
+      logger.info('AGENT_SPEECH_SUMMARY', {
+        streamId: getSessionLabel(),
+        callId: session.callId,
+        agentLines: session.agentSpeech.stats().turns,
+        interrupted: session.agentSpeech.stats().interrupted,
+        callerHellosOverAgentIgnored: speechCounts.droppedOverAgent,
+        repliesHeldUntilAgentFinished: speechCounts.deferred,
+        talkOverWithoutStopping: speechCounts.talkOverIgnored
+      });
+    }
 
     function sendDeepgramTtsText(text) {
       if (bridgeClosed) return;
@@ -420,7 +614,7 @@ module.exports = function setupWebSocketBridge(server) {
           streamId: getSessionLabel(),
           delayMs: GEMINI_OPENING_FALLBACK_MS
         });
-        pushTranscriptTurn(transcript, 'AGENT', safeText);
+        recordAgentText(safeText);
         sendDeepgramTtsText(safeText);
       }, GEMINI_OPENING_FALLBACK_MS);
     }
@@ -529,11 +723,7 @@ module.exports = function setupWebSocketBridge(server) {
       }
 
       if (options.interrupt) {
-        if (ws.readyState === WebSocket.OPEN) {
-          sendReverseMediaStop(ws, session);
-        } if (ttsWs?.readyState === WebSocket.OPEN) {
-          ttsWs.send(JSON.stringify({ type: 'Clear' }));
-        }
+        interruptAgentSpeech('new_prompt');
       }
 
       try {
@@ -550,7 +740,7 @@ module.exports = function setupWebSocketBridge(server) {
         }
 
         transcript.push({ role: 'CUSTOMER', text: safeText, time: new Date().toISOString() });
-        transcript.push({ role: 'AGENT', text: aiText, time: new Date().toISOString() });
+        recordAgentText(aiText);
         debugLog('Gemini generated text', { streamId: getSessionLabel(), text: aiText });
         sendDeepgramTtsText(aiText);
 
@@ -562,7 +752,7 @@ module.exports = function setupWebSocketBridge(server) {
         const fallback = isOutboundSession()
           ? 'Maaf kijiye, thodi technical dikkat aa rahi hai. Hum aapse baad mein sampark karenge. Dhanyavaad.'
           : 'Maaf kijiye, thodi technical dikkat aa rahi hai. Hamari team aapse sampark karegi. Dhanyavaad.';
-        transcript.push({ role: 'AGENT', text: fallback, time: new Date().toISOString() });
+        recordAgentText(fallback);
         sendDeepgramTtsText(fallback);
         requestCallHangup('gemini_error_fallback');
         scheduleFinalizeCallHangup('gemini_error_fallback', fallback);
@@ -576,7 +766,7 @@ module.exports = function setupWebSocketBridge(server) {
       }
 
       if (options.interrupt) {
-        sendReverseMediaStop(ws, session);
+        interruptAgentSpeech('new_prompt');
       }
 
       geminiLivePromptSentAt = Date.now();
@@ -730,10 +920,13 @@ module.exports = function setupWebSocketBridge(server) {
                 }
               }
 
+              // The rest of a line the caller already cut off.
+              const discarding = session.discardAgentAudio === true;
+
               modelTurnParts.forEach((part) => {
                 const inlineData = part.inlineData || part.inline_data;
                 const base64Audio = inlineData?.data;
-                if (!base64Audio) {
+                if (!base64Audio || discarding) {
                   return;
                 }
 
@@ -766,14 +959,14 @@ module.exports = function setupWebSocketBridge(server) {
               const outputTranscript = message?.serverContent?.outputTranscription?.text
                 || message?.serverContent?.output_transcription?.text
                 || '';
-              if (outputTranscript) {
+              if (outputTranscript && !discarding) {
                 const cleanTranscript = String(outputTranscript)
                   .replace(/\bEND_CALL\s*=\s*true\b/gi, '')
                   .replace(/\bend_call\b/gi, '')
                   .trim();
                 if (cleanTranscript) {
                   debugLog('Gemini Live generated text', { streamId: getSessionLabel(), text: cleanTranscript });
-                  pushTranscriptTurn(transcript, 'AGENT', cleanTranscript);
+                  recordAgentText(cleanTranscript);
                   if (!GEMINI_LIVE_DIRECT_AUDIO) {
                     sendDeepgramTtsText(cleanTranscript);
                   }
@@ -796,7 +989,12 @@ module.exports = function setupWebSocketBridge(server) {
                 }
               }
 
-              if (message?.serverContent?.turnComplete || message?.serverContent?.generationComplete) {
+              if (discarding && (message?.serverContent?.turnComplete || message?.serverContent?.interrupted)) {
+                // The cut-off line has ended; whatever comes next is new.
+                session.discardAgentAudio = false;
+                session.geminiLiveRawBuffer = Buffer.alloc(0);
+              } else if (message?.serverContent?.turnComplete || message?.serverContent?.generationComplete) {
+                session.agentSpeech.markGenerationComplete();
                 if (outboundDemoState.endCallAfterNextReply && !pendingHangup) {
                   requestFinalHangup(
                     'gemini_live_state_completed',
@@ -820,6 +1018,7 @@ module.exports = function setupWebSocketBridge(server) {
                   session.geminiLiveRawBuffer = Buffer.alloc(0);
                   if (!session.audioBuffer) session.audioBuffer = Buffer.alloc(0);
                   session.audioBuffer = Buffer.concat([session.audioBuffer, resampled]);
+                  session.agentSpeech.addAudio(resampled.length);
                 }
 
                 // Signal the interval to flush the tail when buffer drains below 3200
@@ -846,7 +1045,7 @@ module.exports = function setupWebSocketBridge(server) {
                 finalResponseInProgress = false;
               }
 
-              if (message?.serverContent?.interrupted) {
+              if (message?.serverContent?.interrupted && !discarding) {
                 const pendingBytes = session.audioBuffer?.length || 0;
                 // Barge-in is right in the middle of a conversation and wrong
                 // at the end of one. Gemini raises this whenever its VAD hears
@@ -875,7 +1074,7 @@ module.exports = function setupWebSocketBridge(server) {
                     pendingAudioMs: Math.round(pendingBytes / 2 / 8000 * 1000)
                   });
                 } else {
-                  sendReverseMediaStop(ws, session);
+                  interruptAgentSpeech('gemini_interrupted');
                   session.firstChunkSentAt = null;
                   session.geminiLiveFirstAudioAt = null;
                   session.sttProducedAt = null;
@@ -1093,10 +1292,38 @@ module.exports = function setupWebSocketBridge(server) {
       }
 
       const result = deepgramTranscriptBuffer.handleResult(event);
-      if (result.hasSpeech && !callerSpeechActive) {
+      if (!result.hasSpeech) {
+        return;
+      }
+
+      if (!callerSpeechActive || !callerUtterance) {
         callerSpeechActive = true;
         lastLlmResponseAt = Date.now();
-        sendReverseMediaStop(ws, session);
+        callerUtterance = { remainingMsAtSpeechStart: agentRemainingMs(), stopped: false, talkOverReason: null };
+      }
+      if (callerUtterance.stopped) {
+        return;
+      }
+
+      // Judged again on every result: "hello" is not a reason to stop, but
+      // "hello, abhi busy hoon" is.
+      const decision = decideBargeIn({
+        callerText: result.utteranceText,
+        agentRemainingMs: agentRemainingMs(),
+        protectedTurn: isProtectedTurn()
+      });
+      if (decision.stopAgent) {
+        callerUtterance.stopped = true;
+        interruptAgentSpeech('caller_barge_in', result.utteranceText);
+      } else if (decision.reason !== 'agent_silent' && callerUtterance.talkOverReason !== decision.reason) {
+        callerUtterance.talkOverReason = decision.reason;
+        speechCounts.talkOverIgnored += 1;
+        debugLog('Caller spoke over agent; agent kept talking', {
+          streamId: getSessionLabel(),
+          text: result.utteranceText,
+          reason: decision.reason,
+          agentRemainingMs: agentRemainingMs()
+        });
       }
     }
 
@@ -1214,6 +1441,9 @@ module.exports = function setupWebSocketBridge(server) {
 
         try {
           const event = JSON.parse(text);
+          if (event.type === 'Flushed') {
+            session.agentSpeech.markGenerationComplete();
+          }
           if (event.type === 'Warning' || event.type === 'Error') {
             console.warn(`[ICALLMATE][DEEPGRAM TTS] ${JSON.stringify(event)}`);
           }
@@ -1268,6 +1498,7 @@ module.exports = function setupWebSocketBridge(server) {
         }
       },
       close() {
+        logSpeechSummary();
         if (llmWatchdogInterval) clearInterval(llmWatchdogInterval);
         if (session.audioInterval) clearInterval(session.audioInterval);
         if (session.hardLimitTimer) clearTimeout(session.hardLimitTimer);
