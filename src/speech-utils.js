@@ -175,7 +175,7 @@ function createDeepgramTranscriptBuffer({ onTranscript, flushDelayMs = 180 }) {
 
   function handleResult(event) {
     if (closed) {
-      return { hasSpeech: false, isFinal: false, isSpeechFinal: false };
+      return { hasSpeech: false, isFinal: false, isSpeechFinal: false, utteranceText: '' };
     }
 
     const text = String(event?.channel?.alternatives?.[0]?.transcript || '').trim();
@@ -186,13 +186,17 @@ function createDeepgramTranscriptBuffer({ onTranscript, flushDelayMs = 180 }) {
       finalParts.push(text);
     }
 
+    // Everything heard so far in this utterance, interim words included, so a
+    // barge-in can be judged on what is being said rather than that something is.
+    const utteranceText = [...finalParts, isFinal ? '' : text].join(' ').replace(/\s+/g, ' ').trim();
+
     if (isSpeechFinal) {
       flush();
     } else if (text && isFinal) {
       scheduleFlush();
     }
 
-    return { hasSpeech: Boolean(text), isFinal, isSpeechFinal };
+    return { hasSpeech: Boolean(text), isFinal, isSpeechFinal, utteranceText };
   }
 
   function close() {
