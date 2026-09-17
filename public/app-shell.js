@@ -188,6 +188,7 @@
       retry_scheduled: 'Scheduled',
       callback_scheduled: 'Scheduled',
       no_answer: 'No Answer',
+      no_response: 'No Feedback',
       busy: 'Busy',
       failed: 'Failed',
       completed: 'Completed',

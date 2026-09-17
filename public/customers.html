@@ -512,14 +512,14 @@
     function hasFailedCall(customerId) {
       return recentCallsCache.some((call) => (
         Number(call.customer_id) === Number(customerId)
-        && ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase())
+        && ['failed', 'busy', 'no_answer', 'no_response'].includes(String(call.outcome || '').toLowerCase())
       ));
     }
 
     function getLatestFailedCall(customerId) {
       return recentCallsCache.find((call) => (
         Number(call.customer_id) === Number(customerId)
-        && ['failed', 'busy', 'no_answer'].includes(String(call.outcome || '').toLowerCase())
+        && ['failed', 'busy', 'no_answer', 'no_response'].includes(String(call.outcome || '').toLowerCase())
       )) || null;
     }
 
@@ -741,6 +741,7 @@
     // read identically.
     const FAILURE_LABELS = {
       'no_answer': 'No answer - the call was not picked up',
+      'no_response': 'Patient disconnected without giving any feedback',
       'busy': 'The number was busy',
       'failed': 'The call could not be connected',
       'wrong_number': 'Wrong number',
@@ -755,7 +756,7 @@
     }
 
     function renderMetrics(filteredCustomers = customerCache) {
-      const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
+      const failedOutcomes = new Set(['failed', 'busy', 'no_answer', 'no_response']);
       const completedCalls = recentCallsCache.filter((call) => String(call.outcome || '').toLowerCase() === 'completed');
 
       // Counted with the same predicate the list uses. These read the raw
@@ -808,7 +809,7 @@
       const dateFilter = document.getElementById('dateFilter').value;
       const customDate = document.getElementById('customDateFilter').value || document.getElementById('mobileCustomDateFilter').value;
       const callType = document.getElementById('callTypeFilter').value;
-      const failedOutcomes = new Set(['failed', 'busy', 'no_answer']);
+      const failedOutcomes = new Set(['failed', 'busy', 'no_answer', 'no_response']);
 
       const matchesCommonFilters = (record) => {
         const namePhone = `${AppShell.formatName(record.name || record.customer_name)} ${record.phone || record.customer_phone}`.toLowerCase();

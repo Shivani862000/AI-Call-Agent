@@ -44,7 +44,8 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
       SUM(CASE WHEN outcome = 'completed' THEN 1 ELSE 0 END) as completed_calls,
       SUM(CASE WHEN outcome = 'callback' THEN 1 ELSE 0 END) as callbacks_requested,
       SUM(CASE WHEN outcome IN ('failed', 'busy', 'no_answer', 'declined') THEN 1 ELSE 0 END) as failed_calls,
-      SUM(CASE WHEN outcome IN ('answered', 'completed', 'consent_given', 'interested', 'callback', 'not_interested', 'hot_lead') THEN 1 ELSE 0 END) as answered,
+      SUM(CASE WHEN outcome IN ('answered', 'completed', 'consent_given', 'interested', 'callback', 'not_interested', 'hot_lead', 'no_response') THEN 1 ELSE 0 END) as answered,
+      SUM(CASE WHEN outcome = 'no_response' THEN 1 ELSE 0 END) as no_response_calls,
       SUM(CASE WHEN outcome = 'no_answer' THEN 1 ELSE 0 END) as no_answer,
       SUM(CASE WHEN outcome = 'declined' THEN 1 ELSE 0 END) as declined,
       SUM(CASE WHEN outcome = 'consent_given' THEN 1 ELSE 0 END) as consent_given,
@@ -163,6 +164,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
   const safeCallbacksRequested = Number(callStats?.callbacks_requested) || 0;
   const safeFailedCalls = Number(callStats?.failed_calls) || 0;
   const safeNoAnswer = Number(callStats?.no_answer) || 0;
+  const safeNoResponse = Number(callStats?.no_response_calls) || 0;
   const safeDeclined = Number(callStats?.declined) || 0;
   const safeConsent = Number(callStats?.consent_given) || 0;  const safeFallbacks = Number(callStats?.fallbacks_triggered) || 0;
   const safeHotLeads = Number(callStats?.hot_leads) || 0;
@@ -285,6 +287,7 @@ async function buildReportData({ start, end, label = 'today' } = {}) {
     callbacks_requested: safeCallbacksRequested,
     answered: safeAnswered,
     no_answer: safeNoAnswer,
+    no_response_calls: safeNoResponse,
     declined: safeDeclined,
     consent_given: safeConsent,
     fallbacks_triggered: safeFallbacks,

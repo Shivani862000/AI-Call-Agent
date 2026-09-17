@@ -1,3 +1,9 @@
+const {
+  NO_RESPONSE_OUTCOME,
+  NO_RESPONSE_DETAIL,
+  NO_RESPONSE_MAX_RETRIES
+} = require('./no-response');
+
 
 const VALUE_SCORES = {
   vip: 95,
@@ -283,10 +289,27 @@ async function createSupervisorEvent({ dbRun, callId, eventType, severity = 'inf
   );
 }
 
+// Provider statuses that only say the line connected. None of them may
+// overrule a call already found to have produced nothing.
+const CONNECTED_ONLY_OUTCOMES = new Set(['completed', 'answered', 'in_progress', 'ringing', 'queued', 'initiated']);
+
 async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, providerStatus, inferredOutcome }) {
   const nowIso = new Date().toISOString();
   const currentOutcome = inferredOutcome || providerStatus;
   const normalized = String(currentOutcome || '').toLowerCase();
+
+  // iCallMate's "completed" can arrive after the pipeline has flagged the call
+  // and scheduled its retry; applying it would mark the patient completed.
+  if (callRecord?.id && CONNECTED_ONLY_OUTCOMES.has(normalized)) {
+    const stored = await dbGet('SELECT outcome FROM calls WHERE id = ?', [callRecord.id]);
+    if (stored?.outcome === NO_RESPONSE_OUTCOME) {
+      return {
+        customerStatus: customer?.status || null,
+        nextRetryAt: customer?.next_retry_at || null,
+        followUpTask: null
+      };
+    }
+  }
   const priorityScore = computePriorityScore(customer);
 
   const customerUpdates = {
@@ -363,6 +386,24 @@ async function applyCallOutcomeWorkflow({ dbGet, dbRun, callRecord, customer, pr
       } catch (error) {
         console.error('[BUSY FALLBACK ERROR]', error.message);
       }
+    }
+  } else if (normalized === NO_RESPONSE_OUTCOME) {
+    callUpdates.outcome_detail = NO_RESPONSE_DETAIL;
+    const earlier = await dbGet(
+      'SELECT COUNT(*) AS count FROM calls WHERE customer_id = ? AND outcome = ? AND id <> ?',
+      [customer.id, NO_RESPONSE_OUTCOME, callRecord?.id || 0]
+    );
+    const logger = require('../services/system-logger');
+    if (Number(earlier?.count || 0) < NO_RESPONSE_MAX_RETRIES) {
+      customerUpdates.status = 'retry_scheduled';
+      customerUpdates.auto_retry_enabled = 1;
+      customerUpdates.next_retry_at = enforceBusinessHours(new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString());
+      callUpdates.next_action_at = customerUpdates.next_retry_at;
+      logger.warn('CALL_RETRY_SCHEDULED', { phone: customer.phone, reason: NO_RESPONSE_DETAIL, nextAttemptAt: customerUpdates.next_retry_at });
+    } else {
+      customerUpdates.status = NO_RESPONSE_OUTCOME;
+      customerUpdates.auto_retry_enabled = 0;
+      customerUpdates.failed_reason = 'Disconnected without giving feedback again after a retry';
     }
   } else if (normalized === 'callback') {
     customerUpdates.status = 'callback_scheduled';
