@@ -45,6 +45,7 @@ const {
 const { dbGet, dbRun } = require('../db');
 const { saveCallFeedbackFromTranscript } = require('../services/call-feedback');
 const { processCompletedCallPipeline } = require('../services/post-call-pipeline');
+const { describeEngagement } = require('../services/no-response');
 const { generateGeminiReply } = require('../services/gemini');
 const logger = require('../services/system-logger');
 const {
@@ -650,7 +651,8 @@ module.exports = function setupWebSocketBridge(server) {
                   END,
                   ended_at = COALESCE(ended_at, ?),
                   last_event = ?,
-                  notes = ?
+                  notes = ?,
+                  engagement = ?
             WHERE id = ?`,
             [
               'completed',
@@ -661,6 +663,7 @@ module.exports = function setupWebSocketBridge(server) {
               nowIso,
               'ai-completed',
               'AI conversation completed and auto hangup requested',
+              describeEngagement(outboundDemoState),
               session.callId
             ]
           );
@@ -1771,7 +1774,8 @@ module.exports = function setupWebSocketBridge(server) {
           // Update customer status
           if (session.customerId) {
             try {
-              await dbRun('UPDATE customers SET status = ?, last_called_at = ? WHERE id = ?',
+              // The pipeline may already have rescheduled a no-response call.
+              await dbRun(`UPDATE customers SET status = CASE WHEN status IN ('retry_scheduled', 'no_response') THEN status ELSE ? END, last_called_at = ? WHERE id = ?`,
                 ['completed', new Date().toISOString(), session.customerId]);
               console.log(`[CALL STATUS] Calling -> Completed (hangup-call, customerId=${session.customerId})`);
             } catch (e) { console.error('[CALL STATUS UPDATE ERROR]', e.message); }

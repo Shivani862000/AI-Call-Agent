@@ -108,3 +108,35 @@ test('a patient can have more than one call scheduled', { skip: !HAS_DB && 'no S
   });
   await closeDatabase();
 });
+
+test('a no-response call is not turned back into a completed one', { skip: !HAS_DB && 'no Supabase connection configured' }, async () => {
+  const { initializeDatabase, dbRun, dbGet, closeDatabase } = require('../db');
+  await initializeDatabase();
+
+  const marker = `no-response-test-${Date.now()}`;
+  const patient = await dbRun('INSERT INTO patients (first_name, phone) VALUES (?, ?)', [marker, marker]);
+  const customer = await dbRun('INSERT INTO customers (patient_id, status) VALUES (?, ?)', [patient.lastID, 'pending']);
+
+  try {
+    const created = await dbRun(
+      'INSERT INTO calls (customer_id, outcome, outcome_detail) VALUES (?, ?, ?)',
+      [customer.lastID, 'no_response', 'Patient disconnected without giving any feedback']
+    );
+
+    // What the hangup handler and the provider webhook write afterwards.
+    await dbRun('UPDATE calls SET outcome = ?, outcome_detail = ? WHERE id = ?', ['completed', 'completed', created.lastID]);
+    let call = await dbGet('SELECT outcome, outcome_detail, status FROM calls WHERE id = ?', [created.lastID]);
+    assert.equal(call.outcome, 'no_response');
+    assert.equal(call.outcome_detail, 'Patient disconnected without giving any feedback');
+    assert.equal(call.status, 'no_response');
+
+    // A real change of outcome still goes through.
+    await dbRun('UPDATE calls SET outcome = ? WHERE id = ?', ['failed', created.lastID]);
+    call = await dbGet('SELECT outcome FROM calls WHERE id = ?', [created.lastID]);
+    assert.equal(call.outcome, 'failed');
+  } finally {
+    await dbRun('DELETE FROM customers WHERE id = ?', [customer.lastID]);
+    await dbRun('DELETE FROM patients WHERE id = ?', [patient.lastID]);
+    await closeDatabase();
+  }
+});

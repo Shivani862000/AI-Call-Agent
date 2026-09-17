@@ -12,6 +12,12 @@ const {
   createSupervisorEvent
 } = require('./call-orchestration');
 const { syncCallToCrm, sendHotLeadAlert } = require('./crm-sync');
+const {
+  NO_RESPONSE_OUTCOME,
+  NO_RESPONSE_DETAIL,
+  NO_RESPONSE_SUMMARY,
+  isNoResponseCall
+} = require('./no-response');
 
 const RECORDINGS_DIR = path.join('/tmp', 'feedback-call-recordings');
 
@@ -132,6 +138,73 @@ function pickRating({ modelRating, spokenRating }) {
   return null;
 }
 
+/**
+ * Closes out a call the patient answered and gave nothing on.
+ *
+ * There is nothing to analyse, so the model is not asked -- it would only spend
+ * one of the day's analysis requests to say so -- and no feedback row is
+ * written. The call is marked done so it does not sit in the pending lists.
+ */
+async function finishNoResponseCall({ dbGet, dbRun, callRecord, transcriptText, transcriptSource }) {
+  const nowIso = new Date().toISOString();
+  await dbRun(
+    `UPDATE calls
+        SET transcript_text = COALESCE(NULLIF(?, ''), transcript_text),
+            transcript_status = ?,
+            transcript_source = COALESCE(?, transcript_source),
+            analysis_status = 'completed',
+            summary = ?,
+            analysis_summary = ?,
+            extracted_rating = NULL,
+            outcome = ?,
+            outcome_detail = ?,
+            analysis_completed_at = ?
+      WHERE id = ?`,
+    [
+      transcriptText || '',
+      transcriptText ? 'completed' : 'missing',
+      transcriptSource,
+      NO_RESPONSE_SUMMARY,
+      NO_RESPONSE_SUMMARY,
+      NO_RESPONSE_OUTCOME,
+      NO_RESPONSE_DETAIL,
+      nowIso,
+      callRecord.id
+    ]
+  );
+
+  logger.warn('CALL_NO_RESPONSE', {
+    callId: callRecord.id,
+    customerId: callRecord.customer_id,
+    patient: callRecord.customer_name,
+    phone: callRecord.customer_phone,
+    reason: NO_RESPONSE_DETAIL
+  });
+
+  const refreshedCall = await dbGet('SELECT * FROM calls WHERE id = ?', [callRecord.id]);
+  const refreshedCustomer = await dbGet('SELECT * FROM customer_queue WHERE id = ?', [callRecord.customer_id]);
+  const workflowResult = refreshedCustomer
+    ? await applyCallOutcomeWorkflow({
+      dbGet,
+      dbRun,
+      callRecord: refreshedCall,
+      customer: refreshedCustomer,
+      providerStatus: NO_RESPONSE_OUTCOME,
+      inferredOutcome: NO_RESPONSE_OUTCOME
+    })
+    : null;
+
+  return {
+    ok: true,
+    callId: callRecord.id,
+    noResponse: true,
+    transcriptSource,
+    summary: NO_RESPONSE_SUMMARY,
+    feedbackId: null,
+    workflowResult
+  };
+}
+
 async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   const callRecord = await dbGet(
     `SELECT calls.*, customer_queue.name AS customer_name, customer_queue.phone AS customer_phone
@@ -199,6 +272,11 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
   let transcriptText = callRecord.transcript_text || '';
   let transcriptSource = transcriptText ? 'live_stream' : null;
 
+  // The live call already knows; no need to transcribe the recording to find out.
+  if (callRecord.engagement === NO_RESPONSE_OUTCOME) {
+    return finishNoResponseCall({ dbGet, dbRun, callRecord, transcriptText, transcriptSource });
+  }
+
   if (recordingLocalPath) {
     const audioTranscript = await transcribeAudioFile(recordingLocalPath, {
       language: callRecord.language || 'hi'
@@ -220,6 +298,10 @@ async function processCompletedCallPipeline({ dbGet, dbRun, callSid, callId }) {
       reason: 'no_transcript_available'
     });
     return { ok: false, reason: 'no_transcript_available' };
+  }
+
+  if (isNoResponseCall({ engagement: callRecord.engagement, transcriptText })) {
+    return finishNoResponseCall({ dbGet, dbRun, callRecord, transcriptText, transcriptSource });
   }
 
   const transcriptTurns = convertPlainTranscriptToTurns(transcriptText);

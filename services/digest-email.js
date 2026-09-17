@@ -58,7 +58,9 @@ function formatDuration(answeredAt, endedAt) {
 }
 
 const ANSWERED_OUTCOMES = new Set([
-  'completed', 'answered', 'callback', 'interested', 'hot_lead', 'consent_given', 'not_interested'
+  'completed', 'answered', 'callback', 'interested', 'hot_lead', 'consent_given', 'not_interested',
+  // Picked up, then nothing said: answered, but not a completed call.
+  'no_response'
 ]);
 
 function isAnswered(call) {
@@ -66,6 +68,7 @@ function isAnswered(call) {
 }
 
 function outcomeLabel(outcome) {
+  if (String(outcome || '').toLowerCase() === 'no_response') return 'Disconnected, no feedback';
   const text = String(outcome || 'unknown').replace(/[_-]+/g, ' ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -76,6 +79,7 @@ const OUTCOME_TONE = {
   hot_lead: { fg: '#15803d', bg: '#dcfce7' },
   interested: { fg: '#15803d', bg: '#dcfce7' },
   callback: { fg: '#92400e', bg: '#fef3c7' },
+  no_response: { fg: '#92400e', bg: '#fef3c7' },
   failed: { fg: '#b91c1c', bg: '#fee2e2' }
 };
 

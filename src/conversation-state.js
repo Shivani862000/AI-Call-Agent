@@ -316,10 +316,12 @@ function handleIdentityReply(customerReply, state, customerName) {
   const close = `Say exactly: "Koi baat nahi. ${FINAL_CLOSING_LINE}" Then end the call. Do not mention the donation or the patient's name.`;
 
   if (isWrongPersonReply(customerReply) || isNegativeOrBusyReply(customerReply) || isNoReply(customerReply)) {
+    state.identityOutcome = 'declined';
     markCallCompleted(state);
     return { instruction: `Wrong person, or the donor cannot talk. ${close}` };
   }
   if (isIdentityConfirmation(customerReply)) {
+    state.identityOutcome = 'confirmed';
     return { confirmed: true };
   }
 
@@ -557,6 +559,13 @@ function buildOutboundDemoTurnInstruction(callerText, state, clientName, custome
     'Do not answer any further customer speech. Do not repeat closing messages.',
     'Do not continue talking. Do not provide additional information. Immediately end the call.'
   ];
+
+  // Counted for the call record: a patient who confirmed who they were and
+  // then answered nothing gave no feedback, however long the call ran.
+  if (state.step !== 'intro' && state.step !== 'completed' && customerReply
+      && !isGreetingOnly(customerReply) && !isFillerOnly(customerReply)) {
+    state.answersGiven = (state.answersGiven || 0) + 1;
+  }
 
   const repeat = repeatLineForGreeting(customerReply, state);
   if (repeat) {
