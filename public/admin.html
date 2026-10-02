@@ -51,6 +51,26 @@
     .legend i { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 2px; }
     .metric-card .metric-note b { color: #334155; }
 
+    /* At a glance: the calls behind the figures */
+    .glance-calls { margin-top: 16px; }
+    .glance-panel.is-loading .glance-calls { opacity: 0.45; }
+    .glance-calls .poc-card-header { margin-bottom: 6px; }
+    .call-list { display: grid; }
+    .call-row {
+      display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto auto; align-items: center; gap: 14px;
+      padding: 10px 0; border-top: 1px solid #eef2f7; font-size: 14px;
+    }
+    .call-row:first-child { border-top: 0; }
+    .call-who { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .call-who a { color: inherit; }
+    .call-meta { margin-top: 2px; font-size: 12px; color: #94a3b8; }
+    .call-when { font-size: 13px; color: #475569; white-space: nowrap; }
+    .chip.answered { background: #dcfce7; color: #15803d; }
+    .call-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .call-actions .button-link { padding: 6px 10px; font-size: 13px; }
+    .glance-calls-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #eef2f7; font-size: 13px; color: #64748b; }
+    .glance-calls-footer .button-link { padding: 8px 14px; font-size: 13px; }
+
     /* Needs attention */
     .attn-card { border-left: 4px solid var(--red); }
     .attn-count {
@@ -132,6 +152,9 @@
       .attn-card .poc-card-header { flex-direction: column; }
       .trend { gap: 6px; height: 160px; }
       .glance-panel { padding: 12px; border-radius: 16px; }
+      .call-row { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
+      .call-when { grid-column: 1; font-size: 12px; }
+      .call-actions { grid-column: 2; grid-row: 1 / span 2; }
     }
   </style>
 </head>
@@ -239,6 +262,17 @@
           <div id="feedbackNote" class="metric-note"></div>
         </article>
         </div>
+
+        <article class="poc-card glance-calls">
+          <div class="poc-card-header">
+            <h3 class="poc-card-title" style="font-size:16px">Calls</h3>
+          </div>
+          <div id="glanceCallList" class="call-list"></div>
+          <div class="glance-calls-footer">
+            <span id="glanceCallCount"></span>
+            <a class="secondary button-link" href="/customers.html">See all calls →</a>
+          </div>
+        </article>
       </section>
 
       <!-- 2. Needs attention -->
@@ -534,6 +568,55 @@
       }
     }
 
+    const CALL_TYPE_LABELS = { REVIEW_CALL: 'Review call', THREE_MONTH_FOLLOWUP: '3 month follow-up' };
+    const OUTCOME_LABELS = {
+      no_answer: ['No answer', 'wrong_number'],
+      declined: ['Declined', 'wrong_number'],
+      busy: ['Busy', 'wrong_number'],
+      failed: ['Failed', 'complaint'],
+      no_response: ['No response', 'muted'],
+      callback: ['Callback', 'callback']
+    };
+
+    function callOutcomeChip(call) {
+      const [label, tone] = OUTCOME_LABELS[call.outcome]
+        || (call.answered ? ['Answered', 'answered'] : [call.outcome ? call.outcome.replace(/_/g, ' ') : 'In progress', 'muted']);
+      return `<span class="chip ${tone}">${esc(label)}</span>`;
+    }
+
+    function renderGlanceCalls(data) {
+      const calls = data.glance.recent_calls || [];
+      const placed = data.glance.placed;
+      $('glanceCallList').innerHTML = calls.length
+        ? calls.map((call) => {
+          const name = esc(AppShell.formatName(call.patient_name));
+          const meta = [CALL_TYPE_LABELS[call.call_type] || AppShell.formatCallType(call.call_type), call.duration_seconds ? fmtDuration(call.duration_seconds) : '']
+            .filter(Boolean).map(esc).join(' · ');
+          const actions = [];
+          if (call.has_recording) {
+            actions.push(`<a class="secondary button-link" href="/api/calls/${call.call_id}/recording" target="_blank" rel="noopener">Listen</a>`);
+          }
+          // The call detail page is admin-only; agents would get a 403.
+          if (!isAgent() && call.answered) {
+            actions.push(`<a class="secondary button-link" href="/feedback-analysis.html?callId=${call.call_id}">Details</a>`);
+          }
+          return `
+            <div class="call-row">
+              <div>
+                <div class="call-who">${call.patient_id ? `<a href="/patients.html?patient=${call.patient_id}">${name}</a>` : name}</div>
+                <div class="call-meta">${meta}</div>
+              </div>
+              <div class="call-when">${esc(whenLabel(call.called_at))}</div>
+              ${callOutcomeChip(call)}
+              <div class="call-actions">${actions.join('')}</div>
+            </div>`;
+        }).join('')
+        : '<div class="attn-empty">No calls in this period.</div>';
+      $('glanceCallCount').textContent = placed > calls.length
+        ? `Latest ${fmtCount(calls.length)} of ${fmtCount(placed)} calls`
+        : calls.length ? `${fmtCount(calls.length)} ${calls.length === 1 ? 'call' : 'calls'}` : '';
+    }
+
     // ── Needs attention ──────────────────────────────────────────────────────
 
     function attentionWhat(item) {
@@ -801,6 +884,7 @@
       overview = data;
       renderHeader();
       renderGlance(data);
+      renderGlanceCalls(data);
       renderAttention();
       renderDonors();
       renderHealth();
