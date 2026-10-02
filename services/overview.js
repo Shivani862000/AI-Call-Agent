@@ -275,6 +275,40 @@ const NO_LATER_CALL = `NOT EXISTS (
      AND later.id <> c.id
      AND later.called_at > c.called_at)`;
 
+/** How many calls At a glance lists. The rest are one click away on the calls page. */
+const RECENT_CALLS_LIMIT = 8;
+
+/** The latest outbound calls in the range, newest first. */
+async function rangeCallList(range) {
+  const rows = await dbAll(
+    `SELECT c.id, c.patient_id, c.call_type, c.outcome, c.called_at,
+            (c.answered_at IS NOT NULL) AS answered,
+            c.sentiment_label,
+            ${PATIENT_NAME} AS patient_name,
+            ${DURATION} AS duration_seconds,
+            ${HAS_RECORDING} AS has_recording
+       FROM calls c
+       LEFT JOIN patients p ON p.id = c.patient_id
+      WHERE COALESCE(c.call_direction, 'outbound') = 'outbound'
+        AND c.called_at >= ? AND c.called_at < ?
+      ORDER BY c.called_at DESC, c.id DESC
+      LIMIT ?`,
+    [range.start.toISOString(), range.end.toISOString(), RECENT_CALLS_LIMIT]
+  );
+  return rows.map((row) => ({
+    call_id: num(row.id),
+    patient_id: numOrNull(row.patient_id),
+    patient_name: row.patient_name,
+    call_type: row.call_type || null,
+    outcome: row.outcome || null,
+    answered: Boolean(row.answered),
+    sentiment: row.sentiment_label || null,
+    called_at: row.called_at,
+    duration_seconds: numOrNull(row.duration_seconds),
+    has_recording: Boolean(row.has_recording)
+  }));
+}
+
 /**
  * Open items, newest first within each kind. Complaints stay until someone
  * hides them. Callbacks and overdue retries also clear themselves once the
@@ -513,8 +547,9 @@ async function buildOverview({ range: rangeKey = '24h', role, now = new Date() }
   const range = resolveRange(rangeKey, now);
   const includeFeedback = String(role || '').toUpperCase() !== 'AGENT';
 
-  const [calls, feedback, past, attention, donorData, healthData, trendData, totalData] = await Promise.all([
+  const [calls, callList, feedback, past, attention, donorData, healthData, trendData, totalData] = await Promise.all([
     rangeCalls(range),
+    rangeCallList(range),
     includeFeedback ? rangeFeedback(range) : Promise.resolve(null),
     history(now, { includeFeedback }),
     attentionItems(),
@@ -536,7 +571,7 @@ async function buildOverview({ range: rangeKey = '24h', role, now = new Date() }
       compare: compareLabel(range, now),
       working_days: workingDaysInRange(range, now)
     },
-    glance: { ...calls, feedback },
+    glance: { ...calls, feedback, recent_calls: callList },
     average: averagesFor(range, past, now),
     attention,
     donors: donorData,
